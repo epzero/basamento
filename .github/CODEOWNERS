@@ -1,0 +1,24 @@
+# Generated from review.yaml by `go tool gate docs -write`. Do not edit.
+# High-tier paths need the approval of the reviewer or the architect.
+/.github/** @rider-undefined @archer-undefined
+/Makefile @rider-undefined @archer-undefined
+/review.yaml @rider-undefined @archer-undefined
+/layering.yaml @rider-undefined @archer-undefined
+/AGENTS.md @rider-undefined @archer-undefined
+/CLAUDE.md @rider-undefined @archer-undefined
+/.agents/** @rider-undefined @archer-undefined
+/.claude/** @rider-undefined @archer-undefined
+/.cursor/rules/** @rider-undefined @archer-undefined
+/.golangci.yml @rider-undefined @archer-undefined
+REVIEW.md @rider-undefined @archer-undefined
+/docs/adr/** @rider-undefined @archer-undefined
+/specs/constitution.md @rider-undefined @archer-undefined
+/tools/gate/** @rider-undefined @archer-undefined
+/internal/gate/** @rider-undefined @archer-undefined
+/contracts/** @rider-undefined @archer-undefined
+/auth/** @rider-undefined @archer-undefined
+/platform/secrets/** @rider-undefined @archer-undefined
+/model/node/** @rider-undefined @archer-undefined
+/runtime/** @rider-undefined @archer-undefined
+/go.mod @rider-undefined @archer-undefined
+go.mod @rider-undefined @archer-undefined

@@ -1,0 +1,78 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    BROWSER-001-01:
+        hash: sha256:e61df0f388d56781019c64f4598c841d4d8878266494204c2cbd3495420345a9
+        reqs:
+            - REQ-BROWSER-001
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        note: Public contract every browser runner implementation must pass.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    BROWSER-002-01:
+        hash: sha256:19e2d1f442c2be95e1c1bfe0c692219db6ea17837fd413e4a1f0af79fe77e31f
+        reqs:
+            - REQ-BROWSER-002
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    BROWSER-003-01:
+        hash: sha256:e76a4d3a7908f97f8ce8e68112803b81ea1c9adfe2a36854d4800a83c97a1288
+        reqs:
+            - REQ-BROWSER-003
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        note: 'Security: recordings must not leak input values.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    BROWSER-004-01:
+        hash: sha256:782b1be04f71e106a13615f7431b87422cc1641131079c8b5cf0f34290ea3617
+        reqs:
+            - REQ-BROWSER-004
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    BROWSER-005-01:
+        hash: sha256:fa13dc76c7bf3f03cb6f9d5559898ed84f0dfcb3ba6449332121d8a62928a6a4
+        reqs:
+            - REQ-BROWSER-005
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    BROWSER-006-01:
+        hash: sha256:ff1613b5eea7c9cc3f19f437cdd1d1747249f85fac78bcc297571a4614c7ad2f
+        reqs:
+            - REQ-BROWSER-006
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

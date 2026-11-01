@@ -1,0 +1,55 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    RT-001-01:
+        hash: sha256:ebde016c3cc733b13e9c2201127d1b729395d71b50a83ed80bfb75908ef6eff2
+        reqs:
+            - REQ-RT-001
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Durability and determinism of the runtime contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    RT-002-01:
+        hash: sha256:f6a6e9ca77a553be107e7679ae56cb27442397bd01e8d8dbd878c5535e8cc5b7
+        reqs:
+            - REQ-RT-002
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Durability and determinism of the runtime contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    RT-003-01:
+        hash: sha256:50009616f0cbaac2c77c1acb627ef40bf7e5225bd47d8c151db2e242d44b7f34
+        reqs:
+            - REQ-RT-003
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    RT-004-01:
+        hash: sha256:5efb9b6cd22bddee8234108da4463c6a911884f8b9a6078bff9679b0cd9d53de
+        reqs:
+            - REQ-RT-004
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Durability and determinism of the runtime contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

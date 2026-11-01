@@ -1,0 +1,677 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    MODEL-001-01:
+        hash: sha256:426cee962c98017846ab7950f38d1224f6d7af3e4be2fafeb44667cc55f7f13d
+        reqs:
+            - REQ-MODEL-001
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: Public invocation contract every model and remote service implements.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-001-02:
+        hash: sha256:e74928cbe1f9abf24699fc51b35c1f91ebc9a9a04206bdc1ff066ef517c64272
+        reqs:
+            - REQ-MODEL-001
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: Public invocation contract every model and remote service implements.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-002-01:
+        hash: sha256:91df53b12096ad564d25f1ea47ee7959b6c3d3d421abb84f4223f7eba83a8897
+        reqs:
+            - REQ-MODEL-002
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: Public invocation contract every model and remote service implements.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-003-01:
+        hash: sha256:91cf0550cce6ee47b4d417fabdb592f689e49dfb43d552a9953fc60f812f6e5e
+        reqs:
+            - REQ-MODEL-003
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: Public invocation contract every model and remote service implements.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-004-01:
+        hash: sha256:f8a7a892c5f54998e44e7427d281c4ec5d28161812b2c3045603cdb5818d5457
+        reqs:
+            - REQ-MODEL-004
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-005-01:
+        hash: sha256:f31bb2782a42b7ec42876bf553a492942f58366eee7b9fb77e1de13562d3ea4f
+        reqs:
+            - REQ-MODEL-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-005-02:
+        hash: sha256:15b75e871d43967e40222824ad1824a4db061aa2e93bb4bc9d891ac848295a93
+        reqs:
+            - REQ-MODEL-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-006-01:
+        hash: sha256:d828e46328ccb80bb5a9fe76e6c11f61389b9631c60917af3ad6a8b238735d9b
+        reqs:
+            - REQ-MODEL-006
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-007-01:
+        hash: sha256:6c39e39ca49a9a90655425c33bca16e5acd49c147d93e81a4a5baded986ad20b
+        reqs:
+            - REQ-MODEL-007
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-008-01:
+        hash: sha256:78b9702d3a121a44631d93d421b2b151f52be6a8adb3be2f4c881b185f26fe60
+        reqs:
+            - REQ-MODEL-008
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-009-01:
+        hash: sha256:da9bea59d8a1efe47aa0ac0723500b148ebea2729ef3de7b4c908e556664d8e8
+        reqs:
+            - REQ-MODEL-009
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: human:epzero
+        approved_at: "2026-11-16"
+        note: 'Money safety: cancellation settles actual cost when charged and releases reservation when cost is 0.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-009-02:
+        hash: sha256:c6a0bc9ecdc3ec644a02883dae3528a8ea15112914efdc32b6fbc31cedabb6ee
+        reqs:
+            - REQ-MODEL-009
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: human:epzero
+        approved_at: "2026-11-16"
+        note: 'Money safety: cancellation settles actual cost when charged and releases reservation when cost is 0.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-010-01:
+        hash: sha256:233571668a8e98a9179bd8cd5e5be8a5bdfc7e0a790a78ed1456be499a546916
+        reqs:
+            - REQ-MODEL-010
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-011-01:
+        hash: sha256:f850a5ce610c13cacb1e1fcc28b68ced095dff79060cce2bc671a4dd07f225e8
+        reqs:
+            - REQ-MODEL-011
+        tier: P2
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:cc9645
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-012-01:
+        hash: sha256:c2692b864b786935354176d028d19dd2be9a436d8a6bcc764ff1808a782675af
+        reqs:
+            - REQ-MODEL-012
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-012-02:
+        hash: sha256:bf84a60635eeb02191d41424eb6ae9251821a10bd98b69d01098c26e9ee03f74
+        reqs:
+            - REQ-MODEL-012
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-013-01:
+        hash: sha256:59b661e1f24b8d63d9c9ce5278bb72efa68ea9a0b6e5ba056bad547a86db6827
+        reqs:
+            - REQ-MODEL-013
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-014-01:
+        hash: sha256:c3d5dd93390145647a0241710b679355cc8319894ac016f5b97b0ac0483adf76
+        reqs:
+            - REQ-MODEL-014
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-015-01:
+        hash: sha256:4e43b2eaac32401b137e63690f7e6320d19b5dca09ddb21919050e0fe164d792
+        reqs:
+            - REQ-MODEL-015
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-015-02:
+        hash: sha256:22df786a73d174da3d07391034919186d52b3aa68f2ac78af064d218ad8f3a95
+        reqs:
+            - REQ-MODEL-015
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-016-01:
+        hash: sha256:2721c9d944be83421a6bf0be517a4680582350aff9be6395e734ffb37173a8ce
+        reqs:
+            - REQ-MODEL-016
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-017-01:
+        hash: sha256:0d78bf11dcf9360be935c1a2f89af12eee2475ff2646bb6b1e6845500f58d724
+        reqs:
+            - REQ-MODEL-017
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-018-01:
+        hash: sha256:77ca6148f29cb5f86c96f10309d0546f2d81902e55c60f94bd21001d4ffbb0db
+        reqs:
+            - REQ-MODEL-018
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-019-01:
+        hash: sha256:7c3c83911aa0134d2d525fd556dec38cd876f7dbf62d433895ac808caed2add7
+        reqs:
+            - REQ-MODEL-019
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-020-01:
+        hash: sha256:e0b868b551b9dddadecc5334cfe2bbe00a85f96a4b1d61e30956dee1096c5720
+        reqs:
+            - REQ-MODEL-020
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-021-01:
+        hash: sha256:e2828776775865675abadbb9c68e7702d8e4a0d4e4b85907e858255e782fd84c
+        reqs:
+            - REQ-MODEL-021
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-021-02:
+        hash: sha256:8047658cf0906bcaa467c445ee6b0acc2b8fa68b78f5a343c871d2e86ffedc24
+        reqs:
+            - REQ-MODEL-021
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-022-01:
+        hash: sha256:b0b1d77259da2bca1eb1ce3a812b4d5774d3fad640d29ca2820b98b360ffa8a3
+        reqs:
+            - REQ-MODEL-022
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-023-01:
+        hash: sha256:06b7bd05ca8b20133fddb27ea119d53118ee5f6819388758336595a6ce355c9f
+        reqs:
+            - REQ-MODEL-023
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-024-01:
+        hash: sha256:7f8089c61018d0077aab57e0a322dddf37d4205e9186e59a2768e37fec5573d0
+        reqs:
+            - REQ-MODEL-024
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-025-01:
+        hash: sha256:34c5542829cbf6a74dc00c1cfbc3027331e9fc0100cf7a3baf66d0ed450d7d61
+        reqs:
+            - REQ-MODEL-025
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-026-01:
+        hash: sha256:b272f9fcd362268d8db2d795af6d93a4e9203cb65627f24439c2c8f92c0f2eb6
+        reqs:
+            - REQ-MODEL-026
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-027-01:
+        hash: sha256:3f11f5fb92840543a8baab9dd9a8cb072da552752d9a477ff78861722434a597
+        reqs:
+            - REQ-MODEL-027
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-028-01:
+        hash: sha256:544328da06905d9f82f635e893337ef325282c1084635bcae6c18179fbc096bb
+        reqs:
+            - REQ-MODEL-028
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-029-01:
+        hash: sha256:c126f640fd08bbd0acf4b3dc50a8e2df9ebb21e3d8cb37d0300f34127ddd9257
+        reqs:
+            - REQ-MODEL-029
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-030-01:
+        hash: sha256:64b7cd6cd682862a6d223ae5ba83dcfac61fe3650a04c5509e6ed16a83708f4e
+        reqs:
+            - REQ-MODEL-030
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-031-01:
+        hash: sha256:50879c04fe9eb50d23288d39884db88b98c43d5cd6e7607233659bc618957058
+        reqs:
+            - REQ-MODEL-031
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-032-01:
+        hash: sha256:1ae19c5db3c5b1374adc7e47b31ef1a638c8c2528b7fa4e896c70234b119ce15
+        reqs:
+            - REQ-MODEL-032
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-033-01:
+        hash: sha256:0201d9683a4ed2abf9c722a98d06c09e36ac3f569882de233f0c71630fe77a70
+        reqs:
+            - REQ-MODEL-033
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Money safety and durability: no duplicate paid starts, in-doubt grace period, stale-report rejection, restart lease extension, and spill-over reservations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-034-01:
+        hash: sha256:0aa494c6b384ed8a0972c660ed71504cd40fbe5d533c5c6f2a79618997946650
+        reqs:
+            - REQ-MODEL-034
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-035-01:
+        hash: sha256:7ed4dacff155d45035e3df0ca4653a9761cd81d88dc7488f63b1b0ec98a17c21
+        reqs:
+            - REQ-MODEL-035
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-035-02:
+        hash: sha256:9cbc5abb73565de37a8dabbc49add89a7d755ed9e4c99ef4996fb557dc19398a
+        reqs:
+            - REQ-MODEL-035
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-035-03:
+        hash: sha256:536fb6e2bda8078cf06eede2b51250db6283f6554441a6c0301d921eb81e0cd7
+        reqs:
+            - REQ-MODEL-035
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-036-01:
+        hash: sha256:82e7f67aa029f5e9a705b628885860582bfaaab09a30c450bcdba3ade9bd15d3
+        reqs:
+            - REQ-MODEL-036
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-036-02:
+        hash: sha256:ba24e11938202f02d0ad279198ba63d900276cb86aa317c5b79790d3269cb091
+        reqs:
+            - REQ-MODEL-036
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-037-01:
+        hash: sha256:2dc79ff33f1ac3601df3ac8801a0684c9ad64d6c4bf9e12fec3aecd7e8ec037c
+        reqs:
+            - REQ-MODEL-037
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-038-01:
+        hash: sha256:d2150526440e0363c4b6f42b527958a585bf0c9f6cf4b4661e1bf33d4a3cfd61
+        reqs:
+            - REQ-MODEL-038
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-039-01:
+        hash: sha256:efb183cd12fff2320d7a6b97c8fd20df0de3bb474f8bf6b1cb12115c6ad750f9
+        reqs:
+            - REQ-MODEL-039
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-039-02:
+        hash: sha256:122233e327c3142ab86ad3ecbde2197d87315a01e5d43dd2b3750156add7a214
+        reqs:
+            - REQ-MODEL-039
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Tenant isolation and authentication: pool isolation, token revocation/expiry, worker removal, and shared-pool demand cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-040-01:
+        hash: sha256:193b04973fe73437b9214b1c129cc8ec8f857f4cf3ed1a5cf3ab7289ab36555b
+        reqs:
+            - REQ-MODEL-040
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-041-01:
+        hash: sha256:2d080d598eb312847335fbddabbc5533392a94064aec118b42e59a4200d22448
+        reqs:
+            - REQ-MODEL-041
+        tier: P2
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: New worker pool scheduling, lease lifecycle, routing, and on-demand template behavior.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    MODEL-042-01:
+        hash: sha256:34bd17088010dbc6903009bb78b46d38eccd84fb11688c3d954d65f2df367271
+        reqs:
+            - REQ-MODEL-042
+        tier: P0
+        author: claude-code:spec-author:1910b3
+        reviewer: claude-code:spec-reviewer:836de9
+        approved_at: "2026-11-16"
+        note: 'Cost safety: on-demand scaler demand calculation, template/deployment caps, and idle-exit scaling down.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

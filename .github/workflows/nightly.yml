@@ -1,0 +1,43 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flake-hunt:
+    # Repeated runs look for nondeterminism; a flaky scenario is quarantined
+    # with @quarantine @issue:<key> @until:<date> (docs/engineering/bdd-convention.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go test -race -count=10 ./...
+
+  slow-lanes:
+    # @slow scenarios; @live and @eval join once credentials and recordings exist.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go test -count=1 ./internal/bdd/
+        env:
+          BDD_TAGS: "@slow && ~@planned && ~@quarantine"
+
+  release-readiness:
+    # Reports P0 scenarios still awaiting human acceptance; informational at night.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go tool gate release-check || true

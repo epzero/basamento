@@ -1,0 +1,69 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    CORE-001-01:
+        hash: sha256:927d01f2e82f670d6cae9f3dbecd580281688fe1252ae072358344898c263279
+        reqs:
+            - REQ-CORE-001
+        tier: P1
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:3a22a7
+        approved_at: "2026-11-01"
+        note: Test timestamp changed; behavior unchanged.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    CORE-002-01:
+        hash: sha256:42abff358d50bdd2ba14d4cc82554d889ce6e8489df57112c7629e9b16ae2280
+        reqs:
+            - REQ-CORE-002
+        tier: P1
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:3a22a7
+        approved_at: "2026-11-01"
+        note: Test timestamp changed; behavior unchanged.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    CORE-002-02:
+        hash: sha256:ac53df798bb179061244162db2e01f8bbdd4d559e11e3e05bea550ebc2bbcf83
+        reqs:
+            - REQ-CORE-002
+        tier: P1
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:3a22a7
+        approved_at: "2026-11-01"
+        note: Test timestamp changed; behavior unchanged.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    CORE-003-01:
+        hash: sha256:1ea2d0af38d2c8269166bc40729d8c303cfdff4b6c43e58e5c64985a13573c8b
+        reqs:
+            - REQ-CORE-003
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: 'Identifiers are persisted keys: a collision or format change corrupts data.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    CORE-004-01:
+        hash: sha256:fede82201a64637dd0a4490bef07268c64a4f0fe8ce1e3898cbe4a00fe523ed4
+        reqs:
+            - REQ-CORE-004
+        tier: P1
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Ordering and validation of identifiers other code relies on.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

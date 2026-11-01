@@ -1,0 +1,16 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - misspell
+    - unconvert
+    - nolintlint
+    - gocritic
+  settings:
+    gocritic:
+      disabled-checks: [ifElseChain]
+formatters:
+  enable:
+    - gofmt

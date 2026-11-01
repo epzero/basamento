@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+// Contract of the browser runner, a separate service that drives real browsers
+// for agents and records them (ADR-0009, specs/browser).
+//
+// A session is an invocation: it is started, followed and cancelled through
+// basamento.invoke.v1.InvocationService with op "browser.session". Its params
+// are a SessionSpec and the data of each event is a SessionEvent, both in
+// their JSON form. The session id is the invocation handle's id.
+//
+// The platform passes its model endpoint and the session's token in the
+// request headers Basamento-Model-Endpoint and Basamento-Model-Token of Start,
+// never in params, which are recorded with the run.
+package basamento.browser.v1;
+
+// SessionMode selects how the runner drives the browser.
+enum SessionMode {
+  SESSION_MODE_UNSPECIFIED = 0;
+  // Execute the scenarios of a feature and report each step.
+  SESSION_MODE_SCRIPTED = 1;
+  // Act toward a goal within a budget and report every action.
+  SESSION_MODE_GOAL = 2;
+}
+
+// Recording selects evidence to capture.
+message Recording {
+  // rrweb DOM recording; inputs masked unless listed in unmask_selectors.
+  bool rrweb = 1;
+  bool video = 2;
+  bool trace = 3;
+  bool har = 4;
+  bool console = 5;
+  bool accessibility = 6;
+  repeated string unmask_selectors = 7;
+  repeated string block_selectors = 8;
+}
+
+// Budget bounds a session.
+message Budget {
+  int32 max_steps = 1;
+  int64 max_duration_ms = 2;
+  int64 max_cost_mpts = 3;
+}
+
+// Target is the app under test.
+message Target {
+  string base_url = 1;
+  // Named auth fixture resolved by the runner; never raw credentials.
+  string auth_fixture = 2;
+  string device = 3;
+  string locale = 4;
+}
+
+// SessionSpec is the params of a "browser.session" invocation.
+message SessionSpec {
+  SessionMode mode = 1;
+  Target target = 2;
+  // Scripted: Gherkin feature text.
+  string feature = 3;
+  // Goal-driven: the goal and optional instructions for the agent.
+  string goal = 4;
+  string instructions = 5;
+  Budget budget = 6;
+  Recording recording = 7;
+}
+
+// StepResult is the outcome of one scripted step.
+message StepResult {
+  string scenario = 1;
+  string step = 2;
+  bool passed = 3;
+  string message = 4;
+  // Milliseconds since session start, aligned with the rrweb recording.
+  int64 at_ms = 5;
+  string screenshot_key = 6;
+}
+
+// Action is one UI action the runner performed.
+message Action {
+  string kind = 1;
+  string target = 2;
+  int64 at_ms = 3;
+  string screenshot_key = 4;
+}
+
+// SessionEvent is the data of one event of a "browser.session" invocation.
+message SessionEvent {
+  oneof event {
+    Action action = 1;
+    StepResult step = 2;
+  }
+}
+
+// BrowserRunnerService holds what only a browser runner offers, next to the
+// invocation contract it also implements.
+service BrowserRunnerService {
+  // Describe reports browsers, devices and recorders the runner supports.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // GetArtifacts lists a session's evidence.
+  rpc GetArtifacts(GetArtifactsRequest) returns (GetArtifactsResponse);
+}
+
+// DescribeRequest is empty.
+message DescribeRequest {}
+
+// DescribeResponse lists capabilities.
+message DescribeResponse {
+  repeated string browsers = 1;
+  repeated string devices = 2;
+  repeated string recorders = 3;
+}
+
+// GetArtifactsRequest asks for evidence.
+message GetArtifactsRequest {
+  string session_id = 1;
+}
+
+// Artifact is one evidence file in blob storage.
+message Artifact {
+  // rrweb | video | trace | har | console | accessibility | screenshot
+  string kind = 1;
+  string blob_key = 2;
+  string mime = 3;
+}
+
+// GetArtifactsResponse lists evidence.
+message GetArtifactsResponse {
+  repeated Artifact artifacts = 1;
+}

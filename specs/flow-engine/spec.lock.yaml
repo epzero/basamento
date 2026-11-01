@@ -1,0 +1,78 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    FLOW-001-01:
+        hash: sha256:adaa1ff481c884658508f1c0d79d46f18388e1f9a965fb1c6b39e4eaf991ac13
+        reqs:
+            - REQ-FLOW-001
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    FLOW-002-01:
+        hash: sha256:15a7312254dc3764fe37c6417004edc08fa603851276fea1aed1c1199a7fdcee
+        reqs:
+            - REQ-FLOW-002
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Determinism and run-durability invariants of the flow machine.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    FLOW-003-01:
+        hash: sha256:e456586a668978e4bd241496b429bd22c7f8cfdb1a7785f141242248600e66d4
+        reqs:
+            - REQ-FLOW-003
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    FLOW-004-01:
+        hash: sha256:92a5969fa28d0d02a773134a5bf0449ae4875c9982713482dac357b21772b68a
+        reqs:
+            - REQ-FLOW-004
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    FLOW-005-01:
+        hash: sha256:b936411c8d649252c977f1a208b5beefe030be5530d76cd736a581c268c7a3c3
+        reqs:
+            - REQ-FLOW-005
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Determinism and run-durability invariants of the flow machine.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    FLOW-006-01:
+        hash: sha256:122a9c52a80956448e01c66ffb3e1e3cb78800f416546a9ce65989f3a2a4757f
+        reqs:
+            - REQ-FLOW-006
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

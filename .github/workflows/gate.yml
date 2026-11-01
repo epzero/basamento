@@ -1,0 +1,70 @@
+name: gate
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      GATE_STRICT: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # red→green and buf breaking compare against the base
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install gate tools
+        run: |
+          make tools
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Determine base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "ref=${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: make gate
+        run: make gate BASE="${{ steps.base.outputs.ref }}"
+
+      - name: Gate report
+        if: always()
+        run: |
+          mkdir -p .gate
+          go tool gate spec trace -json > .gate/trace.json || true
+          go tool gate spec queue > .gate/human-queue.txt || true
+          {
+            echo "### Gate"
+            echo
+            echo "Human review queue (P0 first):"
+            echo '```'
+            head -20 .gate/human-queue.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-report
+          path: .gate/

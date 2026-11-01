@@ -1,0 +1,11 @@
+---
+description: Repository rules for agents
+alwaysApply: true
+---
+
+Read `AGENTS.md` at the repository root before doing anything and follow it.
+Your harness is `cursor`. A lead follows its playbook, the skill
+`lead-<maintainer>`; a subagent follows its role, the skill `role-<role>`
+(both under `.agents/skills/`), and starts with the
+`go tool gate agent new` command written there, then works only inside the
+worktree it prints.

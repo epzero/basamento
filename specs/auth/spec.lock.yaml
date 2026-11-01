@@ -1,0 +1,82 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    AUTH-001-01:
+        hash: sha256:6d3972534509bed0e3b3f7ba1e19fcd86afeefc1dbe4a273c9f5d294a2ddb976
+        reqs:
+            - REQ-AUTH-001
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: 'Security: authentication, tenancy and permission boundaries.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    AUTH-002-01:
+        hash: sha256:7d98fcae259c5239a56913e6f10e97d4f2137e7413e4f344f206c39e96c5308d
+        reqs:
+            - REQ-AUTH-002
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: 'Security: authentication, tenancy and permission boundaries.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    AUTH-003-01:
+        hash: sha256:428700f47d1c7c38cc4e7da1252d84ba3bf018e057185d6035255b99b124f4fc
+        reqs:
+            - REQ-AUTH-003
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: 'Security: authentication, tenancy and permission boundaries.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    AUTH-004-01:
+        hash: sha256:820c848e275284fd6a2b785524bbe4458827c8f0275474d983ad77e65127cfb9
+        reqs:
+            - REQ-AUTH-004
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: 'Security: authentication, tenancy and permission boundaries.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    AUTH-005-01:
+        hash: sha256:8878fcc17cb2b041b3b32bae3a1c059415785b4a1238504eb236ddbc41a88cbb
+        reqs:
+            - REQ-AUTH-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:a71b3a
+        approved_at: "2026-11-01"
+        note: 'Security: worker tokens limited to one session and expiry.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    AUTH-005-02:
+        hash: sha256:d6683daca454c32b42c4f8de71a02325a7de7b2d124283d7f5bbfa35d3df3cca
+        reqs:
+            - REQ-AUTH-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: antigravity:spec-reviewer:3a22a7
+        approved_at: "2026-11-01"
+        note: 'Security: worker tokens limited to one session and expiry.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"

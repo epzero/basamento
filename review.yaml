@@ -1,0 +1,39 @@
+# Review risk tiers (docs/engineering/code-review.md). A change takes the
+# highest tier of any path it touches. Reviewers read this file and the
+# REVIEW.md files from the base branch, never from the change under review.
+default: medium
+# The reviewer and the architect. High-tier paths need the approval of one
+# of them who did not open the pull request, given once the owner has
+# approved in the tracker (.github/CODEOWNERS is generated from this file).
+high_owner: "@rider-undefined @archer-undefined"
+tiers:
+  high:
+    - .github/**
+    - Makefile
+    - review.yaml
+    - layering.yaml
+    - AGENTS.md
+    - CLAUDE.md
+    - .agents/**
+    - .claude/**
+    - .cursor/rules/**
+    - .golangci.yml
+    - "**/REVIEW.md"
+    - docs/adr/**
+    - specs/constitution.md
+    - tools/gate/**
+    - internal/gate/**
+    - contracts/**
+    - auth/**
+    - platform/secrets/**
+    - model/node/**
+    - runtime/**
+    - go.mod
+    - "**/go.mod"
+  # Requirement text is not hashed in the ledger, so review is its only guard.
+  # Ledgers ride with their specs: spec tiers (P0..P3) decide when a person looks.
+  medium:
+    - specs/**
+  low:
+    - docs/**
+    - "**/*.md"

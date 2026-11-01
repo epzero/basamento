@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+// Wire shapes for two-layer run streaming (ADR-0005, specs/streaming).
+// Additive changes only: never renumber, rename or remove fields.
+package basamento.stream.v1;
+
+import "google/protobuf/struct.proto";
+
+// Cursor is what a reattaching client sends.
+message Cursor {
+  // Last durable event sequence the client has seen.
+  int64 seq = 1;
+  // Last delta sequence seen per in-flight message id.
+  map<string, int64> open = 2;
+}
+
+// DurableEvent is persisted and ordered per run by seq.
+message DurableEvent {
+  string run_id = 1;
+  int64 seq = 2;
+  // run.*, node.*, message.started, message.completed, tool.*, gate.*
+  string type = 3;
+  int32 v = 4;
+  google.protobuf.Struct data = 5;
+}
+
+// DeltaKind is the kind of an ephemeral increment.
+enum DeltaKind {
+  DELTA_KIND_UNSPECIFIED = 0;
+  DELTA_KIND_TEXT = 1;
+  DELTA_KIND_AUDIO = 2;
+  DELTA_KIND_PROGRESS = 3;
+  // Discard the message's partial content; a new attempt follows.
+  DELTA_KIND_RESET = 4;
+}
+
+// Delta is ephemeral and ordered per message by dseq.
+message Delta {
+  string run_id = 1;
+  string message_id = 2;
+  int64 dseq = 3;
+  DeltaKind kind = 4;
+  string text = 5;
+  bytes audio = 6;
+  double progress = 7;
+  // Attempt number, set on reset.
+  int32 attempt = 8;
+}
+
+// Snapshot is sent on reattach for each in-flight message before its deltas.
+message Snapshot {
+  string message_id = 1;
+  string text = 2;
+  int64 dseq = 3;
+}
+
+// StreamItem is one item of a run stream.
+message StreamItem {
+  oneof item {
+    DurableEvent event = 1;
+    Delta delta = 2;
+    Snapshot snapshot = 3;
+  }
+}
+
+// RunStreamService serves run streams to clients (connect, SSE, WebSocket).
+service RunStreamService {
+  // Attach streams a run from a cursor: missed durable events, snapshots, then live items.
+  rpc Attach(AttachRequest) returns (stream AttachResponse);
+}
+
+// AttachRequest starts or resumes a run stream.
+message AttachRequest {
+  string run_id = 1;
+  Cursor cursor = 2;
+}
+
+// AttachResponse carries one stream item.
+message AttachResponse {
+  StreamItem item = 1;
+}

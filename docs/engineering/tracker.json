@@ -1,0 +1,35 @@
+{
+  "about": "What the workflow needs from any issue tracker (docs/engineering/agent-workflow.md §3). Tracker-neutral: each tracker's skill under .agents/skills/tracker-<name>/ reads this file and sets a workspace up to match. Change the hand-offs here and in that section together.",
+  "states": [
+    {"name": "Backlog", "type": "backlog", "means": "Not started, not yet ordered."},
+    {"name": "Todo", "type": "unstarted", "means": "Not started. An unassigned ticket is incoming and belongs to the designer."},
+    {"name": "In Progress", "type": "started", "means": "Its assignee is writing: specs, a design, code, fixes."},
+    {"name": "In Review", "type": "started", "means": "A pull request is open and waits for its assignee: a review, the owner's decision, an approval, the merge."},
+    {"name": "Done", "type": "completed", "means": "Merged or answered."},
+    {"name": "Canceled", "type": "canceled", "means": "Dropped."}
+  ],
+  "labels": [
+    {"name": "escaped", "color": "#EB5757", "description": "A bug found after a merge (a revert or a fix-forward). Note which review layer should have caught it; the case joins the reviewer's eval set."}
+  ],
+  "label_groups": [
+    {
+      "name": "ask",
+      "color": "#5E6AD2",
+      "description": "What the ticket's assignee is asked to do. Exactly one per ticket, replaced at every hand-off; the hand-off comment starts with the same word.",
+      "labels": [
+        {"name": "specs-needed", "to": "designer", "state": "Todo", "description": "Write the specs for this work package: it has no approved scenarios yet."},
+        {"name": "spec-review-requested", "to": "reviewer", "state": "In Review", "description": "Review the spec pull request."},
+        {"name": "spec-changes-requested", "to": "designer", "state": "In Progress", "description": "Change the specs as the review asks."},
+        {"name": "spec-approved", "to": "designer", "state": "In Review", "description": "The specs are approved: merge the spec pull request."},
+        {"name": "ready-to-implement", "to": "developer", "state": "Todo", "description": "Implement: the specs are on main, or no spec change is needed."},
+        {"name": "design-needed", "to": "architect", "state": "Todo", "description": "Write a technical design."},
+        {"name": "code-review-requested", "to": "reviewer", "state": "In Review", "description": "Review the pull request."},
+        {"name": "code-changes-requested", "to": "author", "state": "In Progress", "description": "Fix or answer the review's findings."},
+        {"name": "ready-to-integrate", "to": "author", "state": "In Review", "description": "Approved: merge the pull request."},
+        {"name": "needs-architect", "to": "architect", "state": "In Review", "description": "Three review rounds without approval: arbitrate."},
+        {"name": "needs-human", "to": "owner", "state": null, "description": "The owner is asked to decide: a high-risk change, a design, another direction, a spec acceptance, a question."},
+        {"name": "owner-approved", "to": "reviewer", "state": "In Review", "description": "The owner approved in the tracker: give the approval on GitHub."}
+      ]
+    }
+  ]
+}

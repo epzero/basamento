@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+// The invocation contract over the network, mirroring model.Invoker method for
+// method. External services (remote model providers, the browser runner)
+// implement it. A provider that cannot look invocations up answers Lookup with
+// the connect code "unimplemented". ADR-0006, ADR-0009, specs/models.
+package basamento.invoke.v1;
+
+import "google/protobuf/struct.proto";
+
+// AssetRef points to content-addressed blob storage.
+message AssetRef {
+  string blob_key = 1;
+  string sha256 = 2;
+  string media = 3;
+  string mime = 4;
+}
+
+// AssetList is the assets of one input slot.
+message AssetList {
+  repeated AssetRef assets = 1;
+}
+
+// Handle identifies a started invocation.
+message Handle {
+  string provider = 1;
+  string id = 2;
+  string client_ref = 3;
+}
+
+// EventKind is the kind of partial output.
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_TEXT = 1;
+  EVENT_KIND_REASONING = 2;
+  EVENT_KIND_TOOL_CALL = 3;
+  EVENT_KIND_AUDIO = 4;
+  EVENT_KIND_PROGRESS = 5;
+  // Discard partial output; a new attempt follows.
+  EVENT_KIND_RESET = 6;
+}
+
+// State of an invocation.
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_RUNNING = 1;
+  STATE_SUCCEEDED = 2;
+  STATE_FAILED = 3;
+  STATE_CANCELLED = 4;
+}
+
+// Usage is token accounting for language models.
+message Usage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cached_tokens = 3;
+  int64 reasoning_tokens = 4;
+}
+
+// Output is a produced file not yet ingested.
+message Output {
+  string url = 1;
+  string media = 2;
+  string mime = 3;
+}
+
+// InputSlot names an input a model accepts, e.g. prompt, first_frame, mask.
+message InputSlot {
+  string name = 1;
+  // text | messages | image | video | audio
+  string media = 2;
+  bool required = 3;
+  // Most assets the slot takes; 0 means one.
+  int32 max = 4;
+}
+
+// Descriptor is catalog data for one model the provider serves.
+message Descriptor {
+  string id = 1;
+  string provider = 2;
+  // Capabilities, e.g. "video.generate".
+  repeated string caps = 3;
+  // JSON Schema of the parameters, checked before a start.
+  google.protobuf.Struct params_schema = 4;
+  repeated InputSlot inputs = 5;
+  // CEL over `params` returning the estimated cost in milli-points.
+  string price = 6;
+  // cloud | machine_local
+  string locality = 7;
+}
+
+// Vector is one embedding.
+message Vector {
+  repeated float values = 1;
+}
+
+// InvocationService is implemented by external invocation providers.
+service InvocationService {
+  // Describe lists the models the provider serves.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // Start begins an invocation and returns at once; idempotent per client_ref.
+  rpc Start(StartRequest) returns (StartResponse);
+  // StreamEvents delivers partial output after a sequence number until the invocation ends.
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamEventsResponse);
+  // GetResult returns the current state and, once ended, the result.
+  rpc GetResult(GetResultRequest) returns (GetResultResponse);
+  // Cancel requests cancellation; the final state is reported by GetResult.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  // Lookup resolves an ambiguous start by client_ref.
+  rpc Lookup(LookupRequest) returns (LookupResponse);
+}
+
+// DescribeRequest is empty.
+message DescribeRequest {}
+
+// DescribeResponse lists the provider's models.
+message DescribeResponse {
+  repeated Descriptor models = 1;
+}
+
+// StartRequest starts an invocation.
+message StartRequest {
+  string model = 1;
+  // Capability, e.g. "video.generate".
+  string op = 2;
+  google.protobuf.Struct params = 3;
+  map<string, string> text = 4;
+  map<string, AssetList> assets = 5;
+  // Chat transcript, tools and structured-output schema as JSON.
+  google.protobuf.Value messages = 6;
+  google.protobuf.Value tools = 7;
+  google.protobuf.Struct output_schema = 8;
+  optional int64 seed = 9;
+  // Idempotency key, stable across retries of one logical invocation.
+  string client_ref = 10;
+}
+
+// StartResponse returns the handle.
+message StartResponse {
+  Handle handle = 1;
+}
+
+// StreamEventsRequest follows an invocation's events.
+message StreamEventsRequest {
+  Handle handle = 1;
+  int64 after_seq = 2;
+}
+
+// StreamEventsResponse is one event.
+message StreamEventsResponse {
+  int64 seq = 1;
+  EventKind kind = 2;
+  string text = 3;
+  bytes audio = 4;
+  double progress = 5;
+  int32 attempt = 6;
+  google.protobuf.Struct data = 7;
+}
+
+// GetResultRequest asks for an invocation's state.
+message GetResultRequest {
+  Handle handle = 1;
+}
+
+// GetResultResponse reports state and, once ended, the result.
+message GetResultResponse {
+  State state = 1;
+  google.protobuf.Value message = 2;
+  repeated Output outputs = 3;
+  Usage usage = 4;
+  int64 cost_mpts = 5;
+  google.protobuf.Struct error = 6;
+  // Suggested delay before asking again while running.
+  int64 retry_after_ms = 7;
+  // Embeddings, one per input.
+  repeated Vector vectors = 8;
+}
+
+// CancelRequest asks to cancel an invocation.
+message CancelRequest {
+  Handle handle = 1;
+}
+
+// CancelResponse acknowledges a cancellation request.
+message CancelResponse {}
+
+// LookupRequest finds an invocation by client_ref.
+message LookupRequest {
+  string client_ref = 1;
+}
+
+// LookupResponse returns the invocation if the provider has one for client_ref.
+message LookupResponse {
+  bool found = 1;
+  Handle handle = 2;
+}

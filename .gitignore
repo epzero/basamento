@@ -1,0 +1,10 @@
+/.gate/
+/dist/
+/bin/
+/data/
+*.test
+*.out
+.DS_Store
+/runtime/temporal/embedded/bench-cli
+/.claude/worktrees/
+/.claude/settings.local.json

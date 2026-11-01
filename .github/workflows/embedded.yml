@@ -1,0 +1,41 @@
+name: embedded-server
+
+# The embedded Temporal server is its own Go module (ADR-0002); the main gate
+# does not build it. This runs only when the module changes, plus nightly.
+on:
+  pull_request:
+    paths: ["runtime/temporal/embedded/**"]
+  push:
+    branches: [main]
+    paths: ["runtime/temporal/embedded/**"]
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embedded:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime/temporal/embedded
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: runtime/temporal/embedded/go.sum
+      - run: go vet ./...
+      - name: Dependency licenses
+        # go-statsd-client/statsd is MIT, its license file sits in a parent module path.
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          GOROOT=$(go env GOROOT) "$(go env GOPATH)/bin/go-licenses" check ./... \
+            --disallowed_types=forbidden,restricted \
+            --ignore github.com/epzero/basamento \
+            --ignore github.com/cactus/go-statsd-client/statsd
+      - run: CGO_ENABLED=0 go build -o bench-cli ./bench
+      - name: Crash recovery and replay
+        run: ./bench-cli crash -dir "$(mktemp -d)"

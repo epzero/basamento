@@ -1,0 +1,93 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    STRM-001-01:
+        hash: sha256:00b1f6799e8846ed7f16943b2d3f79a99cbd71bcd59dde2fc683d3ef29821627
+        reqs:
+            - REQ-STRM-001
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Constitution article 4 and the client streaming contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-002-01:
+        hash: sha256:1e5ba128c1a9c370c51be4445e025c6b5ce300623ba0cecd449c16d147cbf065
+        reqs:
+            - REQ-STRM-002
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Constitution article 4 and the client streaming contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-003-01:
+        hash: sha256:7bb482f02203ab8065e7edf9f8a19b0ce24b17eac41b1e4d990fcc9a5dba577f
+        reqs:
+            - REQ-STRM-003
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Constitution article 4 and the client streaming contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-004-01:
+        hash: sha256:be95a273d41b5ed996743e9159b3d27589430e61b569f9bb6f1820a4dd987bdd
+        reqs:
+            - REQ-STRM-004
+        tier: P0
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Constitution article 4 and the client streaming contract.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-005-01:
+        hash: sha256:bf8196089a745ce98105b7a60a9146474acd0c10b0d8af33c7681976d6aac406
+        reqs:
+            - REQ-STRM-005
+        tier: P1
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        note: Cancellation semantics of streaming steps.
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-006-01:
+        hash: sha256:74a5ac8f9ede09c2384b4cce2e7a1ac1515e26ca332a7a67483aa2974b2c77dc
+        reqs:
+            - REQ-STRM-006
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
+    STRM-007-01:
+        hash: sha256:26355d9da657fc64d6531c4d960a2d866e3df3a678b404f9bd43cbc45952c6be
+        reqs:
+            - REQ-STRM-007
+        tier: P2
+        author: claude-code:spec-author:boot01
+        reviewer: antigravity:spec-reviewer:boot02
+        approved_at: "2026-11-01"
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-01"
