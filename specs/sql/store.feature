@@ -13,6 +13,13 @@ Feature: Opening a SQL store
     And the data directory contains the file "kit.db"
     And the schema version is 3
 
+  @REQ-SQL-001 @profile:cloud @id:SQL-001-02
+  Scenario: A Postgres URL opens the database
+    Given an empty database
+    When a SQL store is opened with the sample migrations 1 to 3
+    Then the store opens
+    And the schema version is 3
+
   @REQ-SQL-002 @id:SQL-002-01
   Scenario Outline: Unsupported URLs are rejected without creating anything
     Given an empty data directory

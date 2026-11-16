@@ -15,6 +15,11 @@ Feature: Tenant-scoped repositories
     Then the call fails with code "invalid_argument"
     And no tenant has an item with key "orphan"
 
+  @REQ-SQL-010 @security @id:SQL-010-02
+  Scenario: Listing items without a tenant is rejected
+    When items are listed without a tenant
+    Then the call fails with code "invalid_argument"
+
   @REQ-SQL-011 @security @id:SQL-011-01
   Scenario: Listing returns only the caller's items
     When tenant "acme" lists its items
