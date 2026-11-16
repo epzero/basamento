@@ -58,3 +58,7 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Master key** | The key-encryption key held by the key service (a local key, a KMS key or a Vault Transit key). It wraps data keys and never leaves the key service. |
+| **Key service** | What holds the master key, selected by URL: `localsecrets://` in the embedded profile, a KMS or Vault Transit in the cloud one. The gate uses a **simulated key service**. |
+| **Data key**, **keyset** | A tenant's keyset is its data keys, one of them **primary**, stored only wrapped by the master key. New payloads use the primary data key; earlier ones still decrypt. |
+| **Payload codec** | Encrypts each payload a runtime records in history with the tenant's primary data key, and decrypts it on the way back. |
