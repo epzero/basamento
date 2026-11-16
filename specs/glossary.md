@@ -58,3 +58,6 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Bus** | The publish/subscribe port. A message is published on a **subject** (dot-separated tokens, no wildcards, such as `run.r1.deltas`) and kept until the subject is **purged**. A **subscriber** subscribes live, from the start, or after a bus sequence it already has. |
+| **Bus sequence** | The number the bus gives a message when it is published. It increases on each subject but is not contiguous, and it is neither a durable event's `seq` nor a delta's `dseq`. |
+| **KV entry** | A value under a key in the KV store, with a **revision** that grows on every change and an optional **TTL** after which the entry **expires** and reads as absent. A **swap** changes an entry only at its current revision; a **create** succeeds only if the key has no entry. |
