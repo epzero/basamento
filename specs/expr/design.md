@@ -29,6 +29,13 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
   names the expression or mapping source, and the position, variable, limit
   or cause the requirement asks for. Callers (the flow compiler, the price
   table, authorization) add their own context, such as a node or edge name.
+  `expr` owns the cause phrases of evaluation errors and maps the library's
+  errors onto them, whatever the library's own wording:
+  - `division by zero`
+  - `overflow`
+  - `out of bounds` (an index outside a list)
+  - `no such key` (an absent map key or property)
+  - `no JSON form` (a result that cannot be written as JSON)
 - A compiled `Program` or `Mapping` is immutable and safe for concurrent use.
 - `expr` imports only `core` (`layering.yaml`). It reads schemas as JSON, so
   it does not need `core/schema` (§2).
@@ -54,7 +61,11 @@ for typing (validation is `core/schema`'s work).
 | `enum` or `const` whose values all have one JSON type | the type of those values |
 | a `type` list, `anyOf`, `oneOf`, `allOf`, a mixed `enum`, `{}` or `true` | `dyn`, checked when evaluated |
 | `{"$ref": "#/$defs/<name>"}` | the type of that definition; where a definition refers back to itself, `dyn` at that point |
-| any other `$ref` | rejected with `invalid_argument`: the caller resolves external references first |
+| `false`, a `$ref` to a missing `#/$defs/<name>`, or any other `$ref` | rejected with `invalid_argument` (the caller resolves external references first) |
+
+The boolean schema in the last row is the schema itself being `false`, which
+accepts no value; an object schema's `"additionalProperties": false` is
+unaffected and is not rejected.
 
 A result schema (REQ-EXPR-002) is mapped the same way. A result of type `dyn`
 is accepted at compile time and converted when evaluated (§3); an `int`
@@ -105,7 +116,7 @@ nothing is coerced from strings.
   expressions: it is unbounded for any comprehension over a list of unknown
   size.
 
-## 5. The mapping environment (REQ-EXPR-013 … REQ-EXPR-019)
+## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-019)
 
 - **Variables**: named variables (`$params`, `$inputs`…) declared at compile
   time; `$ENV` is never one of them.
@@ -125,8 +136,8 @@ nothing is coerced from strings.
 - **Object order**: gojq iterates objects (`.[]`, `to_entries`, `keys`) and
   encodes them (`tojson`) in ascending key order. Scenarios pin this so a
   future gojq upgrade cannot change it silently. Functions the gojq library
-  does not define (`input_filename`, `stderr`) are rejected like the others,
-  with the same error.
+  does not define (`debug`, `input_filename`, `stderr`) are rejected like
+  the others, with the same error.
 - **Step limit**: default **1 000 000** steps per evaluation. gojq checks its
   context before every instruction it executes, so a context whose `Done`
   channel closes after the limit's number of checks bounds evaluation

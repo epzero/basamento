@@ -57,7 +57,7 @@ Feature: Evaluating expressions deterministically
       | expression              | cause            |
       | n / 0                   | division by zero |
       | n + 9223372036854775807 | overflow         |
-      | items[5]                | out of range     |
+      | items[5]                | out of bounds    |
       | m['b']                  | no such key      |
 
   @REQ-EXPR-008 @REQ-EXPR-009 @id:EXPR-008-02

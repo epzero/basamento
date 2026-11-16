@@ -68,7 +68,7 @@ If a mapping calls a function or uses a directive that reads the clock, the loca
 When a mapping iterates over an object, the mapping evaluator shall visit its keys in ascending order.
 
 ### REQ-EXPR-017 — Step limit
-If evaluating a mapping exceeds the step limit of its mapping environment, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the step limit.
+If evaluating a mapping exceeds its step limit, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the step limit.
 
 ### REQ-EXPR-018 — Exact integers in mappings
 When a mapping passes through an integer of its input unchanged, the mapping evaluator shall return the integer's exact value, whatever its magnitude.

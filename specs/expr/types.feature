@@ -17,6 +17,7 @@ Feature: Variable types from JSON Schema
       | {"type": "number"}                                             | v          | double                    |
       | {"type": "string"}                                             | v          | string                    |
       | {"type": "string", "format": "date-time"}                      | v          | google.protobuf.Timestamp |
+      | {"type": "null"}                                               | v          | null_type                 |
       | {"type": "array", "items": {"type": "integer"}}                | v          | list(int)                 |
       | {"type": "array"}                                              | v          | list(dyn)                 |
       | {"type": "object", "properties": {"a": {"type": "integer"}}}   | v.a        | int                       |
@@ -54,3 +55,14 @@ Feature: Variable types from JSON Schema
     When the expression "v" is compiled
     Then compilation fails with code "invalid_argument"
     And the error names the reference "https://schemas.example.test/state.json"
+
+  @REQ-EXPR-003 @id:EXPR-003-04
+  Scenario Outline: A schema that cannot be given a type is rejected
+    Given an expression environment declaring "v" with schema <schema>
+    When the expression "v" is compiled
+    Then compilation fails with code "invalid_argument"
+
+    Examples:
+      | schema                      |
+      | false                       |
+      | {"$ref": "#/$defs/missing"} |
