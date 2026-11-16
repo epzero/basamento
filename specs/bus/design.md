@@ -9,15 +9,19 @@ with embedded and cloud implementations), ADR-0005 (the bus under streaming).
 | --- | --- |
 | `platform` (`platform.go`) | The `Bus` and `KV` ports and `Message`. The changes in §2 are made there. |
 | `platform/bus` | The embedded implementation (`nats-server` in-process, JetStream file storage under the data directory) and the cloud implementation (`nats.go` against a NATS cluster). One JetStream code path serves both; they differ in how the connection is made. |
-| `platform/bus/bustest` | The in-process fake. Test-only (constitution 11): importable from `_test.go` files and `internal/bdd` only, enforced by `gate layering`. |
+| `platform/bus/bustest` | The in-process fake. Test-only (constitution 11): imported from `_test.go` files and `internal/bdd` only. |
 
 Selecting an implementation by URL (`nats-embedded://…` or `nats://…`) is
 wiring, specified with `kit serve` (WP-L1-05), not here.
 
 ## 2. Port changes
 
-The contract in `platform/platform.go` predates these specs. It changes as
-follows; the scenarios depend on it.
+The contract in `platform/platform.go` predates these specs. Because
+`platform/platform.go` is shared across `WP-L1-*` and outside `WP-L1-03`'s
+owned directory (`platform/bus`), the implementer lands these port changes
+first in a small pull request of their own before the `platform/bus`
+implementation (`docs/engineering/agent-workflow.md` §4), noting the touch to
+`platform/platform.go` in the pull request description:
 
 - **`Subscribe(ctx, subject, after)`**: `after = 0` means *from the start*
   (every retained message), not live only. Otherwise no full replay is
@@ -59,8 +63,8 @@ system clock in production):
 
 - An entry is stored with its deadline (`time of put, swap or create + ttl`).
   `Get` returns `not_found` once `clock.Now() >= deadline` (REQ-BUS-018).
-- A create on a key whose entry has expired replaces it; a swap at the revision
-  of an expired entry fails with `conflict` (REQ-BUS-019).
+- A create on a key whose entry has expired replaces it (REQ-BUS-019); a swap
+  at the revision of an expired entry fails with `conflict` (REQ-BUS-025).
 - The implementation may also set a longer server-side TTL as a backstop for
   cleanup; it never decides expiry.
 - In the cloud profile, processes compare deadlines written by other
@@ -93,12 +97,13 @@ system clock in production):
 
 ## 7. How the scenarios run
 
-- The component driver runs every scenario of `specs/bus` against the fake,
-  the embedded implementation and the cloud implementation. The cloud
-  implementation is reached through a `nats://` URL served by a `nats-server`
-  started in the test process, so the gate needs no external service.
-  Scenarios tagged only `@profile:embedded` (restart) run against the
-  embedded implementation alone.
+- The component driver runs every scenario of `publish-and-replay.feature`,
+  `retention.feature`, `limits-and-failures.feature`, `kv.feature` and
+  `ttl.feature` against the fake, the embedded implementation and the cloud
+  implementation. The cloud implementation is reached through a `nats://` URL
+  served by a `nats-server` started in the test process, so the gate needs no
+  external service. The restart scenarios of `embedded.feature`, tagged only
+  `@profile:embedded`, run against the embedded implementation alone.
 - "Receives … and nothing else" and "receives nothing" are asserted without
   sleeps: after the expected messages, the driver publishes a sentinel and
   checks that it is the next message delivered.

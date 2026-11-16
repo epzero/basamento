@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud
+@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: Purging a subject
   The bus keeps a subject's messages until the subject is purged; the
   streaming layer purges the deltas of a message shortly after it completes.

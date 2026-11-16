@@ -10,7 +10,7 @@ cluster) and their in-process fake for unit tests. The streaming layer
 ## Implementations
 
 ### REQ-BUS-001 — One behavior on every implementation
-The in-process fake, the embedded implementation and the cloud implementation of the bus and the KV store shall each give the results that every scenario of this capability states.
+The in-process fake, the embedded implementation and the cloud implementation of the bus and the KV store shall each satisfy every requirement of this capability that is not scoped to a single profile.
 
 ## Bus
 
@@ -51,12 +51,12 @@ If a caller passes an empty or malformed subject or key, or a negative TTL, then
 If the bus server cannot be reached, then the bus and the KV store shall fail each call with code `unavailable` instead of waiting for the server to return.
 
 ### REQ-BUS-014 — Embedded durability
-Where the profile is `embedded`, when the bus is stopped and started again on the same data directory, the bus shall keep every message not purged, every KV entry and its revision, and the bus sequences of each subject.
+Where the profile is `embedded`, when the bus is stopped and started again on the same data directory, the bus shall keep every message not purged, the last purged bus sequence and the bus sequences of each subject, and every KV entry and its revision.
 
 ## KV store
 
 ### REQ-BUS-015 — Put and read
-When a KV entry is put, the KV store shall keep its value with a revision greater than every earlier revision of that key, and a read of the key shall return the latest value and its revision; if the key has no entry, the read shall fail with code `not_found`.
+When a KV entry is put, the KV store shall keep its value with a revision greater than every earlier revision of that key, and a read of the key shall return the latest value and its revision.
 
 ### REQ-BUS-016 — Compare-and-swap
 When a KV entry is swapped at a revision, the KV store shall replace its value and return a greater revision if that revision is the entry's current one, and otherwise shall fail with code `conflict` and leave the entry unchanged.
@@ -65,13 +65,25 @@ When a KV entry is swapped at a revision, the KV store shall replace its value a
 When a KV entry is created, the KV store shall store it if the key has no entry, and otherwise shall fail with code `conflict` and leave the existing entry unchanged.
 
 ### REQ-BUS-018 — Expiry
-While the clock is at or past the time a KV entry was put, swapped or created plus its TTL, the KV store shall treat the entry as absent; an entry without a TTL does not expire.
+While the clock is at or past the time a KV entry with a TTL was put, swapped or created plus its TTL, the KV store shall treat the entry as absent.
 
-### REQ-BUS-019 — An expired entry is lost to its holder
-When a KV entry has expired, the KV store shall let anyone create the key again, and shall fail a swap at the expired entry's revision with code `conflict`.
+### REQ-BUS-019 — Creating an expired key
+While a KV entry has expired, when a caller creates the key, the KV store shall store the new entry and return a new revision.
 
 ### REQ-BUS-020 — Renewal
 When a KV entry is swapped with a TTL before it expires, the KV store shall count its TTL from the time of the swap.
 
 ### REQ-BUS-021 — Delete
-When a KV entry is deleted, the KV store shall treat the key as having no entry; deleting a key that has no entry shall succeed.
+When a KV entry is deleted, the KV store shall treat the key as having no entry.
+
+### REQ-BUS-022 — Reading a key without an entry
+If a caller reads a key that has no entry, then the KV store shall fail the read with code `not_found`.
+
+### REQ-BUS-023 — Entries without a TTL
+When a KV entry is put, swapped or created without a TTL, the KV store shall keep the entry regardless of how much time passes.
+
+### REQ-BUS-024 — Deleting a key without an entry
+When a caller deletes a key that has no entry, the KV store shall succeed and leave the key without an entry.
+
+### REQ-BUS-025 — Swapping an expired entry
+If a caller swaps a KV entry at the revision of an entry that has expired, then the KV store shall fail the swap with code `conflict`.

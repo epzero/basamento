@@ -22,3 +22,12 @@ Feature: The embedded bus keeps its data across restarts
     When the embedded bus is stopped and started again on the same data directory
     And 30 seconds pass
     Then reading entry "lock.r1" fails with code "not_found"
+
+  @REQ-BUS-014 @REQ-BUS-007 @REQ-BUS-008 @id:BUS-014-03
+  Scenario: A purge and its last purged bus sequence survive a restart
+    Given messages "m1" to "m3" are published on subject "run.r1.msg.a"
+    And subject "run.r1.msg.a" is purged
+    When the embedded bus is stopped and started again on the same data directory
+    And a subscriber subscribes to "run.r1.msg.a" after the bus sequence of "m1"
+    Then the subscription fails with code "not_found"
+    And the error reports the bus sequence of "m3" as the last purged

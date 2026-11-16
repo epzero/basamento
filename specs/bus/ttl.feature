@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud
+@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: KV entries that expire after a TTL
   A holder keeps a lock or a presence entry by renewing it before its TTL
   passes. Expiry follows the injected clock, so it is exact and repeatable;
@@ -18,7 +18,7 @@ Feature: KV entries that expire after a TTL
       | 29999 milliseconds | returns value "ana"              |
       | 30 seconds         | fails with code "not_found"      |
 
-  @REQ-BUS-018 @id:BUS-018-02
+  @REQ-BUS-023 @id:BUS-023-01
   Scenario: An entry without a TTL does not expire
     Given entry "cursor.r1" is put with value "42"
     When 365 days pass
@@ -32,7 +32,7 @@ Feature: KV entries that expire after a TTL
     Then the create returns a revision
     And reading entry "lock.r1" returns value "ben"
 
-  @REQ-BUS-019 @id:BUS-019-02
+  @REQ-BUS-025 @id:BUS-025-01
   Scenario: A holder cannot renew an expired entry, even if nobody took it
     Given entry "lock.r1" is created with value "ana" and TTL "30s"
     When 30 seconds pass
@@ -40,7 +40,7 @@ Feature: KV entries that expire after a TTL
     Then the swap fails with code "conflict"
     And reading entry "lock.r1" fails with code "not_found"
 
-  @REQ-BUS-019 @REQ-BUS-016 @id:BUS-019-03
+  @REQ-BUS-025 @REQ-BUS-016 @id:BUS-025-02
   Scenario: A holder cannot renew after another holder took the key
     Given entry "lock.r1" is created with value "ana" and TTL "30s"
     And 30 seconds pass

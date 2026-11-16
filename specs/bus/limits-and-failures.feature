@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud
+@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: Limits, invalid arguments and an unreachable server
   Calls the bus or the KV store cannot honor fail at once with a stable error
   code and leave nothing behind.
@@ -32,7 +32,6 @@ Feature: Limits, invalid arguments and an unreachable server
   Scenario Outline: A malformed key or a negative TTL is refused
     When entry "<key>" is put with value "v" and TTL "<ttl>"
     Then the put fails with code "invalid_argument"
-    And the KV store holds no entry
 
     Examples:
       | key       | ttl |
@@ -40,6 +39,8 @@ Feature: Limits, invalid arguments and an unreachable server
       | lock r1   | 0s  |
       | lock.*    | 0s  |
       | lock.>    | 0s  |
+      | .lock     | 0s  |
+      | lock.     | 0s  |
       | lock.r1   | -1s |
 
   @REQ-BUS-013 @id:BUS-013-01

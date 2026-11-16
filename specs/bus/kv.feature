@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud
+@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: Read, put, swap, create and delete KV entries
   The KV store keeps small values such as cursors, locks and presence. Every
   change gives the entry a new revision, and a swap or a create succeeds only
@@ -11,7 +11,7 @@ Feature: Read, put, swap, create and delete KV entries
     Then the second put returned a greater revision than the first
     And reading entry "cursor.r1" returns value "2" with the revision the second put returned
 
-  @REQ-BUS-015 @id:BUS-015-02
+  @REQ-BUS-022 @id:BUS-022-01
   Scenario: Reading a key without an entry fails with not_found
     When entry "cursor.r9" is read
     Then the read fails with code "not_found"
@@ -65,9 +65,13 @@ Feature: Read, put, swap, create and delete KV entries
     Then reading entry "lock.r1" returns value "ben"
 
   @REQ-BUS-021 @id:BUS-021-01
-  Scenario: Deleting an entry makes it absent, and deleting it again succeeds
+  Scenario: Deleting an entry makes it absent
     Given entry "cursor.r1" is put with value "42"
     When entry "cursor.r1" is deleted
-    And entry "cursor.r1" is deleted again
-    Then both deletes succeed
-    And reading entry "cursor.r1" fails with code "not_found"
+    Then reading entry "cursor.r1" fails with code "not_found"
+
+  @REQ-BUS-024 @id:BUS-024-01
+  Scenario: Deleting a key without an entry succeeds
+    When entry "cursor.r9" is deleted
+    Then the delete succeeds
+    And reading entry "cursor.r9" fails with code "not_found"
