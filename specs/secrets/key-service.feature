@@ -16,7 +16,7 @@ Feature: Key service and value encryption
       | localsecrets://bm90LWEtMzItYnl0ZS1rZXk= | local key must be 32 bytes, base64 encoded |
       | localsecrets://%%%not-base64            | local key must be 32 bytes, base64 encoded |
 
-  @security @REQ-SECRET-019 @id:SECRET-019-02
+  @security @REQ-SECRET-019 @REQ-SECRET-007 @id:SECRET-019-02
   Scenario: A refused local key never appears in the error or the log
     Given the log is captured
     When the secrets port is opened with URL "localsecrets://bm90LWEtMzItYnl0ZS1rZXk="
@@ -27,9 +27,9 @@ Feature: Key service and value encryption
   Scenario: A value encrypted by the secrets port decrypts with the same master key
     Given the secrets port is opened with a local key of 32 random bytes from seed 3
     When the value "sk-live-4f9a2c" is encrypted
+    And the secrets port is reopened with the same URL
     Then the ciphertext does not contain "sk-live-4f9a2c"
     And the ciphertext decrypts to "sk-live-4f9a2c"
-    And the ciphertext decrypts to "sk-live-4f9a2c" after the secrets port is reopened with the same URL
 
   @security @REQ-SECRET-021 @id:SECRET-021-01
   Scenario Outline: A value ciphertext that was altered or made under another key does not decrypt

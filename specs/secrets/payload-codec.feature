@@ -111,3 +111,17 @@ Feature: Payload encryption
     When encoded payload "p1" is decoded for tenant "acme"
     Then the captured log does not contain "sk-live-4f9a2c"
     And the captured log does not contain the bytes of a data key of tenant "acme" or of master key "mk-1"
+
+  @security @REQ-SECRET-022 @id:SECRET-022-01
+  Scenario: Encoding a payload without a tenant is rejected
+    Given payload "p1" with encoding "json/plain" and data "{}"
+    When payload "p1" is encoded without a tenant
+    Then encoding fails with code "invalid_argument"
+    And no encoded payload is returned
+
+  @security @REQ-SECRET-022 @id:SECRET-022-02
+  Scenario: Decoding an encoded payload without a tenant is rejected
+    Given payload "p1" with encoding "json/plain" and data "{}" encoded for tenant "acme"
+    When encoded payload "p1" is decoded without a tenant
+    Then decoding fails with code "invalid_argument"
+    And no decoded payload is returned

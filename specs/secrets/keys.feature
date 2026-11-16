@@ -61,8 +61,8 @@ Feature: Data keys and master keys
     Then the decoded payload data is "sk-live-4f9a2c"
     And the stored keyset of tenant "acme" names master key "mk-2" as the key that wrapped it
 
-  @security @REQ-SECRET-014 @id:SECRET-014-01
-  Scenario: A master key rotation that stops halfway can be run again to completion
+  @security @REQ-SECRET-014 @REQ-SECRET-016 @id:SECRET-014-01
+  Scenario: A master key rotation that stops halfway fails and every payload still decodes with both master keys
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
     And the simulated key service also holds master key "mk-2"
@@ -70,20 +70,43 @@ Feature: Data keys and master keys
     When the master key is rotated from "mk-1" to "mk-2"
     Then the rotation fails with code "unavailable"
     And encoded payloads "p1" and "g1" decode for their tenants with master keys "mk-1" and "mk-2" configured
-    When the simulated key service is reachable again
-    And the master key is rotated from "mk-1" to "mk-2"
+
+  @security @REQ-SECRET-014 @id:SECRET-014-02
+  Scenario: Running the rotation again rewraps the remaining keysets under the new master key
+    Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
+    And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
+    And the simulated key service also holds master key "mk-2"
+    And the simulated key service becomes unreachable once one keyset has been rewrapped
+    And a master key rotation from "mk-1" to "mk-2" has failed once
+    And the simulated key service is reachable again
+    When the master key is rotated from "mk-1" to "mk-2"
     Then the stored keysets of tenants "acme" and "globex" name master key "mk-2" as the key that wrapped them
 
   @security @REQ-SECRET-015 @id:SECRET-015-01
-  Scenario: A codec with the wrong master key fails and leaves the stored keyset intact
+  Scenario: Decoding with the wrong master key fails and leaves the stored keyset intact
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And the simulated key service also holds master key "mk-other"
     When the payload codec restarts with the same keyset store and master key "mk-other"
     And encoded payload "p1" is decoded for tenant "acme"
     Then decoding fails with code "internal" and message "keyset of the tenant cannot be unwrapped"
-    And encoding a payload for tenant "acme" fails with code "internal"
     And the stored keyset of tenant "acme" is unchanged
+
+  @security @REQ-SECRET-015 @id:SECRET-015-02
+  Scenario: Encoding with the wrong master key fails instead of replacing the stored keyset
+    Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
+    And the simulated key service also holds master key "mk-other"
+    When the payload codec restarts with the same keyset store and master key "mk-other"
+    And a new payload is encoded for tenant "acme"
+    Then encoding fails with code "internal" and message "keyset of the tenant cannot be unwrapped"
+    And the stored keyset of tenant "acme" is unchanged
+
+  @security @REQ-SECRET-015 @id:SECRET-015-03
+  Scenario: Restarting again with the right master key decodes the payload again
+    Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
+    And the simulated key service also holds master key "mk-other"
+    And the payload codec has restarted with the same keyset store and master key "mk-other"
     When the payload codec restarts with the same keyset store and master key "mk-1"
+    And encoded payload "p1" is decoded for tenant "acme"
     Then encoded payload "p1" decodes for tenant "acme" to "sk-live-4f9a2c"
 
   @security @REQ-SECRET-016 @id:SECRET-016-01
@@ -128,3 +151,12 @@ Feature: Data keys and master keys
     And encoded payload "p2" is decoded for tenant "acme" by the first payload codec
     Then the decoded payload data is "sk-live-4f9a2c"
     And the first payload codec sent 1 unwrap request to the simulated key service for that decode
+
+  @security @REQ-SECRET-023 @id:SECRET-023-01
+  Scenario: A swapped-in keyset wrapped for another tenant cannot be unwrapped
+    Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
+    And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
+    And the stored keyset of tenant "acme" is replaced by the stored keyset of tenant "globex"
+    When the payload codec restarts with the same keyset store and master key "mk-1"
+    And encoded payload "p1" is decoded for tenant "acme"
+    Then decoding fails with code "internal" and message "keyset of the tenant cannot be unwrapped"

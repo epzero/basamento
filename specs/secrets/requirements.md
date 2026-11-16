@@ -24,7 +24,7 @@ The payload codec shall encode a payload as ciphertext with only the metadata `e
 When the same payload is encoded more than once, the payload codec shall produce a different ciphertext each time.
 
 ### REQ-SECRET-004 — Authentication failure
-If an encoded payload fails authentication under the decoding tenant's data keys, then the payload codec shall reject it with code `invalid_argument` and the message `payload cannot be decrypted`, whatever check failed, and return no data.
+If an encoded payload cannot be authenticated or lacks a matching data key for the decoding tenant, then the payload codec shall reject it with code `invalid_argument` and the message `payload cannot be decrypted`, whatever check failed, and return no payload.
 
 ### REQ-SECRET-005 — Tenant binding
 The payload codec shall bind each encoded payload to the tenant it was encoded for, so that it decodes for that tenant only.
@@ -33,7 +33,10 @@ The payload codec shall bind each encoded payload to the tenant it was encoded f
 If a payload without the encoding `binary/encrypted` is decoded, then the payload codec shall reject it with code `invalid_argument` and the message `payload is not encrypted`.
 
 ### REQ-SECRET-007 — No secrets in errors or logs
-The secrets port and the payload codec shall never write payload data, data keys or master keys into an error or a log record.
+The secrets port and the payload codec shall never write payload data, data keys, master keys or URL secrets into an error or a log record.
+
+### REQ-SECRET-022 — Tenant required
+If a payload is encoded or decoded without a tenant in context, then the payload codec shall reject the call with code `invalid_argument` and return no payload.
 
 ## Data keys and master keys
 
@@ -56,19 +59,22 @@ While a tenant's keyset holds data keys that are no longer primary, the payload 
 When the master key is rotated, the secrets port shall rewrap every stored keyset under the new master key without changing the data keys it holds.
 
 ### REQ-SECRET-014 — Interrupted master key rotation
-If a master key rotation stops before every keyset is rewrapped, then the secrets port shall keep each keyset wrapped by either the old or the new master key, decodable with either configured, and complete the rotation when it is run again.
+If a master key rotation stops before every keyset is rewrapped, then the secrets port shall leave each keyset wrapped by either the old or the new master key, decodable with both master keys configured, and rewrap the remaining keysets on a retry.
 
 ### REQ-SECRET-015 — Wrong master key
 If the configured master key cannot unwrap a tenant's stored keyset, then the payload codec shall fail that tenant's encodes and decodes with code `internal` and leave the stored keyset unchanged.
 
 ### REQ-SECRET-016 — Key service unavailable
-If the key service cannot be reached when a data key must be wrapped or unwrapped, then the payload codec shall fail with code `unavailable` and return no payload.
+If the key service cannot be reached when a keyset must be wrapped, unwrapped or rewrapped, then the secrets port and the payload codec shall fail the operation with code `unavailable` and return no payload.
 
 ### REQ-SECRET-017 — Unwrap once
 While a tenant's keyset is unchanged in the keyset store, the payload codec shall ask the key service to unwrap it at most once per process.
 
 ### REQ-SECRET-018 — Keyset reload
 If an encoded payload names a data key absent from the payload codec's cached keyset, then the payload codec shall reload the tenant's keyset from the keyset store once before it decides whether the payload decodes.
+
+### REQ-SECRET-023 — Keysets bound to their tenant
+If the stored keyset of a tenant is not the one that was wrapped for that tenant, then the payload codec shall fail with code `internal` and the message `keyset of the tenant cannot be unwrapped`, and return no payload.
 
 ## Key service and values
 
