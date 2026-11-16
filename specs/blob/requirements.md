@@ -63,7 +63,7 @@ If a blob URL is requested with a lifetime that is not positive or exceeds the m
 When a blob store is opened from a location URL, the blob store shall select the implementation by the URL scheme: `file` for a local directory, `s3`, `gs` or `azblob` for the cloud.
 
 ### REQ-BLOB-019 — Unsupported locations
-If a location URL has a scheme the blob store does not support, then opening it shall fail with code `invalid_argument` and a message that names the supported schemes.
+If a location URL has no scheme or a scheme the blob store does not support, then opening it shall fail with code `invalid_argument` and a message that names the supported schemes.
 
 ### REQ-BLOB-020 — Empty data directory
 When a blob store is opened on a local directory that does not exist yet, the blob store shall create the directory and start with no blobs.

@@ -23,7 +23,7 @@ Feature: Blob URLs
     And a client with no credentials fetches the blob URL
     Then the response has status 200, content type "application/octet-stream" and body "hello"
 
-  @REQ-BLOB-015 @REQ-BLOB-013 @profile:embedded @id:BLOB-015-01
+  @REQ-BLOB-015 @REQ-BLOB-013 @security @profile:embedded @id:BLOB-015-01
   Scenario Outline: A proxied blob URL works until its lifetime ends
     Given tenant "acme" has stored "hello" as "text/plain"
     And tenant "acme" has a blob URL for the content key of "hello" with a lifetime of 15 minutes
