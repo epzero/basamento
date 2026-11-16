@@ -89,6 +89,7 @@ Findings carry a rule, a severity (`error` or `warning`) and a segment name.
 | `no_budget` | warning | template |
 | `unpaired_delimiter` | error | assembled prompt |
 
-The registry lints every template it registers (REQ-PROMPT-020). An
+The registry lints every template it registers: errors refuse it
+(REQ-PROMPT-020), warnings are returned with it (REQ-PROMPT-023). An
 undeclared variable is refused by the registry itself (REQ-PROMPT-004). Rule
 names are stable: new rules are added, none is renamed or removed.

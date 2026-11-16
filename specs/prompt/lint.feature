@@ -63,7 +63,7 @@ Feature: Prompt lint
     Then the registration fails with code "invalid_argument" listing the lint error "variable_in_static" for segment "rules"
     And "greeting@1" does not resolve
 
-  @REQ-PROMPT-020 @id:PROMPT-020-02
+  @REQ-PROMPT-023 @id:PROMPT-023-01
   Scenario: A template with only lint warnings is registered with its warnings
     Given a template "docs@1" that declares input "doc" and the segments
       | segment | kind    | budget | text    |

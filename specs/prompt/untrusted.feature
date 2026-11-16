@@ -39,6 +39,18 @@ Feature: Untrusted input is wrapped and cannot break out
     Then the history segment holds 2 entries, each wrapped once with source "history"
     And segment "turn" holds 1 value wrapped with source "question"
 
+  @REQ-PROMPT-014 @id:PROMPT-014-04
+  Scenario: An empty untrusted input is wrapped with its name as source
+    Given a template "docs@1" that declares input "doc" and the segments
+      | segment | kind    | text    |
+      | context | dynamic | {{doc}} |
+    And the template is registered
+    When "docs@1" is assembled with inputs {"doc": ""}
+    Then segment "context" reads
+      """
+      <untrusted source="doc"></untrusted>
+      """
+
   @REQ-PROMPT-015 @id:PROMPT-015-01
   Scenario: A closing delimiter inside a value is neutralized
     Given a template "docs@1" that declares input "doc" and the segments

@@ -6,16 +6,17 @@ Feature: Segments, budgets and cache hints
 
   @REQ-PROMPT-008 @id:PROMPT-008-01
   Scenario: Segments are assembled by kind, whatever the order they are declared in
-    Given a template "chat@1" that declares input "question" and the segments
-      | segment | kind    | text         |
-      | turn    | user    | {{question}} |
-      | notes   | dynamic | No notes.    |
-      | rules   | static  | Be brief.    |
-      | style   | static  | Use English. |
-      | past    | history |              |
+    Given a template "chat@1" that declares trusted input "tenant_name" and input "question" and the segments
+      | segment | kind        | text                 |
+      | turn    | user        | {{question}}         |
+      | notes   | dynamic     | No notes.            |
+      | rules   | static      | Be brief.            |
+      | tenant  | semi-static | For {{tenant_name}}. |
+      | style   | static      | Use English.         |
+      | past    | history     |                      |
     And the template is registered
-    When "chat@1" is assembled with inputs {"question": "Why?"} and no history
-    Then the assembled segments are, in order, "rules", "style", "notes", "past", "turn"
+    When "chat@1" is assembled with inputs {"tenant_name": "Acme", "question": "Why?"} and no history
+    Then the assembled segments are, in order, "rules", "style", "tenant", "notes", "past", "turn"
 
   @REQ-PROMPT-009 @id:PROMPT-009-01
   Scenario: A segment larger than its budget fails the assembly

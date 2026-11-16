@@ -24,8 +24,11 @@ The prompt registry shall identify every template by id and version and resolve 
 ### REQ-PROMPT-002 — Versions are immutable
 If a template is registered under an id and version that already holds different content, then the prompt registry shall reject it with code `conflict` and keep the content registered first.
 
-### REQ-PROMPT-003 — References are pinned and must resolve
-If a template reference names no version, or names an id and version that is not registered, then the prompt registry shall reject it, with code `invalid_argument` for a missing version and code `not_found` for an unregistered one.
+### REQ-PROMPT-003 — References are pinned
+If a template reference names no version, then the prompt registry shall reject it with code `invalid_argument`.
+
+### REQ-PROMPT-022 — References must resolve
+If a template reference names an id and version that is not registered, then the prompt registry shall reject it with code `not_found`.
 
 ### REQ-PROMPT-004 — Variables are declared
 If a template uses a variable it does not declare as an input, then the prompt registry shall reject the template with code `invalid_argument` naming the variable.
@@ -82,7 +85,10 @@ If the fixed text of a segment, without its variables, is larger than the segmen
 If a `dynamic`, `history` or `user` segment has no budget, then prompt lint shall report the warning `no_budget` for that segment.
 
 ### REQ-PROMPT-020 — Lint errors block registration
-If prompt lint reports an error for a template, then the prompt registry shall reject the template with code `invalid_argument` listing the errors; lint warnings shall not prevent registration.
+If prompt lint reports an error for a template, then the prompt registry shall reject the template with code `invalid_argument` listing the errors.
+
+### REQ-PROMPT-023 — Lint warnings do not block registration
+When prompt lint reports only warnings for a template, the prompt registry shall register the template and return the warnings.
 
 ### REQ-PROMPT-021 — Assembled prompts carry only their own delimiters
 When an assembled prompt is linted, prompt lint shall report the error `unpaired_delimiter` for every untrusted-content delimiter that is not one of the pairs the assembler wrapped a value in.

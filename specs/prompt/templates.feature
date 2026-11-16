@@ -25,17 +25,26 @@ Feature: Versioned prompt templates
     And the prompt registry holds 1 version of template "greeting"
 
   @REQ-PROMPT-003 @id:PROMPT-003-01
-  Scenario Outline: A reference that does not pin a registered version is refused
+  Scenario Outline: A reference that names no version is refused
     Given the prompt registry holds template "greeting@1" with static segment "Say hello."
     When "<reference>" is resolved
-    Then the resolution fails with code "<code>"
+    Then the resolution fails with code "invalid_argument"
 
     Examples:
-      | reference  | code             |
-      | greeting   | invalid_argument |
-      | greeting@  | invalid_argument |
-      | greeting@9 | not_found        |
-      | farewell@1 | not_found        |
+      | reference |
+      | greeting  |
+      | greeting@ |
+
+  @REQ-PROMPT-022 @id:PROMPT-022-01
+  Scenario Outline: A reference to a version that is not registered is refused
+    Given the prompt registry holds template "greeting@1" with static segment "Say hello."
+    When "<reference>" is resolved
+    Then the resolution fails with code "not_found"
+
+    Examples:
+      | reference  |
+      | greeting@9 |
+      | farewell@1 |
 
   @REQ-PROMPT-004 @id:PROMPT-004-01
   Scenario: A template that uses an undeclared variable is refused
