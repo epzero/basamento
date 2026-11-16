@@ -14,11 +14,11 @@ schema is not here; `expr` (WP-L2-01) builds on this package.
   ECMAScript algorithm (`strconv.FormatFloat(f, 'g', -1, 64)` adjusted to the
   ECMAScript exponent rules); no third-party canonicalizer.
 
-Library output is never part of the contract on its own: the scenarios state
-behavior through validation, so a library upgrade that changes the shape of a
-generated schema but not what it accepts keeps the scenarios green. It still
-changes canonical bytes, and therefore flow hashes; such an upgrade is called
-out in its pull request.
+Library output beyond the required object shape (`properties`, `required` and
+property `description`) is never part of the contract on its own: type and
+constraint scenarios state behavior through validation, so a library upgrade
+that changes how a generated schema expresses them but not what it accepts
+keeps the scenarios green.
 
 ## Interfaces the implementer follows
 

@@ -107,14 +107,16 @@ Feature: Compiling schemas and validating instances
   Scenario: All violations are listed in a fixed order
     Given the schema:
       """
-      {"type": "object", "properties": {"b": {"type": "string", "minLength": 3}, "a": {"type": "integer"}}, "required": ["c"]}
+      {"type": "object", "properties": {"b": {"type": "string", "minLength": 3}, "a": {"type": "integer"}, "d": {"type": "string", "pattern": "^[a-z]+$", "minLength": 5}}, "required": ["c"]}
       """
-    When the instance {"b": 1, "a": "x"} is validated 3 times
+    When the instance {"b": 1, "a": "x", "d": "A"} is validated 3 times
     Then each validation lists exactly these violations, in this order:
-      | location | keyword  |
-      | /a       | type     |
-      | /b       | type     |
-      | /c       | required |
+      | location | keyword   |
+      | /a       | type      |
+      | /b       | type      |
+      | /c       | required  |
+      | /d       | minLength |
+      | /d       | pattern   |
 
   @REQ-SCHEMA-023 @id:SCHEMA-023-01
   Scenario Outline: Numbers are compared by their exact value
@@ -148,9 +150,13 @@ Feature: Compiling schemas and validating instances
       | date-time | 2026-11-16T09:00:00Z                 | accepted |
       | date-time | 2026-11-16 09:00                     | rejected |
       | date      | 2026-02-30                           | rejected |
+      | time      | 09:00:00Z                            | accepted |
+      | time      | 25:00:00Z                            | rejected |
       | duration  | PT72H                                | accepted |
       | email     | ana@example.com                      | accepted |
       | email     | ana.example.com                      | rejected |
+      | uri       | https://basamento.dev/schemas/gate   | accepted |
+      | uri       | not a uri                            | rejected |
       | uuid      | 0190a8e2-6c3b-7d4e-8f00-123456789abc | accepted |
       | uuid      | 0190a8e2                             | rejected |
 
