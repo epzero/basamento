@@ -1,0 +1,79 @@
+# Schema: design
+
+Package `core/schema` (WP-L2-02). It sits in `core`, so it imports nothing of
+Basamento but `core`, and every layer may use it. CEL type-checking against a
+schema is not here; `expr` (WP-L2-01) builds on this package.
+
+## Libraries
+
+- Generation: `github.com/google/jsonschema-go` (`jsonschema.ForType`).
+- Validation: `github.com/santhosh-tekuri/jsonschema` (v6), with
+  `AssertFormat` on and a loader that serves only the schema set
+  (REQ-SCHEMA-012). The default HTTP and file loaders are never installed.
+- Canonical JSON: RFC 8785, written in this package. Numbers use the
+  ECMAScript algorithm (`strconv.FormatFloat(f, 'g', -1, 64)` adjusted to the
+  ECMAScript exponent rules); no third-party canonicalizer.
+
+Library output is never part of the contract on its own: the scenarios state
+behavior through validation, so a library upgrade that changes the shape of a
+generated schema but not what it accepts keeps the scenarios green. It still
+changes canonical bytes, and therefore flow hashes; such an upgrade is called
+out in its pull request.
+
+## Interfaces the implementer follows
+
+Names are guidance; the behaviors are the contract.
+
+```go
+// Generation
+func For[T any]() (*Schema, error)
+func ForType(t reflect.Type) (*Schema, error)
+
+// Compilation: a schema set is the closed world of schemas a schema may refer to.
+type Set struct{ /* id → raw schema */ }
+func (s *Set) Add(id string, raw json.RawMessage) error
+func (s *Set) Compile(id string) (*Compiled, error)
+func Compile(raw json.RawMessage) (*Compiled, error) // a set of one, no references
+
+// Validation
+func (c *Compiled) Validate(instance json.RawMessage) error
+
+// Canonical JSON
+func Canonicalize(text []byte) ([]byte, error)
+func Marshal(v any) ([]byte, error) // encoding/json, then Canonicalize
+```
+
+## Errors
+
+Every failure is a `*core.Error` with code `invalid_argument`
+(`core/errors.go`). Locations are in `Details`:
+
+| Failure | `Details` |
+| --- | --- |
+| Generation | `field`: Go field path, dot separated (`In.Bad`) |
+| Compilation | `violations`: list of `{schema_location, keyword, message}`; or `reference` for REQ-SCHEMA-012 |
+| Validation | `violations`: list of `{location, keyword, message}` in the order of REQ-SCHEMA-022 |
+| Canonicalization, duplicate names in instances | `location` |
+
+Locations are JSON Pointers (RFC 6901): `~` is written `~0`, `/` is written
+`~1`, and the root is the empty pointer `""`. A validation library reports
+`required` and `additionalProperties` at the object; this package moves them
+to the property (REQ-SCHEMA-021), one violation per property. Messages are
+English for logs (`core.Error.Message`); none of them is part of a scenario.
+
+## Instances and numbers
+
+Instances are read with `json.Decoder.UseNumber`, never into `float64`, so
+the validator compares exact decimals (REQ-SCHEMA-023). Duplicate member
+names are detected while reading, before validation (REQ-SCHEMA-025), because
+two readers of the same payload (the validator and CEL) would otherwise see
+different values. Invalid UTF-8 bytes in a text are refused like an unpaired
+surrogate escape (REQ-SCHEMA-037); the scenarios cover the escape only,
+because a feature file cannot hold invalid bytes.
+
+## Out of scope
+
+- CEL type-checking against schemas (WP-L2-01, `specs/expr`).
+- The flow IR hash itself: the flow compiler hashes the canonical form
+  (`docs/architecture/flow-engine.md`), WP-L4-01.
+- Structured-output repair strategies (`docs/architecture/model-layer.md` §5).
