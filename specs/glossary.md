@@ -58,3 +58,5 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **SQL store** | The SQL port of the platform: a SQLite file in the embedded profile, Postgres in the cloud profile, opened by URL. Its repositories are scoped to the tenant of each call. |
+| **Migration**, **migration set**, **schema version** | A numbered schema change embedded in the binary; the ordered migrations a SQL store applies on open; the number of the last migration applied to a database. |
