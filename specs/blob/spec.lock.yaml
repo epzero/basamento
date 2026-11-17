@@ -12,7 +12,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-001-02:
         hash: sha256:6f159958318093e169c6db4b01d228e7e1562419baab265e5865f71ebefbff8b
         reqs:
@@ -34,7 +37,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-002-02:
         hash: sha256:5059746cbe798d66038bbe90b7b8312c7b61e5fbfcac20f6210afcc987861014
         reqs:
@@ -45,7 +51,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-002-03:
         hash: sha256:4f2bb03eeed9c4502f59fe4a1d2be6b980214968807fdc242b90d6b9960930c6
         reqs:
@@ -56,7 +65,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-003-01:
         hash: sha256:83a25df425c9e08af3039e968aac02d28766c99c97f8ea976c9d4ca75fd016fa
         reqs:
@@ -67,7 +79,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: reject malformed and path-traversal keys across all operations without touching stored data.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-003-02:
         hash: sha256:70d3dae7901a9a4435ddd454d1e557bda836b16673afb874ad5592dac9e54cfc
         reqs:
@@ -78,7 +93,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: reject malformed and path-traversal keys across all operations without touching stored data.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-004-01:
         hash: sha256:31e4bdfdd4949974d19d0cb00c6579f21f07c39fc10a97f89a3ad66ac947cfda
         reqs:
@@ -160,7 +178,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-009-02:
         hash: sha256:5d8d4a3b7b6c5de98ea17a5194a74cf16c60059b100c95143b0660cad99fb2c5
         reqs:
@@ -172,7 +193,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-010-01:
         hash: sha256:f969883621a206ac9b8f7dd1324d5dad1e34ac546b47fc19b2fe95a551a4f3b6
         reqs:
@@ -183,7 +207,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-010-02:
         hash: sha256:08944adcbc0f202316ae96ad2fdf25fb70ef5cf8f6e48373593aefb9e868e116
         reqs:
@@ -194,7 +221,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-011-01:
         hash: sha256:186a1415674e469dbebab9f243c55a0754d6c1afc20467a1ae25d7258ecebd01
         reqs:
@@ -205,7 +235,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-012-01:
         hash: sha256:5e353f8befa9a79c33db123cee84b1fefc48646b7a6a5025d5a56b4572353323
         reqs:
@@ -216,7 +249,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-013-01:
         hash: sha256:d1efb6e4f64c0ce4eaf7359a657838909629903a5f27b2315e1f2a0804b897f8
         reqs:
@@ -248,7 +284,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-016-01:
         hash: sha256:96d06afc40f688c6a44453d668a91a37cb6acb9dd948b17dda063bcbae506e9a
         reqs:
@@ -259,7 +298,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-016-02:
         hash: sha256:6734a753e1b3afebae6200c847ba429dc57b3b08728fa3e92357a69982193c3e
         reqs:
@@ -271,7 +313,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-017-01:
         hash: sha256:976f21ffc7f46b9a3a6eb136a1cfa76cfae20cd8df1965234bbd9683fe43884b
         reqs:
@@ -282,7 +327,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security and URL safety: reject non-positive or over-max blob URL lifetimes so credential-less URLs remain bounded.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
     BLOB-017-02:
         hash: sha256:ded79415df2c7fcaab01997c82bdbfc39f66d0019b64e86776e279540b2b618a
         reqs:
