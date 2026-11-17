@@ -6,7 +6,6 @@ One durable contract, two runtimes (ADR-0002, `specs/runtime`).
 Depends: WP-L4-04.
 Owns: `runtime/local`.
 In-process `Runtime` and `DurableContext`; not durable by design; passes the conformance suite.
-Specs: `specs/runtime/local.feature`.
 
 ### WP-L5-02 — Temporal runtime
 Depends: WP-L4-04, WP-L1-02, WP-L1-04.

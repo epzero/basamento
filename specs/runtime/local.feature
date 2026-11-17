@@ -2,229 +2,234 @@
 Feature: The local runtime
 
   The local runtime runs flows in-process with an in-memory journal. It is not
-  durable by design and says so; each scenario below touches one behavior that
-  is particular to it (WP-L5-01). What every runtime shares is in
-  Conformance (WP-L5-04); the Temporal runtime is WP-L5-02.
+  durable by design and says so; each scenario below checks one behavior of
+  `runtime/local` (WP-L5-01). What every runtime shares is in Conformance
+  (WP-L5-04); the Temporal runtime is WP-L5-02.
 
   @REQ-RT-005 @id:RT-005-01
-  Scenario: The local runtime does not advertise durability
+  Scenario: The local runtime reports its capabilities honestly
     Given the runtime is "local"
-    Then the runtime capabilities have "Durable" false
-    And the runtime capabilities have "SyncGateUpdates" true
-    And the runtime capabilities have "ContinueAsNew" false
-    And the runtime capabilities have "PolyglotQueues" false
+    Then the runtime reports capability "durable" as false
+    And the runtime reports capability "sync_gate_updates" as true
+    And the runtime reports capability "continue_as_new" as false
+    And the runtime reports capability "polyglot_queues" as false
 
   @REQ-RT-006 @id:RT-006-01
-  Scenario: A new process's runtime has no record of an earlier process's runs
+  Scenario: A new local runtime has no record of an earlier runtime's runs
     Given tenant "acme" has run "r1" of "review" on an earlier local runtime
     When a new local runtime starts and tenant "acme" describes run "r1"
-    Then run "r1" is described as code "not_found"
+    Then describing run "r1" fails with code "not_found"
 
   @REQ-RT-006 @id:RT-006-02
-  Scenario: A new process's runtime lists no runs of an earlier process
+  Scenario: A new local runtime lists no runs of an earlier runtime
     Given tenant "acme" ran flow "review" on an earlier local runtime
     When a new local runtime starts and tenant "acme" lists runs of flow "review"
     Then tenant "acme" lists 0 runs
 
   @REQ-RT-007 @id:RT-007-01
-  Scenario: A step runs once per run and its result is reused
-    Given a flow calls step "fetch" twice and returns both results
+  Scenario: A step runs once per step name in a run and its recorded result is reused
+    Given a flow calls step "fetch" twice with the same name and returns both results
     When a run of "twice" completes
     Then step "fetch" was executed 1 time
     And both results are {"lines": 3}
 
   @REQ-RT-007 @id:RT-007-02
-  Scenario: Step results are kept per run, not per runtime
-    Given a flow calls step "fetch" once and returns its result
-    When runs "r1" and "r2" of "once" complete on one local runtime
+  Scenario: Step results are recorded per run, not shared across runs
+    Given step "fetch" returns {"call": 1} on execution 1 and {"call": 2} on execution 2
+    And a flow calls step "fetch" once and returns its result
+    When runs "r1" and "r2" of "once" complete in order on one local runtime
     Then step "fetch" was executed 2 times
-    And both runs return a result
+    And run "r1" returns {"call": 1} and run "r2" returns {"call": 2}
 
   @REQ-RT-008 @id:RT-008-01
-  Scenario: A timer does not complete before its time
+  Scenario: A timer does not complete before its duration has elapsed
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow calls "Sleep" for "30m" and then completes
+    And a flow waits on a "30m" timer and then completes
     When a run of "timer" starts and 29 minutes pass
     Then the run is still "running"
-    And the run completed exactly 0 calls of "Sleep"
+    And the run has completed 0 timers
 
   @REQ-RT-008 @id:RT-008-02
-  Scenario: A timer completes once the clock reaches its time
+  Scenario: A timer completes once the clock reaches its duration
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow calls "Sleep" for "30m" and then completes
+    And a flow waits on a "30m" timer and then completes
     When a run of "timer" starts and 30 minutes pass
     Then the run is "completed"
 
   @REQ-RT-009 @id:RT-009-01
-  Scenario: A resolved gate completes the run's wait
+  Scenario: A resolved gate completes the run's gate wait
     Given a run waiting at gate "approve" that accepts payloads where "input.approved || size(input.notes) > 0"
     When the gate is resolved with payload {"approved": true}
     Then the run returns {"gate": {"approved": true}}
     And the run is "completed"
 
   @REQ-RT-010 @id:RT-010-01
-  Scenario: Resolving a gate the run already received is a conflict
+  Scenario: Resolving a gate the run already received fails with conflict
     Given a run that resolved gate "approve" and received {"approved": true}
     When the gate is resolved again with payload {"notes": "second"}
     Then the resolution fails with code "conflict"
     And the run is "completed"
 
   @REQ-RT-011 @id:RT-011-01
-  Scenario: Select answers with the gate's index when it is already ready
+  Scenario: Waiting on the first of a timer and an already resolved gate returns the gate's index
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow waits on a 1-hour timer and gate "approve", in that order
+    And a flow waits on the first of a "1h" timer and gate "approve", in that order
     And the gate is resolved with payload {"approved": true}
-    When the flow reaches Select and 1 hour passes
-    Then Select returns index 1
-    And the result of index 1 is {"approved": true}
+    When the flow waits on the first ready operation
+    Then the wait returns index 1
+    And the result at index 1 is {"approved": true}
 
   @REQ-RT-011 @id:RT-011-02
-  Scenario: Select answers with the lower index when two futures are ready
+  Scenario: Waiting on the first of two ready operations returns the lower index
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow waits on a 1-hour timer and a 2-hour timer, in that order
-    When the flow reaches Select and 2 hours pass
-    Then Select returns index 0
+    And a flow waits on the first of a "1h" timer and a "2h" timer, in that order
+    When 2 hours pass and the flow waits on the first ready operation
+    Then the wait returns index 0
+
+  @REQ-RT-011 @id:RT-011-03
+  Scenario: Waiting on the first of two steps in flight returns the index of whichever finishes first
+    Given a flow starts steps "a" and "b" and waits on the first to finish, in that order
+    And step "a" finishes only after step "b"
+    When the wait answers
+    Then the wait returns index 1
+    And step "b" was executed 1 time
 
   @REQ-RT-012 @id:RT-012-01
-  Scenario: Cancelling a run stops the step it is running
-    Given a flow runs step "render" that runs until it is cancelled
-    And a run of "render" has step "render" in flight
+  Scenario: Cancelling a run stops the step it has in flight
+    Given a flow runs step "render" that blocks until cancelled
+    And run "c1" of "render" has step "render" in flight
     When run "c1" is cancelled with reason "user"
     Then the run is "cancelled"
-    And step "render" saw its context cancelled before the run closed
+    And step "render" received cancellation before the run closed
 
   @REQ-RT-013 @id:RT-013-01
   Scenario Outline: A pending wait ends with "cancelled" when its run is cancelled
     Given a run of "<flow>" is waiting on <wait>
     When the run is cancelled
     Then the run is "cancelled"
-    And the pending call completes with code "cancelled"
+    And the pending wait fails with code "cancelled"
 
     Examples:
-      | flow    | wait             |
-      | waiting | gate "approve"   |
-      | timer   | "Sleep" for "1h" |
+      | flow    | wait           |
+      | waiting | gate "approve" |
+      | timer   | a "1h" timer   |
 
   @REQ-RT-014 @id:RT-014-01
-  Scenario: A child flow runs as its own run under the id the parent chose
-    Given a parent flow "parent" calls "Child" for flow "child" with child run id "child-1"
+  Scenario: A child flow runs as its own run under the child run id the parent chose
+    Given parent flow "parent" starts child flow "child" with child run id "child-1"
     When a run of "parent" completes
     Then run "child-1" is "completed"
 
   @REQ-RT-014 @id:RT-014-02
-  Scenario: A child returns its output to the parent
-    Given a parent flow "parent" calls "Child" for flow "child" with child run id "child-1"
+  Scenario: A child run returns its output to the parent run
+    Given parent flow "parent" starts child flow "child" with child run id "child-1"
     And flow "child" returns {"status": "ok"}
     When a run of "parent" completes
-    Then the parent's child future yields {"status": "ok"}
+    Then the parent receives child output {"status": "ok"}
 
   @REQ-RT-015 @id:RT-015-01
-  Scenario: A parent that ends terminates the children it left in flight
-    Given flow "parent" calls "Child" for flow "child" with child run id "child-1" and policy "terminate"
+  Scenario: Under close policy "terminate" the parent's end terminates an in-flight child
+    Given parent flow "parent" starts child flow "child" with child run id "child-1" and close policy "terminate"
     And flow "child" waits at gate "approve"
-    When a run of "parent" completes
+    When a run of "parent" completes without waiting for "child-1"
     Then run "child-1" is "terminated"
 
   @REQ-RT-015 @id:RT-015-02
-  Scenario: Under policy "abandon" the parent's end leaves the child running
-    Given flow "parent" calls "Child" for flow "child" with child run id "child-1" and policy "abandon"
+  Scenario: Under close policy "abandon" the parent's end leaves an in-flight child running
+    Given parent flow "parent" starts child flow "child" with child run id "child-1" and close policy "abandon"
     And flow "child" waits at gate "approve"
-    When a run of "parent" completes
+    When a run of "parent" completes without waiting for "child-1"
     Then run "child-1" is "running"
 
   @REQ-RT-015 @id:RT-015-03
-  Scenario: Under policy "request_cancel" the parent's end cancels the child
-    Given flow "parent" calls "Child" for flow "child" with child run id "child-1" and policy "request_cancel"
+  Scenario: Under close policy "request_cancel" the parent's end cancels an in-flight child
+    Given parent flow "parent" starts child flow "child" with child run id "child-1" and close policy "request_cancel"
     And flow "child" waits at gate "approve"
-    When a run of "parent" completes
+    When a run of "parent" completes without waiting for "child-1"
     Then run "child-1" is "cancelled"
 
   @REQ-RT-016 @id:RT-016-01
-  Scenario: A step that reports retryable false fails the run at once
-    Given step "charge" fails in a way that reports retryable false
-    When a run of "pay" starts
+  Scenario: A step that fails with a non-retryable error stops after 1 attempt
+    Given step "charge" fails with code "invalid_argument" marked retryable false
+    When a run of "pay" runs
     Then step "charge" was executed 1 time
+    And the step fails with code "invalid_argument"
     And the run is "failed"
 
   @REQ-RT-016 @id:RT-016-02
-  Scenario: A code listed in NonRetryable stops the retries although it is retryable
-    Given step "charge" fails with code "rate_limited", which reports retryable true
-    And the step's options list "rate_limited" as non-retryable
-    When a run of "pay" starts
+  Scenario: An error code listed as non-retryable stops retries even when marked retryable
+    Given step "charge" fails with code "rate_limited" marked retryable true
+    And the step lists "rate_limited" as non-retryable
+    When a run of "pay" runs
     Then step "charge" was executed 1 time
+    And the step fails with code "rate_limited"
     And the run is "failed"
 
   @REQ-RT-017 @id:RT-017-01
-  Scenario: A step that never succeeds fails the run after its attempt limit
-    Given step "charge" fails in a way that reports retryable true
-    And the step's options allow 3 attempts
-    When a run of "pay" starts
+  Scenario: A retryable step that never succeeds fails after its configured attempt limit
+    Given step "charge" fails with code "vendor_error" marked retryable true
+    And the step allows 3 attempts
+    When a run of "pay" runs
     Then step "charge" was executed 3 times
-    And the run fails with code "unavailable"
+    And the step fails with code "vendor_error"
+    And the run is "failed"
 
   @REQ-RT-018 @id:RT-018-01
-  Scenario: A step that leaves MaxAttempts at 0 is tried 3 times
-    Given step "charge" fails in a way that reports retryable true
-    And the step's options leave the attempt limit at 0
-    When a run of "pay" starts
+  Scenario: A step with attempt limit 0 is tried 3 times by default
+    Given step "charge" fails with code "vendor_error" marked retryable true
+    And the step leaves its attempt limit at 0
+    When a run of "pay" runs
     Then step "charge" was executed 3 times
-    And the run fails with code "unavailable"
+    And the step fails with code "vendor_error"
+    And the run is "failed"
 
   @REQ-RT-019 @id:RT-019-01
-  Scenario: Independent steps run at the same time
-    Given a flow starts steps "a", "b" and "c" and waits on them together
-    And each of steps "a", "b" and "c" waits until all three of them are executing
-    When a run of "fanout" starts
-    Then 3 steps are executing at once
+  Scenario: Independent steps execute concurrently
+    Given a flow starts steps "a", "b" and "c" and waits on all three
+    And each of steps "a", "b" and "c" waits until all 3 steps are executing
+    When a run of "fanout" completes
+    Then 3 steps executed concurrently
     And the run is "completed"
-
-  @REQ-RT-020 @id:RT-020-01
-  Scenario: Select reports the ready step's own index when the steps finish out of order
-    Given a run's Select waits on steps "a" and "b" in that order
-    And step "a" finishes only after step "b"
-    When the run's Select answers
-    Then Select returns index 0
-    And step "a" was executed 1 time
 
   @REQ-RT-021 @id:RT-021-01
   Scenario: Two tenants' runs do not share step results
-    Given tenant "acme" runs flow "work" that calls step "fetch"
+    Given step "fetch" returns {"tenant": "acme"} for tenant "acme" and {"tenant": "globex"} for tenant "globex"
+    And tenant "acme" runs flow "work" that calls step "fetch"
     And tenant "globex" runs flow "work" that calls step "fetch"
-    When both runs are in flight on one local runtime and both complete
+    When both runs complete on one local runtime
     Then step "fetch" was executed 2 times
-    And both runs return their own result
-
-  @REQ-RT-021 @id:RT-021-02
-  Scenario: A run id of one tenant does not reach another tenant's run
-    Given tenant "acme" has run "shared-1" that waits at gate "approve"
-    When tenant "globex" describes run "shared-1"
-    Then run "shared-1" is described as code "not_found"
-
-  @REQ-RT-021 @id:RT-021-03
-  Scenario: A tenant cannot cancel another tenant's run
-    Given tenant "acme" has run "shared-1" that waits at gate "approve"
-    When tenant "globex" cancels run "shared-1"
-    Then the cancellation fails with code "not_found"
-    And tenant "acme" describes run "shared-1" as "running"
+    And the "acme" run returns {"tenant": "acme"} and the "globex" run returns {"tenant": "globex"}
 
   @REQ-RT-022 @id:RT-022-01
-  Scenario: Shutdown leaves in-flight runs running
-    Given a run of "timer" is in flight on a served local runtime
-    When the Serve context is cancelled
-    Then Serve returns no error
+  Scenario: Shutting down the local runtime leaves in-flight runs in state running
+    Given a run of "timer" is in flight on a running local runtime
+    When the local runtime shuts down
+    Then shutdown completes with no error
     And the run is described as "running"
 
-  @REQ-RT-022 @id:RT-022-02
-  Scenario: Shutdown stops the steps in flight before Serve returns
-    Given a run of "render" has step "render" in flight on a served local runtime
-    When the Serve context is cancelled
-    Then Serve returns no error
-    And step "render" saw its context cancelled
-    And no steps are executing
+  @REQ-RT-023 @id:RT-023-01
+  Scenario: Shutting down the local runtime cancels in-flight steps and waits for them to stop
+    Given a run of "render" has step "render" in flight on a running local runtime
+    When the local runtime shuts down
+    Then shutdown completes with no error
+    And step "render" received cancellation
+    And 0 steps are executing
 
-  @REQ-RT-022 @id:RT-022-03
-  Scenario: A served runtime takes no new runs after shutdown
-    Given a run of "timer" is in flight on a served local runtime
-    And the Serve context is cancelled
-    When a run of "linear" is started
-    Then the start fails with code "unavailable"
+  @REQ-RT-024 @id:RT-024-01
+  Scenario: A local runtime that has shut down rejects new runs with unavailable
+    Given a running local runtime has shut down
+    When a run of "linear" is started on that runtime
+    Then starting the run fails with code "unavailable"
+
+  @REQ-RT-025 @id:RT-025-01
+  Scenario: Describing another tenant's run fails with not_found
+    Given tenant "acme" has run "shared-1" waiting at gate "approve"
+    When tenant "globex" describes run "shared-1"
+    Then describing run "shared-1" fails with code "not_found"
+
+  @REQ-RT-025 @id:RT-025-02
+  Scenario: Cancelling another tenant's run fails with not_found
+    Given tenant "acme" has run "shared-1" waiting at gate "approve"
+    When tenant "globex" cancels run "shared-1"
+    Then cancelling run "shared-1" fails with code "not_found"
+    And tenant "acme" describes run "shared-1" as "running"

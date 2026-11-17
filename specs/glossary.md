@@ -17,7 +17,7 @@ the same change that first uses it.
 | **Runtime** | An implementation of the durable contract: `local` (in-process, not durable) or `temporal`. |
 | **Profile** | Deployment shape: `embedded` (one process, single user) or `cloud` (SaaS services). |
 | **Local runtime** | The `local` runtime: runs a flow in-process on goroutines with a journal held in memory only. Not durable: a run does not survive its process (`REQ-RT-005`, `REQ-RT-006`). |
-| **Child run** | A run started by another run's `Child` call, under the child run id the parent chooses, in the parent's tenant. When the parent ends, the child follows the parent's close policy: `terminate`, `request_cancel` or `abandon` (`REQ-RT-014`, `REQ-RT-015`). |
+| **Child run** | A run started by a parent run for a child flow under the child run id the parent chooses, in the parent's tenant. When the parent ends, an in-flight child run follows its close policy: `terminate` moves it to `terminated`, `request_cancel` cancels it to `cancelled`, and `abandon` leaves it `running` (`REQ-RT-014`, `REQ-RT-015`). |
 | **Durable event** | A run event persisted in order (`seq`) and replayable from any cursor. |
 | **Delta** | An ephemeral increment of a message (text, audio, progress), ordered by `dseq`, kept while its message is in flight. |
 | **Message** | A model output inside a run, streamed as deltas and completed as a durable event. |
