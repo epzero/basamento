@@ -1,6 +1,6 @@
 @planned @wp:WP-L1-07 @level:component @profile:embedded
 Feature: The embedded profile keeps a run's spans for the inspector
-  In the embedded profile, ended spans go to the SQL store, and the run
+  In the embedded profile, ended spans go to the span store, and the run
   inspector reads them back as one ordered trace per run. A tenant never
   sees another tenant's spans, and spans do not stay past their retention.
 
@@ -22,10 +22,10 @@ Feature: The embedded profile keeps a run's spans for the inspector
     And 250 milliseconds pass on the clock
     And span "step a" records attribute "attempt" with the value 2
     And span "step a" is ended with status "error"
-    Then the span store row of span "step a" has the trace id of span "run_01"
-    And the span store row of span "step a" has parent span id, name "step a", status "error", run id "run_01" and tenant "acme"
-    And the span store row of span "step a" starts at "2026-10-01T09:00:00Z" and ends at "2026-10-01T09:00:00.250Z"
-    And the span store row of span "step a" has attribute "attempt" with the value 2
+    Then the kept span "step a" has the trace id of span "run_01"
+    And the kept span "step a" has parent span id of span "run_01", name "step a", status "error", run id "run_01" and tenant "acme"
+    And the kept span "step a" starts at "2026-10-01T09:00:00Z" and ends at "2026-10-01T09:00:00.250Z"
+    And the kept span "step a" has attribute "attempt" with the value 2
 
   @REQ-TELEM-012 @id:TELEM-012-01
   Scenario: A run's spans come back in start order
@@ -56,18 +56,20 @@ Feature: The embedded profile keeps a run's spans for the inspector
     Given run "run_01" of tenant "acme" is running
     When span "step a" is started and ended
     And tenant "globex" reads the spans of run "run_01"
-    Then tenant "globex" reads 0 spans and fails with code "not_found"
+    Then the read returns 0 spans and fails with code "not_found"
 
   @REQ-TELEM-014 @id:TELEM-014-01
-  Scenario: A span is deleted 24 hours after it ends
-    Given run "run_01" of tenant "acme" is running
+  Scenario: A span older than the retention period is deleted on purge
+    Given the span store retention period is 24 hours
+    And run "run_01" of tenant "acme" is running
     And span "step a" is started and ended
-    When 24 hours pass on the clock and the span store purges expired spans
+    When 24 hours and 1 second pass on the clock and the span store purges expired spans
     Then tenant "acme" reads 0 spans of run "run_01"
 
   @REQ-TELEM-014 @id:TELEM-014-02
-  Scenario: A span that ended less than 24 hours ago is kept
-    Given run "run_01" of tenant "acme" is running
+  Scenario: A span within the retention period is kept on purge
+    Given the span store retention period is 24 hours
+    And run "run_01" of tenant "acme" is running
     And span "step a" is started and ended
     When 23 hours and 59 minutes pass on the clock and the span store purges expired spans
     Then tenant "acme" reads 1 span of run "run_01"

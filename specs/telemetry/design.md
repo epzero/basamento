@@ -6,106 +6,91 @@ code agree. Where this file and a requirement disagree, the requirement wins.
 
 ## Package
 
-`platform/telemetry`, owned by WP-L1-07, a layer `platform/telemetry` that may
-import `core` and `platform` only. It is the OpenTelemetry SDK wiring; every
-log record, span and metric of the process comes from it (REQ-TELEM-001).
+`platform/telemetry`, owned by WP-L1-07, falls under the `platform: [core]`
+layer in `layering.yaml` and may import `core` and `platform` packages only.
+It is the `slog` and OpenTelemetry SDK wiring constructed and passed to
+consumers via dependency injection (no package-level mutable state;
+`docs/engineering/coding-guidelines.md` §2, REQ-TELEM-001).
 
 ```go
 type Config struct {
-    Profile      string        // "embedded" or "cloud"
-    CollectorURL string        // OTLP/gRPC endpoint; cloud only
-    Clock        core.Clock    // the only source of time (REQ-TELEM-003)
-    Secrets      SecretsSource // credential values to redact, by tenant
-    Runs         SpanReader    // the SQL table the span store lives in (WP-L1-01)
-    IDs          core.Ids      // event_id (REQ-TELEM-004)
+    Profile         string        // "embedded" or "cloud"
+    CollectorURL    string        // OTLP endpoint; cloud only
+    Clock           core.Clock    // the only source of time (REQ-TELEM-003)
+    RetentionPeriod time.Duration // embedded span store retention (REQ-TELEM-014)
+    Secrets         SecretsSource // credential values to redact
+    Spans           SpanStore     // SQLite span store in the embedded profile (WP-L1-01)
 }
 
 type Telemetry interface {
     Logger() *slog.Logger
     Tracer() trace.Tracer
     Meter() metric.Meter
-    Redactor() Redactor
+    Inject(ctx context.Context, carrier propagation.TextMapCarrier)
+    Extract(ctx context.Context, carrier propagation.TextMapCarrier) context.Context
     Flush(ctx context.Context) error
     Shutdown(ctx context.Context) error // returns once drained (REQ-TELEM-022)
-    DropCounts() Dropped                // by signal (REQ-TELEM-017)
 }
 ```
 
-- One setup per process: the construction function returns `conflict` from
-  `core` when one already exists (REQ-TELEM-002).
-- Every OTel provider is built with a `WithClock`-style option that reads
-  `Config.Clock`; nothing calls `time.Now`, and no span or metric sleeps. A
-  scenario that says "without the clock advancing" checks that the call
-  returns while the fake clock still reads the same instant.
+- Every provider and handler reads timestamps from `Config.Clock`
+  (REQ-TELEM-003); nothing calls `time.Now`, and no span, log record or metric
+  sleeps. A scenario that says "without the clock advancing" checks that the
+  call returns while the fake clock still reads the same instant.
 
 ## Profiles
 
 | | `embedded` | `cloud` |
 | --- | --- | --- |
-| Span processor | one that writes kept spans to the SQL store when the span ends | batch exporter, no span store |
-| Span exporter | none, unless a `CollectorURL` is given | OTLP/gRPC to `CollectorURL` |
-| Span store rows | `trace_id, span_id, parent_span_id, name, start, end, status, run_id, tenant, attributes` (REQ-TELEM-011) | none (REQ-TELEM-018) |
-| Purge | `DELETE` on rows whose end is older than 24 h, run by a clock-driven ticker so the fake clock triggers it | none |
-
-A scenario tagged `@profile:embedded` in a `@profile:cloud` feature sets up
-the embedded profile with an unreachable collector; that is the only way the
-console batch exporter's failure path is observable today. The implementer
-lands that exporter for both profiles in this work package; no other package
-changes.
+| Span processor | writes ended spans to the span store (`REQ-TELEM-010`, `REQ-TELEM-011`) | batch exporter to `CollectorURL` (`REQ-TELEM-015`) |
+| Metrics & logs | held in-process / `slog` handler | OTLP batch export to `CollectorURL` (`REQ-TELEM-015`) |
+| Purge | deletes rows whose end time is older than `Config.RetentionPeriod` (`REQ-TELEM-014`) | none |
 
 ## Redaction
 
-`Redactor.Scrub(field string, v any) any` and `Redactor.String(s string) string`.
-The scrubber walks strings, arrays (`[]any`) and objects (`map[string]any`):
+Before any log record, span attribute or metric label is kept or handed to an
+exporter (`REQ-TELEM-006`, `REQ-TELEM-007`):
 
 1. A field whose key is `password`, `secret`, `token` or `authorization`
-   (case-insensitive, at any depth) becomes `[REDACTED]`; `token_count` does
-   not match (REQ-TELEM-006, TELEM-006-04).
-2. A string that contains a credential value of the tenant in context or any
-   whole-word occurrence (case-insensitive) of payload text or input text of
-   a run of that tenant becomes `[REDACTED]` (REQ-TELEM-006, TELEM-006-02).
-   Numbers are compared as their decimal text; a number is never payload data.
-3. A string longer than 512 characters: the first 512 characters are scanned
-   again for any of the values above; if one is found the whole value becomes
-   `[REDACTED]`, otherwise it is kept as recorded (REQ-TELEM-008).
-4. Anything else is returned unchanged (REQ-TELEM-009).
-
-The log handler, the span processor and the metric view call the redactor
-**before** storing or exporting (REQ-TELEM-007). `[REDACTED]` is replaced,
-not trimmed.
+   (case-insensitive exact key match, at any depth in nested maps/slices/groups)
+   has its value replaced with `[REDACTED]`. Keys that merely contain one of
+   those words as a substring (such as `token_count`) are not matched
+   (`TELEM-006-04`).
+2. Any string value containing a credential value supplied by `Config.Secrets`
+   is replaced with `[REDACTED]` (`TELEM-006-01`).
+3. Other fields and values are kept unchanged (`TELEM-006-04`).
 
 ## Correlation
 
-A log handler adds, on every record: `event_id` (a `core.Ids` id, kind
-`evt`), and `trace_id`, `span_id` from the active span (empty when none),
-`run_id` and `tenant` from the context the run set (REQ-TELEM-004,
-REQ-TELEM-005).
+The `slog.Handler` attaches `run_id` and `tenant` from the `context.Context`,
+and `trace_id` and `span_id` from the active span in context (or empty strings
+when no span is active) on every log record (`REQ-TELEM-005`).
 
-## Export
+## Export and Propagation
 
-OTLP/gRPC over plaintext to the collector URL, one exporter per signal
-(traces, logs, metrics). Batches are exported with bounded concurrency and a
-bounded queue; an attempt that fails drops its batch, adds its size per
-signal to the drop counts, and records the counts as metric points. Host work
-never blocks on the exporter and never sees its error (REQ-TELEM-016,
-REQ-TELEM-017, REQ-TELEM-019). Metric points carry no labels (REQ-TELEM-020).
+In the `cloud` profile, OTLP exporters send batches to `CollectorURL` with
+bounded queues and without blocking the caller (`REQ-TELEM-015`,
+`REQ-TELEM-016`). An export batch that cannot be delivered is dropped rather
+than retried without bound, and the observed span, log record or metric point
+completes without error (`REQ-TELEM-017`, `REQ-TELEM-019`).
 
-## Steps
+`Inject` and `Extract` serialize and restore W3C TraceContext across process or
+worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
 
-A step's trace context is saved with the step's durable record and restored
-into the step's `context.Context` before every attempt, after restarts too
-(REQ-TELEM-021; the only durable record exists today on the temporal runtime,
-so the scenario is `@runtime:any` and both runtimes must satisfy it).
+## Gate and Ownership Notes
 
-## Gate helpers
+- `platform/telemetry` falls under `platform: [core]` in `layering.yaml`. If
+  `platform/telemetry` ever needs its own layer entry in `layering.yaml`, that
+  change must land first in its own pull request with an ADR
+  (`docs/engineering/agent-workflow.md` §4).
+- The SQLite table and migration for the embedded span store live in
+  `platform/sql` (owned by WP-L1-01). If WP-L1-01 does not already include the
+  span table, the implementer lands that schema change first or notes it in the
+  pull request with a reviewer from WP-L1-01 (`agent-workflow.md` §4).
+- The simulated OTLP collector and test harness helpers live in `internal/bdd`
+  (and `_test.go` files), never in `platform/telemetry`.
 
-The SQLite store for the span table comes from WP-L1-01. The
-simulated collector and the in-process setup helpers live in `internal/bdd`
-(and `_test.go` files), never in `platform/telemetry`. The OTLP receiver the
-simulated collector stands on is new test support inside `internal/bdd`;
-`platform/telemetry` itself only gains the `opentelemetry-go` exporters,
-which need a dependency reason in the commit body. `gate layering` does not
-know `platform/telemetry` yet: adding the layer line needs an ADR owned by
-the architect, and `platform/telemetry` imports nothing outside `core` and
-`platform` until that ADR lands, so the change passes `gate layering` as the
-graph stands.
+## Open questions
+
+1. **Default embedded span retention period (`REQ-TELEM-014`):** `REQ-TELEM-014` specifies purging spans older than the configured retention period (`Config.RetentionPeriod`); what default duration (e.g., `24h` vs `7d`) should `WP-L1-05` (`internal/config`) wire when none is set?
+2. **Embedded span store migration ownership (`WP-L1-01` vs `WP-L1-07`):** Should the SQLite migration for the embedded `spans` table land in `WP-L1-01` (`platform/sql`) before `WP-L1-07` implementation starts, or in `WP-L1-07` with a `platform/sql` cross-area note and reviewer?
