@@ -35,6 +35,7 @@ generation and interactive narrative. Status words: **Implemented**,
 | Bus + KV | `nats-server` in-process with JetStream | NATS cluster | `nats-server`, `nats.go` |
 | Secrets (key wrapping) | local key | KMS or Vault Transit | `gocloud.dev/secrets` + Tink |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
+| Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
 | Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |
 | Telemetry | slog + OTel spans to SQLite for the inspector | OTLP | `opentelemetry-go` |
 
@@ -101,7 +102,7 @@ flowchart TD
 
 | Package | Role |
 | --- | --- |
-| `core` | ids, clock, error taxonomy. `core/coretest` fakes are test-only. **Implemented.** |
+| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`). `core/coretest` fakes are test-only. **Implemented.** |
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |

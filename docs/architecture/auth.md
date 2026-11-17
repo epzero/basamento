@@ -16,10 +16,15 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
 - A single `authz.Check(principal, action, resource)` runs in a connect
   interceptor. Denials return `permission_denied` and write an audit event
   (REQ-AUTH-004).
+- **Audit**: every producer, the credential store and this check among them,
+  records through `platform.Audit`. There is one audit store, owned by the
+  credential store (WP-L1-06): an append-only table with tenant-scoped reads.
+  Authorization is another producer (denials), not the owner of a second
+  store. An event never carries a secret value.
 - Optional **CEL conditions** for attribute rules (`resource.owner ==
   principal.id`), reusing the expression engine. No Casbin.
-- **Tenancy**: every repository call takes a tenant context
-  (REQ-AUTH-002). Postgres row-level security is a second line of defense in
+- **Tenancy**: every repository call takes a tenant context, set with
+  `core.WithTenant` and read with `core.TenantFrom` (REQ-AUTH-002). Postgres row-level security is a second line of defense in
   the cloud profile.
 - **Worker tokens**: scoped to one session's resources with a fixed expiry,
   for the browser runner and other external services (REQ-AUTH-005).
