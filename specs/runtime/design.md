@@ -3,7 +3,7 @@
 ## Local runtime (WP-L5-01)
 
 Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019` and
-`REQ-RT-021` … `REQ-RT-025` in `local.feature` to the implementer. This work
+`REQ-RT-021` … `REQ-RT-026` in `local.feature` to the implementer. This work
 package changes no contract file.
 
 ### Ports the composition root supplies
@@ -84,10 +84,13 @@ fixed grace period.
 
 Each run's state and step journal are isolated per `(TenantID, RunID)`
 (`REQ-RT-021`). `Describe`, `Cancel`, `Resolve` and `List` match on tenant as
-well as run id. Describing or cancelling a run of another tenant returns
-`not_found`, the same answer as for a run that never existed, rather than
-`permission_denied`, which would tell the caller that the id exists
-(`REQ-RT-025`).
+well as run id. Describing, cancelling or resolving a gate of a run of
+another tenant returns `not_found`, the same answer as for a run that never
+existed, rather than `permission_denied`, which would tell the caller that the
+id exists (`REQ-RT-025`). `List` filters on tenant, so a tenant lists only its
+own runs, even when another tenant has a run with the same id (`REQ-RT-026`).
+`terminated` (a child closed by its parent under `terminate`, `REQ-RT-015`) is
+one of the `Run` states in `specs/glossary.md`.
 
 ### Changes outside `runtime/local`
 
@@ -101,4 +104,4 @@ its own.
 
 1. **Default step retry limit (`REQ-RT-018`)**: `runtime/runtime.go:48` states `MaxAttempts int // 0 = runtime default`, without pinning a number in `ADR-0002` or `docs/architecture/runtime.md`. This spec chooses `3` attempts for `runtime/local` when `MaxAttempts` is `0`. Confirm whether `3` is the intended default for `local` (and whether `temporal` in `WP-L5-02` should share it).
 2. **Run failure error propagation (`REQ-RT-016`, `REQ-RT-017`)**: `runtime.RunStatus` (`runtime/runtime.go:120-126`) exposes `State` (`running | completed | failed | cancelled | terminated`) and timestamps, but has no `Error` or `Code` field on `RunStatus` itself. This spec asserts the error code on the failed step (`Future.Get`) and asserts that the run's state becomes `"failed"`, without inventing an `internal` or `unavailable` run-level error code mapping. Confirm whether `RunStatus` should remain state-only or whether a contract change is wanted later.
-3. **Shared `Run` row in `specs/glossary.md`**: `runtime/runtime.go:123` includes `terminated` in `RunStatus.State`, whereas the shared **Run** row in `specs/glossary.md:9` lists `running, completed, failed, cancelled`. To avoid touching shared glossary text that other work packages rely on, this draft defines `terminated` in the new **Child run** row and leaves the **Run** row untouched. Confirm whether the **Run** row in `specs/glossary.md` should be extended with `terminated`.
+3. ~~**Shared `Run` row in `specs/glossary.md`**~~: resolved in review round 1, which required `terminated` in the **Run** row; the row now lists it and the **Child run** row keeps the close-policy detail.

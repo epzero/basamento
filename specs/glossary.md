@@ -6,7 +6,7 @@ the same change that first uses it.
 | Term | Meaning |
 | --- | --- |
 | **Flow** | A versioned definition (IR) of nodes and edges, stored as data and identified by its content hash. |
-| **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled. |
+| **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled, terminated. |
 | **Node** | One step of a flow: `set`, `task`, `model`, `agent`, `tool`, `map`, `parallel`, `subflow`, `gate`, `wait`. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
