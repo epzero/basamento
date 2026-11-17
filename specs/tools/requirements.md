@@ -14,12 +14,12 @@ Who decides to call a tool is the agent loop (WP-L7-01, `specs/agent`). Tools
 that workers on other machines serve are `specs/models/workers.feature`
 (WP-L3-07), and this capability does not change what a worker receives.
 Credentials are the vault's (WP-L1-06) and JSON Schema validation is that of
-`specs/schema`; this capability uses both.
+`core/schema` (WP-L2-02); this capability uses both.
 
 ## The tool port
 
 ### REQ-TOOL-001 — A tool's description
-The tool port shall describe every tool by its name, its description and its input JSON Schema, and shall offer to a caller's model only the tools that caller was given.
+The tool port shall describe every tool by its name, its description and its input JSON Schema.
 
 ### REQ-TOOL-002 — Arguments are checked before the tool runs
 If a call's arguments do not satisfy the tool's input schema, then the tool layer shall not run the tool and shall report the violation, naming the argument and what the schema requires of it, as the tool's error.
@@ -31,7 +31,7 @@ The tool layer shall execute each tool call as one durable step whose idempotenc
 When a tool returns an error, the tool layer shall end the call with that tool's error code and message without retrying the call.
 
 ### REQ-TOOL-005 — A tool that panics
-If a tool panics while it runs, then the tool layer shall end the call with code `internal` and the tool's name, and the run shall continue.
+If a tool panics while it runs, then the tool layer shall catch the panic, end the call with code `internal` and the tool's name, and let the run continue.
 
 ### REQ-TOOL-006 — A tool that exceeds its time limit
 If a tool call exceeds its time limit, then the tool layer shall end the call with code `timeout` and end the tool at its next heartbeat.
@@ -42,15 +42,15 @@ If a tool's result exceeds the result size limit, then the tool layer shall stor
 ## Allowlists
 
 ### REQ-TOOL-008 — An agent calls only its tools
-If an agent or a flow calls a tool that is not on its allowlist, then the tool layer shall refuse the call with code `permission_denied`, not run the tool, and record an audit event naming the agent and the tool.
+If an agent or a flow calls a tool that is not on its allowlist, then the tool layer shall refuse the call with code `permission_denied`, not run the tool, and report the refusal to the caller.
+
+### REQ-TOOL-023 — A model sees only its caller's allowlist
+The tool layer shall offer to a caller's model only the tools on that caller's allowlist.
 
 ### REQ-TOOL-009 — Changes to a tool's set
 The tool layer shall offer to an agent whose allowlist changed only the tools of its current allowlist, from its next model turn.
 
 ## Output back to a model
-
-### REQ-TOOL-010 — A result goes to a model as untrusted
-When a tool's result goes back to a model, the tool layer shall wrap it as untrusted input, so that the model reads it as data and not as instructions.
 
 ### REQ-TOOL-011 — A failure goes to a model as an error
 When a tool call ends with an error, the tool layer shall give the model that error's code and message, without the tool's error details.
@@ -73,7 +73,13 @@ If an MCP server's connection is lost after the tool layer forwarded a call, the
 When an MCP server reports that its tool list changed, the tool layer shall re-read the server's tools before offering them to an agent again.
 
 ### REQ-TOOL-017 — MCP server credentials
-While a call to an MCP server needs a credential, the tool layer shall resolve it from the server's credential reference at the call and never write it to a run's events, history, errors or logs.
+When calling an MCP server that configures a credential reference, the tool layer shall resolve the credential from that reference at the call and never write the secret to a run's events, history, errors or logs.
+
+### REQ-TOOL-024 — Conflicting MCP tool names
+If an MCP server offers a tool whose prefixed name collides with a tool already in the caller's set, then the tool layer shall reject the tool list with code `conflict`.
+
+### REQ-TOOL-025 — An MCP server that returns a tool error
+If an MCP server returns an error for a tool call, then the tool layer shall end the call with code `vendor_error` and the server's message.
 
 ## The sandbox port
 
@@ -84,10 +90,10 @@ The sandbox port shall run a command with no access to the host's files, its env
 If a command exceeds its sandbox's time limit, then the sandbox port shall stop the command and end the call with code `timeout`.
 
 ### REQ-TOOL-020 — Output beyond the sandbox's output limit
-While a command's output exceeds its sandbox's output limit, the sandbox port shall keep the first bytes up to the limit, discard the rest and mark the output truncated.
+If a command's output exceeds its sandbox's output limit, then the sandbox port shall keep the first bytes up to the limit, discard the rest and mark the output truncated.
 
 ### REQ-TOOL-021 — A command that ends with a non-zero exit status
-When a command ends with a non-zero exit status, the sandbox port shall end the call with that exit status and the captured output.
+When a command ends with a non-zero exit status, the sandbox port shall return a normal result carrying that exit status and the captured output.
 
 ### REQ-TOOL-022 — A sandbox that cannot run
 If a sandbox cannot start or fails on its own, then the sandbox port shall end the call with code `internal`.

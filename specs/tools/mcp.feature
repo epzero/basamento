@@ -64,3 +64,17 @@ Feature: Tools found on an MCP server
     When agent "assistant" calls tool "mcp_weather__forecast" with arguments {"city": "Porto"}
     Then the simulated MCP server "weather" received the credential "sk-weather-7f3a"
     And the secret "sk-weather-7f3a" appears in no run event, history entry, error or log line
+
+  @REQ-TOOL-024 @id:TOOL-024-01
+  Scenario: A server tool whose prefixed name collides with an existing tool is rejected
+    Given tool "mcp_weather__forecast" exists and is given to agent "assistant"
+    And the simulated MCP server "weather" offers tool "forecast" requiring "city"
+    When agent "assistant" uses the MCP server "weather"
+    Then listing the tools fails with code "conflict"
+
+  @REQ-TOOL-025 @id:TOOL-025-01
+  Scenario: An error returned by the server ends the call as a vendor error
+    Given agent "assistant" uses the MCP server "weather" that offers tool "forecast" requiring "city"
+    And the simulated MCP server "weather" answers "forecast" with the error "station offline"
+    When agent "assistant" calls tool "mcp_weather__forecast" with arguments {"city": "Porto"}
+    Then the call ends with code "vendor_error" and message "station offline"

@@ -11,21 +11,23 @@ Feature: Running a command in a sandbox
     And agent "assistant" is given tool "run-tests", which runs a command in sandbox "tests"
 
   @REQ-TOOL-018 @security @id:TOOL-018-01
-  Scenario: A command sees none of the host's secrets or files
-    Given sandbox "tests" has no network access, so its client times out after 30 seconds
-    When agent "assistant" calls tool "run-tests" with the command "printenv; cat /home/kit/vault.db; curl https://169.254.169.254/latest/meta-data/"
-    Then the sandbox "tests" received 0 environment variables and no host file path
-    And the call ends with code "timeout"
-    And the output holds no secret
+  Scenario: A command sees none of the host's environment, files, metadata or network
+    Given the host environment defines "HOST_SECRET=top-secret" and host file "/home/kit/vault.db" exists
+    And sandbox "tests" has no network access
+    And sandbox "tests" answers the command "env" with exit status 0 and stdout "HOME=/work"
+    When agent "assistant" calls tool "run-tests" with the command "env"
+    Then the sandbox "tests" received 0 host environment variables, 0 host files, no instance metadata access and no network grant
+    And the call's output is "HOME=/work"
+    And the call's output does not contain "top-secret"
 
   @REQ-TOOL-018 @security @id:TOOL-018-02
   Scenario: A command reaches only the network its sandbox was granted
     Given sandbox "tests" is granted network access to "api.example.com"
-    And sandbox "tests" answers the command "echo $HOME" with "exit status 0" and stdout "/home/sandbox"
+    And sandbox "tests" answers the command "echo $HOME" with exit status 0 and stdout "/home/sandbox"
     When agent "assistant" calls tool "run-tests" with the command "echo $HOME"
     Then the sandbox "tests" received the network grant "api.example.com" and nothing else
     And the call succeeds
-    And the caller cannot tell from the result that the network was granted
+    And the call's output is "/home/sandbox"
 
   @REQ-TOOL-019 @id:TOOL-019-01
   Scenario: A command that exceeds the sandbox's time limit is stopped
@@ -46,11 +48,10 @@ Feature: Running a command in a sandbox
     And the call's output is marked truncated
 
   @REQ-TOOL-021 @id:TOOL-021-01
-  Scenario: A command that exits non-zero comes back with its status and output
+  Scenario: A command that exits non-zero comes back as a result with its exit status and output
     Given sandbox "tests" answers the command "go test" with exit status 1 and stdout "FAIL example"
     When agent "assistant" calls tool "run-tests" with the command "go test"
-    Then the call ends with exit status 1 and output "FAIL example"
-    And tool "run-tests" reports an error
+    Then the call succeeds with exit status 1 and output "FAIL example"
 
   @REQ-TOOL-022 @id:TOOL-022-01
   Scenario: A sandbox that cannot start fails the call as internal

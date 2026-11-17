@@ -14,18 +14,18 @@ disagree, the requirement wins and this file is corrected.
   third-party modules, which the layering rule does not restrict. `go.mod`
   gains the SDK (and the driver's module) here; `gate layering` checks package
   imports, not modules.
-- **`agent`** (WP-L7-01, not touched here) owns the loop: it passes what it
-  was given, wraps results (REQ-TOOL-010), and builds the model's error message
-  (REQ-TOOL-011). WP-L7-01 depends on WP-L7-02, so the export below is what it
-  consumes.
+- **`agent`** (WP-L7-01, not touched here) owns the loop: it passes the
+  allowlist it was given and builds the model's error message (REQ-TOOL-011).
+  WP-L7-02 depends on WP-L7-01 (`docs/roadmap/L7-agents.md`), and `agent`
+  imports `tool` (`layering.yaml`).
 - The BDD harness passes the agent and flow adapters through a seam, so these
   scenarios run before `agent` exists.
 - The **simulated MCP server** (an `mcp` server built on the SDK's in-memory
   transport) and the **simulated sandbox** are test helpers in
   `internal/bdd` or a `_test.go` file. They are not `core/coretest`, which
   `layering.yaml` restricts further; no production package imports them.
-- `specs/schema` validates a call's arguments (REQ-TOOL-002); this package
-  does not implement JSON Schema itself.
+- `core/schema` (WP-L2-02) validates a call's arguments (REQ-TOOL-002); this
+  package does not implement JSON Schema itself.
 
 ### Not in `tool`
 
@@ -60,9 +60,10 @@ type Tool struct {
 type Func func(ctx context.Context, args json.RawMessage) (Result, error)
 
 type Result struct {
-    Content   json.RawMessage // or a JSON string, for a tool whose result is text
-    BlobRef   string          // set instead of Content when the result exceeded MaxResult
-    Truncated bool            // set by a sandbox result whose output was cut (REQ-TOOL-020)
+    Content    json.RawMessage // or a JSON string, for a tool whose result is text
+    BlobRef    string          // set instead of Content when the result exceeded MaxResult
+    ExitStatus int             // set by a sandbox command (REQ-TOOL-021)
+    Truncated  bool            // set by a sandbox result whose output was cut (REQ-TOOL-020)
 }
 
 // Set is one caller's tools: the registry names an agent was given.
@@ -117,33 +118,23 @@ the step succeeds and the runtime never retries it.
 anything larger with `platform.Blob` and returns `BlobRef`. "A blob reference
 and not the result's bytes" is what the scenario checks.
 
-**Untrusted wrapping (REQ-TOOL-010).** The `agent` wraps `Outcome.Result` with
-`prompt`'s untrusted-input wrapping in the tool-result message; a tool result
-is never appended verbatim. The tool layer does not wrap, so a flow's `tool`
-node gets the raw result.
-
 **Error to the model (REQ-TOOL-011).** The loop renders `Code` and `Message`
 only. Details, causes and panic values are kept in the log, never in the
 message.
 
-**Audit (REQ-TOOL-008).** There is no audit port in `platform` yet; the
-implementer adds one there (WP-L7-02 may import `platform`; the port and its
-embedded implementation are additive and follow the `platform` patterns), and
-until it exists the BDD seam records the event. The record names the caller
-(the agent's name) and the tool, never the arguments; the run id and tenant,
-when a caller has them, are added by the loop that writes through the sink.
-
-**Allowlist changes (REQ-TOOL-009).** A `Set` is read when a model turn is
-built, not cached across turns.
+**Allowlists (REQ-TOOL-008, REQ-TOOL-009, REQ-TOOL-023).** A `Set` is read
+when a model turn is built, not cached across turns, and only its tools are
+offered to the model. A call to a tool not in `Set` returns `Outcome{Failed:
+true, Code: core.CodePermissionDenied}` without running the tool.
 
 **MCP client.**
 - A server is configured by name, an endpoint and an optional credential
   reference `cred://<name>`. The client is the SDK's, with the SDK's in-memory
   transport in tests.
-- **Names:** `mcp_<server>__<tool>`, where the server name has any character
-  outside `[A-Za-z0-9]` replaced by `_`. A name longer than 64 characters, or
-  one the model provider would reject, is a `conflict` when the server's tools
-  are listed. A tool name that is already taken is also `conflict`.
+- **Names (REQ-TOOL-012, REQ-TOOL-024):** `mcp_<server>__<tool>`, where the
+  server name has any character outside `[A-Za-z0-9]` replaced by `_`. A tool
+  name that collides with one already in the caller's `Set` is rejected with
+  `conflict` when the server's tools are listed.
 - Tool list: re-read on every model turn unless the server's session sends a
   "list changed" notification; then the tools are read again before they are
   offered (REQ-TOOL-016).
@@ -153,7 +144,7 @@ built, not cached across turns.
   may have had effects, and the platform never decides to pay a second time
   (ADR-0012 §7 treats tools as not restart-safe). The flow's own retry policy
   decides.
-- **Errors the server returns:** mapped to `vendor_error`, with the server's
+- **Errors the server returns (REQ-TOOL-025):** mapped to `vendor_error`, with the server's
   message (a tool error is not a platform failure). A result the server marks
   as an error (`isError`) is `vendor_error` too, its content in the message up
   to the size limit.
@@ -171,7 +162,7 @@ built, not cached across turns.
 type SandboxSpec struct {
     Image     string          // or a driver-specific base
     TimeLimit time.Duration
-    MaxOutput int             // bytes kept per stream; 0 = 1 MiB
+    MaxOutput int             // bytes kept in total; 0 = 1 MiB
     Network   []string        // hosts or CIDRs; empty = no network
     Files     map[string][]byte // the only files the command sees, under its work dir
     CredRefs  map[string]string // env var name -> cred:// name, resolved at the run
@@ -197,10 +188,10 @@ type SandboxResult struct {
   layer around the driver as well as by the driver, so the caller always sees
   the same outcome: `timeout` at the limit on the fake clock, the first
   `MaxOutput` bytes and `Truncated`.
-- Non-zero exit (REQ-TOOL-021): the `run-tests` tool converts a
-  `SandboxResult` into an `Outcome` with exit status and output and a `Failed`
-  error whose code is `internal`; the tool that wraps a sandbox chooses that
-  mapping, because a failing test run is not a platform failure.
+- Non-zero exit (REQ-TOOL-021): a command that finishes with a non-zero exit
+  status returns a normal `Outcome{Failed: false}` whose `Result` carries
+  `ExitStatus` and the captured output (`Content`), because a non-zero command
+  exit (such as a failing test run) is a tool result, not a tool failure.
 - A driver that cannot start (REQ-TOOL-022) returns `internal`.
 - Drivers: the first is `platform`-backed; the simulated one lives in
   `internal/bdd`.
@@ -209,10 +200,13 @@ type SandboxResult struct {
 
 - Nothing, to run these scenarios: the harness seam in `internal/bdd` is the
   harness's own.
-- The `tool` node handler, the `agent` wrapper and the model-error rendering
-  are WP-L7-01 / the flow engine's; they land in their own work packages,
-  which follow §2 and §3. If either cannot be done without a change to
-  `specs/schema` or `prompt`, that change lands first, in its own pull
-  request, in that capability's directory.
-- `tool` has no `REVIEW.md`. Reviewers read them from the base branch, so one
-  must land before any change to `tool` that it should cover.
+- The `tool` node handler and the model-error rendering are WP-L7-01 / the
+  flow engine's; they land in their own work packages, which follow §2 and
+  §3. If either needs a change in `core/schema` or `prompt`, that change
+  lands first, in its own pull request, in that package's owned directory.
+
+## Open questions
+
+1. **Audit events for refused tool calls:** Should a refused tool call (`permission_denied` when an agent or flow calls a tool outside its allowlist) emit an audit event once `WP-L8-02` defines the audit sink, or are audit events restricted to principal authorization denials (`REQ-AUTH-004`), credential resolutions (`ADR-0004`), and worker pool operations (`ADR-0012`)?
+2. **Untrusted-input wrapping of tool results (`WP-L7-01` / `WP-L3-05`):** `tool` cannot import `prompt` (`layering.yaml`), so `REQ-TOOL-010` was removed from `specs/tools`. Should the requirement and scenario that tool results returned to a model are wrapped via `prompt`'s untrusted-input wrapper be added to `specs/agent` (`WP-L7-01`)?
+3. **Consumer wiring between `agent` (`WP-L7-01`) and `tool` (`WP-L7-02`):** `docs/roadmap/L7-agents.md` states `WP-L7-02` `Depends: WP-L7-01`, while `layering.yaml` has `agent` importing `tool`. When `WP-L7-02` lands `tool`, a small follow-up change in `agent` (or a contract-first PR) will be needed if `agent` was built against a narrow interface before `WP-L7-02`.
