@@ -41,7 +41,7 @@ the same change that first uses it.
 | **Worker template** | The description of workers a pool can start on demand: what one serves, its capacity, the minimum and maximum to run, its **cold start** (the usual time from launch to joining) and its launcher. A template is `degraded` after repeated failed launches. |
 | **Launcher** | What starts workers from a worker template when the **scaler** asks. A **launch** is pending until its worker joins or its **cold-start deadline** passes. A launched worker joins with a single-use **join token**. |
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
-| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`. |
+| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..` (REQ-CRED-006, REQ-CRED-007). |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical call. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |

@@ -42,6 +42,9 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
   serves and leases that work. A worker started on demand joins with a
   single-use token made for that launch (ADR-0012).
 - **Credentials**: vendor keys live in the vault (ADR-0004) and are used by
-  reference; no role can read a value back.
+  reference, `cred://<name>`; no role can read a value back. A name is 1 to
+  128 characters from A–Z, a–z, 0–9, `.`, `_`, `-` and `/`, made of
+  `/`-separated segments none of which is empty, `.` or `..`, so it cannot
+  walk out of the tenant's entries (REQ-CRED-006, REQ-CRED-007).
 - The `Authorizer` port leaves room for OpenFGA if sharing ever becomes
   graph-shaped.

@@ -128,9 +128,13 @@ ADR-0012 §10, constitution §7–8).
   with `invalid_argument` when there is none; nothing falls back to an empty
   or default tenant.
 - **Credentials.** The vault stores named secrets per tenant, reached only by
-  the reference `cred://<name>`. Names match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`,
-  so a name cannot walk the store key (`<prefix>/<tenant>/<name>`, ADR-0004)
-  out of its tenant's entries or carry query, fragment or control characters
+  the reference `cred://<name>`. Names are 1 to 128 characters from A–Z,
+  a–z, 0–9, `.`, `_`, `-` and `/`, made of `/`-separated segments none of
+  which is empty, `.` or `..`; equivalently, with the length limit checked
+  separately, they match
+  `^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,}))(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,})))*$`.
+  A name cannot walk the store key (`<prefix>/<tenant>/<name>`, ADR-0004) out
+  of its tenant's entries or carry query, fragment or control characters
   into an error or an audit event; an invalid name is rejected without being
   echoed. `Resolve` records the use through `Audit` before it returns the
   value, and returns `unavailable` with no value if the record fails.

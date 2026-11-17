@@ -69,12 +69,19 @@ type Secrets interface {
 //
 // Every operation fails closed with code invalid_argument, before touching
 // storage or returning a value, when core.TenantFrom reports no tenant; none
-// falls back to an empty or default tenant. A name must match
-// ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ and a reference must be "cred://"
-// followed by such a name; anything else, including "/", "..", "?", "#",
-// whitespace and control characters, is rejected with code invalid_argument.
-// Names are the only path segment between the tenant and the store key
-// (ADR-0004), so the grammar keeps one tenant out of another's entries.
+// falls back to an empty or default tenant. A name is 1 to 128 characters
+// from A-Z, a-z, 0-9, ".", "_", "-" and "/", made of "/"-separated segments
+// none of which is empty, "." or ".."; so it has no leading or trailing
+// "/", no "//" and no ".." segment. Equivalently, with the length limit
+// checked separately, a name matches
+//
+//	^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,}))(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,})))*$
+//
+// A reference must be "cred://" followed by such a name. Anything else,
+// including "/", "..", "?", "#", whitespace and control characters, is
+// rejected with code invalid_argument. The caller-supplied name is the only
+// part of the store key after the tenant (ADR-0004), and its segments keep
+// one tenant out of another's entries.
 // Errors and AuditEvents never echo the rejected name or reference: the
 // store key it would have formed is a secret (core.Error.Message is not
 // redacted) and the audit store is tenant-readable.
