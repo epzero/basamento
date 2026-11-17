@@ -9,7 +9,7 @@ Feature: Tools found on an MCP server
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a simulated MCP server "weather"
 
-  @REQ-TOOL-012 @REQ-TOOL-013 @id:TOOL-012-02
+  @REQ-TOOL-012 @id:TOOL-012-02
   Scenario: A server's tools appear with their descriptions and schemas
     Given the simulated MCP server "weather" offers tool "forecast" described as "Forecasts rain for a city", requiring "city", and tool "alerts" described as "Lists active alerts", requiring "region"
     When agent "assistant" uses the MCP server "weather"

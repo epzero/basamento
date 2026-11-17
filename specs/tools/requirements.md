@@ -25,7 +25,7 @@ The tool port shall describe every tool by its name, its description and its inp
 If a call's arguments do not satisfy the tool's input schema, then the tool layer shall not run the tool and shall report the violation, naming the argument and what the schema requires of it, as the tool's error.
 
 ### REQ-TOOL-003 — A call is one durable step that runs once
-The tool layer shall execute each tool call as one durable step whose idempotency key ties it to its run, node and call index, so that a resumed run returns the recorded result or error without running the tool again.
+The tool layer shall execute each tool call as one durable step whose idempotency key ties it to its run, node, visit and call index, so that a resumed run returns the recorded result or error without running the tool again.
 
 ### REQ-TOOL-004 — A tool that fails
 When a tool returns an error, the tool layer shall end the call with that tool's error code and message without retrying the call.
@@ -67,7 +67,7 @@ When a call to a tool of an MCP server satisfies its schema, the tool layer shal
 If an MCP server cannot be reached, then the tool layer shall fail calls to its tools before forwarding them, with code `unavailable`.
 
 ### REQ-TOOL-015 — An MCP server that drops a call
-If an MCP server's connection is lost after the tool layer forwarded a call, then the tool layer shall end the call with code `unavailable`.
+If an MCP server's connection is lost after the tool layer forwarded a call, then the tool layer shall end the call with code `unavailable` without retrying the call.
 
 ### REQ-TOOL-016 — An MCP server that changes its tools
 When an MCP server reports that its tool list changed, the tool layer shall re-read the server's tools before offering them to an agent again.
