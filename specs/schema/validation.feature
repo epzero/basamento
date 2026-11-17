@@ -31,20 +31,34 @@ Feature: Compiling schemas and validating instances
       | {"properties": {"n": {"minimum": "3"}}}                 | /properties/n/minimum |
 
   @REQ-SCHEMA-012 @security @id:SCHEMA-012-01
-  Scenario Outline: A reference outside the schema set is rejected without fetching it
+  Scenario: An HTTP reference outside the schema set is rejected without calling the server
+    Given an HTTP server outside the schema set serving "review.json":
+      """
+      {"type": "boolean"}
+      """
+    And a schema referencing that server's URL for "review.json"
+    When the schema is compiled
+    Then the compilation fails with code "invalid_argument" naming that URL
+    And the HTTP server received 0 requests
+
+  @REQ-SCHEMA-012 @security @id:SCHEMA-012-02
+  Scenario: A file reference outside the schema set is rejected even when the file exists
+    Given a schema file "review.json" on disk containing:
+      """
+      {"type": "boolean"}
+      """
+    And a schema referencing that file's URI
+    When the schema is compiled
+    Then the compilation fails with code "invalid_argument" naming that URI
+
+  @REQ-SCHEMA-012 @security @id:SCHEMA-012-03
+  Scenario: A relative reference outside the schema set is rejected
     Given the schema:
       """
-      {"$ref": "<reference>"}
+      {"$ref": "review.json"}
       """
     When the schema is compiled
-    Then the compilation fails with code "invalid_argument" naming the reference "<reference>"
-    And no network request or file read was made
-
-    Examples:
-      | reference                            |
-      | https://schemas.example.com/review.json |
-      | file:///etc/passwd                   |
-      | review.json                          |
+    Then the compilation fails with code "invalid_argument" naming the reference "review.json"
 
   @REQ-SCHEMA-013 @id:SCHEMA-013-01
   Scenario: A reference to another schema of the set is resolved
@@ -149,10 +163,12 @@ Feature: Compiling schemas and validating instances
       | format    | value                                | verdict  |
       | date-time | 2026-11-16T09:00:00Z                 | accepted |
       | date-time | 2026-11-16 09:00                     | rejected |
+      | date      | 2026-11-16                           | accepted |
       | date      | 2026-02-30                           | rejected |
       | time      | 09:00:00Z                            | accepted |
       | time      | 25:00:00Z                            | rejected |
       | duration  | PT72H                                | accepted |
+      | duration  | 72h                                  | rejected |
       | email     | ana@example.com                      | accepted |
       | email     | ana.example.com                      | rejected |
       | uri       | https://basamento.dev/schemas/gate   | accepted |
@@ -170,13 +186,20 @@ Feature: Compiling schemas and validating instances
     Then the only violation is at "/due" of keyword "format"
 
   @REQ-SCHEMA-026 @id:SCHEMA-026-01
-  Scenario: A format that is not listed accepts any string
+  Scenario Outline: Formats other than the listed seven accept any string
     Given the schema:
       """
-      {"type": "string", "format": "color"}
+      {"type": "string", "format": "<format>"}
       """
-    When the instance "not a color" is validated
+    When the instance "<value>" is validated
     Then the instance is accepted
+
+    Examples:
+      | format   | value       |
+      | color    | not a color |
+      | ipv4     | not an ip   |
+      | hostname | not a host! |
+      | regex    | [unclosed   |
 
   @REQ-SCHEMA-025 @security @id:SCHEMA-025-01
   Scenario: An instance with a duplicated member name is rejected

@@ -7,9 +7,11 @@ schema is not here; `expr` (WP-L2-01) builds on this package.
 ## Libraries
 
 - Generation: `github.com/google/jsonschema-go` (`jsonschema.ForType`).
-- Validation: `github.com/santhosh-tekuri/jsonschema` (v6), with
-  `AssertFormat` on and a loader that serves only the schema set
-  (REQ-SCHEMA-012). The default HTTP and file loaders are never installed.
+- Validation: `github.com/santhosh-tekuri/jsonschema` (v6), asserting only the
+  seven `format` values of REQ-SCHEMA-024 (overriding or disabling the
+  library's other built-in format validators so REQ-SCHEMA-026 holds) and
+  using a loader that serves only the schema set (REQ-SCHEMA-012). The default
+  HTTP and file loaders are never installed.
 - Canonical JSON: RFC 8785, written in this package. Numbers use the
   ECMAScript algorithm (`strconv.FormatFloat(f, 'g', -1, 64)` adjusted to the
   ECMAScript exponent rules); no third-party canonicalizer.

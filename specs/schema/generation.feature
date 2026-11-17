@@ -33,8 +33,11 @@ Feature: Generating schemas from Go types
       | float64        | 3.5               | "3.5"             | /x       |
       | bool           | true              | "true"            | /x       |
       | []string       | ["a", "b"]        | ["a", 1]          | /x/1     |
+      | []string       | null              | ["a", 1]          | /x/1     |
       | [2]int         | [1, 2]            | [1, "2"]          | /x/1     |
+      | [2]int         | [1, 2]            | null              | /x       |
       | map[string]int | {"a": 1}          | {"a": "1"}        | /x/a     |
+      | map[string]int | null              | {"a": "1"}        | /x/a     |
 
   @REQ-SCHEMA-002 @id:SCHEMA-002-02
   Scenario: A nested struct becomes a nested object with its own rules
