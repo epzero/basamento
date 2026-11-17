@@ -19,6 +19,7 @@ Feature: Middleware around every chat call
   Scenario: A retryable error with the attempt budget spent fails the call
     Given a scripted chat model that fails attempt 1 with code "unavailable" marked retryable and fails every later attempt the same way
     And a call allows 2 attempts
+    And the call's seeded randomness draws 0 milliseconds of jitter
     When a caller invokes "sim-chat"
     Then the call failed with code "unavailable"
     And the call made 2 attempts
@@ -60,9 +61,9 @@ Feature: Middleware around every chat call
     And invocation 3 started 2000 milliseconds after invocation 2 ended
 
   @REQ-MODEL-051 @cost @id:MODEL-051-02
-  Scenario: The jitter comes from the call's seed and is added to the base wait
+  Scenario: Jitter is added to the base wait without altering the next base wait
     Given a scripted chat model that fails its first 2 attempts with code "unavailable" marked retryable and no Retry-After
-    And the call's seeded randomness draws 500 milliseconds of jitter
+    And the call's seeded randomness draws 500 milliseconds of jitter for retry 1 and 0 milliseconds for retry 2
     When a caller invokes "sim-chat"
     Then invocation 2 started 1500 milliseconds after invocation 1 ended
     And invocation 3 started 2000 milliseconds after invocation 2 ended
@@ -117,7 +118,7 @@ Feature: Middleware around every chat call
 
   @REQ-MODEL-057 @id:MODEL-057-01
   Scenario: An attempt that falls quiet times out at the idle timeout
-    Given a scripted chat model that streams 1 delta and then falls quiet
+    Given a scripted chat model that streams 1 delta at 0 seconds and then falls quiet
     When a caller starts an invocation with an idle timeout of 30 seconds and follows its events
     And 30 seconds pass
     Then attempt 1 was cancelled with code "timeout"
@@ -139,11 +140,11 @@ Feature: Middleware around every chat call
 
   @REQ-MODEL-059 @id:MODEL-059-02
   Scenario: The defaults time out a quiet stream at 60 seconds
-    Given a scripted chat model that streams 1 delta and then falls quiet
+    Given a scripted chat model that streams 1 delta at 0 seconds and then falls quiet
     When a caller starts an invocation and follows its events
     And 59 seconds pass
     Then attempt 1 was not cancelled
-    When 60 seconds pass
+    When 1 more second passes
     Then attempt 1 was cancelled with code "timeout"
 
   @REQ-MODEL-059 @id:MODEL-059-03
@@ -175,9 +176,10 @@ Feature: Middleware around every chat call
   Scenario: The call log has an entry per attempt
     Given a scripted chat model that fails attempt 1 with code "vendor_error" marked retryable
     And the scripted model streams "Hi" on attempt 2
-    When a caller invokes "sim-chat"
+    And the call's seeded randomness draws 0 milliseconds of jitter
+    When a caller invokes "sim-chat" with client ref "call-log-1"
     Then the call log holds 2 entries for attempt 1 and attempt 2 of the call
-    And the entries name the client refs "call-log-1" and "call-log-1-attempt-2"
+    And entry 1 names the client ref "call-log-1" and entry 2 names the distinct deterministic client ref derived from "call-log-1" for attempt 2
     And each entry names model "sim-chat", the rung "none", its start time and its outcome
 
   @REQ-MODEL-063 @security @id:MODEL-063-01
@@ -192,6 +194,7 @@ Feature: Middleware around every chat call
   @REQ-MODEL-064 @id:MODEL-064-01
   Scenario: The middleware chain runs in order from call log down to timeouts
     Given a scripted chat model that never produces a first event on attempt 1 and streams "Hi" on attempt 2
+    And the call's seeded randomness draws 0 milliseconds of jitter
     When a caller starts an invocation with a first-chunk timeout of 10 seconds and follows its events
     And 11 seconds pass
     Then attempt 1 was cancelled with code "timeout" before the retry middleware started attempt 2
@@ -199,14 +202,14 @@ Feature: Middleware around every chat call
     And the call log holds 2 entries and the recording holds 1 call with 2 attempts
 
   @REQ-MODEL-064 @cost @id:MODEL-064-02
-  Scenario: Recording wraps the whole call and replaying it skips the inner middlewares
-    Given a scripted chat model that repeats attempt 1's answer on every later attempt
-    And the call log sink records the order in which the middlewares handle the call
-    And another call replays the recording of the first call
-    When a caller invokes "sim-chat" and the call fails with code "unavailable"
-    And then a caller invokes "sim-chat" from that replay
-    Then the first call's middlewares handled it in the order "call log, recording, fallback, metering, retry, timeouts"
-    And the first call made 2 attempts
-    And the replay returned the same outcome as the first call
-    And the replay's middlewares handled it in the order "call log, recording"
-    And the provider accepted no invocation for the replay
+  Scenario: Recording wraps the inner middlewares inside the call log
+    Given a scripted chat model that fails attempt 1 with code "unavailable" marked retryable and fails every later attempt the same way
+    And a call allows 2 attempts
+    And the call's seeded randomness draws 0 milliseconds of jitter
+    When a caller invokes "sim-chat" and records the call
+    And a caller invokes "sim-chat" replaying that recording
+    Then the first call failed with code "unavailable" after 2 attempts
+    And the replay failed with code "unavailable"
+    And the provider accepted 2 invocations in total across both calls
+    And the metering recorded 2 attempts in total across both calls
+    And the call log holds 3 entries across both calls

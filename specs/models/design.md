@@ -31,17 +31,20 @@ number below that the docs leave open is a choice for the reviewer to weigh.
   escapes): it never adds, drops or changes a field, so a missing `answer`
   cannot be fabricated. If the repair still misses the schema, or if no
   attempt budget remains after the last supported rung, the call fails with
-  `invalid_argument` (REQ-MODEL-047, MODEL-047-01, MODEL-047-02).
+  `invalid_argument` (REQ-MODEL-047, MODEL-047-01, MODEL-047-02, MODEL-054-01,
+  MODEL-054-02, MODEL-062-01).
 
 ## 1a. Client refs
 
 The caller passes the call's client ref. Attempt `n` of the call starts
 with `ClientRef(call-ref, n)`: for attempt 1, the call's client ref itself;
-for later attempts, a deterministic derivation of it and `n` (a stable
-hash, so a repeated call with the same client ref produces the same
-refs). A retry of a start that the provider did not acknowledge (REQ-MODEL-005)
-reuses that attempt's client ref; any other attempt gets its own. The call
-log records both (MODEL-062-01).
+for later attempts, a stable hash of the call's client ref and the attempt
+number `n`, so a repeated call with the same client ref produces the same
+ref for the same attempt, and the ref is never a literal derived by
+concatenation. A retry of a start that the provider did not acknowledge
+(REQ-MODEL-005) reuses that attempt's client ref; any other attempt gets its
+own. The call log records each attempt's ref (MODEL-062-01, MODEL-054-01,
+MODEL-054-02).
 
 ## 2. Rung support and the request
 
@@ -52,6 +55,23 @@ log records both (MODEL-062-01).
 - A model that declares no rung fails with `unsupported` before any start
   (REQ-MODEL-046, MODEL-046-01).
 
+## 1b. Placement of `model/structured` and `model/middleware`
+
+`model/structured` sits between `metering` and `retry` in the middleware chain:
+`call log ∘ recording ∘ fallback ∘ metering ∘ structured ∘ retry ∘ timeouts`.
+For a plain chat call, the `structured` stage passes through with `rung = none`.
+A shared per-call state tracks remaining attempt budget, the call total timeout
+deadline, the call's retry index `k`, and the current rung:
+- `retry` retries retryable provider errors on the current rung without advancing
+  the ladder (REQ-MODEL-048) and preserves the call's backoff progression `k`;
+- `structured` advances the rung only when `retry` returns a completed output
+  that misses the schema (REQ-MODEL-044), and runs local JSON repair in-process
+  after the last supported rung without entering `retry` or `timeouts` (REQ-MODEL-065);
+- `metering` records every provider invocation across rungs and retries (REQ-MODEL-060)
+  and does not meter local repair (0 invocations);
+- `call log` records every attempt (using `rung: local_repair` for a local JSON
+  repair attempt) and `recording` captures the whole call (REQ-MODEL-062, REQ-MODEL-064).
+
 ## 3. Retry
 
 | Decision | Choice |
@@ -61,7 +81,7 @@ log records both (MODEL-062-01).
 | Base and factor | the base wait is 1000 ms before the call's first retry and doubles on each subsequent retry of the call (`1000 ms × 2^(k-1)` before retry `k`, counting retries within the call) |
 | Jitter | in `[0, 50%]` of that retry's base wait, added to it and drawn from the call's seeded randomness; the jitter never becomes part of the next base wait, and the same seed gives the same waits (REQ-MODEL-051) |
 | Retry-After | the longer of `base wait + jitter` and `core.Error.RetryAfter` (REQ-MODEL-052) |
-| Call total timeout | measured from the start of attempt 1 across attempts and waits; if the required wait before the next attempt would reach or exceed the call total timeout, the call fails at once with `core.CodeTimeout` without starting another attempt (REQ-MODEL-053) |
+| Call total timeout | no call total timeout by default unless the call sets one (REQ-MODEL-059); when set, measured from the start of attempt 1 across attempts and waits, and if the required wait before the next attempt would reach or exceed it, the call fails at once with `core.CodeTimeout` without starting another attempt (REQ-MODEL-053) |
 | Whose clock | the middleware waits on `core.Clock` and timers; the gate advances `coretest.FakeClock`, so no wall time is read |
 | Reset | each retry attempt (attempt ≥ 2) emits `EventReset` with `Attempt` before its own events (REQ-MODEL-055), as `docs/architecture/streaming.md` §4 states |
 
@@ -75,7 +95,8 @@ this WP's directories.
 
 Per-attempt streaming defaults: first-chunk `30s`, idle `60s`, streaming total
 `10m` (REQ-MODEL-059), overridden per call with the call's first-chunk
-timeout, idle timeout and attempt total timeout. The first-chunk timer starts at the
+timeout, idle timeout and attempt total timeout. No call total timeout applies
+unless the call sets one (§3, REQ-MODEL-059). The first-chunk timer starts at the
 start of the attempt and is replaced by the idle timer at the first event
 (reset on each subsequent event); the per-attempt total timer covers the
 streaming attempt (REQ-MODEL-058). Each fires once on the fake clock and

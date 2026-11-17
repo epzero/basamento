@@ -161,7 +161,7 @@ When a structured-output call runs, the model layer shall try the supported rung
 The model layer shall ask one model call of a structured-output call to produce its output on at most one rung of the ladder.
 
 ### REQ-MODEL-046 — A model that supports no rung is not called
-If a model supports no rung of the structured-output ladder, then the model layer shall fail the call with code `unsupported` and shall start no invocation.
+If a structured-output call targets a model that supports no rung of the structured-output ladder, then the model layer shall fail the call with code `unsupported` and shall start no invocation.
 
 ### REQ-MODEL-047 — Budget or ladder spent
 If a structured-output attempt does not satisfy the output schema and either the attempt budget is spent or no further supported rung and no local JSON repair remains, then the model layer shall fail the call with code `invalid_argument` and report that no attempt satisfied the output schema.
@@ -182,7 +182,7 @@ When the retry middleware waits before a retry of a call, it shall wait a base w
 When a provider answers a failed attempt with a Retry-After time longer than the computed wait, the retry middleware shall wait for the Retry-After time instead.
 
 ### REQ-MODEL-053 — A call total timeout ends retrying
-If the elapsed time of a call from the start of its first attempt reaches the call's call total timeout before the call succeeds, then the model layer shall fail the call with code `timeout`.
+If the elapsed time of a call from the start of its first attempt reaches, or the required wait before a next attempt would reach or exceed, the call's call total timeout before the call succeeds, then the model layer shall fail the call with code `timeout` without starting another attempt.
 
 ### REQ-MODEL-054 — A client ref per attempt
 The model layer shall derive a deterministic client ref for each attempt of one logical call from the call's client ref and the attempt number, and shall start an attempt with that client ref, except that it shall reuse the client ref of an attempt whose start was not acknowledged when it retries that start.
@@ -200,7 +200,7 @@ If a streaming attempt in progress produces no event for its idle timeout, then 
 If a streaming attempt runs for its attempt total timeout, then the timeout middleware shall cancel the attempt with code `timeout` and a retryable error.
 
 ### REQ-MODEL-059 — Default timeouts
-The model layer shall time out a streaming attempt after 30 seconds without a first event, 60 seconds without one in progress, and 10 minutes in total, unless the call sets another first-chunk timeout, idle timeout or attempt total timeout.
+The model layer shall time out a streaming attempt after 30 seconds without a first event, 60 seconds without one in progress, and 10 minutes in total, and shall apply no call total timeout, unless the call sets another first-chunk timeout, idle timeout, attempt total timeout or call total timeout.
 
 ### REQ-MODEL-060 — Metering per attempt
 The metering middleware shall record the usage and the cost of every attempt of a call that reaches the provider, including each failed attempt, in milli-points.

@@ -81,13 +81,22 @@ Feature: Structured output climbs the ladder on one attempt budget
     And the provider accepted 1 invocation
 
   @REQ-MODEL-054 @cost @id:MODEL-054-01
-  Scenario: Ladder attempts carry distinct client refs derived from the call's
+  Scenario: Ladder attempts carry distinct deterministic client refs derived from the call's
     Given chat model "sim-chat" supports the rungs "native schema, JSON mode"
     And the scripted model returns a JSON answer that misses the schema on every attempt
     When a call with client ref "call-1" asks "sim-chat" for output that satisfies the output schema
-    Then the provider accepted 2 invocations
-    And invocation 1 carried the client ref "call-1"
-    And invocation 2 carried a distinct deterministic client ref derived from "call-1" for attempt 2
+    And another call with client ref "call-1" asks "sim-chat" for output that satisfies the output schema
+    Then each call caused the provider to accept 2 invocations
+    And for both calls invocation 1 carried the client ref "call-1"
+    And both calls' attempt 2 invocations carried the same client ref derived from "call-1" and distinct from "call-1"
+
+  @REQ-MODEL-054 @cost @id:MODEL-054-02
+  Scenario: Retrying an unacknowledged start reuses that attempt's client ref
+    Given chat model "sim-chat" supports the rungs "native schema"
+    And the scripted model fails start 1 without acknowledging acceptance with code "unavailable" marked retryable and returns satisfying output on the next start
+    And the call's seeded randomness draws 0 milliseconds of jitter
+    When a call with client ref "call-1" asks "sim-chat" for output that satisfies the output schema
+    Then the provider received 2 start requests both carrying the client ref "call-1"
 
   @REQ-MODEL-065 @cost @id:MODEL-065-01
   Scenario: The attempt after the last supported rung repairs the JSON locally
