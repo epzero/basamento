@@ -62,3 +62,5 @@ the same change that first uses it.
 | **Key service** | What holds the master key, selected by URL: `localsecrets://` in the embedded profile, a KMS or Vault Transit in the cloud one. The gate uses a **simulated key service**. |
 | **Data key**, **keyset** | A tenant's keyset is its data keys, one of them **primary**, stored only wrapped by the master key. New payloads use the primary data key; earlier ones still decrypt. |
 | **Payload codec** | Encrypts each payload a runtime records in history with the tenant's primary data key, and decrypts it on the way back. |
+| **Credential store** | The vault: a tenant's named credentials, stored only encrypted, written and rotated through a write-only API and resolved by `cred://` reference inside a step. |
+| **Credential name** | The `<name>` of a `cred://<name>` reference: 1–128 characters among ASCII letters, digits, `.`, `_`, `-` and `/`. |
