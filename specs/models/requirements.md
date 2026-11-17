@@ -152,10 +152,10 @@ ladder, native schema → JSON mode → forced tool call → local JSON repair, 
 one attempt budget (`docs/architecture/model-layer.md` §5, ADR-0006).
 
 ### REQ-MODEL-043 — One attempt budget for structured output
-The model layer shall count every attempt of one structured-output call against one attempt budget, and the budget shall be 3 attempts unless the call sets another.
+The model layer shall count every attempt of one structured-output call against one attempt budget of 3 attempts unless the call sets another.
 
 ### REQ-MODEL-044 — Which rung is tried
-The model layer shall try the first rung of the ladder the model supports, and after an attempt that does not satisfy the output schema, shall try the next rung of the ladder the model supports.
+When a structured-output call runs, the model layer shall try the supported rungs of the ladder in order, advancing to the next supported rung after an attempt whose output does not satisfy the output schema.
 
 ### REQ-MODEL-045 — One rung per attempt
 The model layer shall ask one model call of a structured-output call to produce its output on at most one rung of the ladder.
@@ -182,13 +182,13 @@ When the retry middleware waits before an attempt, it shall wait double the prev
 When a provider answers a failed attempt with a Retry-After time longer than the computed wait, the retry middleware shall wait for the Retry-After time instead.
 
 ### REQ-MODEL-053 — A total timeout ends retrying
-If the time from the first attempt of a structured-output or retrying call reaches its total timeout before an attempt satisfies it, then the model layer shall fail the call with code `timeout`.
+If the elapsed time of a call from the start of its first attempt reaches the call's total timeout before the call succeeds, then the model layer shall fail the call with code `timeout`.
 
 ### REQ-MODEL-054 — Attempts share one client ref
 The model layer shall start every attempt of one logical call with the same client ref.
 
 ### REQ-MODEL-055 — A retried attempt resets partial output
-When the model layer makes a new attempt, it shall emit a `reset` event carrying the attempt number before the events of that attempt.
+When the model layer makes a retry attempt, it shall emit a `reset` event carrying the attempt number before the events of that attempt.
 
 ### REQ-MODEL-056 — First-chunk timeout
 If a streaming attempt produces no event within its first-chunk timeout, then the timeout middleware shall cancel the attempt with code `timeout` and a retryable error.
@@ -216,3 +216,6 @@ The call log shall record no credential, no message text and no model output.
 
 ### REQ-MODEL-064 — Middleware order
 The model layer shall apply the middleware to a chat call in one order, outermost first: call log, recording, fallback, metering, retry, timeouts.
+
+### REQ-MODEL-065 — Local JSON repair after the last supported rung
+If the attempt on the last rung the model supports does not satisfy the output schema and attempt budget remains, then the model layer shall run local JSON repair on that attempt's output as the next attempt without starting a model invocation.
