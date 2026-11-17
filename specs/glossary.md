@@ -60,3 +60,7 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Temporal runtime** | The `temporal` runtime: runs the flow host as a Temporal workflow and each step as an activity, with a payload codec that stores large run history payloads as blobs and encrypts every run history payload. Durable; continues a run as new at a checkpoint threshold (`REQ-RT-026` … `REQ-RT-037`). |
+| **Run history** | The ordered record a durable runtime keeps of a run's durable calls and their results (on the temporal runtime, Temporal's event history); replay reads it, and ciphertexts and blobs in it differ between records of the same payload. |
+| **Claim-check threshold** | The most bytes of a run history payload the temporal runtime keeps in the run history; a larger payload is stored as a blob (`REQ-RT-028`). |
+| **Checkpoint event threshold** | The number of events in the run history from which a checkpoint continues the run as new (`REQ-RT-034`). |
