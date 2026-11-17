@@ -57,4 +57,14 @@ the same change that first uses it.
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
+| **Agent** | A named behavior in a flow node: a model, system messages, the tools it allows, caps and a memory policy. The `agent` node handler runs the **agent loop**. |
+| **Agent loop** | The flow code of the `agent` node handler: one model turn per step, one tool call per step, caps checked in flow code. |
+| **Agent run** | One execution of an `agent` node, from its start (or its handoff) to its end. |
+| **Model turn** | One call of the agent's model with its messages, made as one step of the agent run. |
+| **Tool call** | One tool step of an agent run: a tool the model requested, run by the tool port, with its result. |
+| **Agent output** | What an agent run ends with: its answer, or the state and turns of a run that a cap ended or that handed off. |
+| **Cap** | A limit of an agent: steps (model turns), cost in milli-points, tokens, or time on the run clock. Reaching one ends the agent run as completed with a state naming it. |
+| **Handoff** | A model request that ends its agent run so that another agent node continues with the model turns so far. |
+| **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
+| **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
