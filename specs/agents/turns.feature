@@ -14,10 +14,12 @@ Feature: One model turn per step
   @REQ-AGENT-002 @id:AGENT-002-01
   Scenario: A resumed run feeds its completed turns from the record
     Given the scripted model of "worker" answers "Searching." and requests tool "search", then answers "Done." in 2 turns
-    And an agent run of "worker" completed its model turn 1 and its tool call before the process stopped
-    When the agent run resumes
-    Then model turn 2 completed after the resume
-    And the scripted model received 1 invocation after the process stopped
+    And tool "search" returns "42"
+    And the step results of model turn 1 and its tool call are already recorded
+    When an agent run of "worker" resumes from that record
+    Then the agent run is completed with output "Done."
+    And the scripted model received 2 invocations
+    And the messages of model turn 2 contain model turn 1 and the result of tool "search": "42"
 
   @REQ-AGENT-003 @id:AGENT-003-01
   Scenario: A turn that requests two tools makes two tool calls

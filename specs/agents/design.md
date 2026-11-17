@@ -121,30 +121,55 @@ estimated reservation and actual charge are both `X` milli-points.
 The model requests a handoff the way its provider expresses a tool call, with
 the tool name `handoff_to` and the argument naming a node id of the flow. The
 agent loop treats that request specially: it is not a `tool-call step`
-(REQ-AGENT-003).
+(REQ-AGENT-003), and the tool `handoff_to` is never run by the tool port.
 
-The agent run ends completed with state `handoff` and an output:
+A turn's reply may mix tool calls with `handoff_to`. The loop reads the turn's
+requested calls in order, before making any tool call of that turn:
+
+- with no `handoff_to`, it makes one tool-call step per other call
+  (REQ-AGENT-003), as usual;
+- with one `handoff_to`, it makes no tool-call step for that turn, whether or
+  not the turn also requests other tools, and ends the run as a handoff
+  (REQ-AGENT-016). The other requests are not retried by the target;
+- with two or more `handoff_to`, it fails the run with code `invalid_argument`.
+
+The run's output:
 
 ```json
-{"state": "handoff", "target": "fixer", "turns": [ … model turns … ]}
+{"state": "handoff", "target": "fixer", "turns": [ … model turns … ],
+ "started_at": "2026-11-17T10:00:00Z", "time_cap": "1m"}
 ```
 
-The node's outgoing edge leads to the target node, which receives this output
-as its input. When the target's handler sees `state: "handoff"`, it takes
-`turns` as its message history (REQ-AGENT-017). Cycles between agent nodes in a
-flow are bounded by `flow.Guard` (`REQ-FLOW-003`), not by the agent handler.
+`turns` is every model turn of the first agent in order, the closing turn
+included: that turn's assistant message, as recorded, holds the `handoff_to`
+request, exactly as the requests of its other tool calls. `started_at` is the
+run's start time on the run clock (`dc.Now()`, design §1); `time_cap` is the
+time cap in effect for the chain (REQ-AGENT-019, REQ-AGENT-029), written as a
+Go duration string (`"1m"`, `"90s"`) or `null` when the chain has none.
 
-Caps (REQ-AGENT-018, REQ-AGENT-019): the target's `caps.steps` counts the
-target's own model turns (the carried turns are not the target's turns); the
-target's `caps.cost_mpts` and `caps.tokens` count the target's own spend and
-usage, so carried turns never refuse a handoff; the target's **time cap is the
-value the chain started with**, measured from the run's start on the run clock,
-so a chain is bounded in time whatever its length. When the target has no time
-cap and the first agent had one, the target runs under the first agent's time
-cap.
+The node's outgoing edge leads to the target node, which receives this output
+as its input and the same run clock. When the target's handler sees
+`state: "handoff"`, it takes `turns` as its message history (REQ-AGENT-017):
+the target's first turn has the system messages of the target agent, then the
+carried turns each paired with its tool-result messages. Cycles between agent
+nodes in a flow are bounded by `flow.Guard` (`REQ-FLOW-003`), not by the agent
+handler.
+
+Caps (REQ-AGENT-018, REQ-AGENT-019, REQ-AGENT-029): the target's `caps.steps`
+counts the target's own model turns (the carried turns are not the target's
+turns); the target's `caps.cost_mpts` and `caps.tokens` count the target's own
+spend and usage, so carried turns never refuse a handoff; the chain's **time
+cap is the value the chain started with**: the first agent's `caps.time` when
+it has one, otherwise the target's own `caps.time` (REQ-AGENT-029), and it is
+measured from `started_at` on the run clock, so a chain is bounded in time
+whatever its length. The same chain time cap is what the handoff output carries
+as `time_cap`, and each further handoff carries it on. The target's first turn
+boundary is checked like any
+other (design §0.2), the time cap included, so a target that starts at or past
+the cap runs no turn.
 
 A handoff is not a cap: if the target requests a handoff in its first turn,
-the chain continues.
+the chain continues and the next agent receives the target's turns too.
 
 ## 5. Memory policy
 
@@ -193,7 +218,7 @@ pull request of its own.
 ## Open questions
 
 1. **Handoff mechanism (`design.md` §4):** Expressing a model handoff as a reserved `handoff_to` tool call intercepted by the agent loop (rather than a `model.Result` field or structured output convention) is an author choice not fixed by `docs/architecture/flow-engine.md` or `model-layer.md`.
-2. **Caps across a handoff (`REQ-AGENT-018`, `REQ-AGENT-019`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while carrying the first agent's time cap across the chain is an author choice; if the first agent had no time cap and the target agent declares `caps.time`, should the target's `caps.time` apply from the chain start or the target start?
+2. **Caps across a handoff (`REQ-AGENT-018`, `REQ-AGENT-019`, `REQ-AGENT-029`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while carrying the chain's time cap across it is an author choice. Whether the first agent's time cap or the target's own applies when both set one is settled by REQ-AGENT-019 only when the first agent has one; REQ-AGENT-029 settles the case where only the target has one. When both set one, the first agent's cap applies; that rule is stated here, not in a requirement.
 3. **Memory policy retention rule (`REQ-AGENT-023`–`025`, `design.md` §5):** Keeping `system` messages + whole model turn 1 (with its tool results) + the most recent whole turns that fit in `input_tokens` is a concrete policy chosen for WP-L7-01 (`docs/roadmap/L7-agents.md` names "memory policy" without prescribing the algorithm).
 4. **Turn-boundary check order (`design.md` §6):** Checking `cancellation → time cap → step cap → memory policy (input token limit) → token cap → cost reservation` is an author choice that determines which terminal state wins when two caps are reached at the same boundary.
 

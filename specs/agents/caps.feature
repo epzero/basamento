@@ -67,10 +67,10 @@ Feature: Caps on steps, cost, tokens and time
   @REQ-AGENT-012 @id:AGENT-012-02
   Scenario: A run under its time cap keeps running
     Given agent "worker" has a time cap of 1 minute
-    And the scripted model of "worker" requests tool "search" in each of 2 turns, and the tool call of model turn 1 takes 60 seconds on the run clock
-    When an agent run of "worker" starts and 59 seconds pass on the run clock
-    Then the agent run is still running
-    And the scripted model received 1 invocation
+    And the scripted model of "worker" requests tool "search" in each of 2 turns, and the tool call of model turn 1 takes 59 seconds on the run clock
+    When an agent run of "worker" completes
+    Then the agent run is completed with output "Done."
+    And the scripted model received 2 invocations
 
   @REQ-AGENT-028 @id:AGENT-028-01
   Scenario: Cancelling between turns starts no further turn

@@ -40,14 +40,76 @@ Feature: Handoff to another agent
     And the agent run of "fixer" is completed with state "token_cap_reached"
 
   @REQ-AGENT-019 @id:AGENT-019-01
-  Scenario: The time cap covers the target
-    Given agent "triage" has a time cap of 1 minute
+  Scenario: The time cap covers the target from the start of the chain
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has a time cap of 1 minute
     And agent "fixer" has no time cap
-    And the scripted model of "triage" requests a handoff to agent "fixer" in 1 turn
-    And the scripted model of "fixer" requests tool "search" in each of 2 turns after the handoff, and the tool call of model turn 1 takes 60 seconds on the run clock
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
+    And the scripted model of "fixer" requests tool "search" in each of 2 turns after the handoff, and its model turn 1 takes 20 seconds on the run clock
     When the agent runs of "triage" and then "fixer" run
-    Then the agent run of "fixer" is completed with state "time_cap_reached"
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "1m"
+    And the agent run of "fixer" is completed with state "time_cap_reached"
     And the scripted model of "fixer" received 1 invocation
+
+  @REQ-AGENT-019 @id:AGENT-019-02
+  Scenario: The target keeps running just under the time cap
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has a time cap of 1 minute
+    And agent "fixer" has no time cap
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
+    And the scripted model of "fixer" answers "Fixed." in 1 turn, which takes 19 seconds on the run clock
+    When the agent runs of "triage" and then "fixer" complete
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "1m"
+    And the agent run of "fixer" is completed with output "Fixed."
+    And the scripted model of "fixer" received 1 invocation
+
+  @REQ-AGENT-029 @id:AGENT-029-01
+  Scenario: The target applies its own time cap when the first agent had none
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has no time cap
+    And agent "fixer" has a time cap of 1 minute
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
+    And the scripted model of "fixer" requests tool "search" in each of 2 turns after the handoff, and its model turn 1 takes 20 seconds on the run clock
+    When the agent runs of "triage" and then "fixer" run
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "1m"
+    And the agent run of "fixer" is completed with state "time_cap_reached"
+    And the scripted model of "fixer" received 1 invocation
+
+  @REQ-AGENT-029 @id:AGENT-029-02
+  Scenario: A target under its own time cap completes
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has no time cap
+    And agent "fixer" has a time cap of 1 minute
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
+    And the scripted model of "fixer" requests tool "search" in 1 turn after the handoff, which takes 19 seconds on the run clock, then answers "Fixed." in 1 turn
+    When the agent runs of "triage" and then "fixer" complete
+    Then the agent run of "fixer" is completed with output "Fixed."
+    And the scripted model of "fixer" received 2 invocations
+
+  @REQ-AGENT-016 @id:AGENT-016-02
+  Scenario: A turn that mixes a tool call with a handoff hands off without the tool call
+    Given the scripted model of "triage" requests tools "search" and a handoff to agent "fixer" in 1 turn
+    When an agent run of "triage" completes
+    Then the agent run is completed with state "handoff"
+    And the agent run output names node "fixer"
+    And the agent run has 0 tool-call steps
+    And tool "search" was invoked 0 times
+
+  @REQ-AGENT-003 @id:AGENT-003-02
+  Scenario: A handoff request is not a tool call
+    Given the scripted model of "triage" requests tool "search", then requests a handoff to agent "fixer" in 2 turns
+    When an agent run of "triage" completes
+    Then the agent run is completed with state "handoff"
+    And the agent run has 1 tool-call step
+    And tool "handoff_to" was invoked 0 times
+
+  @REQ-AGENT-016 @id:AGENT-016-03
+  Scenario: The target starts with the turn that requested the handoff
+    Given the scripted model of "triage" requests tool "search", then requests a handoff to agent "fixer" in 2 turns
+    And an agent run of "triage" completed with a handoff to node "fixer"
+    When an agent run of "fixer" starts with that handoff
+    Then the messages of model turn 1 of "fixer" contain model turns 1 and 2 of "triage"
+    And the messages of model turn 1 of "fixer" contain the request of tool "handoff_to" from model turn 2 of "triage"
 
   @REQ-AGENT-020 @id:AGENT-020-01
   Scenario: A handoff to an agent the flow does not define fails the run

@@ -10,8 +10,9 @@ every **model turn** is one durable step, so each model output is recorded,
 retried and metered. A **tool call** is one durable step too. The loop ends
 when the model answers without requesting a tool, or when a **cap** (steps,
 cost, tokens, time on the run clock) stops it. A **handoff** starts the agent
-node named by the model. What goes into the next turn is decided by the
-**memory policy**.
+node named by the model: the model asks for it with a `handoff_to` request,
+which the loop reads before it makes any tool call of that turn. What goes
+into the next turn is decided by the **memory policy**.
 
 ### REQ-AGENT-001 — One model turn per step
 While an agent run is running, the agent loop shall make each model turn one step of the run whose result holds that turn's model output.
@@ -20,7 +21,7 @@ While an agent run is running, the agent loop shall make each model turn one ste
 When an agent run resumes, the agent loop shall feed every model turn recorded as completed from its step result.
 
 ### REQ-AGENT-003 — A request for a tool becomes a tool call
-When a model turn requests `n` tools, the agent loop shall make `n` tool-call steps for those requests, one for each.
+When a model turn requests `n` non-handoff tools, the agent loop shall make `n` tool-call steps for those requests, one for each.
 
 ### REQ-AGENT-004 — A tool result is fed to the next turn
 When a tool-call step completes, the agent loop shall include its result in the next model turn's messages.
@@ -47,7 +48,7 @@ If the agent run's used tokens plus a model turn's input tokens would exceed the
 If the agent run's elapsed time from the start of the run on the run clock is at least the time cap when starting a model turn, then the agent loop shall end the agent run as completed with state `time_cap_reached` and its completed model turns in order without invoking the model.
 
 ### REQ-AGENT-016 — A handoff carries the turns
-When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node and every model turn of the run in order.
+When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node, every model turn of the run in order, the run's start time on the run clock and the time cap in effect.
 
 ### REQ-AGENT-017 — A handoff starts the target with the turns
 When an `agent` node's input carries a handoff with the target node, the agent loop shall make the target agent's first model turn with the carried turns in the message history.
@@ -56,7 +57,10 @@ When an `agent` node's input carries a handoff with the target node, the agent l
 When an `agent` node's input carries a handoff with the target node, the agent loop shall take the target agent's step cap, cost cap and token cap in place of the first agent's.
 
 ### REQ-AGENT-019 — The time cap spans the handoff
-When an `agent` node's input carries a handoff with the target node, the agent loop shall measure the target agent's elapsed time against the first agent's time cap.
+When an `agent` node's input carries a handoff with the target node and the first agent has a time cap, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against that time cap.
+
+### REQ-AGENT-029 — The target's time cap when the first agent had none
+When an `agent` node's input carries a handoff with the target node, the first agent has no time cap and the target agent has one, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against the target agent's time cap.
 
 ### REQ-AGENT-020 — A handoff to an agent the flow does not define
 If a model turn requests a handoff to an agent whose node the flow does not define, then the agent run shall fail with code `not_found` naming the agent.
