@@ -57,6 +57,13 @@ func TestTenantFrom(t *testing.T) {
 	}
 }
 
+func TestTenantFromNil(t *testing.T) {
+	//lint:ignore SA1012 the contract is that a nil context reports no tenant.
+	if id, ok := core.TenantFrom(nil); id != "" || ok {
+		t.Fatalf("TenantFrom(nil) = (%q, %v), want (\"\", false)", id, ok)
+	}
+}
+
 func TestWithTenantLeavesParentUnchanged(t *testing.T) {
 	parent := core.WithTenant(t.Context(), "tenant-a")
 	_ = core.WithTenant(parent, "tenant-b")

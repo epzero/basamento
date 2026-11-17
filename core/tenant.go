@@ -19,9 +19,13 @@ func WithTenant(ctx context.Context, id TenantID) context.Context {
 	return context.WithValue(ctx, tenantKey, id)
 }
 
-// TenantFrom returns the tenant carried by ctx, and false when ctx carries
-// none or an empty id.
+// TenantFrom returns the tenant carried by ctx, and false when ctx is nil,
+// carries none or carries an empty id. Callers that must not run without a
+// tenant check the second result instead of comparing against "".
 func TenantFrom(ctx context.Context) (TenantID, bool) {
+	if ctx == nil {
+		return "", false
+	}
 	id, ok := ctx.Value(tenantKey).(TenantID)
 	if !ok || id == "" {
 		return "", false
