@@ -1,0 +1,261 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    PRESET-001-01:
+        hash: sha256:49e170ad7ed7ea8d827aa041b23cbde996ca5894e5c7e582e0a547ae1ad0de86
+        reqs:
+            - REQ-PRESET-001
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-002-01:
+        hash: sha256:c6c46d428dcd4187f94de655ed4d561da2f798a334ac669d17901f16b3fd565f
+        reqs:
+            - REQ-PRESET-002
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-003-01:
+        hash: sha256:d80b869e3889ff6cbbf7e2d67eddfd6b1b561038bb578a6efdf1f716bd9f5a91
+        reqs:
+            - REQ-PRESET-003
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Durability and determinism: crash resume skips checkpointed stages and sandbox calls, and pinned run versions survive version updates.'
+        human:
+            status: pending
+    PRESET-004-01:
+        hash: sha256:656423ce1796c5902eb4690c04b46bd5ca7a480f86c778b3649ce391876efd8b
+        reqs:
+            - REQ-PRESET-004
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-005-01:
+        hash: sha256:1833b0b02b9364e8ba0d7e513011c58f08dadc1c9d69bb22f9c8c4234014fc88
+        reqs:
+            - REQ-PRESET-005
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-006-01:
+        hash: sha256:5d09e9273a2a42e99cee559a21e96698f5b41a73acd0f2ce8e040bf108f05e6d
+        reqs:
+            - REQ-PRESET-006
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-007-01:
+        hash: sha256:b844171745c07008b27cdbdd35174a76aebc5083da6e195b49f1727c8acbe972
+        reqs:
+            - REQ-PRESET-007
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Loop budget guard (@cost): visit and milli-point limits bound repair loops and fail with budget_exceeded.'
+        human:
+            status: pending
+    PRESET-007-02:
+        hash: sha256:8e8e142efb3a322554f663243d3b6e4e0d10c08318dbd2cc031c22cfd7257e81
+        reqs:
+            - REQ-PRESET-007
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Loop budget guard (@cost): visit and milli-point limits bound repair loops and fail with budget_exceeded.'
+        human:
+            status: pending
+    PRESET-008-01:
+        hash: sha256:824f36f6ad32a043c0a5eb05ba4d2c26134a26ac6d2c6552e4fb0a7826876dea
+        reqs:
+            - REQ-PRESET-008
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-009-01:
+        hash: sha256:fdc10e6a0e378621d89dc6b0cf5c7cb42d33fca7b6e4d45798d636c7bc95155f
+        reqs:
+            - REQ-PRESET-009
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        human:
+            status: pending
+    PRESET-010-01:
+        hash: sha256:55eb61f37fd4e04a45e7af757a64fe520e1e5df31cecc2feb87eabccbeb72d95
+        reqs:
+            - REQ-PRESET-010
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        human:
+            status: pending
+    PRESET-011-01:
+        hash: sha256:f1e0b6e941ac0ecea71e25227b95d36be00d5aaf38c02e8af1a1913f00c69409
+        reqs:
+            - REQ-PRESET-011
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-012-01:
+        hash: sha256:d0ca06c77c43b170d9959a011c738ad71495712336df54799b1db26122646140
+        reqs:
+            - REQ-PRESET-012
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-012-02:
+        hash: sha256:5b941ff206cf2c0e156845a44d70f5f5f96bc99356d765cdb8099bfffd12f849
+        reqs:
+            - REQ-PRESET-012
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-013-01:
+        hash: sha256:a65ed61cd165478c3e1e6cfdce06b9fa4a26f94b0b48a8ea25370d03e3befc65
+        reqs:
+            - REQ-PRESET-013
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        human:
+            status: pending
+    PRESET-014-01:
+        hash: sha256:126ebfc0dae04728fde861f8f3c96d3f7e8a160ab71c1ed01083318c5598b2be
+        reqs:
+            - REQ-PRESET-014
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        note: 'Durability and determinism: crash resume skips checkpointed stages and sandbox calls, and pinned run versions survive version updates.'
+        human:
+            status: pending
+    PRESET-015-01:
+        hash: sha256:5089ee4ae9a7d10e7ccd8291eb90ccb9c52de8de743339ea50de153285cfd173
+        reqs:
+            - REQ-PRESET-015
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-016-01:
+        hash: sha256:cda79c056b4eb76ee32951ff112973dccf7081b48efce5562ad9a93964820c30
+        reqs:
+            - REQ-PRESET-016
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-017-01:
+        hash: sha256:69bc1d5e0d87ff0de7e90aa809d197009c81e07be7f5d86977ae091a2004ecc8
+        reqs:
+            - REQ-PRESET-017
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-017-02:
+        hash: sha256:e1668bb888704dd48cd5d723c603f97266dd7925c59dbee6c908576cce51eeb1
+        reqs:
+            - REQ-PRESET-017
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-017-03:
+        hash: sha256:310f73964b73b2b1d5865e8764c911b2cf7a9be94e53141dcfeb6fd46dfd28b5
+        reqs:
+            - REQ-PRESET-017
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-018-01:
+        hash: sha256:da0a93fbfd6b8996c4ccd341694cfd3d7ebc6c950e9169abec666a12b2a8f2d6
+        reqs:
+            - REQ-PRESET-018
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-018-02:
+        hash: sha256:cbb904e448c8c023e364612b000eaed2a7419d605f4323e49870a2798c894b98
+        reqs:
+            - REQ-PRESET-018
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-019-01:
+        hash: sha256:05dfe61a51a4b753817f59a1c20fbf40e76cbf0801a23929db222625ecdd0c20
+        reqs:
+            - REQ-PRESET-019
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    PRESET-019-02:
+        hash: sha256:35fafb0f1a948d86eca5659f8580a12c877124682ad8cde164e0f3ab580fa884
+        reqs:
+            - REQ-PRESET-019
+        tier: P2
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:056934
+        approved_at: "2026-11-17"
+        human:
+            status: pending
