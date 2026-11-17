@@ -107,10 +107,10 @@ its own.
 
 ## Temporal runtime (WP-L5-02)
 
-Decisions for `runtime/temporal` that leave `REQ-RT-026` … `REQ-RT-029` and
-`REQ-RT-031` … `REQ-RT-038` in `temporal.feature` to the implementer. It
+Decisions for `runtime/temporal` that leave `REQ-RT-039` … `REQ-RT-041` and
+`REQ-RT-028` … `REQ-RT-038` in `temporal.feature` to the implementer. It
 builds on the payload codec of WP-L1-04 (`specs/secrets/`) and the blob store
-of WP-L1-02 (`specs/blob/`); it does not respectify either. This work package
+of WP-L1-02 (`specs/blob/`); it does not respecify either. This work package
 changes no contract file.
 
 ### Shape
@@ -120,7 +120,7 @@ are private to `runtime/temporal` and the scenarios do not name them.
 
 | Contract call | On the Temporal runtime |
 | --- | --- |
-| `Step` | activity, on `StepOptions.Queue` or the default queue; `MaxAttempts`, `NonRetryable`, `StartToClose`, `Heartbeat` and `IdempotencyKey` map onto the activity's retry policy (`REQ-RT-027`) |
+| `Step` | activity, on `StepOptions.Queue` or the default queue; `StartToClose`, `Heartbeat` and `IdempotencyKey` map onto the activity options, and `MaxAttempts` and `NonRetryable` map onto its retry policy (`REQ-RT-041`) |
 | `Await` | Update, validated synchronously (`sync_gate_updates`) |
 | `Checkpoint` | ContinueAsNew, at `Checkpoint` only, when the current run history's length as the Temporal SDK reports it reaches the threshold; first waits until no step of the run is in flight (`REQ-RT-034` … `REQ-RT-036`, `REQ-RT-038`) |
 | `Emit` | durable outbox write, ordered per run as on the local runtime |
@@ -139,9 +139,12 @@ mid-run is the conformance suite's concurrency test.
 
 The contract's retry rules that are already specified — `REQ-RT-016` (a
 non-retryable error or a listed code stops retrying) and `REQ-RT-018`
-(`MaxAttempts` 0 allows 3 attempts) — bind every runtime, and the conformance
-flows show them on the temporal runtime; `REQ-RT-027`
-adds only the `MaxAttempts > 0` case where retries can be delayed.
+(`MaxAttempts` 0 allows 3 attempts) — bind every runtime on paper, but
+`conformance.feature` has only the `linear`, `parallel-merge` and
+`gate-and-timeout` flows, which exercise none of them, so their cross-runtime
+parity on the temporal runtime is deferred to WP-L5-04 with its flows and
+golden records; `temporal.feature` does not restate them. `REQ-RT-041` covers
+only the `MaxAttempts > 0` case, where the retry can be delayed.
 
 ### Payload codec: claim-check and encryption
 
@@ -162,8 +165,8 @@ through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
    history or an activity task — whether kept inline or replaced by a
    claim-check marker — therefore carries `encoding: binary/encrypted`
    (`REQ-RT-031`). A start without a tenant is rejected by `Runtime.Start`
-   itself with `invalid_argument` before anything is recorded
-   (`REQ-RT-031`, `RT-031-02`); the API checks as well
+   itself with `invalid_argument` before any step runs or any run history is
+   recorded (`REQ-RT-040`, `RT-031-02`); the API checks as well
    (`owner decision, 2026-11-17`).
 2. **On decode** (`REQ-RT-029`, `REQ-RT-032`, `REQ-RT-033`): the history
    payload is first decrypted with the tenant's encryption codec; a payload
@@ -172,6 +175,15 @@ through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
    marker, the codec reads the referenced blob from the blob store for the
    run's tenant and decrypts that blob with the tenant's encryption codec to
    restore the original payload's content and encoding (`REQ-RT-029`).
+   Decoding happens when the workflow reads a payload back — an activity's
+   result through its `Future.Get`, a gate Update's payload, or a replay of
+   either — so a decode error fails that step or the decoding replay, not
+   the run as a whole: `Future.Get` fails the step with `invalid_argument`
+   (`REQ-RT-032`) or `not_found` (`REQ-RT-033`), and when the flow does not
+   handle the error the step's failure moves the run to `failed`, as for any
+   other unhandled step error (`REQ-RT-017`). `RunStatus` has no error code
+   of its own, so the scenarios assert the code on the step and the state on
+   the run.
 
 Encoding sits inside the data converter, so ciphertexts and blobs depend on
 ambient state, not on deterministic workflow state. The workflow must not
@@ -184,10 +196,11 @@ clear of the 5 KB boundary by more than that overhead.
 
 When a claim-check marker in a run's history names a blob content key that the
 run's tenant does not hold (including a blob stored by another tenant), the
-blob store returns `not_found` (`REQ-BLOB-006`, `REQ-BLOB-010`) and the run
-fails with `not_found` (`REQ-RT-033`). If a payload or blob ciphertext was
-tampered with or encrypted for another tenant, the encryption codec rejects it
-with `invalid_argument` (`REQ-SECRET-004`, `REQ-SECRET-005`).
+blob store returns `not_found` (`REQ-BLOB-006`, `REQ-BLOB-010`) and the step
+fails with `not_found` and, unhandled, the run fails (`REQ-RT-033`). If a
+payload or blob ciphertext was tampered with or encrypted for another tenant,
+the encryption codec rejects it with `invalid_argument` (`REQ-SECRET-004`,
+`REQ-SECRET-005`).
 
 ### ContinueAsNew
 
@@ -220,19 +233,20 @@ a fixed event threshold. ContinueAsNew happens **only** at an explicit
   needs an exact count takes it from the structure of its flow instead: one
   checkpoint above the threshold and no later checkpoint that can reach it
   again gives exactly `1`. `RT-036-02` (threshold `20`) checkpoints once,
-  after 40 steps; `RT-038-01` (threshold `5`, met by 5 steps on its own)
-  checkpoints once, while one of two parallel steps is still in flight, and
-  no later checkpoint exists.
+  after 40 steps; `RT-038-01` (threshold `20`) checkpoints once, after 5
+  steps `s1` to `s5` and while one of two parallel steps is still in flight,
+  and no later checkpoint exists.
 - **Checkpoint drains in-flight steps first.** When `Checkpoint` is called
   while a step of the run is in flight, the runtime waits until no step of the
   run is in flight and only then continues the run as new if its history has
   reached the threshold (`REQ-RT-038`, `owner decision, 2026-11-17`). In
-  `RT-038-01` the checkpoint call meets the threshold by itself (5 steps record
-  at least 5 events here, one activity of which is still in flight), so the
-  wait is observable: without a checkpoint there the run would never continue
-  as new. A step in flight is a `Step` call of the run whose activity has not
-  yet returned a result; a step the flow started and does not await still
-  counts. Created activities that are still running would make Temporal
+  `RT-038-01` the checkpoint comes after 5 steps and meets the threshold
+  `20` by itself with the events those 5 steps record, while step `b` of the
+  parallel pair is still in flight, so the wait is observable: the run
+  continues as new only once `b` has completed, and `b` is not run again
+  (`step "b" completed before the continue-as-new`). A step in flight is a
+  `Step` call of the run whose activity has not yet returned a result; a step
+  the flow started and does not await still counts. Created activities that are still running would make Temporal
   re-dispatch them on the new execution, so draining is what keeps a
   continue-as-new from running a step again. Steps remain at-least-once in
   general — a crash or a failed attempt may run a step again — and idempotent
@@ -272,7 +286,7 @@ In `runtime/temporal` tests (`_test.go` and `internal/bdd`), the harness starts
 an in-process Temporal test server on an **ephemeral loopback port
 (`127.0.0.1:0`)** with time skipping enabled; the embedded profile's server
 (WP-L5-03) and fixed port `7233` are never used. The scenarios speak test time
-only (`RT-027-01`'s `1 day of test time`) and time skipping advances the
+only (`RT-041-01`'s `1 day of test time`) and time skipping advances the
 workflow clock to the next timer or retry at once: no wall clock, no sleep, no
 timing assumption.
 
@@ -317,7 +331,7 @@ blob store of WP-L1-02 through `platform`.
    every payload in Temporal's run history hold only `binary/encrypted`
    ciphertext. Confirm this composition (and counting the threshold on the
    encrypted size), or say if the architect prefers another codec arrangement.
-6. **(WP-L5-02) Who rejects a start without a tenant** (`REQ-RT-031`, `RT-031-02`):
+6. **(WP-L5-02) Who rejects a start without a tenant** (`REQ-RT-040`, `REQ-RT-031`, `RT-031-02`):
    **Decided** (`owner decision, 2026-11-17`): `Runtime.Start` itself rejects a
    run without a tenant with `invalid_argument`, and the API checks as well.
    A tenant is read through `core.TenantFrom(ctx)`; an empty id counts as no

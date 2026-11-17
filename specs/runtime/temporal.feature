@@ -11,7 +11,7 @@ Feature: The Temporal runtime
     Given a Temporal test server at version "1.32.2"
     And a blob store and a payload codec served by a simulated key service
 
-  @REQ-RT-026 @id:RT-026-01
+  @REQ-RT-039 @id:RT-039-01
   Scenario: The temporal runtime reports its capabilities
     Given the runtime is "temporal"
     Then the runtime reports capability "durable" as true
@@ -19,30 +19,31 @@ Feature: The Temporal runtime
     And the runtime reports capability "continue_as_new" as true
     And the runtime reports capability "polyglot_queues" as true
 
-  @REQ-RT-027 @id:RT-027-01
+  @REQ-RT-041 @id:RT-041-01
   Scenario: A retryable step that never succeeds is tried exactly its attempt limit
     Given step "charge" fails with code "vendor_error" marked retryable true
-    And the step allows 3 attempts
+    And the step allows 2 attempts
     When a run of "pay" on the temporal runtime runs for 1 day of test time
-    Then step "charge" was executed 3 times
+    Then step "charge" was executed 2 times
     And the step fails with code "vendor_error"
     And the run is "failed"
 
-  @REQ-RT-027 @id:RT-027-02
+  @REQ-RT-041 @id:RT-041-02
   Scenario: A retryable step that succeeds on its last allowed attempt lets the run complete
-    Given step "charge" fails with code "vendor_error" marked retryable true on its first 2 executions
-    And the step allows 3 attempts
+    Given step "charge" fails with code "vendor_error" marked retryable true on its first 3 executions
+    And the step allows 4 attempts
     When a run of "pay" on the temporal runtime runs for 1 day of test time
-    Then step "charge" was executed 3 times
+    Then step "charge" was executed 4 times
     And the run is "completed"
 
   @REQ-RT-028 @id:RT-028-01
-  Scenario Outline: A payload of <size> bytes with a claim-check threshold of 5 KB is stored in <blobs> blobs
+  Scenario Outline: A payload of <size> bytes with a claim-check threshold of 5 KB produces <blobs> claim-checked payloads
     Given the payload codec claim-check threshold is 5 KB
-    And a flow calls step "fetch" whose result is <size> bytes of seed 7 and returns it
+    And a flow calls step "fetch" whose result is <size> bytes of seed 7 and returns "done"
     When a run of "fetch" on the temporal runtime completes
-    Then the run history holds <blobs> blobs
-    And the run returns the result
+    Then the run history holds <blobs> claim-checked payloads
+    And every payload in the run history is at most 5 KB
+    And the run returns "done"
 
     Examples:
       | size  | blobs |
@@ -55,7 +56,7 @@ Feature: The Temporal runtime
     Given the payload codec claim-check threshold is 5 KB
     And a flow calls step "fetch" whose result is 8192 bytes of seed 11 and returns it
     When a run of "fetch" on the temporal runtime completes
-    Then the run history holds 1 blob
+    Then the run history holds 2 claim-checked payloads
     And the run returns 8192 bytes of seed 11
 
   @security @REQ-RT-031 @id:RT-031-01
@@ -66,29 +67,29 @@ Feature: The Temporal runtime
     And the run history holds neither "sk-live-4f9a2c" nor "json/plain"
     And the run returns {"api_key": "sk-live-4f9a2c"}
 
-  @security @REQ-RT-031 @id:RT-031-02
+  @security @REQ-RT-040 @REQ-RT-031 @id:RT-031-02
   Scenario: A run without a tenant fails before any payload reaches the history unencrypted
     Given a flow calls step "fetch" that returns {"ok": true}
     When a run of "fetch" without a tenant is started on the temporal runtime
     Then starting the run fails with code "invalid_argument"
     And step "fetch" was executed 0 times
-    And the run history holds no payload without encoding "binary/encrypted"
+    And the Temporal test server holds no run history for that start
 
   @security @REQ-RT-032 @id:RT-032-01
-  Scenario: A readable payload in history stops the run
-    Given a run on the temporal runtime waiting at gate "approve" with an unencrypted payload in its run history
-    When gate "approve" is resolved with payload {"approved": true}
-    Then the run is "failed"
-    And loading the run's history payloads fails with code "invalid_argument"
+  Scenario: A readable step payload in history stops the run
+    Given step "fetch" recorded an unencrypted payload in the run history of a run on the temporal runtime
+    When the run reads the result of step "fetch"
+    Then step "fetch" fails with code "invalid_argument"
+    And the run is "failed"
 
   @security @REQ-RT-033 @id:RT-033-01
   Scenario: A claim-checked payload of another tenant cannot be read by the run
     Given the payload codec claim-check threshold is 5 KB
     And tenant "globex" has stored a blob of 8192 bytes of seed 11
-    And a run on the temporal runtime for tenant "acme" waiting at gate "approve" has a claim-checked payload in its run history naming that blob's content key
-    When gate "approve" is resolved with payload {"approved": true}
-    Then the run is "failed"
-    And loading the run's history payloads fails with code "not_found"
+    And a run on the temporal runtime for tenant "acme" has a step "fetch" result in its run history naming that blob's content key
+    When the run reads the result of step "fetch"
+    Then step "fetch" fails with code "not_found"
+    And the run is "failed"
 
   @REQ-RT-034 @id:RT-034-01
   Scenario: A checkpoint continues the run as new once the history reaches the threshold
@@ -152,9 +153,10 @@ Feature: The Temporal runtime
 
   @REQ-RT-038 @id:RT-038-01
   Scenario: A checkpoint waits for an in-flight step before continuing as new
-    Given the checkpoint event threshold is 5
-    And a flow starts steps "a" and "b" in parallel, calls checkpoint while "b" is in flight, then returns "done"
+    Given the checkpoint event threshold is 20
+    And a flow calls 5 steps "s1" to "s5", starts steps "a" and "b" in parallel, calls checkpoint while "b" is in flight, then returns "done"
     When a run of "parallel" on the temporal runtime completes
-    Then steps "a" and "b" were executed once each
+    Then steps "s1" to "s5", "a" and "b" were executed once each
+    And step "b" completed before the continue-as-new
     And the run was continued as new 1 time
     And the run returns "done"

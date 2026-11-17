@@ -95,11 +95,14 @@ claim-check and encryption, and `Checkpoint` as ContinueAsNew
 Every requirement below binds the `temporal` runtime. The embedded server is
 WP-L5-03 and the conformance suite WP-L5-04.
 
-### REQ-RT-026 — Temporal runtime capabilities
+### REQ-RT-039 — Temporal runtime capabilities
 The temporal runtime shall report capabilities `durable`, `sync_gate_updates`, `continue_as_new` and `polyglot_queues` as true.
 
-### REQ-RT-027 — Steps keep their retry settings
-When a step with `MaxAttempts` greater than 0 fails with a retryable error whose code is not listed as non-retryable, the temporal runtime shall retry the step until an attempt succeeds or `MaxAttempts` attempts have failed, and if all `MaxAttempts` attempts fail, fail the step with the last attempt's error and fail the run.
+### REQ-RT-040 — Tenant required on start
+If a run is started on the temporal runtime without a tenant, then the temporal runtime shall reject the start with code `invalid_argument` before executing any step or recording any run history.
+
+### REQ-RT-041 — Steps keep their retry settings
+When a step with `MaxAttempts` greater than 0 fails with a retryable error whose code is not listed as non-retryable, the temporal runtime shall retry the step until an attempt succeeds or `MaxAttempts` attempts have failed; if all `MaxAttempts` attempts fail, the temporal runtime shall fail the step with the last attempt's error and, when the error is unhandled by the flow, fail the run.
 
 ### REQ-RT-028 — Claim-check threshold
 Where a claim-check threshold is configured, the temporal runtime shall store a run history payload larger than the threshold as a blob.
@@ -111,10 +114,10 @@ Where a run history payload is stored as a blob, the temporal runtime shall read
 The temporal runtime shall encode every run history payload with the payload codec for the run's tenant.
 
 ### REQ-RT-032 — Readable payloads are refused
-If a run history payload without the encoding `binary/encrypted` is loaded into a run, then the temporal runtime shall reject it with code `invalid_argument`.
+If a step or replay reads a run history payload without the encoding `binary/encrypted`, then the temporal runtime shall reject it with code `invalid_argument` and fail the step or replay.
 
 ### REQ-RT-033 — Claim-checked payloads stay bound to their tenant
-If a run reads a run history payload whose blob is not held by the run's tenant, then the temporal runtime shall fail the run with code `not_found`.
+If a step reads a claim-checked run history payload whose blob is not held by the run's tenant, then the temporal runtime shall fail the step with code `not_found` and, when unhandled by the flow, fail the run.
 
 ### REQ-RT-034 — Checkpoint threshold
 Where a checkpoint event threshold is configured, the temporal runtime shall continue a run as new when a checkpoint is requested and the current run history's length in events, as the Temporal SDK reports it, is at least the threshold.
