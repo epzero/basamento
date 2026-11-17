@@ -111,9 +111,9 @@ Feature: Middleware around every chat call
 
   @REQ-MODEL-058 @id:MODEL-058-01
   Scenario: A stream that keeps talking is stopped at the total timeout
-    Given a scripted chat model with a total timeout of 30 seconds that streams 1 delta every 5 seconds starting at 0 seconds
+    Given a scripted chat model with a total timeout of 28 seconds that streams 1 delta every 5 seconds starting at 0 seconds
     When a caller starts an invocation and follows its events
-    And 30 seconds pass
+    And 28 seconds pass
     Then attempt 1 was cancelled with code "timeout"
     And the caller received 6 text events
 
@@ -179,4 +179,4 @@ Feature: Middleware around every chat call
     When a caller invokes "sim-chat"
     Then attempt 1 was cancelled with code "timeout" before the retry middleware started attempt 2
     And the metering recorded 2 attempts while the fallback middleware was not triggered
-    And the call log holds 2 entries and the recording holds 2 attempts of one invocation
+    And the call log holds 2 entries and the recording holds 1 call with 2 attempts

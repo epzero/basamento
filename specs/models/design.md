@@ -66,7 +66,9 @@ start of the attempt and is replaced by the idle timer at the first event
 streaming attempt (REQ-MODEL-058). Each fires once on the fake clock and
 cancels the attempt with `core.CodeTimeout`, `Retryable: true`, so
 REQ-MODEL-048 retries it while attempt budget and the call's total timeout
-(REQ-MODEL-053) allow (MODEL-056-01).
+(REQ-MODEL-053) allow (MODEL-056-01). A timer that fires cancels the attempt,
+not the call; whether another attempt follows is decided by the retry rules
+(REQ-MODEL-048, REQ-MODEL-050, REQ-MODEL-053).
 
 ## 5. Metering and the call log
 
