@@ -18,14 +18,21 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
 
-`internal/config` is `internal/`: `layering.yaml` has no line for it, so the
-layering gate enforces nothing about its imports, and no ADR covers it yet.
-Keep it free of every port implementation and of `go.temporal.io/`: it
-returns validated values and lets `cmd/kit` import the implementations. If
-the implementer wants a rule for it, that is a change to `layering.yaml`,
-which needs an ADR and is not part of this work package. `cmd/kit` already
-may import `platform` and `internal/config` will import `core` only, so the
-existing graph needs no change.
+`internal/gate/layering.go` fails the gate for every package `layering.yaml`
+does not assign to a layer (`package not assigned to a layer in
+layering.yaml`). `layering.yaml` has no line for `internal/config` today, so
+`gate layering` fails as soon as the package exists with the current graph:
+the statement that the current graph needs no change is not true. Before
+WP-L1-05 is implemented, a prerequisite move adds `internal/config: [core]`
+to `layering.yaml`, through its own ADR and layering pull request (changing
+the graph needs an ADR, AGENTS.md). Until that lands, the implementer does
+not create `internal/config`.
+
+Keep `internal/config` free of every port implementation and of
+`go.temporal.io/`: it returns validated values and lets `cmd/kit` import the
+implementations, and it imports `core` only. `cmd/kit` already may import
+`platform`, `internal/config` and `runtime`, so the rest of the graph needs
+no change.
 
 ## 2. Keys, types and defaults
 
@@ -44,7 +51,6 @@ renders and what the environment mapping is derived from.
 | `blob.url` | URL | profile-dependent | scheme per profile |
 | `bus.url` | URL | profile-dependent | scheme per profile |
 | `secrets.url` | URL | profile-dependent | scheme per profile |
-| `runtime.url` | URL | empty | empty or `local://` |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
 
 The embedded profile defaults the four port URLs to
@@ -101,8 +107,11 @@ type Options struct {
 
 Validation errors are `*core.Error` with code `invalid_argument`, a message
 naming the key (`invalid setting "bus.url": scheme "amqp" is not accepted by
-profile "embedded"`) and no part of the value. A value that is itself a URL
-is reported by scheme only, never with its userinfo, query or path
+profile "embedded"`) and no part of the value other than the scheme of a
+URL that parsed. An error never shows the URL's userinfo, host, port, query
+or path, the raw text of an unparseable `net/url` error (which quotes the
+input), or any part of a value that is not a URL (`profile`,
+`log.level`, …): for those only the key and the rule are named
 (REQ-CONFIG-007). Errors carry `Details{"key": key}` for the report.
 
 ## 4. Selection
@@ -127,8 +136,9 @@ validated URL and is never called on an unvalidated one.
 
 1. `config.Load`, then `Validate`. Any error: print every error to stderr,
    exit 1. Nothing is opened (REQ-CONFIG-005).
-2. Select the runtime (`local` when `runtime.url` is empty or `local://`),
-   then open the ports in the order sql, blob, bus, secrets. Each `Open`
+2. Use the runtime the profile selects: temporal, the default runtime for
+   both profiles, in-process for `embedded` (REQ-RT-003). Configuration has
+   no runtime setting. Then open the ports in the order sql, blob, bus, secrets. Each `Open`
    takes a `context.Context`. An error names what failed the same way: close
    what is already open in reverse order, print `port "sql" could not open:
    …`, exit 1 (REQ-CONFIG-021).

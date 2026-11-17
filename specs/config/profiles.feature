@@ -5,9 +5,10 @@ Feature: Profiles and port selection
 
   @REQ-CONFIG-011 @REQ-CONFIG-013 @profile:embedded @id:CONFIG-011-01
   Scenario Outline: The embedded profile accepts its schemes
-    Given the embedded profile with "<scheme>:///data"
-    When the configuration is loaded
-    Then "<key>" is selected as "<implementation>"
+    Given the embedded profile with "<key>" set to "<scheme>:///data"
+    When the configuration is validated
+    Then validation succeeds
+    And "<key>" is selected as "<implementation>"
 
     Examples:
       | key         | scheme        | implementation |
@@ -19,8 +20,9 @@ Feature: Profiles and port selection
   @REQ-CONFIG-012 @REQ-CONFIG-013 @profile:cloud @id:CONFIG-012-01
   Scenario Outline: The cloud profile accepts its schemes
     Given the cloud profile with "<key>" set to "<url>"
-    When the configuration is loaded
-    Then "<key>" is selected as "<implementation>"
+    When the configuration is validated
+    Then validation succeeds
+    And "<key>" is selected as "<implementation>"
 
     Examples:
       | key         | url                              | implementation |

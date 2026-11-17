@@ -78,6 +78,3 @@ When `kit serve` receives a termination signal, it shall stop accepting requests
 
 ### REQ-CONFIG-024 — Stop timeout
 If the requests in flight outlast `shutdown.timeout`, then `kit serve` shall close the ports anyway and exit with status 1.
-
-### REQ-CONFIG-025 — Local runtime
-When the embedded profile starts and `runtime.url` is unset, `kit serve` shall use the `local` runtime.

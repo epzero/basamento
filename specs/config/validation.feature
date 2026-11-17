@@ -24,11 +24,23 @@ Feature: Validating the configuration
     Then validation fails with 1 error naming "sql.url"
 
   @REQ-CONFIG-007 @security @id:CONFIG-007-01
-  Scenario: An error keeps a secret value out
+  Scenario: An error keeps every part of the value out but the scheme
     Given the environment sets "KIT_BUS_URL" to "nats://ana:hunter2@nats.example.test:4222"
     When the configuration is validated
     Then validation fails with 1 error naming "bus.url"
-    And the error text does not contain "hunter2"
+    And the error text does not contain "ana", "hunter2", "nats.example.test", "4222", "/bus" or "s3cr3t"
+
+  @REQ-CONFIG-007 @REQ-CONFIG-017 @security @id:CONFIG-007-02
+  Scenario Outline: An unparseable URL and a non-URL value are not echoed
+    Given a configuration file sets "<key>" to "<value>"
+    When the configuration is validated
+    Then validation fails with 1 error naming "<key>"
+    And the error text does not contain "ana", "hunter2", "/bus" or "secret-profile"
+
+    Examples:
+      | key     | value                           |
+      | sql.url | postgres://ana:hunter2@[bad     |
+      | profile | secret-profile                  |
 
   @REQ-CONFIG-017 @id:CONFIG-017-01
   Scenario: An unparseable port URL is rejected
@@ -72,6 +84,20 @@ Feature: Validating the configuration
       | blob.url    | bbolt:///var/lib/kit/blobs          |
       | bus.url     | amqp://bus.example.test             |
       | secrets.url | vault://vault.example.test          |
+
+  @REQ-CONFIG-014 @profile:cloud @id:CONFIG-014-02
+  Scenario Outline: The cloud profile rejects the embedded schemes
+    Given the cloud profile with "<key>" set to "<scheme>:///data"
+    When the configuration is validated
+    Then validation fails with 1 error naming "<key>"
+    And the error text may name the scheme "<scheme>" and does not contain "/data"
+
+    Examples:
+      | key         | scheme        |
+      | sql.url     | sqlite        |
+      | blob.url    | file          |
+      | bus.url     | nats-embedded |
+      | secrets.url | localsecrets  |
 
   @REQ-CONFIG-008 @security @id:CONFIG-008-01
   Scenario: The report masks secret settings
