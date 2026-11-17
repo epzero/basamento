@@ -36,7 +36,7 @@ Feature: A long conversation keeps working
     And each turn of conversation "c1" is the coordinator's Await, Select, Step and Child
     And 3 turns of conversation "c1" have completed
     When ana sends "One more question" and the turn completes
-    Then the coordinator continued as new 5 times
+    Then the coordinator continued as new 4 times
     And the coordinator run is named "conv-c1"
     And the coordinator run started 4 child runs, one per turn
 
