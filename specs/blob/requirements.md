@@ -21,7 +21,7 @@ If a call names a key that is not a well-formed content key, then the blob store
 When a blob is read, the blob store shall return exactly the bytes that were written under its content key.
 
 ### REQ-BLOB-005 — Writes are idempotent
-When content is written under a content key that already holds a blob of the same tenant, the blob store shall succeed and keep the existing blob and its content type unchanged.
+When the same content is written under a content key that already holds a blob of the same tenant, the blob store shall succeed and keep the existing blob and its content type unchanged.
 
 ### REQ-BLOB-006 — Missing blobs
 If a read, a deletion or a blob URL request names a content key under which the calling tenant has no blob, then the blob store shall fail the call with code `not_found`.

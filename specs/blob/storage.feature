@@ -33,6 +33,14 @@ Feature: Storing, reading and deleting blobs
     Then the call fails with code "invalid_argument"
     And tenant "acme" has no blob under the content key of "big"
 
+  @REQ-BLOB-002 @id:BLOB-002-03
+  Scenario: Content mismatch under an existing key is rejected without harming the stored blob
+    Given tenant "acme" has stored "hello" as "text/plain"
+    When tenant "acme" stores "world" under the content key of "hello"
+    Then the call fails with code "invalid_argument"
+    And tenant "acme" reads "hello" under the content key of "hello"
+    And the blob of tenant "acme" under the content key of "hello" has content type "text/plain"
+
   @REQ-BLOB-003 @security @id:BLOB-003-01
   Scenario Outline: Malformed keys are rejected
     When tenant "acme" reads key "<key>"

@@ -55,9 +55,9 @@ Feature: Blob URLs
   @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @id:BLOB-016-02
   Scenario: A proxied blob URL of one tenant cannot be turned into another tenant's
     Given tenant "acme" has stored "hello" as "text/plain"
-    And tenant "globex" has stored "world" as "text/plain"
+    And tenant "globex" has stored "hello" as "text/markdown"
     And tenant "acme" has a blob URL for the content key of "hello" with a lifetime of 15 minutes
-    When a client fetches the blob URL with its tenant replaced by "globex" and its key by the content key of "world"
+    When a client fetches the blob URL with its tenant replaced by "globex"
     Then the response has status 403 and an empty body
 
   @REQ-BLOB-008 @id:BLOB-008-03

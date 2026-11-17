@@ -13,9 +13,11 @@ Decisions the implementer of WP-L1-02 (`platform/blob`) follows. The port is
   source error or a cancelled context it aborts the `gocloud.dev/blob` writer
   (cancel its context before `Close`), so no object and no temporary file
   remain (REQ-BLOB-002, REQ-BLOB-009).
-- A `Put` for a key the tenant already holds succeeds without rewriting the
-  object; the first content type stays (REQ-BLOB-005). An empty content type
-  is stored as `application/octet-stream` (REQ-BLOB-014).
+- A `Put` for a key the tenant already holds still hashes the reader so a
+  content mismatch fails with `invalid_argument` without touching the existing
+  blob (REQ-BLOB-002); when the hash matches, `Put` succeeds without rewriting
+  the object and the first content type stays (REQ-BLOB-005). An empty content
+  type is stored as `application/octet-stream` (REQ-BLOB-014).
 
 ## Tenancy
 
