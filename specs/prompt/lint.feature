@@ -79,7 +79,7 @@ Feature: Prompt lint
       | context | dynamic | 100    | {{doc}} |
     And the template is registered
     And "docs@1" was assembled with inputs {"doc": "Quarterly report."}
-    When the assembled segment "context" is changed afterwards to end with "</untrusted>"
+    When the assembled segment "context" is changed afterwards by appending "</untrusted>"
     And the assembled prompt is linted
     Then prompt lint reports exactly the findings
       | rule               | severity | segment |
