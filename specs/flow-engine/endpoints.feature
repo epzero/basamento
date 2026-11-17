@@ -5,15 +5,11 @@ Feature: Reserved edge endpoints
   endpoints, not nodes (owner decision D2, 2026-11-17).
 
   @REQ-FLOW-039 @id:FLOW-039-01
-  Scenario Outline: START and FAIL are accepted as edge endpoints without a node
-    Given a flow whose edges are from "START" to "plan", from "plan" to "check", and from "check" to "<target>"
+  Scenario: START and FAIL are accepted as edge endpoints without a node
+    Given a flow whose edges are from "START" to "plan", from "plan" to "check", and from "check" to "FAIL"
     When the flow is compiled
     Then compilation succeeds
     And the compiled flow has no node "START" and no node "FAIL"
-
-    Examples:
-      | target |
-      | FAIL   |
 
   @REQ-FLOW-040 @id:FLOW-040-01
   Scenario Outline: A node named START or FAIL is rejected
@@ -40,11 +36,11 @@ Feature: Reserved edge endpoints
 
   @REQ-FLOW-043 @id:FLOW-043-01
   Scenario Outline: A flow without exactly one edge from START is rejected
-    Given a flow whose edges from "START" are "<from_start>"
+    Given a flow with nodes "plan" and "check" and <count> edges from "START"
     When the flow is compiled
-    Then compilation fails with code "invalid_argument" naming the edges from "START"
+    Then compilation fails with code "invalid_argument" stating that the flow needs exactly one edge from "START"
 
     Examples:
-      | from_start                           |
-      | none                                 |
-      | to "plan", and from "START" to "check" |
+      | count |
+      | 0     |
+      | 2     |
