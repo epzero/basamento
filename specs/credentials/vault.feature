@@ -2,7 +2,7 @@
 Feature: Credential values
   A tenant's vault holds named secrets. A value is put, replaced and deleted,
   and it is never read back: a caller holds a `cred://` reference and resolves
-  it at the moment of use. Listings expose names and times only.
+  it at the moment of use. Listings expose names only.
 
   Background:
     Given the clock is frozen at "2026-10-01T09:00:00Z"
@@ -54,6 +54,20 @@ Feature: Credential values
     Then the resolution fails with code "invalid_argument"
     And no value is returned
 
+  @security @REQ-CRED-005 @id:CRED-005-03
+  Scenario: A deletion without a tenant is rejected
+    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    When the credential store deletes "vendor/anthropic" without a tenant
+    And the reference "cred://vendor/anthropic" is resolved for tenant "acme"
+    Then the deletion fails with code "invalid_argument"
+    And the resolution returns "sk-live-4f9a2c"
+
+  @security @REQ-CRED-005 @id:CRED-005-04
+  Scenario: A listing without a tenant is rejected
+    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    When the credential store lists credentials without a tenant
+    Then the listing fails with code "invalid_argument"
+
   @REQ-CRED-006 @id:CRED-006-01
   Scenario Outline: A valid credential name is accepted
     Given the value "sk-live-4f9a2c" is put as "<name>" for tenant "acme"
@@ -92,26 +106,17 @@ Feature: Credential values
     Then the listing of tenant "acme" names "vendor/anthropic"
     And the listing of tenant "acme" contains no "sk-live-4f9a2c"
 
-  @REQ-CRED-015 @id:CRED-015-01
-  Scenario: A listing carries each credential's name and times
+  @security @REQ-CRED-015 @id:CRED-015-01
+  Scenario: A listing returns the tenant's credential names and never a value
     Given the value "sk-a" is put as "vendor/a" for tenant "acme"
-    And the clock advances by 5 minutes
     And the value "sk-b" is put as "vendor/b" for tenant "acme"
     When tenant "acme" lists its credentials
-    Then the listing of tenant "acme" is exactly:
-      | name     | created_at           | updated_at           |
-      | vendor/a | 2026-10-01T09:00:00Z | 2026-10-01T09:00:00Z |
-      | vendor/b | 2026-10-01T09:05:00Z | 2026-10-01T09:05:00Z |
-
-  @REQ-CRED-015 @id:CRED-015-02
-  Scenario: Replacing a value keeps the creation time and changes the last-updated time
-    Given the value "sk-old" is put as "vendor/a" for tenant "acme"
-    When the clock advances by 5 minutes
-    And the value "sk-new" is put as "vendor/a" for tenant "acme"
-    And tenant "acme" lists its credentials
-    Then the listing of tenant "acme" is exactly:
-      | name     | created_at           | updated_at           |
-      | vendor/a | 2026-10-01T09:00:00Z | 2026-10-01T09:05:00Z |
+    Then the listing of tenant "acme" names:
+      | name     |
+      | vendor/a |
+      | vendor/b |
+    And the listing of tenant "acme" contains no "sk-a"
+    And the listing of tenant "acme" contains no "sk-b"
 
   @REQ-CRED-016 @id:CRED-016-01
   Scenario: Listings are ordered by the bytes of the names

@@ -14,7 +14,7 @@ authorization are WP-L8's; this capability is the store itself.
 ## Values
 
 ### REQ-CRED-001 — Round trip
-When a credential value is put under a name for a tenant, the credential store shall return that value when the reference to that name is resolved for that tenant.
+The credential store shall resolve every reference `cred://<name>` for a tenant to the value most recently put under that name for that tenant.
 
 ### REQ-CRED-002 — Replacement
 When a credential value is put under a name a tenant already stores, the credential store shall replace the stored value.
@@ -55,8 +55,8 @@ When the same credential name is put for two tenants, the credential store shall
 ### REQ-CRED-014 — Write-only
 The credential store shall expose a credential value only as the return of a resolution.
 
-### REQ-CRED-015 — Listing metadata
-When a caller lists credentials, the credential store shall return each credential's name, creation time and last-updated time.
+### REQ-CRED-015 — Listing names
+When a caller lists credentials, the credential store shall return the tenant's credential names and never a value.
 
 ### REQ-CRED-016 — Listing order
 When a caller lists credentials, the credential store shall return them ordered by the bytes of their names.
@@ -64,16 +64,13 @@ When a caller lists credentials, the credential store shall return them ordered 
 ## Audit
 
 ### REQ-CRED-017 — Audit of a use
-When a credential reference is resolved, the credential store shall record an audit event carrying the principal, the credential, the run, the step and the outcome.
+When a credential reference is resolved for a tenant, the credential store shall hand the audit sink it is given an audit record carrying the principal, the credential, the run, the step and the outcome, with empty values for any of principal, run or step absent from the context.
 
 ### REQ-CRED-018 — Audit of a failed use
-If a resolution fails, then the credential store shall record an audit event carrying the principal, the requested credential, the run, the step and the failure.
+If a resolution of a well-formed reference with a tenant in context fails, then the credential store shall hand the audit sink it is given an audit record carrying the principal, the requested credential, the run, the step and the failure, and hand it no record when a call carries no tenant or a malformed reference.
 
 ### REQ-CRED-019 — No value in audit, errors or logs
-The credential store shall write a credential value into no audit event, error or log record.
-
-### REQ-CRED-020 — Audit failure fails the use
-If the audit event of a resolution cannot be recorded, then the credential store shall fail the resolution with code `internal` and return no value.
+The credential store shall write a credential value into no audit record, error or log record.
 
 ## Storage
 
@@ -84,7 +81,7 @@ When a credential value is put, the credential store shall store it only as the 
 When the credential store reopens on the same stored credentials and the same master key, the credential store shall resolve credentials stored before the restart.
 
 ### REQ-CRED-023 — Undecryptable stored credential
-If the Secrets port rejects a stored credential's ciphertext, then the credential store shall fail the resolution with code `internal` and return no value.
+If the Secrets port fails to decrypt a stored credential's ciphertext with code `invalid_argument`, then the credential store shall fail the resolution with code `internal` and return no value.
 
 ### REQ-CRED-024 — Rotation between uses
 When a credential value is replaced while a run is in flight, the credential store shall resolve the new value for that run's later uses.
@@ -94,3 +91,6 @@ When a credential value is replaced while a resolution is in flight, the credent
 
 ### REQ-CRED-026 — External store
 Where the credential store is configured with an external store, the credential store shall keep every stored credential only in that external store.
+
+### REQ-CRED-027 — Key service unavailable
+If the key service cannot be reached when a credential is put or resolved, then the credential store shall fail the call with code `unavailable` and return no value.

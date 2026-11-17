@@ -15,7 +15,7 @@ data key, keyset) apply here but are not respecified.
 | Store | Implements `platform.Credentials` over a backing store, the Secrets port, an auditor and the clock. |
 | Backing store | `Backend`: where encrypted credential rows live. One SQL backend ships here; an external secret manager implements the same interface. It never sees a plaintext value. |
 | Secrets port | `platform.Secrets`: `Encrypt` on put, `Decrypt` on resolve. The master key, data keys and keysets belong to WP-L1-04 and never to this package. |
-| Auditor | `Auditor`: one audit event per resolution. The SQL auditor ships here; it appends to `credential_audit`. |
+| Auditor | `Auditor`: the audit sink interface the store is given; it receives one `AuditRecord` per resolution of a well-formed reference with a tenant in context. |
 | Use context | `Use`: principal, run and step, carried by the context of a resolution. |
 
 The constructor is `New(backend Backend, auditor Auditor, secrets platform.Secrets, clock core.Clock) *Store`;
@@ -51,20 +51,7 @@ CREATE TABLE credentials (
   updated_at TIMESTAMP NOT NULL,
   PRIMARY KEY (tenant_id, name)
 );
-
-CREATE TABLE credential_audit (
-  tenant_id  TEXT NOT NULL,
-  principal  TEXT NOT NULL,
-  credential TEXT NOT NULL,
-  run_id     TEXT NOT NULL,
-  step_id    TEXT NOT NULL,
-  outcome    TEXT NOT NULL,
-  at         TIMESTAMP NOT NULL
-);
 ```
-
-The audit table has no value column. Audit rows are append-only and are not
-deleted with the credential.
 
 The store keeps no decrypted value and no ciphertext after a call returns.
 Each resolution reads the row again, so a replacement is seen at once
@@ -88,14 +75,13 @@ caches nothing.
 
 | Call | Does |
 | --- | --- |
-| `Put(ctx, name, value)` | Requires a tenant; validates the name; encrypts; upserts the row, setting `created_at` and `updated_at` to the clock's time. On an existing name the backend keeps the stored `created_at` and updates `ciphertext` and `updated_at`. No audit event. |
-| `Resolve(ctx, ref)` | Requires a tenant; parses the reference; reads the row; decrypts; audits; returns the value. On a failure it audits and returns the failure. |
-| `Delete(ctx, name)` | Requires a tenant; validates the name; deletes the tenant's row. No audit event. |
-| `List(ctx)` | Requires a tenant; returns the tenant's rows as `platform.CredentialInfo`, sorted by name. |
-| `Names(ctx)` | Requires a tenant; returns the names of `List` in the same order. It stays in the port for callers that need no metadata. |
+| `Put(ctx, name, value)` | Requires a tenant; validates the name; encrypts; upserts the row, setting `created_at` and `updated_at` to the clock's time. On an existing name the backend keeps the stored `created_at` and updates `ciphertext` and `updated_at`. No audit record. |
+| `Resolve(ctx, ref)` | Requires a tenant; parses the reference; reads the row; decrypts; hands an audit record to the audit sink; returns the value. On a failure after reference parsing it hands a failure audit record to the audit sink and returns the failure. |
+| `Delete(ctx, name)` | Requires a tenant; validates the name; deletes the tenant's row. No audit record. |
+| `Names(ctx)` | Requires a tenant; returns the tenant's credential names sorted by the bytes of their UTF-8 names, and never a value (REQ-CRED-012, REQ-CRED-015, REQ-CRED-016). |
 
 `Resolve` is the only call that decrypts and the only call that returns a
-value. `Put`, `Delete`, `List` and `Names` never call `Secrets.Decrypt`
+value. `Put`, `Delete` and `Names` never call `Secrets.Decrypt`
 (REQ-CRED-014). The resolved slice belongs to the caller; the store retains no
 copy.
 
@@ -108,15 +94,16 @@ store itself writes the plaintext nowhere.
 
 ## 5. Tenancy
 
-The tenant comes from the context, through the accessor the SQL store uses for
-every repository call (WP-L1-01). The credential store requires it at the
-start of every public method, so no backend, Secrets call or audit write
-happens without one (REQ-CRED-005). If the SQL store has not exported the
-accessor, the implementer lands that small change in a pull request of its own
-before this work package, as with the port change in §8.
+The tenant comes from the context, through the shared tenant context accessor
+used across `platform` ports. The credential store requires it at the start of
+every public method, so no backend, Secrets call or audit record happens
+without one (REQ-CRED-005). If the shared tenant context accessor has not yet
+landed in `core` or `platform`, the implementer lands that small prerequisite
+change first in a pull request of its own before this work package; where it
+lives (`core` vs `platform`) is an open question for the architect.
 
-Every query and every audit insert is scoped to that tenant by the SQL store;
-an external backend scopes its rows by the same tenant. The row key is
+Every SQL query and external-backend operation is scoped to that tenant. The
+row key is
 `(tenant_id, name)`. Another tenant's credential is not found, with the same
 code and message as one that was never stored (REQ-CRED-010, REQ-CRED-011);
 delete, list and resolve never reveal that it exists.
@@ -133,24 +120,39 @@ type Use struct {
 }
 func WithUse(ctx context.Context, u Use) context.Context
 func UseFrom(ctx context.Context) Use
+
+type AuditRecord struct {
+    Tenant     string
+    Principal  string
+    Credential string
+    RunID      string
+    StepID     string
+    Outcome    string
+    At         time.Time
+}
+
+type Auditor interface {
+    Record(ctx context.Context, r AuditRecord)
+}
 ```
 
-For every resolution of a well-formed reference, successful or not, the store
-calls `Auditor.Record` with the principal, the credential name, the run, the
-step, the outcome and the clock's time (REQ-CRED-017, REQ-CRED-018). Outcomes
-are `resolved`, `not_found`, `internal` and `unavailable`.
+For every resolution of a well-formed reference with a tenant in context,
+successful or not, the store hands `Auditor.Record` an `AuditRecord` with the
+tenant, the principal, the credential name, the run, the step, the outcome and
+the clock's time (REQ-CRED-017, REQ-CRED-018). Outcomes are `resolved`,
+`not_found`, `internal` and `unavailable`. When the context carries no `Use`
+(or omits any of principal, run or step), `UseFrom(ctx)` yields empty strings
+for those fields and the resolution still proceeds and audits those empty
+fields (REQ-CRED-017).
 
 A malformed reference is rejected before a credential is named and is not
-audited. A call without a tenant is rejected before any audit row can be
-scoped, and is not audited.
+audited. A call without a tenant is rejected before any audit record can be
+scoped, and is not audited (REQ-CRED-018).
 
-The audit write is part of the use: if `Record` fails, the resolution fails
-with code `internal` and returns no value, even when the value was already
-decrypted (REQ-CRED-020). The value is never written to the event; the event
-carries only the fields above (REQ-CRED-019).
-
-The SQL auditor appends one row to `credential_audit`, using the tenant from
-the context.
+The value is never written to the audit record; the record carries only the
+fields above (REQ-CRED-019). This package defines no audit SQL table and no
+shared `platform` audit port: where audit records are finally persisted is
+WP-L8-02's and the architect's.
 
 ## 7. Backing stores
 
@@ -173,9 +175,8 @@ type Backend interface {
 }
 ```
 
-The SQL backend is `NewSQLBackend(store)`; the SQL auditor is
-`NewSQLAuditor(store)`. The SQL backend writes the `credentials` table through
-the SQL store. An external secret manager (HashiCorp Vault KV, a cloud secret
+The SQL backend is `NewSQLBackend(store)`. The SQL backend writes the
+`credentials` table through the SQL store. An external secret manager (HashiCorp Vault KV, a cloud secret
 manager) implements `Backend` over its own store: it keeps the same `Record`
 bytes under a tenant-scoped path and returns them; it never receives a
 plaintext value because the store encrypts before `Upsert` and decrypts after
@@ -184,32 +185,7 @@ package and add no spec behavior; wiring (WP-L1-05) selects one. The gate
 proves the port with a simulated external backend in `internal/bdd`; no live
 vendor call runs in the gate.
 
-## 8. Port change
-
-The existing `platform.Credentials` port has `Put`, `Resolve`, `Delete` and
-`Names`; `Names` cannot carry the creation and last-updated times the listing
-requires (REQ-CRED-015). Add, additively, to `platform/platform.go`:
-
-```go
-// CredentialInfo describes a stored credential without its value.
-type CredentialInfo struct {
-    Name      string
-    CreatedAt time.Time
-    UpdatedAt time.Time
-}
-
-// In Credentials:
-// List returns the tenant's credentials, ordered by name, with their metadata
-// and never their values.
-List(ctx context.Context) ([]CredentialInfo, error)
-```
-
-`Names` stays and means the names of `List`. `platform/platform.go` is outside
-this work package's owned directory, so the implementer lands this change
-first in a pull request of its own; the credentials implementation and the
-scenarios follow on top of it.
-
-## 9. Errors
+## 8. Errors
 
 Codes come from `core`; no new code is added.
 
@@ -220,9 +196,8 @@ Codes come from `core`; no new code is added.
 | Malformed reference (REQ-CRED-009) | `invalid_argument` | `invalid credential reference` |
 | Resolution names no credential of the tenant (REQ-CRED-010, REQ-CRED-011) | `not_found` | `credential not found` |
 | Delete names no credential of the tenant (REQ-CRED-004) | `not_found` | `credential not found` |
-| The Secrets port rejects the stored ciphertext (REQ-CRED-023) | `internal` | `stored credential cannot be decrypted` |
-| The key service is unavailable | `unavailable` | the Secrets port's error, naming the scheme only |
-| The audit event cannot be recorded (REQ-CRED-020) | `internal` | `credential audit cannot be recorded` |
+| The Secrets port rejects the stored ciphertext with `invalid_argument` (REQ-CRED-023) | `internal` | `stored credential cannot be decrypted` |
+| The key service is unavailable during put or resolve (REQ-CRED-027) | `unavailable` | the Secrets port's error, naming the scheme only |
 | An external backend is unreachable | `unavailable` | the backend's error, naming the store only |
 
 Missing and another tenant's credential share code and message, so a caller
@@ -230,7 +205,7 @@ cannot tell them apart. Errors use fixed messages and never echo the value,
 the ciphertext or a raw reference. Log records may carry the tenant, the
 credential name and the outcome, never the value or the ciphertext.
 
-## 10. Test support
+## 9. Test support
 
 The BDD steps live in `internal/bdd/steps/credentials.go` and helpers beside
 it, in the `internal/bdd` package:
@@ -238,10 +213,11 @@ it, in the `internal/bdd` package:
 - Each scenario gets a fresh SQLite file opened through the SQL store with
   this package's migration set, a simulated key service holding the named
   master key (reusing the secrets steps' helper), the fake clock from
-  `core/coretest`, and the SQL auditor.
-- Every resolution in the steps is made in a use context; the driver defaults
-  it to principal `human:ana`, run `r1` and step `s1` unless the scenario
-  names another. A scenario that asserts the audit names its fields.
+  `core/coretest`, and a **recording `Auditor` sink** in `internal/bdd` that
+  stores the `AuditRecord` values per tenant for the audit assertions.
+- When a step names a principal, run and step, the driver attaches `Use` to
+  the context; when a step does not name them, the driver attaches no `Use`,
+  so `UseFrom(ctx)` returns empty strings.
 - A **simulated external store** implements `credentials.Backend` in
   `internal/bdd`: it keeps records per tenant and exposes what it stored, so a
   scenario can assert ciphertext-only rows and that no SQL credential row
@@ -249,12 +225,19 @@ it, in the `internal/bdd` package:
 - A **gated Secrets wrapper** in `internal/bdd` signals when a resolution
   reaches `Decrypt` and waits until the scenario releases it; it produces the
   in-flight replacement of REQ-CRED-025 deterministically.
-- A **failing auditor** in `internal/bdd` returns an error for REQ-CRED-020.
-- Inspection steps read the `credentials` and `credential_audit` rows through
-  the SQL store; they are test helpers, not a production API.
+- Inspection steps read the `credentials` rows through the SQL store and the
+  recorded audit records from the recording `Auditor` sink; they are test
+  helpers, not a production API.
 
 Unit tests in `platform/credentials` use fakes defined in their own `_test.go`
 files. No test double enters production code, and no new test-only package is
 added: `core/coretest` remains the only entry in `layering.yaml`'s
 `test_only`, importable from `_test.go` files and from `internal/bdd`. The
 gate uses no wall clock, no unseeded randomness and no live vendor call.
+
+## Open questions
+
+1. **Richer listing metadata on `platform.Credentials` (architect):** `platform.Credentials` in `platform/platform.go` currently declares `Names(ctx context.Context) ([]string, error)` (names only). Should the port stay names-only, or should the architect add a `List(ctx context.Context) ([]CredentialInfo, error)` method carrying `CreatedAt` and `UpdatedAt` timestamps in a separate contract change?
+2. **Final audit destination and shared audit port (WP-L8-02 / architect):** WP-L1-06 hands each credential-use `AuditRecord` to an injected `Auditor` sink (`platform/credentials`), tested with a recording sink in `internal/bdd`. Where audit records are finally persisted (and whether a shared `Auditor` port belongs in `platform` or `auth` under WP-L8-02) is left to WP-L8-02 and the architect.
+3. **Audit-write failure policy (owner / architect):** If the production audit store introduced by WP-L8-02 can fail when recording a credential resolution, should `Resolve` fail closed with code `internal` and return no secret value, or return the value and report the audit failure? `REQ-CRED-020` and `CRED-020-01` have been removed pending that policy decision.
+4. **Package home of the shared tenant context accessor (architect):** `platform/sql` (WP-L1-01), `platform/secrets` (WP-L1-04), `platform/credentials` (WP-L1-06), and `stream/eventlog` (WP-L6-01) all read the calling tenant from `context.Context` and reject missing-tenant calls with `invalid_argument`. Should the shared `Tenant` context key and accessor live in `core` or in `platform`?

@@ -18,6 +18,6 @@ Feature: External credential stores
 
   @security @REQ-CRED-026 @REQ-CRED-021 @id:CRED-026-02
   Scenario: An external store holds only ciphertext
-    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    When the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
     Then the simulated external store holds no plaintext of "sk-live-4f9a2c"
     And the stored ciphertext in the simulated external store decrypts through the secrets port to "sk-live-4f9a2c"

@@ -9,6 +9,17 @@ Feature: Credential references and tenancy
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a credential store over an empty SQL store with master key "mk-1"
 
+  @REQ-CRED-008 @id:CRED-008-01
+  Scenario Outline: A reference of the form cred:// followed by a valid name resolves
+    Given the value "sk-live-4f9a2c" is put as "<name>" for tenant "acme"
+    When the reference "<ref>" is resolved for tenant "acme"
+    Then the resolution returns "sk-live-4f9a2c"
+
+    Examples:
+      | name           | ref                   |
+      | a              | cred://a              |
+      | Vendor.A_1/x-y | cred://Vendor.A_1/x-y |
+
   @security @REQ-CRED-009 @id:CRED-009-01
   Scenario Outline: A malformed reference is rejected
     Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
