@@ -25,11 +25,11 @@ the same change that first uses it.
 | **Invocation** | One call of a model (or remote service) through the invocation contract: start, events, result, cancel, lookup. |
 | **Provider** | An adapter that reaches a vendor's models through the invocation contract. |
 | **Simulated provider** | A deterministic stand-in for a provider, used by the gate. It never calls a vendor. A **scripted model** is a simulated chat model that replays a fixed sequence of deltas. |
-| **Attempt** | One try of a logical call that reaches a model, counted against the call's attempt budget; every attempt carries the call's client ref. |
-| **Structured-output ladder** | The rungs a chat call tries, in order, to make the model answer with JSON that satisfies the output schema: native schema, JSON mode, forced tool call, and local JSON repair on the last attempt. |
+| **Attempt** | One try of a logical call — either a model invocation or an in-process local JSON repair — counted against the call's attempt budget. |
+| **Structured-output ladder** | The rungs a chat call tries, in order, to make the model answer with JSON that satisfies the output schema: native schema, JSON mode, forced tool call, and local JSON repair after the last supported rung. |
 | **Rung** | One step of the structured-output ladder; a model supports some rungs and not others. |
 | **Call** | One logical chat call made through the middleware: a result or an error, whatever its attempts. |
-| **Call log** | What the model layer records at the open of every call: one entry per attempt, with its metadata and no secret and no content. |
+| **Call log** | What the model layer records for every call: one entry per attempt, carrying the call's client ref and attempt metadata, with no secret and no content. |
 | **Model capability** | What a model can do: `chat`, `embed`, `image.generate`, `video.generate`, `audio.tts` and so on. |
 | **Locality** | Where a model can run: `cloud`, `machine_local` for apps and servers on the machine `kit` runs on, or `worker`. |
 | **Worker** | A `kit worker` process on any machine that declares the models and tools it serves and pulls only that work. A worker is **present** from joining until it leaves or stops sending heartbeats; it is **draining** (finishing what it holds, taking no more) or **paused** (taking no work, staying) when told so. |
