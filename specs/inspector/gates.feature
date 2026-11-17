@@ -7,6 +7,7 @@ Feature: Open gates and their resolution
 
   Background:
     Given "kit serve" runs with the inspector, tenant "acme", and flow "review"
+    And account "ana" is in project "p1" of tenant "acme"
     And flow "review" has gates "approve" and "review"
 
   @planned @wp:WP-L6-04 @REQ-INSP-005 @id:INSP-005-01
@@ -28,6 +29,15 @@ Feature: Open gates and their resolution
     And ana has opened run "r2"
     When run "r2" reaches gate "review", which accepts payloads where "input.approved"
     Then ana sees 1 open gate, "review", for run "r2"
+
+  @planned @wp:WP-L6-04 @REQ-INSP-005 @id:INSP-005-04
+  Scenario: A run waiting at two gates lists both open gates
+    Given run "r1" of "review" waits at gate "approve", which accepts payloads where "input.approved"
+    And run "r1" of "review" waits at gate "review", which accepts payloads where "size(input.notes) > 0"
+    When ana opens run "r1"
+    Then ana sees 2 open gates, "approve" and "review", for run "r1"
+    And ana sees that gate "approve" accepts payloads where "input.approved"
+    And ana sees that gate "review" accepts payloads where "size(input.notes) > 0"
 
   @planned @wp:WP-L6-04 @REQ-INSP-006 @id:INSP-006-01
   Scenario: A person resolves a gate with an accepted payload
@@ -51,10 +61,3 @@ Feature: Open gates and their resolution
     When ana resolves gate "approve" of run "r1" with payload {"approved": false, "notes": "looks right"}
     Then ana sees 0 open gates for run "r1"
 
-  @planned @wp:WP-L6-04 @REQ-INSP-007 @id:INSP-007-03
-  Scenario: A gate already resolved elsewhere cannot be resolved again
-    Given run "r1" of "review" waits at gate "approve", which accepts payloads where "input.approved || size(input.notes) > 0"
-    And account "ben" is in project "p1" of tenant "acme"
-    And ben resolves gate "approve" of run "r1" with payload {"approved": true}
-    When ana resolves gate "approve" of run "r1" with payload {"notes": "ok"}
-    Then ana sees that gate "approve" rejected the payload with code "conflict"

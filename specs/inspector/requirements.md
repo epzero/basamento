@@ -30,12 +30,12 @@ When a person opens a run, the inspector shall show its stored durable events in
 When a run waits at one or more gates, the inspector shall show each open gate with its node id and the payload it accepts.
 
 ### REQ-INSP-006 — Resolving a gate
-When a person resolves an open gate with a payload, the inspector shall submit the payload to the gate and nothing else.
+When a person resolves an open gate with a payload, the inspector shall submit that payload to the gate.
 
 ### REQ-INSP-007 — A rejected payload is explained
 If the gate rejects a payload, then the inspector shall explain the rejection with the API's reason and keep the gate listed as open.
 
-### REQ-INSP-008 — Failed and cancelled runs
+### REQ-INSP-008 — Failed runs
 Where a run has state `failed`, the inspector shall show the state `failed` and the run's error code.
 
 ### REQ-INSP-009 — Cancelled runs

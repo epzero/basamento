@@ -7,22 +7,21 @@ Feature: The runs a person may see
 
   Background:
     Given "kit serve" runs with the inspector, tenant "acme", and flows "review" and "assistant"
-    And run "r1" of "review" is running with 3 events
-    And run "r2" of "review" is completed with 5 events
-    And run "r3" of "assistant" has state "failed" with error code "vendor_error"
+    And account "ana" is in project "p1" of tenant "acme"
+    And run "r1" of "review" is running in project "p1" with 3 events
+    And run "r2" of "review" is completed in project "p1" with 5 events
+    And run "r3" of "assistant" in project "p1" has state "failed" with error code "vendor_error"
 
   @planned @wp:WP-L6-04 @security @REQ-INSP-001 @REQ-INSP-002 @id:INSP-001-01
   Scenario: The list holds only the person's own runs
     Given tenant "globex" has run "g1" of their flow "review"
-    And account "ana" is in project "p1" of tenant "acme"
     When ana opens the inspector
-    Then ana sees the runs "r1", "r2" and "r3", each with its flow and its state
+    Then ana sees the runs "r1", "r2" and "r3", each with its id, flow and state
     And ana does not see run "g1" or any run of tenant "globex"
 
-  @planned @wp:WP-L6-04 @REQ-INSP-001 @REQ-INSP-002 @id:INSP-001-02
+  @planned @wp:WP-L6-04 @security @REQ-INSP-001 @id:INSP-001-02
   Scenario: Another project of the same tenant is not listed
-    Given account "ana" is in project "p1" of tenant "acme"
-    And run "r4" of "review" is in project "p2" of tenant "acme"
+    Given run "r4" of "review" is in project "p2" of tenant "acme"
     When ana opens the inspector
     Then ana sees the runs "r1", "r2" and "r3"
     And ana does not see run "r4"
@@ -36,7 +35,7 @@ Feature: The runs a person may see
 
   @planned @wp:WP-L6-04 @security @REQ-INSP-002 @id:INSP-002-01
   Scenario: A link to another tenant's run is denied without revealing it
-    Given account "ana" is in project "p1" of tenant "acme"
+    Given tenant "globex" has run "g1" of their flow "review"
     When ana opens a link to run "g1" of tenant "globex"
     Then ana is denied access to run "g1"
     And ana sees no flow, state, event or gate of run "g1"
@@ -69,7 +68,7 @@ Feature: The runs a person may see
 
   @planned @wp:WP-L6-04 @REQ-INSP-009 @id:INSP-009-01
   Scenario: A cancelled run is shown as cancelled, with no error code
-    Given run "r5" of "assistant" has state "cancelled"
+    Given run "r5" of "assistant" in project "p1" has state "cancelled"
     When ana opens run "r5"
     Then ana sees the state "cancelled" for run "r5"
     And ana sees no error code for run "r5"
