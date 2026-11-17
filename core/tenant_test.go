@@ -58,8 +58,9 @@ func TestTenantFrom(t *testing.T) {
 }
 
 func TestTenantFromNil(t *testing.T) {
-	//lint:ignore SA1012 the contract is that a nil context reports no tenant.
-	if id, ok := core.TenantFrom(nil); id != "" || ok {
+	// The contract is that a nil context reports no tenant.
+	var nilCtx context.Context
+	if id, ok := core.TenantFrom(nilCtx); id != "" || ok {
 		t.Fatalf("TenantFrom(nil) = (%q, %v), want (\"\", false)", id, ok)
 	}
 }
