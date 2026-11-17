@@ -39,7 +39,7 @@ While several state changes of one run are recorded at the same time, the system
 If the process stops while a state change of a run records its durable events, then the system shall leave that change in the log only after all of its durable events are in the log.
 
 ### REQ-STRM-011 — Atomic with the state change
-If a state change of a run is committed, then the system shall have committed the durable events that change records in the same transaction.
+When a state change of a run is recorded, the system shall persist the new state and all durable events it records together.
 
 ### REQ-STRM-012 — Atomic on failure
 If a state change of a run is rejected in the writing transaction, then the system shall leave neither that state change nor its durable events in the log.
@@ -54,7 +54,7 @@ When the relay has sent an outbox entry to the bus, the relay shall mark that en
 If the relay stops after sending an outbox entry to the bus and before marking it relayed, then the system shall send that entry to the bus again after the relay restarts.
 
 ### REQ-STRM-016 — Duplicates are identifiable
-Where a consumer has received a durable event, the system shall let the consumer identify a repeated event by its run id and sequence number.
+When a consumer receives a durable event more than once, the system shall carry the same run id and sequence number on each copy.
 
 ### REQ-STRM-017 — Bus unreachable
 If the bus is unreachable, then the system shall keep every unrelayed outbox entry and shall not fail the state change of the run.
@@ -74,8 +74,8 @@ When a caller reads the durable events of a run after a sequence number at or ab
 ### REQ-STRM-022 — Reads stay in the tenant
 If a caller reads the durable events of a run that belongs to another tenant, then the system shall fail the read with code `not_found`.
 
-### REQ-STRM-023 — Event types are never removed
-When a release of the system carries durable event types that earlier releases published, the system shall keep the envelope shape of those event types unchanged.
-
 ### REQ-STRM-024 — Event envelope
 When the system publishes a durable event to the bus, the system shall publish an envelope carrying the run id, the sequence number, the event type, the schema version and the event data.
+
+### REQ-STRM-025 — Tenant required on read
+If a caller reads the durable events of a run without a tenant, then the system shall fail the read with code `invalid_argument`.
