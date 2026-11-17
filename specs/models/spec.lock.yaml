@@ -675,3 +675,399 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    MODEL-043-01:
+        hash: sha256:fc92202793873b62531e0c2e33448ec21607c0fbb66743e6cf43501604d79500
+        reqs:
+            - REQ-MODEL-043
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-043-02:
+        hash: sha256:16d4fa0590937fd4401f771312528d2e90ae65e5f6943185714804a754a17873
+        reqs:
+            - REQ-MODEL-043
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-044-01:
+        hash: sha256:5056b08dfdddbcb8110aef191500f08d9e864534b3de3f51d9f007c98ebb40ca
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-044-02:
+        hash: sha256:c6afe28d8785b2de78f9580f0eaca0e8a47f824879608117ac23e2aea795c71f
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-044-03:
+        hash: sha256:600fa02bbb8bd672704de93ce47e0cabb04472d219c8fd0d743f9d2845c070d3
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-045-01:
+        hash: sha256:d356b170c9d353b416a7454628b206cb714ea7576d38efde7fb906368009348a
+        reqs:
+            - REQ-MODEL-045
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-046-01:
+        hash: sha256:249ab0eacb5330fd9b9e91e498f777a958d6b968a5be7389a3e0040c96052e59
+        reqs:
+            - REQ-MODEL-046
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-047-01:
+        hash: sha256:c0a80135e9cc3863e633d741c5a57d02a9bda779072f9c1e0506d23d3e4519b9
+        reqs:
+            - REQ-MODEL-047
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-047-02:
+        hash: sha256:295c9af2b468807b5bc0693b003c37da309d82f1905503e1bab0df9fd294ed99
+        reqs:
+            - REQ-MODEL-047
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-048-01:
+        hash: sha256:07ad684ca8594099158fcf578594967f8d6509b790ec1d82a379d2cc0d199c85
+        reqs:
+            - REQ-MODEL-048
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-049-01:
+        hash: sha256:59f5c0e0d120eb3396f160552f5f872a5a9a707f3790bef2383c85794937d051
+        reqs:
+            - REQ-MODEL-049
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-050-01:
+        hash: sha256:4ce83edb955858f6a9741c9dbb8f5beeb53bc4d9574381098f40ef3d60e61e2b
+        reqs:
+            - REQ-MODEL-050
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-051-01:
+        hash: sha256:105de38a08c77371bef28a9eb42ad7193c2d78e2d99abe2642f3df6a2c999b41
+        reqs:
+            - REQ-MODEL-051
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-051-02:
+        hash: sha256:51acd71a3f88e1ed91e564285ce24ec9ce778004d5e2717d922d574e96fb12a1
+        reqs:
+            - REQ-MODEL-051
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-052-01:
+        hash: sha256:fb65951ec3a52ee56aad4979c622a21a42cbe76801acb79bfcec67c80763efef
+        reqs:
+            - REQ-MODEL-052
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-052-02:
+        hash: sha256:a38137cf481c113f5334cd961300732f0b697dd2e29edfde182a94df06bd03e9
+        reqs:
+            - REQ-MODEL-052
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-053-01:
+        hash: sha256:ca1ed59dedea19638fd11e8c905502b70e39f6e191c74f224ee1bbd850de1063
+        reqs:
+            - REQ-MODEL-053
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-053-02:
+        hash: sha256:0c1563fe0c2d86c34edf67c4a78bc3ef2955cb9e5d72d6caded80b3f71e99b4d
+        reqs:
+            - REQ-MODEL-053
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-054-01:
+        hash: sha256:49f5507e4afeaa10e07d73ff867748b354074236fed2ea8227919525dd432dd9
+        reqs:
+            - REQ-MODEL-054
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-054-02:
+        hash: sha256:79edd7bdd3776bb7c9098b67246909301ad4bac6bb9dfa57a3cc554284378736
+        reqs:
+            - REQ-MODEL-054
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-055-01:
+        hash: sha256:e3b8b52714f2a70a4c967eb3c7c830ae7c1f3b0457e23cff40f7d4e19e897143
+        reqs:
+            - REQ-MODEL-055
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-056-01:
+        hash: sha256:b75c0dedf160ce7905e786437b7a5638d65cdc0578945ceb0864e601ba04aaca
+        reqs:
+            - REQ-MODEL-056
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-057-01:
+        hash: sha256:c336fad73e0c78aaf55cbac4787ea8fca11598c697644db72cb0f412712fdbeb
+        reqs:
+            - REQ-MODEL-057
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-058-01:
+        hash: sha256:8acf9d9fbb108c050f43317595fc3e29ec9305eb54acda9f3a12cf6633b86678
+        reqs:
+            - REQ-MODEL-058
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-01:
+        hash: sha256:5e1bff9bd1574509a1f237bbd40a7b000eb09a5ee4279c910922c6bfa1e0e320
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-02:
+        hash: sha256:409d3f9d78426029973f6baf1fc8907d990d62568577bcdffcdcc821fb81396e
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-03:
+        hash: sha256:c0e855a60f49be9e7fc9dee70c0d0c08033089ce3a22a41ae1431a7855c12aab
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-060-01:
+        hash: sha256:20d752373d7bc42aaab9ec571c002bdd58e20987a133224406bc179f9133a044
+        reqs:
+            - REQ-MODEL-060
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-061-01:
+        hash: sha256:b511f42f332c269503cee8f15d1369da70d150639ff77bf8adfd60e2343eeaae
+        reqs:
+            - REQ-MODEL-061
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-062-01:
+        hash: sha256:c5138c5377619d5148b123b195656f4b6340041b7a4884cd6189c5f44212c4f0
+        reqs:
+            - REQ-MODEL-062
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-063-01:
+        hash: sha256:bfa07c03c7ab33252c51a2baabaaa673123e807370d26687a1cac83d31ce9bb8
+        reqs:
+            - REQ-MODEL-063
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-064-01:
+        hash: sha256:53842f03cff11fde7980f5246ef29fad0e6c23881cd713c302d547ff6c5ee0aa
+        reqs:
+            - REQ-MODEL-064
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-064-02:
+        hash: sha256:b205eae1336ca86c376804c777a3eecc92ac1890c1fc91e4fa97495277b44f47
+        reqs:
+            - REQ-MODEL-064
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-065-01:
+        hash: sha256:12dcb1b47abf3a27f3607aeb80a9644bc9cf981fd0d955f2956a257cedf66bce
+        reqs:
+            - REQ-MODEL-065
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-065-02:
+        hash: sha256:9ed9b693f4f1d2287882a3ed827df15404a7e2135084cb8561b353f4e2eca865
+        reqs:
+            - REQ-MODEL-065
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
+    MODEL-066-01:
+        hash: sha256:3dd24dc747c9a5c47883e755af754f9c7a1bdd78d4fe3eb4c4ab7a114158608f
+        reqs:
+            - REQ-MODEL-066
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: pending
