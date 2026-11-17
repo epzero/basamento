@@ -100,7 +100,7 @@ its own.
 ## Temporal runtime (WP-L5-02)
 
 Decisions for `runtime/temporal` that leave `REQ-RT-026` … `REQ-RT-029` and
-`REQ-RT-031` … `REQ-RT-037` in `temporal.feature` to the implementer. It
+`REQ-RT-031` … `REQ-RT-038` in `temporal.feature` to the implementer. It
 builds on the payload codec of WP-L1-04 (`specs/secrets/`) and the blob store
 of WP-L1-02 (`specs/blob/`); it does not respectify either. This work package
 changes no contract file.
@@ -114,7 +114,7 @@ are private to `runtime/temporal` and the scenarios do not name them.
 | --- | --- |
 | `Step` | activity, on `StepOptions.Queue` or the default queue; `MaxAttempts`, `NonRetryable`, `StartToClose`, `Heartbeat` and `IdempotencyKey` map onto the activity's retry policy (`REQ-RT-027`) |
 | `Await` | Update, validated synchronously (`sync_gate_updates`) |
-| `Checkpoint` | ContinueAsNew when the run history reaches the threshold (`REQ-RT-034` … `REQ-RT-036`) |
+| `Checkpoint` | ContinueAsNew, at `Checkpoint` only, when the current run history's length as the Temporal SDK reports it reaches the threshold; first waits until no step of the run is in flight (`REQ-RT-034` … `REQ-RT-036`, `REQ-RT-038`) |
 | `Emit` | durable outbox write, ordered per run as on the local runtime |
 | `Child`, `Sleep`, `Select`, `Cancel` | as the local runtime (`REQ-RT-009` … `REQ-RT-015`); the conformance suite checks they match |
 
@@ -125,7 +125,7 @@ are private to `runtime/temporal` and the scenarios do not name them.
 equivalence of final states and durable events (`RT-001-01`), replay
 (`RT-004-01`) and several golden flows, one of which exercises ContinueAsNew.
 This work package does not restate them: `temporal.feature` only says what
-conformance cannot observe — the run history's payloads, blobs, event counts
+conformance cannot observe — the run history's payloads, blobs, history length
 and server version. Restart is not simulated here: killing a worker process
 mid-run is the conformance suite's concurrency test.
 
@@ -138,9 +138,11 @@ adds only the `MaxAttempts > 0` case where retries can be delayed.
 ### Payload codec: claim-check and encryption
 
 The workflow and the activity worker share one context-aware data converter
-(with the tenant of the run or activity in the context, as
-`specs/secrets/design.md` §1 requires) that composes the encryption codec of
-WP-L1-04 and the blob claim-check codec over WP-L1-02:
+that composes the encryption codec of WP-L1-04 and the blob claim-check codec
+over WP-L1-02. The tenant of the run or activity is read from the context
+through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
+`specs/secrets/design.md` §1 requires; an empty id counts as no tenant
+(`owner decision, 2026-11-17`). The codec composes them in this order:
 
 1. **On encode** (`REQ-RT-028`, `REQ-RT-031`): the payload is first encrypted
    with the tenant's encryption codec (`REQ-SECRET-002`). If the encrypted
@@ -151,8 +153,10 @@ WP-L1-04 and the blob claim-check codec over WP-L1-02:
    with the tenant's encryption codec. Every payload written to the run
    history or an activity task — whether kept inline or replaced by a
    claim-check marker — therefore carries `encoding: binary/encrypted`
-   (`REQ-RT-031`). A start without a tenant is rejected by `Start` itself with
-   `invalid_argument` before anything is recorded (`REQ-RT-031`, `RT-031-02`).
+   (`REQ-RT-031`). A start without a tenant is rejected by `Runtime.Start`
+   itself with `invalid_argument` before anything is recorded
+   (`REQ-RT-031`, `RT-031-02`); the API checks as well
+   (`owner decision, 2026-11-17`).
 2. **On decode** (`REQ-RT-029`, `REQ-RT-032`, `REQ-RT-033`): the history
    payload is first decrypted with the tenant's encryption codec; a payload
    without `encoding: binary/encrypted` is rejected with `invalid_argument`
@@ -181,39 +185,51 @@ with `invalid_argument` (`REQ-SECRET-004`, `REQ-SECRET-005`).
 
 The checkpoint event threshold is a configuration of the runtime.
 `docs/architecture/runtime.md` (§2, §3) maps `Checkpoint` to ContinueAsNew at
-a fixed event threshold and does not specify automatic ContinueAsNew outside
-`Checkpoint`; in this spec ContinueAsNew is triggered only when `Checkpoint`
-is called and the current history's event count has reached the threshold.
+a fixed event threshold. ContinueAsNew happens **only** at an explicit
+`Checkpoint` call; nothing else the runtime does continues a run as new
+(`owner decision, 2026-11-17`).
 
-- **Event counts** (one rule, applied to every scenario). In the current
-  history (since the run started or since its last ContinueAsNew, which resets
-  the current history's event count to 0), the runtime counts **2 events per
-  step** (activity scheduled and activity result; a retried step adds 1 event
-  per retry, and no scenario retries before a checkpoint) and **1 event per
-  emitted durable event** (`Emit`), excluding the checkpoint request itself.
-  When `Checkpoint` is called, the runtime continues the run as new if and
-  only if `count >= threshold` (`REQ-RT-034`, `REQ-RT-035`):
-  - `RT-034-01` (threshold `8`): 5 steps `s1`–`s5` with a checkpoint after
-    each give counts `2`, `4`, `6`, `8` at `s1`–`s4`; `s4`'s checkpoint hits
-    `8 >= 8` and continues as new (resetting the new history's count to `0`),
-    and `s5` records `2 < 8` in the new history. Continued as new `1` time.
-  - `RT-035-01` (threshold `8`): 3 steps `s1`–`s3` give `6 < 8` events at the
-    checkpoint; the run stays in its history (continued as new `0` times,
-    checkpoint recorded at event count `6`) and completes when gate `"approve"`
-    is resolved.
-  - `RT-035-02` (threshold `13`): 6 steps `s1`–`s6` give `12 < 13` events (one
-    short of the threshold) at the only checkpoint. Continued as new `0`
-    times.
-  - `RT-036-01` (threshold `8`): 9 steps `s1`–`s9` give `18 >= 8` events at
-    the checkpoint, so the run continues as new `1` time and waits at gate
-    `"approve"`; the run id (`"r1"`), the 9 recorded step results and the
-    gate wait survive, so resolving `"approve"` on `"r1"` completes the run
-    without re-executing `s1`–`s9`.
-  - `RT-036-02` (threshold `6`): 6 emitted events `"a"`–`"f"` give `6 >= 6`
-    events at the checkpoint, so the run continues as new `1` time (resetting
-    the new history's count to `0`), then runs 5 steps (`10` events, with no
-    further checkpoint) and returns `"done"` with `"a"`–`"f"` in its outbox
-    once, in order.
+- **The measure is Temporal's history length.** At a `Checkpoint`, the
+  workflow compares the threshold with the current run history's length in
+  events as the Temporal SDK reports it at that moment
+  (`workflow.GetInfo(ctx).GetCurrentHistoryLength()`, read inside the
+  workflow). The runtime models no event count: it does not assume a number
+  of events per step, per emitted event or per anything else. Those events are
+  the SDK's and server's to decide, and the runtime treats the number as
+  opaque except for the comparison. The runtime continues the run as new if
+  and only if that length is at least the threshold (`REQ-RT-034`), and leaves
+  the run in its current history otherwise (`REQ-RT-035`). A new history
+  (after ContinueAsNew) starts its length again from the few events that begin
+  it.
+- **Scenarios stay away from the boundary.** Because no scenario knows how
+  many events a step records, a scenario never places a threshold at the
+  boundary of a run's history length; it chooses thresholds far from it, so
+  the verdict is the same for any plausible history: a short run (a few steps
+  and emitted events) far below the threshold continues as new `0` times
+  (`RT-035-01`, `RT-035-02`: threshold `1000` with 3 and 6 steps), and a long
+  run far above it continues as new at least once, without naming the exact
+  number of times (`RT-034-01`: threshold `20` with 40 steps). A scenario that
+  needs an exact count takes it from the structure of its flow instead: one
+  checkpoint above the threshold and no later checkpoint that can reach it
+  again gives exactly `1`. `RT-036-02` (threshold `20`) checkpoints once,
+  after 40 steps; `RT-038-01` (threshold `5`, met by 5 steps on its own)
+  checkpoints once, while one of two parallel steps is still in flight, and
+  no later checkpoint exists.
+- **Checkpoint drains in-flight steps first.** When `Checkpoint` is called
+  while a step of the run is in flight, the runtime waits until no step of the
+  run is in flight and only then continues the run as new if its history has
+  reached the threshold (`REQ-RT-038`, `owner decision, 2026-11-17`). In
+  `RT-038-01` the checkpoint call meets the threshold by itself (5 steps record
+  at least 5 events here, one activity of which is still in flight), so the
+  wait is observable: without a checkpoint there the run would never continue
+  as new. A step in flight is a `Step` call of the run whose activity has not
+  yet returned a result; a step the flow started and does not await still
+  counts. Created activities that are still running would make Temporal
+  re-dispatch them on the new execution, so draining is what keeps a
+  continue-as-new from running a step again. Steps remain at-least-once in
+  general — a crash or a failed attempt may run a step again — and idempotent
+  per `IdempotencyKey`; what draining guarantees is that the continue-as-new
+  itself is never the cause (`RT-038-01`).
 - The continued run keeps its id (`StartRequest.RunID`, `"r1"` in
   `RT-036-01`), its recorded step results, its outbox and its pending gate
   waits (`REQ-RT-036`). `Describe` and `List` report one run under that id;
@@ -274,17 +290,17 @@ blob store of WP-L1-02 through `platform`.
 1. **Default step retry limit (`REQ-RT-018`)**: `runtime/runtime.go:48` states `MaxAttempts int // 0 = runtime default`, without pinning a number in `ADR-0002` or `docs/architecture/runtime.md`. This spec chooses `3` attempts for `runtime/local` when `MaxAttempts` is `0`. Confirm whether `3` is the intended default for `local` (and whether `temporal` in `WP-L5-02` should share it).
 2. **Run failure error propagation (`REQ-RT-016`, `REQ-RT-017`)**: `runtime.RunStatus` (`runtime/runtime.go:120-126`) exposes `State` (`running | completed | failed | cancelled | terminated`) and timestamps, but has no `Error` or `Code` field on `RunStatus` itself. This spec asserts the error code on the failed step (`Future.Get`) and asserts that the run's state becomes `"failed"`, without inventing an `internal` or `unavailable` run-level error code mapping. Confirm whether `RunStatus` should remain state-only or whether a contract change is wanted later.
 3. **Shared `Run` row in `specs/glossary.md`**: `runtime/runtime.go:123` includes `terminated` in `RunStatus.State`, whereas the shared **Run** row in `specs/glossary.md:9` lists `running, completed, failed, cancelled`. To avoid touching shared glossary text that other work packages rely on, this draft defines `terminated` in the new **Child run** row and leaves the **Run** row untouched. Confirm whether the **Run** row in `specs/glossary.md` should be extended with `terminated`.
-4. **Acknowledging a step attempt before ContinueAsNew (WP-L5-02)**: if a run
-   continues as new while an activity attempt is in flight after a timeout,
-   Temporal can ask for the activity again, so `Future.Get` may be a result
-   that was not the first attempt's, even though the run's history records
-   one result (`REQ-RT-036`). The docs do not say how the runtime should
-   acknowledge the in-flight attempt before continuing as new, and no scenario
-   can check what the history does not show. Decide: (a) accept at-least-once
-   for steps, as `runtime/temporal/embedded/BENCHMARKS.md` item 5 already does;
-   or (b) require the runtime to complete or cancel in-flight steps before
-   ContinueAsNew.
-5. **Payload codec composition and claim-check threshold (`REQ-RT-028` … `REQ-RT-032`)**:
+4. **(WP-L5-02) In-flight steps at ContinueAsNew and the counting model**: former
+   questions on how the runtime acknowledges an in-flight step attempt before
+   ContinueAsNew and whether the threshold counts logical runtime events or
+   Temporal history events. **Decided** (`owner decision, 2026-11-17`):
+   ContinueAsNew happens only at `Checkpoint`; `Checkpoint` waits until no
+   step of the run is in flight before continuing, so a continue-as-new never
+   re-runs a step (`REQ-RT-038`), and steps stay at-least-once in general;
+   the threshold is compared with Temporal's history length as the SDK
+   reports it, and the runtime models no event count (`REQ-RT-034`,
+   `REQ-RT-035`). Scenarios keep away from the boundary of the exact count.
+5. **(WP-L5-02) Payload codec composition and claim-check threshold** (`REQ-RT-028` … `REQ-RT-032`):
    `docs/architecture/runtime.md` §3 says "On Temporal this is a payload codec,
    which also encrypts", without prescribing the internal ordering of
    encryption and claim-check. This spec encrypts the payload first, stores the
@@ -293,17 +309,8 @@ blob store of WP-L1-02 through `platform`.
    every payload in Temporal's run history hold only `binary/encrypted`
    ciphertext. Confirm this composition (and counting the threshold on the
    encrypted size), or say if the architect prefers another codec arrangement.
-6. **ContinueAsNew trigger and event counting (`REQ-RT-034`, `REQ-RT-035`)**:
-   `docs/architecture/runtime.md` (§2, §3) states "`Checkpoint` =
-   ContinueAsNew" and "Histories are bounded with `Checkpoint` at a fixed
-   event threshold", without specifying whether ContinueAsNew can ever trigger
-   outside an explicit `Checkpoint` call or whether the threshold counts
-   logical runtime events (2 per step, 1 per emitted event) versus raw
-   Temporal `HistoryEvent` records. Confirm the `Checkpoint`-only trigger and
-   the 2-per-step / 1-per-emit event count model used in `RT-034-01` …
-   `RT-036-02`.
-7. **Who rejects a start without a tenant (`REQ-RT-031`, `RT-031-02`)**:
-   `Start` rejects it with `invalid_argument` because the payload codec needs a
-   tenant (`REQ-SECRET-022`). Nothing specifies error codes for `Start` and
-   `Runtime` has no "unauthenticated" tenant input. Confirm the code, or move
-   the check to the API.
+6. **(WP-L5-02) Who rejects a start without a tenant** (`REQ-RT-031`, `RT-031-02`):
+   **Decided** (`owner decision, 2026-11-17`): `Runtime.Start` itself rejects a
+   run without a tenant with `invalid_argument`, and the API checks as well.
+   A tenant is read through `core.TenantFrom(ctx)`; an empty id counts as no
+   tenant.

@@ -111,13 +111,16 @@ If a run history payload without the encoding `binary/encrypted` is loaded into 
 If a run reads a run history payload whose blob is not held by the run's tenant, then the temporal runtime shall fail the run with code `not_found`.
 
 ### REQ-RT-034 — Checkpoint threshold
-Where a checkpoint event threshold is configured, the temporal runtime shall continue a run as new once a checkpoint is requested and the run history holds at least that many events.
+Where a checkpoint event threshold is configured, the temporal runtime shall continue a run as new when a checkpoint is requested and the current run history's length in events, as the Temporal SDK reports it, is at least the threshold.
 
 ### REQ-RT-035 — Checkpoint before the threshold
-If a checkpoint is requested while the run history holds fewer events than the checkpoint event threshold, then the temporal runtime shall leave the run in its current history.
+If a checkpoint is requested and the current run history's length in events, as the Temporal SDK reports it, is fewer than the checkpoint event threshold, then the temporal runtime shall leave the run in its current history.
 
 ### REQ-RT-036 — ContinueAsNew keeps the run
 When the temporal runtime continues a run as new, the temporal runtime shall keep the run's id, recorded results, emitted events and awaited gates.
 
 ### REQ-RT-037 — Pinned server versions
 If the temporal runtime starts against a server whose version is outside the pinned range, then the temporal runtime shall refuse to start with code `unsupported`.
+
+### REQ-RT-038 — Checkpoint waits for in-flight steps
+When a checkpoint is requested while a step of the run is in flight, the temporal runtime shall wait until no step of the run is in flight before continuing the run as new, and shall not execute a step of the run again because of the continue-as-new.

@@ -90,51 +90,45 @@ Feature: The Temporal runtime
     Then the run is "failed"
     And loading the run's history payloads fails with code "not_found"
 
-  # 2 events/step, 1 event/emit, new history starts at 0: 5 steps give 8 at
-  # s4's checkpoint and 2 in the new history (RT-034-01); 3 steps give 6 at
-  # the checkpoint (RT-035-01); 6 steps give 12 < 13 (RT-035-02); 9 steps give
-  # 18 >= 8 at the checkpoint (RT-036-01); 6 emitted events give 6 >= 6 at the
-  # checkpoint, then 5 steps give 10 in the new history (RT-036-02).
   @REQ-RT-034 @id:RT-034-01
   Scenario: A checkpoint continues the run as new once the history reaches the threshold
-    Given the checkpoint event threshold is 8
-    And a flow calls 5 steps "s1" to "s5" and checkpoints after each, then returns "done"
+    Given the checkpoint event threshold is 20
+    And a flow calls 40 steps "s1" to "s40" and checkpoints after each, then returns "done"
     When a run of "steps" on the temporal runtime completes
-    Then the run was continued as new 1 time
+    Then the run was continued as new at least once
     And the run is "completed"
 
   @REQ-RT-035 @id:RT-035-01
   Scenario: A checkpoint below the threshold keeps the run in its history
-    Given the checkpoint event threshold is 8
+    Given the checkpoint event threshold is 1000
     And a flow calls 3 steps "s1" to "s3", checkpoints, then waits at gate "approve"
     And a run of "short" on the temporal runtime has started and waits at gate "approve"
     When gate "approve" is resolved with payload {"approved": true}
     Then the run was continued as new 0 times
-    And the run history holds a checkpoint for event count 6
     And the run returns {"approved": true}
 
   @REQ-RT-035 @id:RT-035-02
-  Scenario: A checkpoint one event short of the threshold keeps the run in its history
-    Given the checkpoint event threshold is 13
+  Scenario: A checkpoint far below the threshold keeps the run in its history
+    Given the checkpoint event threshold is 1000
     And a flow calls 6 steps "s1" to "s6", checkpoints, then returns "done"
     When a run of "steps" on the temporal runtime completes
     Then the run was continued as new 0 times
     And the run returns "done"
 
   @REQ-RT-036 @id:RT-036-01
-  Scenario: A run continued as new keeps its id, results, events and awaited gate
-    Given the checkpoint event threshold is 8
-    And a flow calls 9 steps "s1" to "s9", checkpoints, then waits at gate "approve" and returns {"done": true}
+  Scenario: A run continued as new keeps its id, results and awaited gate
+    Given the checkpoint event threshold is 20
+    And a flow calls 40 steps "s1" to "s40", checkpoints, then waits at gate "approve" and returns {"done": true}
     And run "r1" of that flow on the temporal runtime is waiting at gate "approve" after continuing as new
     When gate "approve" on run "r1" is resolved with payload {"approved": true}
-    Then steps "s1" to "s9" were executed once each
+    Then steps "s1" to "s40" were executed once each
     And run "r1" is "completed"
     And the run returns {"done": true}
 
   @REQ-RT-036 @id:RT-036-02
   Scenario: Emitted events before a continue-as-new reach the run's outbox once, in order
-    Given the checkpoint event threshold is 6
-    And a flow emits "a", "b", "c", "d", "e" and "f", checkpoints, calls 5 steps, then returns "done"
+    Given the checkpoint event threshold is 20
+    And a flow emits "a", "b", "c", "d", "e" and "f", calls 40 steps "s1" to "s40", checkpoints, calls 5 steps "t1" to "t5", then returns "done"
     When a run of "emit" on the temporal runtime completes
     Then the run was continued as new 1 time
     And the run's durable events are "a", "b", "c", "d", "e", "f"
@@ -155,3 +149,12 @@ Feature: The Temporal runtime
       | server |
       | 1.31.9 |
       | 1.33.0 |
+
+  @REQ-RT-038 @id:RT-038-01
+  Scenario: A checkpoint waits for an in-flight step before continuing as new
+    Given the checkpoint event threshold is 5
+    And a flow starts steps "a" and "b" in parallel, calls checkpoint while "b" is in flight, then returns "done"
+    When a run of "parallel" on the temporal runtime completes
+    Then steps "a" and "b" were executed once each
+    And the run was continued as new 1 time
+    And the run returns "done"
