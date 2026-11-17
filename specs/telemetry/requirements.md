@@ -14,7 +14,7 @@ The telemetry setup shall take the timestamp of every log record, span and metri
 When a log record is written, the telemetry setup shall attach the `run_id` and `tenant` from the context, together with the active span's `trace_id` and `span_id` when a span is active and empty `trace_id` and `span_id` otherwise.
 
 ### REQ-TELEM-006 — Secrets are never recorded
-The telemetry setup shall replace with `[REDACTED]` any credential value it is given and the value of any field named `password`, `secret`, `token` or `authorization` at any depth in every log record, span attribute and metric label, and leave other fields unchanged.
+The telemetry setup shall replace with `[REDACTED]` any string value containing a credential value it is given, and the whole value of any field named `password`, `secret`, `token` or `authorization` (case-insensitively, at any depth) in every log record, span attribute and metric label, and leave other fields unchanged.
 
 ### REQ-TELEM-007 — Records are redacted before they are kept or exported
 While a log record, span attribute or metric label is being recorded, the telemetry setup shall redact its values before they are kept or handed to an exporter.
@@ -32,7 +32,7 @@ Where the profile is `embedded`, when a run's spans are read back, the telemetry
 If a tenant asks for the spans of a run of another tenant, then the telemetry setup shall return no span and fail the read with code `not_found`.
 
 ### REQ-TELEM-014 — Retention
-Where the profile is `embedded`, when the span store purges, the telemetry setup shall delete the spans that ended before the configured retention period.
+Where the profile is `embedded`, when the span store purges, the telemetry setup shall delete the spans that ended more than the configured retention period before the purge.
 
 ### REQ-TELEM-015 — Export in the cloud profile
 Where the profile is `cloud`, the telemetry setup shall export its spans, metric points and log records over OTLP to the collector URL it is given.
@@ -41,7 +41,7 @@ Where the profile is `cloud`, the telemetry setup shall export its spans, metric
 Where the profile is `cloud`, while the collector is slow or unreachable, the telemetry setup shall record and return every span, metric point and log record without waiting for the export.
 
 ### REQ-TELEM-017 — Undelivered batches are dropped
-If an export batch cannot be delivered, then the telemetry setup shall drop that batch rather than retrying it without bound.
+If an export batch cannot be delivered, then the telemetry setup shall drop that batch without retrying it.
 
 ### REQ-TELEM-019 — Work never sees an export failure
 If an export batch cannot be delivered, then the telemetry setup shall complete the recording of the span, log record or metric point without error.

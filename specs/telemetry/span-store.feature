@@ -30,7 +30,7 @@ Feature: The embedded profile keeps a run's spans for the inspector
   @REQ-TELEM-012 @id:TELEM-012-01
   Scenario: A run's spans come back in start order
     Given run "run_01" of tenant "acme" is running
-    When span "step c" is started and ended, then span "step a" is started and ended, then span "step b" is started and ended
+    When span "step c" is started and ended, then the clock advances by 1 second, then span "step a" is started and ended, then the clock advances by 1 second, then span "step b" is started and ended
     And tenant "acme" reads the spans of run "run_01"
     Then tenant "acme" reads the spans named "step c", "step a", "step b" in that order
 
@@ -45,8 +45,9 @@ Feature: The embedded profile keeps a run's spans for the inspector
   @REQ-TELEM-012 @id:TELEM-012-03
   Scenario: A run's spans leave out the spans of another run
     Given run "run_01" and run "run_02" of tenant "acme" are running
-    And span "step a" is started and ended
-    And span "step b" is started and ended
+    And span "step a" is started and ended inside run "run_01"
+    And the clock advances by 1 second
+    And span "step b" is started and ended inside run "run_01"
     And span "step c" is started and ended inside run "run_02"
     When tenant "acme" reads the spans of run "run_01"
     Then tenant "acme" reads 2 spans named "step a", "step b" in that order

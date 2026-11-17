@@ -38,16 +38,16 @@ Feature: The cloud profile exports over OTLP and never lets export break the wor
   Scenario: An undelivered batch is dropped rather than retried forever
     Given the simulated collector is unreachable
     And run "run_01" of tenant "acme" is running
-    When span "step a" is started and ended
+    When span "step a" is started and ended, a log record "started" is written, and metric "runs.started" is recorded with the value 1
     And the telemetry setup makes 1 export attempt
     And the simulated collector becomes reachable
     And the telemetry setup is flushed
-    Then the collector received 0 spans named "step a"
+    Then the collector received 0 spans, 0 log records and 0 metric points
 
   @REQ-TELEM-019 @id:TELEM-019-01
   Scenario: A span completes without error when export fails
     Given the simulated collector is unreachable
-    When span "step a" is started and ended
+    When span "step a" is started and ended with status "ok"
     And the telemetry setup makes 1 export attempt
     Then span "step a" ends with status "ok"
 

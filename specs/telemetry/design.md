@@ -70,8 +70,8 @@ when no span is active) on every log record (`REQ-TELEM-005`).
 
 In the `cloud` profile, OTLP exporters send batches to `CollectorURL` with
 bounded queues and without blocking the caller (`REQ-TELEM-015`,
-`REQ-TELEM-016`). An export batch that cannot be delivered is dropped rather
-than retried without bound, and the observed span, log record or metric point
+`REQ-TELEM-016`). An export batch that cannot be delivered is dropped
+without retrying it, and the observed span, log record or metric point
 completes without error (`REQ-TELEM-017`, `REQ-TELEM-019`).
 
 `Inject` and `Extract` serialize and restore W3C TraceContext across process or
