@@ -1,0 +1,362 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    EXPR-001-01:
+        hash: sha256:91771d17e722268c67e2ac756068809917742120e7154e50d3e6b4a4ed26750f
+        reqs:
+            - REQ-EXPR-001
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-001-02:
+        hash: sha256:859610da10d5a3c7087f87924536c6936ef3cb8ab1ce0e6bfee1d099e6005320
+        reqs:
+            - REQ-EXPR-001
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-001-03:
+        hash: sha256:984877dc43c406ba643c5bb6061338462b25f53cf64c6afd50aa785f46cfbc44
+        reqs:
+            - REQ-EXPR-001
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-001-04:
+        hash: sha256:386c35ff8617a38a4239aa67d377b4b576137bfe7220c46459ea1cc0e1ca26b8
+        reqs:
+            - REQ-EXPR-001
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-002-01:
+        hash: sha256:8bacfda0f99fc1749e5e2b6f32016bb0af197b0e255d9efe140e9ffdca9cd6cd
+        reqs:
+            - REQ-EXPR-002
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-002-02:
+        hash: sha256:f237b0938a6cc2b5b921b5832fa82b1ce4594251b09392e667a3616e89aa0396
+        reqs:
+            - REQ-EXPR-002
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-003-01:
+        hash: sha256:6d501dc40fee9da3c67a94e2f1a22620cc477c975b50e6d4524e3bd52311e905
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-003-02:
+        hash: sha256:eb1b68b83664ff27d7a30b6c3974d25eab927345d60058c2f11474174ee03058
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-003-03:
+        hash: sha256:399e784f1591022093e03ec435a6ede3ae2c03b61ac921052e90af2d9cbc607c
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-003-04:
+        hash: sha256:44a78cb2b3d00b0b30df9abd5e41ec5dede5aa6cf7d7191844b44f8fbf262df9
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-004-01:
+        hash: sha256:96a64b6531a0c82447a5cb17daf5bae4dd77561a9f6f65ec5e2abbdc9856a821
+        reqs:
+            - REQ-EXPR-004
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-005-01:
+        hash: sha256:26b7336f4798abb131f1e781d9230eee764ab8b8765ec72f7280bd0ebb3682d3
+        reqs:
+            - REQ-EXPR-005
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (CEL): no clock, randomness, env or file access; time enters only as a variable; sorted map iteration (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-005-02:
+        hash: sha256:5dd7eff1293c046dc0d4796a57ffa79404c259d12fa506fbe3d909238d37f00e
+        reqs:
+            - REQ-EXPR-005
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (CEL): no clock, randomness, env or file access; time enters only as a variable; sorted map iteration (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-006-01:
+        hash: sha256:b2781fe1d26b39e616bb4f84a482849b091ce0d3fd457d5cfd73a59f612840fb
+        reqs:
+            - REQ-EXPR-006
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (CEL): no clock, randomness, env or file access; time enters only as a variable; sorted map iteration (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-006-02:
+        hash: sha256:0ca384705cbca914d3353bb44874f7de7cc6207157709251b274a74627310e2e
+        reqs:
+            - REQ-EXPR-006
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (CEL): no clock, randomness, env or file access; time enters only as a variable; sorted map iteration (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-007-01:
+        hash: sha256:20047f48285083b24f0a616c051a3bf976370eabd15dd9f414f91389cdae50e1
+        reqs:
+            - REQ-EXPR-007
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-007-02:
+        hash: sha256:202dcc77460a575204159e59eb3e7dfb7ac1e6b80b45aa52a95d633aa87711e5
+        reqs:
+            - REQ-EXPR-007
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-007-03:
+        hash: sha256:5a6256dc5ca52b913f94ddb933fbb74613f82e97f72e8be35105ed7805e367e6
+        reqs:
+            - REQ-EXPR-007
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-008-01:
+        hash: sha256:d75d585297953efec8bbdfda16cf5b17b7819c9d6b3c38c4de957ea80b613059
+        reqs:
+            - REQ-EXPR-008
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-008-02:
+        hash: sha256:1d22ae6dcdb5dc27af131c5603d457cd41a5daa6edc6b19d3878c5731ae5c652
+        reqs:
+            - REQ-EXPR-008
+            - REQ-EXPR-009
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-008-03:
+        hash: sha256:e9b4b606f1ea3813b1f4b338cdc0817207b487a2d0a3a73b92e747f2ed0c3532
+        reqs:
+            - REQ-EXPR-008
+            - REQ-EXPR-012
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-009-01:
+        hash: sha256:43e4d664012236bbea07511367c95dde254b02d67fc5f411d5e6d1ee382a3847
+        reqs:
+            - REQ-EXPR-009
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-010-01:
+        hash: sha256:834c68c9ea9833cd6404ebdbfe4cd54f84de2a220c42ea08dd7f4be143c1053d
+        reqs:
+            - REQ-EXPR-010
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-011-01:
+        hash: sha256:aea3ebda116d733e9beb4233223e1c29c9cbe50d6c53331e0619aec37c7b3075
+        reqs:
+            - REQ-EXPR-011
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-012-01:
+        hash: sha256:015bd06de6923e1b9f680df576a08cbcabb28c2114553211fe49256e35e02513
+        reqs:
+            - REQ-EXPR-012
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-013-01:
+        hash: sha256:55d9d4f39f5b2a5bd367db0066c0f9098ab2ea61e354bb448e3def7d2eaf3228
+        reqs:
+            - REQ-EXPR-013
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-014-01:
+        hash: sha256:2c4b6c53892171f68fdc3728a7aad22aab206a2db87fd5d842d859a08a36ae96
+        reqs:
+            - REQ-EXPR-014
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-015-01:
+        hash: sha256:df84889d22400500a77e7afff0bc2a71e4c469a9987e5b2085626a895d454ddf
+        reqs:
+            - REQ-EXPR-015
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (gojq): rejects clock, local timezone, env, inputs, streams and modules; sorted object iteration and JSON encoding (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-015-02:
+        hash: sha256:cb081d662e0b703d9c60b6085f6fcba85fceb3f19e9017337547e02fc95a54a8
+        reqs:
+            - REQ-EXPR-015
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-016-01:
+        hash: sha256:53cb34f3cb5d53e3b7a7b3e2d097ac9e8f02f2aa2454cf2865a7782656b8e257
+        reqs:
+            - REQ-EXPR-016
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        note: 'Determinism and sandbox (gojq): rejects clock, local timezone, env, inputs, streams and modules; sorted object iteration and JSON encoding (Constitution Art. 3, ADR-0003).'
+        human:
+            status: pending
+    EXPR-017-01:
+        hash: sha256:2eb1d67d1ecb4424ea1b14935d0c316ac562ada48d9b73e2099ea6d218772ce6
+        reqs:
+            - REQ-EXPR-017
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-017-02:
+        hash: sha256:5ac5f91cd16c415c986834c227262ade67e39da132429e16c0ab2ef11be85d06
+        reqs:
+            - REQ-EXPR-017
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-017-03:
+        hash: sha256:841133bb311551adf5038bfec269237bba77674070bbe349080291baa817f4df
+        reqs:
+            - REQ-EXPR-017
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-018-01:
+        hash: sha256:8c00ed71bcad18cb03977a4bf4b95bfc22e746834f7660a162b2d5030b9620a8
+        reqs:
+            - REQ-EXPR-018
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-019-01:
+        hash: sha256:005c77f5dcfeacade5de9f234c94856c03f04df781592d9bc9c3629d8be65ed4
+        reqs:
+            - REQ-EXPR-019
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: antigravity:spec-reviewer:88cf63
+        approved_at: "2026-11-17"
+        human:
+            status: pending
