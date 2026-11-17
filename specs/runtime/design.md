@@ -99,12 +99,11 @@ its own.
 
 ## Temporal runtime (WP-L5-02)
 
-Decisions for `runtime/temporal` that leave `REQ-RT-026` … `REQ-RT-037` in
-`temporal.feature` to the implementer. It builds on the payload codec of
-WP-L1-04 (`specs/secrets/`) and the blob store of WP-L1-02 (`specs/blob/`); it
-does not respectify either. This work package changes no contract file unless
-open question 7 is answered yes, in which case the contract change lands first
-in a pull request of its own.
+Decisions for `runtime/temporal` that leave `REQ-RT-026` … `REQ-RT-029` and
+`REQ-RT-031` … `REQ-RT-037` in `temporal.feature` to the implementer. It
+builds on the payload codec of WP-L1-04 (`specs/secrets/`) and the blob store
+of WP-L1-02 (`specs/blob/`); it does not respectify either. This work package
+changes no contract file.
 
 ### Shape
 
@@ -138,79 +137,92 @@ adds only the `MaxAttempts > 0` case where retries can be delayed.
 
 ### Payload codec: claim-check and encryption
 
-The workflow and the activity worker share one data converter that wraps two
-codecs, in this order:
+The workflow and the activity worker share one context-aware data converter
+(with the tenant of the run or activity in the context, as
+`specs/secrets/design.md` §1 requires) that composes the encryption codec of
+WP-L1-04 and the blob claim-check codec over WP-L1-02:
 
-1. **Encryption** (`REQ-RT-031`): the payload codec of WP-L1-04, with the
-   tenant of the run or activity in the context (a context-aware converter, as
-   `specs/secrets/design.md` §1 requires). It runs for every payload the runtime
-   hands to Temporal, so every payload in the run history and in the activity
-   task carries `encoding: binary/encrypted` (`REQ-SECRET-002`). The codec's
-   own failures (a payload without that encoding, `REQ-SECRET-006`) are what
-   `REQ-RT-032` reports: a run that must load such a payload from its history
-   fails it with `invalid_argument`. A start without a tenant is rejected by `Start` itself
-   with `invalid_argument` before anything is recorded (`REQ-RT-031`,
-   `RT-031-02`); this is the runtime's check, not a new payload codec rule.
-2. **Claim-check** (`REQ-RT-028` … `REQ-RT-030`): a payload whose encoded form
-   is larger than the threshold is written to the blob store of the run's tenant
-   and replaced in the history by a small marker payload whose content, and
-   so whose `sha256:` content key (`REQ-BLOB-001`), is the content key of that
-   blob. The bytes of a content key and its marker contain no `0x00`
-   (`REQ-RT-030`), so the blob's bytes are not the content key of anything
-   else and two payloads with the same content key hold the same payload only
-   (`REQ-RT-029`). The marker itself is encrypted by step 1 and passes the
-   codec untouched on decode, as a payload already encoded by a codec.
+1. **On encode** (`REQ-RT-028`, `REQ-RT-031`): the payload is first encrypted
+   with the tenant's encryption codec (`REQ-SECRET-002`). If the encrypted
+   payload's size in bytes exceeds the claim-check threshold, the encrypted
+   payload is written as a blob to the run's tenant in the blob store under
+   its `sha256:` content key (`REQ-BLOB-001`), replaced by a small claim-check
+   marker payload naming that content key, and the marker itself is encrypted
+   with the tenant's encryption codec. Every payload written to the run
+   history or an activity task — whether kept inline or replaced by a
+   claim-check marker — therefore carries `encoding: binary/encrypted`
+   (`REQ-RT-031`). A start without a tenant is rejected by `Start` itself with
+   `invalid_argument` before anything is recorded (`REQ-RT-031`, `RT-031-02`).
+2. **On decode** (`REQ-RT-029`, `REQ-RT-032`, `REQ-RT-033`): the history
+   payload is first decrypted with the tenant's encryption codec; a payload
+   without `encoding: binary/encrypted` is rejected with `invalid_argument`
+   (`REQ-SECRET-006`, `REQ-RT-032`). If the decrypted payload is a claim-check
+   marker, the codec reads the referenced blob from the blob store for the
+   run's tenant and decrypts that blob with the tenant's encryption codec to
+   restore the original payload's content and encoding (`REQ-RT-029`).
 
-Encoding sits inside the workflow, so its ciphertexts and blobs depend on
-ambient state, not on the run. The workflow must not branch on anything but
-the decoded payload: re-encoding a payload after ContinueAsNew or replay
-produces a different ciphertext (`REQ-SECRET-003`) but the same decoded
-content, so replay is unaffected. The claim-check threshold applies to the
-encrypted form, which is a few bytes larger than the plain form; the sizes in
-the scenarios are chosen clear of the boundary by more than that overhead.
+Encoding sits inside the data converter, so ciphertexts and blobs depend on
+ambient state, not on deterministic workflow state. The workflow must not
+branch on anything but the decoded payload: re-encoding a payload after
+ContinueAsNew or replay produces a different ciphertext (`REQ-SECRET-003`)
+but the same decoded content, so replay is unaffected. The claim-check
+threshold applies to the encrypted form, which is a few bytes larger than the
+plain form; the sizes in the scenarios (`1024`, `6000`, `65536`) are chosen
+clear of the 5 KB boundary by more than that overhead.
 
-Reading a blob the run's tenant does not hold, or that decodes for another
-tenant or fails authentication, is the payload codec's or blob store's error
-(`REQ-BLOB-010`, `REQ-SECRET-004`): the activity that reads it fails with
-`invalid_argument` and the run fails (`REQ-RT-033`).
+When a claim-check marker in a run's history names a blob content key that the
+run's tenant does not hold (including a blob stored by another tenant), the
+blob store returns `not_found` (`REQ-BLOB-006`, `REQ-BLOB-010`) and the run
+fails with `not_found` (`REQ-RT-033`). If a payload or blob ciphertext was
+tampered with or encrypted for another tenant, the encryption codec rejects it
+with `invalid_argument` (`REQ-SECRET-004`, `REQ-SECRET-005`).
 
 ### ContinueAsNew
 
-The checkpoint event threshold is a configuration of the runtime. The
-event count a checkpoint request compares is the number of history events the
-run already recorded, not counting the request itself.
+The checkpoint event threshold is a configuration of the runtime.
+`docs/architecture/runtime.md` (§2, §3) maps `Checkpoint` to ContinueAsNew at
+a fixed event threshold and does not specify automatic ContinueAsNew outside
+`Checkpoint`; in this spec ContinueAsNew is triggered only when `Checkpoint`
+is called and the current history's event count has reached the threshold.
 
-- **Event counts** (the rule, then each scenario). The runtime records exactly
-  two events per step — the schedule of its activity and its result (a
-  retried activity adds events; no scenario retries before a checkpoint) —
-  and one event per emitted durable event.
-  - `RT-034-01`: after `s8`'s result there are 8 events; the count excludes
-    the checkpoint's own event, so `s8`'s checkpoint is at 8 ≥ 8 and
-    continues as new; the new run starts with the 8 recorded events and `s9`
-    runs there. 1 time.
-  - `RT-035-01`: 3 steps give 6 events < 8; the run stays in its history and
-    waits at the gate.
-  - `RT-035-02`: 6 steps give 12 events, one short of 13; the only checkpoint
-    finds 12 < 13. 0 times.
-  - `RT-036-01`: `s9`'s checkpoint follows 18 events ≥ 8 and continues as new
-    while the run waits at `approve`; the gate wait, the 9 recorded results
-    and the run id survive, so no step runs again and the Update completes the
-    continued run's wait.
-  - `RT-036-02`: 6 emitted events before the only checkpoint give 6 events <
-    8. The checkpoint continues the run because the flow explicitly continues
-    as new there, as `RT-036-01` does at its gate; the continued run keeps
-    the 6 events, runs the 5 steps (30 events) and returns.
-- The continued run keeps its id (`StartRequest.RunID`, `r1` in `RT-036-01`),
-  its recorded step results, its outbox and its pending gate waits
-  (`REQ-RT-036`). `Describe` and `List` report one run under that id; the
-  chain of runs Temporal keeps in its place does not appear in `List`. The
-  gate Update that arrives after ContinueAsNew addresses the run by id, so the
-  continued run receives it.
-- Because the runtime always gives a started run a run id (design: a generated
-  one when `StartRequest.RunID` is empty), ContinueAsNew never hits Temporal's
+- **Event counts** (one rule, applied to every scenario). In the current
+  history (since the run started or since its last ContinueAsNew, which resets
+  the current history's event count to 0), the runtime counts **2 events per
+  step** (activity scheduled and activity result; a retried step adds 1 event
+  per retry, and no scenario retries before a checkpoint) and **1 event per
+  emitted durable event** (`Emit`), excluding the checkpoint request itself.
+  When `Checkpoint` is called, the runtime continues the run as new if and
+  only if `count >= threshold` (`REQ-RT-034`, `REQ-RT-035`):
+  - `RT-034-01` (threshold `8`): 5 steps `s1`–`s5` with a checkpoint after
+    each give counts `2`, `4`, `6`, `8` at `s1`–`s4`; `s4`'s checkpoint hits
+    `8 >= 8` and continues as new (resetting the new history's count to `0`),
+    and `s5` records `2 < 8` in the new history. Continued as new `1` time.
+  - `RT-035-01` (threshold `8`): 3 steps `s1`–`s3` give `6 < 8` events at the
+    checkpoint; the run stays in its history (continued as new `0` times,
+    checkpoint recorded at event count `6`) and completes when gate `"approve"`
+    is resolved.
+  - `RT-035-02` (threshold `13`): 6 steps `s1`–`s6` give `12 < 13` events (one
+    short of the threshold) at the only checkpoint. Continued as new `0`
+    times.
+  - `RT-036-01` (threshold `8`): 9 steps `s1`–`s9` give `18 >= 8` events at
+    the checkpoint, so the run continues as new `1` time and waits at gate
+    `"approve"`; the run id (`"r1"`), the 9 recorded step results and the
+    gate wait survive, so resolving `"approve"` on `"r1"` completes the run
+    without re-executing `s1`–`s9`.
+  - `RT-036-02` (threshold `6`): 6 emitted events `"a"`–`"f"` give `6 >= 6`
+    events at the checkpoint, so the run continues as new `1` time (resetting
+    the new history's count to `0`), then runs 5 steps (`10` events, with no
+    further checkpoint) and returns `"done"` with `"a"`–`"f"` in its outbox
+    once, in order.
+- The continued run keeps its id (`StartRequest.RunID`, `"r1"` in
+  `RT-036-01`), its recorded step results, its outbox and its pending gate
+  waits (`REQ-RT-036`). `Describe` and `List` report one run under that id;
+  the chain of workflow executions Temporal keeps under the hood does not
+  appear in `List`. The gate Update that arrives after ContinueAsNew addresses
+  the run by id, so the continued run receives it.
+- Because the runtime always gives a started run a run id (a generated one
+  when `StartRequest.RunID` is empty), ContinueAsNew never hits Temporal's
   same-run-id collision.
-- `Checkpoint` only takes effect at a workflow task boundary: on a run waiting
-  at a gate, it is a request on the continued run.
 
 ### Version pinning
 
@@ -220,48 +232,42 @@ writing the pinned release ships server v1.32.2, API v1.63.5 and SDK v1.47.0
 and minor version — 1.32 — and "outside the pinned range" means a different
 major or minor (`1.31.9` and `1.33.0` in `RT-037-02`). On `Serve`, the
 runtime asks the server for its version and refuses to serve, with code
-`unsupported`, when it is outside the range (`REQ-RT-037`); it reports the
-server version it saw through `DescribeServerVersion` (open question 7).
+`unsupported`, when it is outside the range (`REQ-RT-037`). This check uses no
+new method on `runtime.Runtime` or `runtime.Caps`.
 
 The gate has no way to run an older or newer server build. The Temporal **test
 server** — the SDK's dev server whose features the scenarios use through
-time skipping — runs exactly one version, the pinned one. `RT-037-02` passes
-the runtime a **simulated version of the server it would ask**: a stand-in for
-the one version call `Serve` makes, seen through the runtime's connection
-parameter, which fails like a server refusing the request. The test server
-reports its real version, which `RT-037-01` checks is `1.32.2`; a pin change
-updates the Background and that example in the same change.
+time skipping — runs at the pinned version (`1.32.2` in `Background` and
+`RT-037-01`). `RT-037-02` passes the runtime a **simulated Temporal server
+version** for the version check `Serve` makes, which fails with `unsupported`
+when outside `1.32.x`.
 
 ### How the scenarios run deterministically
 
-`memory` (`runtime/temporal` test setup, `_test.go` and `internal/bdd`): the
-Temporal SDK's **test server** (`temporal.NewTestServer`, which embeds the CLI
-dev server) with its **test environment** and time skipping. The scenarios
-speak test time only (`RT-027-01`'s `1 day of test time`) and time skipping
-advances the workflow clock to the next timer or retry at once: no wall clock,
-no sleep, no timing assumption. The server is in-process on port 7233 (dev server
-default) of a fresh test server, and the embedded profile's server (WP-L5-03) is not
-involved.
+In `runtime/temporal` tests (`_test.go` and `internal/bdd`), the harness starts
+an in-process Temporal test server on an **ephemeral loopback port
+(`127.0.0.1:0`)** with time skipping enabled; the embedded profile's server
+(WP-L5-03) and fixed port `7233` are never used. The scenarios speak test time
+only (`RT-027-01`'s `1 day of test time`) and time skipping advances the
+workflow clock to the next timer or retry at once: no wall clock, no sleep, no
+timing assumption.
 
-The gate environment (`TestEnvironment`) does not expose Temporal's history;
-histories are read from the test server's client (`GetWorkflowHistory`) and
-from its metadata client (the run's event history and the `ContinuedAsNew`
-close event). The tenant, the blob store, the payload codec and the key
-service come from the gate: the payload codec and its simulated key service
-are WP-L1-04's (`internal/bdd/steps/secrets.go`), the blob store is WP-L1-02's
-in-memory or file-backed store, and the two are composed here as the
-development converter this package takes from the composition root. The
-documents of other work packages this work package needs (`specs/secrets/`,
-`specs/blob/`) were in review on their own branches when this draft was
-written; the implementer uses their step library, not a copy.
+Histories are read from the test server's client (`GetWorkflowHistory`,
+including payload metadata and `ContinuedAsNew` events). The tenant, the blob
+store, the payload codec and the simulated key service come from the gate: the
+payload codec and its simulated key service are WP-L1-04's
+(`internal/bdd/steps/secrets.go`), the blob store is WP-L1-02's store, and the
+two are composed here as the data converter this package takes from the
+composition root. The documents of other work packages this work package needs
+(`specs/secrets/`, `specs/blob/`) were in review on their own branches when
+this draft was written; the implementer uses their step library, not a copy.
 
 ### Changed outside `runtime/temporal`
 
-None are expected. `layering.yaml` already lists `runtime/temporal`
+None. `layering.yaml` already lists `runtime/temporal`
 (`[core, runtime, flow, platform]`, and `go.temporal.io/` denied in every
 other layer), so the runtime may import the payload codec of WP-L1-04 and the
-blob store of WP-L1-02 through `platform`. If open question 7 changes
-`runtime/runtime.go`, that change lands first in a pull request of its own.
+blob store of WP-L1-02 through `platform`.
 
 ## Open questions
 
@@ -275,39 +281,29 @@ blob store of WP-L1-02 through `platform`. If open question 7 changes
    one result (`REQ-RT-036`). The docs do not say how the runtime should
    acknowledge the in-flight attempt before continuing as new, and no scenario
    can check what the history does not show. Decide: (a) accept at-least-once
-   for steps, as `runtime/temporal/embedded/BENCHMARKS.md` item 5 already does,
-   and drop the claim from the requirements; or (b) require the runtime to
-   complete or cancel in-flight steps before ContinueAsNew.
-5. **Counted into the claim-check threshold (`REQ-RT-028`, `REQ-RT-029`)**: "larger than the threshold"
-   is counted on the encrypted form, because the runtime encodes before it
-   claim-checks. Alternatively it could be counted on the plain payload; that
-   needs the encryption codec to expose the plain size to the claim-check
-   codec.
-6. **Wording of `REQ-RT-030`**: the claim-check marker's exact shape (metadata key,
-   payload) is left to the implementer as long as it holds no `0x00` byte.
-   Confirm whether the owner wants the marker specified instead, as
-   `specs/secrets/design.md` does for its encoded payload.
-7. **Reporting the server version (`REQ-RT-037`)**: `Runtime` and `Caps` have
-   no way to report the server version or to report the version the runtime
-   refused, which `RT-037-01` and `RT-037-02` read. Decide: (a) add
-   `DescribeServerVersion` to the runtime contract in its own pull request,
-   with or without a versioned `Capabilities` field; or (b) drop those Then
-   steps and let the version check report only through the start's error.
-   The simulated server version of `RT-037-02` is a test stand-in for the one
-   version call; confirm that it is acceptable that no scenario runs an
-   actual server of another version.
-8. **Who rejects a start without a tenant (`REQ-RT-031`, `RT-031-02`)**:
+   for steps, as `runtime/temporal/embedded/BENCHMARKS.md` item 5 already does;
+   or (b) require the runtime to complete or cancel in-flight steps before
+   ContinueAsNew.
+5. **Payload codec composition and claim-check threshold (`REQ-RT-028` … `REQ-RT-032`)**:
+   `docs/architecture/runtime.md` §3 says "On Temporal this is a payload codec,
+   which also encrypts", without prescribing the internal ordering of
+   encryption and claim-check. This spec encrypts the payload first, stores the
+   encrypted payload in the blob store when it exceeds the threshold, and
+   encrypts the resulting claim-check marker so that both the blob store and
+   every payload in Temporal's run history hold only `binary/encrypted`
+   ciphertext. Confirm this composition (and counting the threshold on the
+   encrypted size), or say if the architect prefers another codec arrangement.
+6. **ContinueAsNew trigger and event counting (`REQ-RT-034`, `REQ-RT-035`)**:
+   `docs/architecture/runtime.md` (§2, §3) states "`Checkpoint` =
+   ContinueAsNew" and "Histories are bounded with `Checkpoint` at a fixed
+   event threshold", without specifying whether ContinueAsNew can ever trigger
+   outside an explicit `Checkpoint` call or whether the threshold counts
+   logical runtime events (2 per step, 1 per emitted event) versus raw
+   Temporal `HistoryEvent` records. Confirm the `Checkpoint`-only trigger and
+   the 2-per-step / 1-per-emit event count model used in `RT-034-01` …
+   `RT-036-02`.
+7. **Who rejects a start without a tenant (`REQ-RT-031`, `RT-031-02`)**:
    `Start` rejects it with `invalid_argument` because the payload codec needs a
    tenant (`REQ-SECRET-022`). Nothing specifies error codes for `Start` and
    `Runtime` has no "unauthenticated" tenant input. Confirm the code, or move
    the check to the API.
-9. **`RT-031-02`'s count**: "the Temporal test server holds 0 workloads for
-   `fetch`" needs a way to list workloads; the SDK's visibility count query is
-   the candidate. Confirm it, or replace the step with a count of started
-   activities.
-10. **A result that survives a continue-as-new despite a retried attempt**:
-    the scenario considered for it (threshold 8, step "charge" whose attempt 1
-    times out and attempt 2 completes, then a checkpoint) is not written: the
-    run history would hold 3 step events, not the 2 the count assumes, and the
-    outcome is the question of open question 4. Once 4 is decided, decide
-    whether it needs a scenario.

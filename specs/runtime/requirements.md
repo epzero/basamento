@@ -93,16 +93,13 @@ WP-L5-03 and the conformance suite WP-L5-04.
 The temporal runtime shall report capabilities `durable`, `sync_gate_updates`, `continue_as_new` and `polyglot_queues` as true.
 
 ### REQ-RT-027 — Steps keep their retry settings
-When a step with `MaxAttempts` greater than 0 fails with a retryable error whose code is not listed as non-retryable, the temporal runtime shall run at most `MaxAttempts` attempts of that step.
+When a step with `MaxAttempts` greater than 0 fails with a retryable error whose code is not listed as non-retryable, the temporal runtime shall retry the step until an attempt succeeds or `MaxAttempts` attempts have failed, and if all `MaxAttempts` attempts fail, fail the step with the last attempt's error and fail the run.
 
 ### REQ-RT-028 — Claim-check threshold
 Where a claim-check threshold is configured, the temporal runtime shall store a run history payload larger than the threshold as a blob.
 
 ### REQ-RT-029 — Claim-checked payloads round-trip unchanged
 Where a run history payload is stored as a blob, the temporal runtime shall read it back as the payload that was written, content and encoding.
-
-### REQ-RT-030 — Blob content key carries a marker
-When the temporal runtime writes a payload to the blob store, the temporal runtime shall name the payload's content key with the content key of a blob whose content is that payload only, without the byte `0x00`.
 
 ### REQ-RT-031 — History holds only encrypted payloads
 The temporal runtime shall encode every run history payload with the payload codec for the run's tenant.
@@ -111,7 +108,7 @@ The temporal runtime shall encode every run history payload with the payload cod
 If a run history payload without the encoding `binary/encrypted` is loaded into a run, then the temporal runtime shall reject it with code `invalid_argument`.
 
 ### REQ-RT-033 — Claim-checked payloads stay bound to their tenant
-If a run reads a run history payload stored as a blob under a tenant other than the run's, then the temporal runtime shall fail the step that reads it with code `invalid_argument`.
+If a run reads a run history payload whose blob is not held by the run's tenant, then the temporal runtime shall fail the run with code `not_found`.
 
 ### REQ-RT-034 — Checkpoint threshold
 Where a checkpoint event threshold is configured, the temporal runtime shall continue a run as new once a checkpoint is requested and the run history holds at least that many events.
