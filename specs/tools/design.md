@@ -10,10 +10,11 @@ disagree, the requirement wins and this file is corrected.
 - **`tool`** (owned by WP-L7-02) holds the port, the registry and allowlists,
   the call step, the MCP client and the sandbox port. It may import `core` and
   `platform` (`layering.yaml`); the MCP Go SDK
-  (`github.com/modelcontextprotocol/go-sdk`) and a sandbox driver are
-  third-party modules, which the layering rule does not restrict. `go.mod`
-  gains the SDK (and the driver's module) here; `gate layering` checks package
-  imports, not modules.
+  (`github.com/modelcontextprotocol/go-sdk`) is a third-party module, which
+  the layering rule does not restrict. `go.mod` gains the SDK here; `gate
+  layering` checks package imports, not modules. WP-L7-02 adds no sandbox
+  driver module: the gate exercises the port against the simulated sandbox,
+  and concrete drivers are a follow-up work package.
 - **`agent`** (WP-L7-01, not touched here) owns the loop: it passes the
   allowlist it was given and builds the model's error message (REQ-TOOL-011).
   WP-L7-02 depends on WP-L7-01 (`docs/roadmap/L7-agents.md`), and `agent`
@@ -95,12 +96,13 @@ func RunStep(ctx context.Context, set *Set, call Call, now func() time.Time) (Ou
 ## 3. Decisions
 
 **Step key and result (REQ-TOOL-003).** The key is
-`tool:<run>:<node path>:<call index>`; the node path is the same one the model
-node uses (map index and enclosing subflows included), and the call index
-counts the calls of one model reply in order. The step returns the `Outcome`,
-success or failure, so a replay returns the recorded outcome and never the
-tool. Every outcome is recorded, including `permission_denied` and the two
-refusals below.
+`tool:<run>:<node path>:<visit>:<call index>`; the node path is the same one
+the model node uses (map index and enclosing subflows included), `visit`
+counts visits to that node or turns of the agent loop, and `call index`
+counts the calls within that visit or model reply in order. The step returns
+the `Outcome`, success or failure, so a replay returns the recorded outcome
+and never the tool. Every outcome is recorded, including `permission_denied`
+and the two refusals below.
 
 **Order inside the step.** Allowlist check (REQ-TOOL-008) → unknown name
 (`not_found`; the allowlist check comes first, so a tool an agent was not
@@ -135,8 +137,9 @@ true, Code: core.CodePermissionDenied}` without running the tool.
   server name has any character outside `[A-Za-z0-9]` replaced by `_`. A tool
   name that collides with one already in the caller's `Set` is rejected with
   `conflict` when the server's tools are listed.
-- Tool list: re-read on every model turn unless the server's session sends a
-  "list changed" notification; then the tools are read again before they are
+- Tool list: cached until the server's session sends a "list changed"
+  notification (or re-read on every model turn when notifications are not
+  supported); when notified, the tools are read again before they are
   offered (REQ-TOOL-016).
 - **Unreachable (REQ-TOOL-014):** no session, or the connection fails before
   the call is sent. **Dropped mid-call (REQ-TOOL-015):** the connection fails
@@ -181,9 +184,10 @@ type SandboxResult struct {
   fresh work directory), no host environment (`HOME` is set to the work
   directory, which is what `echo $HOME` shows), no instance metadata address
   and, with `Network` empty, no network. A host file path in a command is
-  not rewritten; it simply does not exist. The gate proves the port's
-  contract against the simulated sandbox; a real driver's isolation is a
-  deployment matter, checked by a `@live` check of its own later.
+  not rewritten; it simply does not exist. WP-L7-02 implements only this
+  port and the simulated sandbox: the gate proves the port's contract
+  against it. A concrete driver and its isolation `@live` check are a
+  follow-up work package.
 - Time (REQ-TOOL-019) and output (REQ-TOOL-020) limits are enforced by the
   layer around the driver as well as by the driver, so the caller always sees
   the same outcome: `timeout` at the limit on the fake clock, the first
@@ -193,8 +197,9 @@ type SandboxResult struct {
   `ExitStatus` and the captured output (`Content`), because a non-zero command
   exit (such as a failing test run) is a tool result, not a tool failure.
 - A driver that cannot start (REQ-TOOL-022) returns `internal`.
-- Drivers: the first is `platform`-backed; the simulated one lives in
-  `internal/bdd`.
+- The simulated sandbox lives in `internal/bdd`; WP-L7-02 adds no concrete
+  driver. The first concrete driver (a `platform`-backed one) and its
+  `@live` check are a follow-up work package.
 
 ## 4. What the implementer changes outside `tool`
 

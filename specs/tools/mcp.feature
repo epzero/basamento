@@ -27,7 +27,7 @@ Feature: Tools found on an MCP server
 
   @REQ-TOOL-012 @REQ-TOOL-002 @id:TOOL-012-01
   Scenario: Arguments are checked against the server's schema before forwarding
-    Given agent "assistant" uses the MCP server "weather" that offers tool "forecast" requiring "city"
+    Given agent "assistant" uses the MCP server "weather" that offers tool "forecast" requiring "city" of type "string"
     When agent "assistant" calls tool "mcp_weather__forecast" with arguments {"city": 7}
     Then the call ends with code "invalid_argument"
     And the simulated MCP server "weather" received 0 calls

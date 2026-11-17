@@ -34,16 +34,16 @@ Feature: Calling a tool
 
   @REQ-TOOL-002 @id:TOOL-002-02
   Scenario Outline: A wrong argument is reported with what the schema requires
-    Given agent "assistant" is given tool "track-parcel", whose input schema takes "<value>"
+    Given agent "assistant" is given tool "track-parcel", whose input schema requires "tracking_number" of type "string" and allows no other properties
     When agent "assistant" calls tool "track-parcel" with arguments <arguments>
     Then tool "track-parcel" was not run
     And the call ends with code "invalid_argument"
-    And the error names "tracking_number" as <must be>
+    And the error names "<argument>" as <requirement>
 
     Examples:
-      | value  | arguments                       | must be                        |
-      | string | {"tracking_number": 42}         | must be a string               |
-      | string | {"tracking_number": "P-1", "mode": "air"} | must not have "mode"  |
+      | arguments                                 | argument        | requirement      |
+      | {"tracking_number": 42}                   | tracking_number | must be a string |
+      | {"tracking_number": "P-1", "mode": "air"} | mode            | not allowed      |
 
   @REQ-TOOL-003 @id:TOOL-003-01
   Scenario: A run that resumes after completing a call does not run the tool again
@@ -104,6 +104,7 @@ Feature: Calling a tool
     When agent "assistant" calls tool "dump"
     Then the call succeeds
     And the result is a blob reference and not the result's bytes
+    And blob storage holds the 2048 bytes at that reference
 
   @REQ-TOOL-008 @security @id:TOOL-008-01
   Scenario: An agent call to a tool outside its allowlist is refused and never run
@@ -132,7 +133,7 @@ Feature: Calling a tool
   @REQ-TOOL-011 @id:TOOL-011-01
   Scenario: A model learns why a call failed, without the tool's details
     Given agent "assistant" is given tool "search"
-    And tool "search" returns the error "upstream index is rebuilding" with details {"host": "index-7.internal"}
+    And tool "search" returns the error "upstream index is rebuilding" with code "vendor_error" and details {"host": "index-7.internal"}
     When agent "assistant" calls tool "search" and starts a model turn
     Then the model receives the error code "vendor_error" and message "upstream index is rebuilding"
     And the model receives no details

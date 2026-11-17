@@ -23,11 +23,11 @@ Feature: Running a command in a sandbox
   @REQ-TOOL-018 @security @id:TOOL-018-02
   Scenario: A command reaches only the network its sandbox was granted
     Given sandbox "tests" is granted network access to "api.example.com"
-    And sandbox "tests" answers the command "echo $HOME" with exit status 0 and stdout "/home/sandbox"
-    When agent "assistant" calls tool "run-tests" with the command "echo $HOME"
+    And sandbox "tests" answers the command "curl https://api.example.com/health" with exit status 0 and stdout "ok"
+    When agent "assistant" calls tool "run-tests" with the command "curl https://api.example.com/health"
     Then the sandbox "tests" received the network grant "api.example.com" and nothing else
     And the call succeeds
-    And the call's output is "/home/sandbox"
+    And the call's output is "ok"
 
   @REQ-TOOL-019 @id:TOOL-019-01
   Scenario: A command that exceeds the sandbox's time limit is stopped
