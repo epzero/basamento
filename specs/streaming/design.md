@@ -12,6 +12,12 @@ snapshots and reattach are REQ-STRM-001 … 007 and `docs/architecture/streaming
 The relay runs in-process in every profile: it starts with the composition root,
 not as a separate service.
 
+### Dependencies
+
+WP-L6-01 depends on WP-L1-01 (SQL store), WP-L1-03 (Bus and KV) and WP-L5-01
+(runtime); owner decision, 2026-11-17. The relay publishes through the
+`platform.Bus` port from WP-L1-03.
+
 ### Two pieces
 
 - **Writer.** Takes the state change and the events it records
@@ -19,13 +25,13 @@ not as a separate service.
   (REQ-STRM-008, REQ-STRM-009), and commits both in one SQL transaction
   (REQ-STRM-010 … 012).
 - **Relay.** Reads unrelayed outbox entries per run in `seq` order, publishes
-  each with `platform.Bus.Publish` (the `Bus` port, from WP-L1-03; the relay is
-  written against the interface, so it compiles and is tested with a failing
-  substitute bus before there is a real one), and marks it relayed only after the bus has
-  accepted it (REQ-STRM-013, REQ-STRM-014). A failure leaves the entry
-  unrelayed (REQ-STRM-015 … 019). It is a loop driven by the `core.Clock` and a
-  fixed retry step; tests inject bus failures through a failing `Bus` and
-  advance the fake clock, never by timing (REQ-STRM-018, REQ-STRM-019).
+  each with `platform.Bus.Publish` (WP-L6-01 depends on WP-L1-03 for the
+  `platform.Bus` port; owner decision, 2026-11-17), and marks it relayed only
+  after the bus has accepted it (REQ-STRM-013, REQ-STRM-014). A failure leaves
+  the entry unrelayed (REQ-STRM-015 … 019). It is a loop driven by the
+  `core.Clock` and a fixed retry step; tests inject bus failures through a
+  fake `platform.Bus` in `internal/bdd` and advance the fake clock, never by
+  timing (REQ-STRM-018, REQ-STRM-019).
 
 ### Subject
 
@@ -54,11 +60,13 @@ of their own before the log itself:
    (REQ-SQL-010 … 012, `specs/sql/design.md` §4) require every repository
    call to read its tenant from `context.Context` and fail with
    `invalid_argument` when none is present. `Read` takes its tenant from
-   the context and never from an argument, so a caller cannot omit the
-   tenant or name another tenant (REQ-STRM-022, REQ-STRM-025). The shared
-   `Tenant` context key and accessor belong in `core`, not in
-   `stream/eventlog`; if not yet present in `core`, the implementer lands
-   them first in their own pull request and cites this design.
+   `core.TenantFrom(ctx)` and never from an argument, so a caller cannot omit
+   the tenant or name another tenant (REQ-STRM-022, REQ-STRM-025). `core`
+   provides `core.TenantID`, `core.WithTenant(ctx, id)` and
+   `core.TenantFrom(ctx) (core.TenantID, bool)`;
+   an empty id counts as no tenant (owner decision, 2026-11-17). The helper
+   lands first, in its own contract pull request (`feat(core)`), before this
+   work package.
 
 ### Data
 
@@ -79,5 +87,8 @@ timing in the gate.
 
 ## Open questions
 
-1. **Roadmap dependency (`docs/roadmap/L6-streaming-and-api.md` line 6):** `WP-L6-01` currently lists `Depends: WP-L1-01, WP-L5-01.` and omits `WP-L1-03` (Bus and KV), whereas `WP-L6-02` includes `WP-L1-03`. Should a separate roadmap/design change add `WP-L1-03` to `WP-L6-01`'s `Depends:` line, or should `WP-L6-01` continue to build against `platform.Bus` and its test double until `WP-L1-03` lands?
-2. **Shared SQL transaction and tenant-context helpers (`WP-L1-01` vs `WP-L6-01`):** `specs/sql` (`WP-L1-01`) specifies all-or-nothing transactions (`REQ-SQL-013`) and tenant-from-context scoping (`REQ-SQL-010` .. `012`), while `specs/streaming/design.md` notes that the implementer lands the `core` tenant-context accessor and any missing cross-repository transaction entry point in small prerequisite pull requests if `WP-L1-01` does not export them first.
+1. **Shared SQL transaction handle (`WP-L1-01` vs `WP-L6-01`):** `specs/sql`
+   (`WP-L1-01`) specifies all-or-nothing transactions (`REQ-SQL-013`), while
+   this design notes that the implementer lands any missing cross-repository
+   transaction entry point in a small prerequisite pull request if `WP-L1-01`
+   does not export it first.
