@@ -63,3 +63,10 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Model id** | The name a model is looked up by in the catalog and passed in a request, such as `sim-chat`. It identifies one descriptor, one price. |
+| **Rate rule** | One row of a model's price: rates per million tokens (input, output, …) and an optional condition, the `when`, under which they apply. |
+| **Price formula** | The expression that turns rates and usage into milli-points. A model may declare its own; otherwise the default token formula applies. |
+| **Default token formula** | The price formula of a model priced by rate rules: a million input tokens cost the input rate and a million output tokens the output rate, cached and reasoning tokens not counted. |
+| **Price override** | A price set for one model in one layer above the shipped snapshot: the deployment's, or a tenant's, which applies only to that tenant's calls and wins over the deployment's. |
+| **Counted input tokens** | The tokens a model's tokenizer gives the messages, tool definitions and repair input of a call; an estimate counts them before the call. |
+| **Estimate** | What the price table computes for a call before it starts, from its counted input tokens and its output limit, to reserve against a budget. |

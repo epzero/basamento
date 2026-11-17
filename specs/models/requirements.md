@@ -219,3 +219,47 @@ The model layer shall apply the middleware to a chat call in one order, outermos
 
 ### REQ-MODEL-065 — Local JSON repair after the last supported rung
 If the attempt on the last rung the model supports does not satisfy the output schema and attempt budget remains, then the model layer shall run local JSON repair on that attempt's output as the next attempt without starting a model invocation.
+
+## Catalog and price table
+
+The catalog answers which descriptor a model id stands for and at which price
+a call of it is charged. Prices are the price table's: rate rules per model,
+overridden per deployment and per tenant (`docs/architecture/model-layer.md`
+§7). Reservations, their budget check and settlement consume what this section
+supplies and are specified in `cost.feature`.
+
+### REQ-MODEL-066 — A descriptor by model id
+When the catalog looks up a model id it holds, the catalog shall return that model's descriptor.
+
+### REQ-MODEL-067 — An unknown model id
+If the catalog looks up a model id it does not hold, then the catalog shall fail with code `not_found`.
+
+### REQ-MODEL-068 — A rate rule applies by its condition
+While a model's rate rule holds for an invocation, the price table shall price that invocation at the rule's rates.
+
+### REQ-MODEL-069 — The first holding rate rule wins
+When several of a model's rate rules hold for an invocation, the price table shall price it at the first of them in the table's order.
+
+### REQ-MODEL-070 — Prices come from the most specific layer
+When a call of a model is priced in a tenant that has a price for that model, the price table shall take the price from the tenant's override; otherwise, when the deployment has one, from the deployment's override; and otherwise from the snapshot shipped with the binary.
+
+### REQ-MODEL-071 — Tenant prices stay in their tenant
+The price table shall never apply one tenant's override to a call of another tenant.
+
+### REQ-MODEL-072 — A model without a price is not called
+If no layer of the price table has a price that holds for a call, then the system shall fail the call with code `unsupported` and shall start no invocation.
+
+### REQ-MODEL-073 — The default token formula
+Where a model declares no price formula of its own, the model layer shall price its call with the formula the chosen rates' per-million-token rates give, where a million input tokens cost as many milli-points as the input rate and a million output tokens as the output rate.
+
+### REQ-MODEL-074 — The default formula ignores cached and reasoning tokens
+The default token formula shall count neither cached tokens nor reasoning tokens.
+
+### REQ-MODEL-075 — Whole milli-points, rounded half up
+The price table and the price formulas shall return a whole number of milli-points, rounding half up when the exact amount falls between two whole milli-points.
+
+### REQ-MODEL-076 — The reservation estimate
+When the price table estimates the cost of a call before it starts, the estimate shall be the model's price formula on the call's parameters, its counted input tokens and its output limit as usage.
+
+### REQ-MODEL-077 — Prices do not change what a call was charged
+When a price changes after a call has started, the system shall price that call, at its reservation and at its settlement, by the price that held when its invocation started.
