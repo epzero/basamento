@@ -2,7 +2,9 @@
 
 Status: **Planned** (WP-L10-01). Roadmap: `docs/roadmap/L10-presets.md`. Design: ADR-0003, ADR-0011, `design.md`.
 
-The code generator is a preset: two flows, `codegen.bootstrap` and
+The code generator is a preset: its own Go module and binary, importing
+Basamento as a library, not compiled into `kit` (owner decision, 2026-11-17).
+It defines two flows, `codegen.bootstrap` and
 `codegen.iterate`, over one loop — plan, implement each planned module, verify
 in a sandbox, repair under a guard, review gate, commit. A **preset version**
 is the content hash of the flows, prompts and evals, with its recorded `@eval`

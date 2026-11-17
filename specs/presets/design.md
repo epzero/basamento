@@ -7,16 +7,19 @@ Decisions: ADR-0003 (flows as data), ADR-0011 (host and node handlers),
 ADR-0010 (eval lane). This file adds no behavior: where it and the
 requirements could disagree, the requirements win and this file is fixed first.
 
-## 0. Changes outside `presets/codegen`, landed first
+## 0. How the preset ships, and changes landed first
+
+The codegen preset is an application built on Basamento, not part of the
+foundation: `presets/codegen` is its own Go module, with its own binary, that
+imports Basamento as a library (owner decision, 2026-11-17), like
+`runtime/temporal/embedded`, which already has its own `go.mod`. It is not
+compiled into `kit`, has no entry in `layering.yaml` and needs no ADR for
+this.
 
 This work package owns `presets/codegen` only. Before implementation of
 `presets/codegen` starts:
 
-1. **Layer** (open question for the architect). `presets/codegen` has no
-   layer in `layering.yaml`. Adding a layer to `layering.yaml` requires an
-   ADR and a separate change by the architect (`AGENTS.md`,
-   `docs/engineering/agent-workflow.md` §4, §7.4).
-2. **Sandbox commands** (`REQ-PRESET-005`). A plan's tests are a list of
+1. **Sandbox commands** (`REQ-PRESET-005`). A plan's tests are a list of
    sandbox calls. Each `tool` node passes its command as literal `spec.args`,
    never built by a CEL expression: `expr` is deterministic and cost-limited,
    but it is not an expression language for composing untrusted shell text.
@@ -88,8 +91,8 @@ propose(v2) ─► compile ─┬─ fails ─► rejected invalid_argument, no 
   `iterate-minimal`; `versions.feature` tests version regression against
   recorded per-case scores (0–100), where a case with no score counts as a
   regression (`PRESET-017-03`).
-- **Scores are records, not calls.** In the gate and in the flag `kit eval
-  --scores <file>` they come from a recorded file. Nightly fills the file from
+- **Scores are records, not calls.** In the gate and in the preset's own
+  binary, `eval --scores <file>`, they come from a recorded file. Nightly fills the file from
   live runs and the judge. The judge contract (`design.md` §4) is fixed; a
   prompt or judge change is re-recorded like any `@eval` change (ADR-0010).
 - A proposal is a flow run of `codegen.version`: stages `compile`, `eval`,
@@ -143,5 +146,4 @@ and this capability claims nothing more.
 
 ## Open questions
 
-1. **Layering for `presets/codegen` (`layering.yaml` + ADR):** `WP-L10-01` owns `presets/codegen`, which has no entry in `layering.yaml`. Per `AGENTS.md` and `docs/engineering/agent-workflow.md` §4 and §7.4, the architect must decide the allowed imports of `presets/codegen` in `layering.yaml` and record that in an ADR before implementation starts.
-2. **System-level API coverage (`@level:system`):** `WP-L10-01` depends on `WP-L7-02` and `WP-L1-05`, not `WP-L6-03` (`docs/roadmap/L10-presets.md`), so API-driven `@level:system` scenarios are excluded from this work package (`docs/roadmap/README.md`). Decide whether a later task/WP or a roadmap dependency update should add a system-level codegen scenario once `WP-L6-03` is a dependency.
+1. **System-level API coverage (`@level:system`):** `WP-L10-01` depends on `WP-L7-02` and `WP-L1-05`, not `WP-L6-03` (`docs/roadmap/L10-presets.md`), so API-driven `@level:system` scenarios are excluded from this work package (`docs/roadmap/README.md`). Decide whether a later task/WP or a roadmap dependency update should add a system-level codegen scenario once `WP-L6-03` is a dependency.
