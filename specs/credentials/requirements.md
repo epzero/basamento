@@ -32,7 +32,7 @@ If a credential store call carries no tenant in its context, then the credential
 The credential store shall accept a credential name of 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`.
 
 ### REQ-CRED-007 — Invalid credential names
-If a credential name is empty, longer than 128 characters, or contains a character other than `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, then the credential store shall reject the call with code `invalid_argument`.
+If a credential name is empty, longer than 128 characters, contains a character other than `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, or has a `/`-separated segment that is empty, `.` or `..`, then the credential store shall reject the call with code `invalid_argument`.
 
 ### REQ-CRED-008 — Reference form
 The credential store shall resolve only a reference of the form `cred://` followed by a valid credential name.

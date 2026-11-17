@@ -80,10 +80,11 @@ Feature: Credential values
       | Vendor.A_1/x-y |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
 
-  @REQ-CRED-007 @id:CRED-007-01
+  @security @REQ-CRED-007 @id:CRED-007-01
   Scenario Outline: An invalid credential name is rejected on put
     When the value "sk-live-4f9a2c" is put as "<name>" for tenant "acme"
     Then the put fails with code "invalid_argument"
+    And the error does not contain "<name>"
     And no credential is stored for any tenant
 
     Examples:
@@ -93,6 +94,11 @@ Feature: Credential values
       | vendor/anthropic% |
       | vendor:anthropic |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
+      | ../a |
+      | a/../b |
+      | /a |
+      | a/ |
+      | a//b |
 
   @REQ-CRED-007 @id:CRED-007-02
   Scenario: An invalid credential name is rejected on delete

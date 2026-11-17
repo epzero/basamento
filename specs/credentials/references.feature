@@ -35,6 +35,11 @@ Feature: Credential references and tenancy
       | cred://vendor/anthropic% |
       | cred://vendor/anthropic?version=1 |
       | cred://Vendor anthropic |
+      | cred://../a |
+      | cred://a/../b |
+      | cred:///a |
+      | cred://a/ |
+      | cred://a//b |
 
   @security @REQ-CRED-010 @id:CRED-010-01
   Scenario: A reference to a missing credential fails

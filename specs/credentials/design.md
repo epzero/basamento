@@ -65,9 +65,11 @@ caches nothing.
 
 ## 3. Names and references
 
-- A credential name matches `^[A-Za-z0-9._/-]{1,128}$`: 1–128 ASCII letters,
-  digits, `.`, `_`, `-` or `/`. Names are case-sensitive and used verbatim as
-  the row key, with no normalization.
+- A credential name matches `^[A-Za-z0-9._/-]{1,128}$` and is made of
+  `/`-separated segments, none empty, `.` or `..`: 1–128 ASCII letters, digits,
+  `.`, `_`, `-` or `/`, so no leading or trailing `/`, no `//` and no `../`
+  traversal. Names are case-sensitive and used verbatim as the row key, with
+  no normalization.
 - `Put` and `Delete` take a bare name. A reference is not a name.
 - `Resolve` accepts exactly `cred://` followed by a valid name. The prefix is
   case-sensitive; no query, fragment, whitespace or other character is part of
