@@ -22,7 +22,7 @@ Feature: The codegen loop
   Scenario: A completed stage leaves a checkpoint
     Given a bootstrap brief whose plan has 2 modules and plans, implements and verifies each
     When a bootstrap run of brief "invoices" is started
-    Then the run has checkpoints for stages "plan" and "implement" and not "verify"
+    Then the run has checkpoints for stages "plan", "implement" and "verify" and not "review"
 
   @REQ-PRESET-004 @id:PRESET-004-01
   Scenario: One implement step per planned module, in plan order
@@ -36,8 +36,9 @@ Feature: The codegen loop
   Scenario: The plan's tests run once every module is implemented
     Given a bootstrap brief whose plan has 2 modules and plans and implements them and verifies once
     When a bootstrap run of brief "invoices" is started
-    Then the sandbox received 2 calls
-    And both calls ran on the workspace the model returned in stage "implement"
+    Then the stage log is ["plan", "implement", "verify", "review"]
+    And the sandbox received 1 call
+    And the call ran on the workspace the model returned in stage "implement"
 
   @REQ-PRESET-006 @id:PRESET-006-01
   Scenario: A failing verification is repaired
@@ -49,7 +50,8 @@ Feature: The codegen loop
   Scenario: A repair that passes the tests goes to a person
     Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies with 1 failing, then 0 failing, tests
     When a bootstrap run of brief "invoices" is started
-    Then the run waits at gate "review"
+    Then the stage log is ["plan", "implement", "verify", "repair", "verify", "review"]
+    And the run waits at gate "review"
     And the repair stage ran once, with the output of the failing verification
 
   @REQ-PRESET-007 @cost @id:PRESET-007-01
@@ -97,27 +99,30 @@ Feature: The codegen loop
     Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies with 1 failing, then 0 failing, tests
     And a bootstrap run of brief "invoices" is paused after its first verification
     When preset version "v2" replaces version "v1" as the current version
-    And the run resumes and a person resolves gate "review" with "approved"
+    And the run resumes
+    And a person resolves gate "review" with "approved"
     Then the repair stage ran with the prompt of version "v1"
     And the run's version is "v1"
 
   @REQ-PRESET-015 @id:PRESET-015-01
   Scenario: A run's events name the version and its inputs
     Given a bootstrap brief whose plan has 1 module "store" and plans, implements and verifies it
-    When a bootstrap run of brief "invoices" is started with the preset's analysis bundle
-    Then the run's run-started event names flow "codegen.bootstrap", version "v1", prompt hashes "v1/prompts" and bundle "bundle-v1"
+    When a bootstrap run of brief "invoices" is started
+    Then the run's run-started event names flow "codegen.bootstrap", version "v1", prompts "v1/prompts" and evals "v1/evals"
 
   @REQ-PRESET-003 @id:PRESET-003-01
   Scenario Outline: A resumed run does not redo a completed stage
-    Given a bootstrap brief whose plan has 2 modules and plans, implements and verifies each
-    And a bootstrap run of brief "invoices" is stopped after stage <stage>
-    When the run resumes it
+    Given a bootstrap brief whose plan has 2 modules and plans and implements them and verifies once
+    And a bootstrap run of brief "invoices" is stopped after stage "<stage>"
+    When the run resumes and completes with an approved review
     Then the stage log is ["plan", "implement", "verify", "review"]
-    And the model made 3 plan and implement requests and 1 repair request in both attempts together
+    And the model made 3 plan and implement requests and 0 repair requests in both attempts together
     And the sandbox made 1 call in both attempts together
+    And the git host recorded 1 commit in both attempts together
 
     Examples:
       | stage     |
       | plan      |
       | implement |
       | verify    |
+      | review    |
