@@ -47,5 +47,5 @@ Feature: Queuing messages sent during a turn
   Scenario: The same text sent twice in a row is two messages
     Given ana sends "Hello" and the turn completes
     When ana sends "Hello"
-    Then the scripted model's call for this turn records 3 model messages, in order
+    Then the scripted model's call for this turn records 3 messages, in order
     And the scripted model's call for this turn recorded the user text "Hello" twice

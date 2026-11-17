@@ -59,7 +59,7 @@ the same change that first uses it.
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
-| **User message** | A message a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
+| **User message** | A message with a message id and text that a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
 | **Conversation coordinator** | The single run of a conversation (named `conv-<id>`) that orders turns, starts one child run per turn, and checkpoints by continuing as new. |
 | **Turn** | One user message and the model's answer to it, run as one child run of the conversation coordinator. It ends with state `completed`, `failed` or `cancelled`. |
 | **Child run** | A run started by another run; a turn is a child run of its conversation coordinator. |

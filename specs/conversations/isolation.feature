@@ -45,11 +45,17 @@ Feature: Conversations are isolated by tenant and by user
   @REQ-CONV-018 @id:CONV-018-01
   Scenario: Another user of the same tenant cannot send to a conversation
     When ben of tenant "acme" sends "Hello" to ana's conversation "c1"
-    Then the send fails with code "not_found"
+    Then the send fails with code "permission_denied"
     And ana's conversation "c1" has no queued message
 
   @REQ-CONV-018 @id:CONV-018-02
   Scenario: Another user of the same tenant cannot cancel a conversation
     When ben of tenant "acme" cancels ana's conversation "c1"
-    Then the cancel fails with code "not_found"
+    Then the cancel fails with code "permission_denied"
     And ana's conversation "c1" is still open
+
+  @REQ-CONV-018 @id:CONV-018-03
+  Scenario: Another user of the same tenant cannot read a conversation
+    Given ana of tenant "acme" sent "Hello" and the turn completed with the model message "Hi Ana"
+    When ben of tenant "acme" reads ana's conversation "c1"
+    Then the read fails with code "permission_denied"

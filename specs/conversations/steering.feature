@@ -40,3 +40,10 @@ Feature: Steering a running turn
     And the turn completes
     Then the turn's child run received the user message "Make it shorter" before "And about Florence instead"
     And the scripted model's third call recorded the user texts "Write a long article about Rome", "Make it shorter", "And about Florence instead", in that order
+
+  @REQ-CONV-020 @id:CONV-020-01
+  Scenario: Steering when no turn is running is refused
+    Given ana sent "Hello" and the turn completed
+    When ana steers "Make it shorter"
+    Then the steer fails with code "conflict"
+    And the coordinator run started 1 child run

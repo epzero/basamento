@@ -17,19 +17,17 @@ Feature: The history a new turn sees
       | And a flow?          |
 
   @REQ-CONV-012 @id:CONV-012-02
-  Scenario Outline: A turn leaves out what is not a completed turn
+  Scenario: A later turn sees what a cancelled turn produced
     Given ana sent "Hello" and the turn completed with the model message "Hi Ana"
-    And ana sent "<message>" and the turn ended with state "<state>"
+    And ana sends "Write 100 paragraphs"
+    And the scripted model streamed "Chapter one begins with" in 2 deltas
+    And ana cancels the turn
     When ana sends "What next?"
     Then the scripted model's call for the third turn records these texts in order:
-      | Hello      |
-      | Hi Ana     |
-      | What next? |
-
-    Examples:
-      | message              | state     |
-      | Write 100 paragraphs | cancelled |
-      | Summarise the mail   | failed    |
+      | Hello                |
+      | Hi Ana               |
+      | Write 100 paragraphs |
+      | What next?           |
 
   @REQ-CONV-012 @id:CONV-012-03
   Scenario: The message that starts a turn is in the history its steering messages extend

@@ -61,3 +61,10 @@ Feature: Cancelling a turn or a conversation
     When ana sends "Are you there?"
     Then the send fails with code "conflict"
     And the coordinator run started 1 child run
+
+  @REQ-CONV-021 @id:CONV-021-01
+  Scenario: Cancelling a turn when no turn is running is refused
+    Given ana sent "Hello" and the turn completed
+    When ana cancels the turn
+    Then the cancel fails with code "conflict"
+    And conversation "c1" is still open

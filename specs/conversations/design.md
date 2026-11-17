@@ -8,7 +8,7 @@ records what ADR-0007 leaves open.
 ## 1. Shape
 
 One coordinator flow code (`agent/conversation`) registered with the flow host,
-run on the `temporal` runtime as `conv-<id>`:
+run on the configured `runtime.Runtime` as `conv-<id>`:
 
 ```
 dc.Await("inbox")            validate the user message, fold it into "inbox"
@@ -26,8 +26,9 @@ dc.Await("inbox")            validate the user message, fold it into "inbox"
 - **Gate resolutions.** A user message reaches the coordinator as one gate
   resolution carrying `{tenant, user, message_id, text, mode}`; the coordinator
   is always waiting at an open gate, so a resolution validates synchronously
-  and is refused with `not_found` / `invalid_argument` at the edge (REQ-CONV-017,
-  REQ-CONV-018, REQ-STRM-style validation as in `flow-engine` REQ-FLOW-006).
+  and is refused with `not_found` / `permission_denied` / `conflict` /
+  `invalid_argument` at the edge (REQ-CONV-017 to REQ-CONV-021, and gate
+  validation as in `flow-engine` REQ-FLOW-006).
 - **Transport.** Steps speak of user messages only. The gate/update mechanics
   of the runtime never appear in scenarios.
 
@@ -46,14 +47,15 @@ The coordinator's durable state is a single record:
 `handled` is what makes REQ-CONV-005 hold: the same `message_id` twice is a
 no-op, while the same text with a different id is two messages. Because
 `handled` lives in the run's state, it also survives a restart and a
-continuation (REQ-CONV-015-03).
+continuation.
 
-The history a turn sees (REQ-CONV-012) is built from `messages`: completed
-turns in order, then the starting user message. What a failed turn produced
-stays in `messages` (REQ-CONV-013): it is marked `interrupted` and its user
-message and model messages are given to later turns, so a retry can see what
-went wrong. Steering messages are appended to `messages` as they are delivered
-(REQ-CONV-007, REQ-CONV-012-03).
+The history a turn sees (REQ-CONV-012) is built from `messages`: completed,
+failed and cancelled turns in order, then the starting user message. What a
+failed or cancelled turn produced stays in `messages` (REQ-CONV-009,
+REQ-CONV-013): its partial model message is marked `interrupted`, and its user
+message and model messages are given to later turns so a subsequent turn can
+see what happened. Steering messages are appended to `messages` as they are
+delivered (REQ-CONV-007, CONV-012-03).
 
 **Growth.** `messages` grows with the conversation. The coordinator stores
 it in state, beyond the few-KB threshold of `docs/architecture/runtime.md` §3
@@ -66,8 +68,8 @@ budget is the agent loop's memory policy (WP-L7-01), not this work package's.
 | Mode | While a turn runs | Between turns |
 | --- | --- | --- |
 | `queue` (default) | append to `queue` | start its turn at once (REQ-CONV-004-02) |
-| `steer` | deliver to the running child run as its next steering input (REQ-CONV-006) | refused with `conflict`: nothing to redirect |
-| `cancel` | cancel the running child run (REQ-CONV-008) | refused with `conflict`: nothing to cancel |
+| `steer` | deliver to the running child run as its next steering input (REQ-CONV-006) | refused with `conflict`: nothing to redirect (REQ-CONV-020) |
+| `cancel` | cancel the running child run (REQ-CONV-008) | refused with `conflict`: nothing to cancel (REQ-CONV-021) |
 
 The running child run receives steering inputs through the same typed input
 channel it uses for cancellation of a turn (flow-engine gate).
@@ -96,10 +98,15 @@ The coordinator counts the durable calls it made since it last started
 (`dc.Capabilities()` and the runtime's event count, not a timer). At each turn
 boundary, if the count is at or above the threshold it calls
 `dc.Checkpoint()`; the new run is `conv-<id>` with the same record. The
-threshold is configuration with the default of 1000. Only the `temporal`
-runtime has `ContinueAsNew` (`Caps`); on a runtime without it the coordinator
-does not checkpoint (no fake semantics, ADR-0002), and the long-conversation
-scenarios target `temporal`.
+threshold is configuration with a default of 1000 durable calls (chosen by this
+spec; `docs/architecture/runtime.md` §3 leaves the fixed event threshold open).
+When `dc.Capabilities().ContinueAsNew` is true, the coordinator checkpoints at
+the turn boundary; when it is false (on the `local` runtime), the coordinator
+does not checkpoint (no fake semantics, ADR-0002; CONV-014-04).
+A child run's durable calls count toward the coordinator's threshold: each child
+run the coordinator starts is itself a durable call of the coordinator, so the
+scenarios count a turn as the child run's durable calls (4 or 40) once the
+coordinator has started it.
 
 ## 5. Isolation (REQ-CONV-016 to REQ-CONV-018)
 
@@ -109,9 +116,10 @@ step's `tenant` context comes from the run state, never from the message.
 Every read or write of the record carries that context (constitution §8). A
 principal of another tenant therefore cannot address the run, and a step of
 another tenant cannot read the record. Within a tenant, `user` must equal the
-user in the record for any read or write; a mismatch is `not_found`, not
-`permission_denied`, so the existence of another user's conversation is not
-disclosed (REQ-CONV-018; the tenant rule itself is REQ-AUTH-002).
+user in the record for any read, send or cancel (`resource.owner == principal.id`,
+`docs/architecture/auth.md` §2); a mismatch is denied with `permission_denied`
+(REQ-CONV-018, matching REQ-AUTH-004 and REQ-AUTH-005), whereas cross-tenant
+access is `not_found` (REQ-CONV-017, matching REQ-AUTH-002).
 
 ## 6. Changes outside this work package
 
@@ -130,3 +138,9 @@ disclosed (REQ-CONV-018; the tenant rule itself is REQ-AUTH-002).
 Step definitions go in `internal/bdd/steps/conversation.go`. The scripted
 model, the runtime and the tenant context are built in `internal/bdd` and
 test-only packages; no test double is imported by `agent/conversation`.
+
+## Open questions
+
+1. **Interrupted turns in subsequent turn history (`REQ-CONV-012`, `CONV-012-02`, `CONV-013-03`):** `ADR-0007` specifies that `cancel` keeps the partial message marked `interrupted`, and `REQ-STRM-005` records interrupted partial messages, but `ADR-0007` does not explicitly say whether failed and cancelled turns' user and interrupted model messages are passed to subsequent turns' child runs. This spec includes both `failed` and `cancelled` turns (with partial model messages marked `interrupted`) in the history later turns see so follow-up turns and retries have context. Confirm whether both should be included, only `failed`, or neither.
+2. **Roadmap dependency for `@runtime:temporal` crash-resume conversation scenarios (`WP-L7-03`):** `docs/roadmap/L7-agents.md` gives `WP-L7-03` `Depends: WP-L7-01, WP-L6-02` (which depend on `WP-L5-01` local runtime, not `WP-L5-02`/`WP-L5-03` Temporal runtime). Because a spec PR does not edit `docs/roadmap/`, `REQ-CONV-015` (`durability.feature`: crash-resume of queued and steering messages on `@runtime:temporal`) was removed and `REQ-CONV-014` (`long-conversations.feature`) was made `@runtime:any` using `Caps.ContinueAsNew`. Should `WP-L7-03` add `WP-L5-03` to `Depends:` in `docs/roadmap/L7-agents.md` (or should a follow-up work package own `@runtime:temporal` conversation durability scenarios)?
+3. **Default checkpoint threshold of 1000 durable calls (`REQ-CONV-014`):** `docs/architecture/runtime.md` §3 says *"Histories are bounded with `Checkpoint` at a fixed event threshold"* without naming a number, and `ADR-0007` says *"The coordinator checkpoints regularly"*. This spec chooses `1000` durable calls as the default threshold. Confirm whether `1000` is the intended default.
