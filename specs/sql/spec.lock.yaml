@@ -56,7 +56,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: failed store open must never leak URL password in error message or details.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-005-01:
         hash: sha256:a4ce9622d2432c693ab9c8eb23e774f3dd34a1b791a9cab8fccf178f8a1ab013
         reqs:
@@ -78,7 +81,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data safety and durability: upgrades keep existing data, failed migrations roll back, older binaries refuse newer schemas, and concurrent opens migrate once.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-006-01:
         hash: sha256:096644bffdaf70da6f1b2e8ffab1f872155de800fa9e62003ca53d62f05cab0f
         reqs:
@@ -100,7 +106,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data safety and durability: upgrades keep existing data, failed migrations roll back, older binaries refuse newer schemas, and concurrent opens migrate once.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-008-01:
         hash: sha256:43c418b393af6f46a106a4b8f41724cb9282d37b09373ad6f14afb2899bad51b
         reqs:
@@ -111,7 +120,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data safety and durability: upgrades keep existing data, failed migrations roll back, older binaries refuse newer schemas, and concurrent opens migrate once.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-009-01:
         hash: sha256:5e8e6d69420829f23d8eecbfde4610571487e7ebbfada7394367840af1e1404b
         reqs:
@@ -122,7 +134,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data safety and durability: upgrades keep existing data, failed migrations roll back, older binaries refuse newer schemas, and concurrent opens migrate once.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-010-01:
         hash: sha256:cbf24df369d5ff3a2f43c1b85350f614801eff7b0f1bd37e5d988fffd7a66009
         reqs:
@@ -133,7 +148,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-010-02:
         hash: sha256:80541accd02dd49f317b683a8444822dc843d80fef1b3c966cdac5d95f1458d2
         reqs:
@@ -144,7 +162,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-011-01:
         hash: sha256:9b5be5cadc6ef74c07679909e78f6e307d06d5ba415b365be029c5c90d679902
         reqs:
@@ -155,7 +176,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-011-02:
         hash: sha256:49955f1887896fdbfd4916df7cad7c5513d41d003d42137518a7abfbb8a645e1
         reqs:
@@ -166,7 +190,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-012-01:
         hash: sha256:c2efabd05b738b681a9ca9bd346a9e19b7c59d7385be883ff10bd02b325a761f
         reqs:
@@ -177,7 +204,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-012-02:
         hash: sha256:9522511df0e8977b249cd63bc57d5a9d3282710b6ca1fc82675bffe15e3eb4b0
         reqs:
@@ -188,7 +218,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant context required on every repository call and cross-tenant reads, updates and deletes isolated.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-013-01:
         hash: sha256:f121e3e2d9e96a3b8dd69950dc5636e984e3e8d6e603981210195c9da4328e44
         reqs:
@@ -199,7 +232,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability and data integrity: transactions are all-or-nothing across failures and commits.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-013-02:
         hash: sha256:71c02f82e51c7a9bbbabfa077949a1f8681403facea769ae2defba3278f9360c
         reqs:
@@ -210,7 +246,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability and data integrity: transactions are all-or-nothing across failures and commits.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/2
     SQL-014-01:
         hash: sha256:2c241fae54d72d057674fe70c58cbf238bafec2de251f4fd5fb619fd4d40ec25
         reqs:
