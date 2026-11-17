@@ -36,7 +36,7 @@ When a state change of a run records a durable event, the system shall give it t
 While several state changes of one run are recorded at the same time, the system shall still give each event the run's next sequence number, with no gap and no duplicate.
 
 ### REQ-STRM-010 — A crash leaves whole or nothing
-If the process stops while a state change of a run records its durable events, then the system shall leave that change in the log only after all of its durable events are in the log.
+If the process stops while a state change of a run records its durable events, then the system shall leave either both that state change and all of its durable events in the log, or neither.
 
 ### REQ-STRM-011 — Atomic with the state change
 When a state change of a run is recorded, the system shall persist the new state and all durable events it records together.

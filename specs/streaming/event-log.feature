@@ -23,7 +23,7 @@ Feature: Durable event log and relay
   @REQ-STRM-010 @id:STRM-010-01 @contract
   Scenario Outline: A crash while appending leaves a change whole or not at all
     Given a run "r1" of tenant "acme" in state "running"
-    When the process stops at "<point>" during a state change that records 2 events
+    When the process stops at "<point>" during a state change to "completed" that records 2 events
     Then the log of "r1" holds either no events and state "running" or events with sequences 1 to 2 and state "completed"
 
     Examples:
@@ -118,8 +118,7 @@ Feature: Durable event log and relay
     Given a run "r1" of tenant "acme" in state "running"
     And a run "r2" of tenant "acme" in state "running"
     And the log of "r1" holds events with sequences 1 to 3 and types ["run.started", "node.started", "node.completed"]
-    When 20 state changes of "r1" and 20 state changes of "r2" are recorded at the same time, each recording "node.started"
-    And the principal of "acme" reads "r1" after sequence 3 while they are recorded, then reads again after they finish from the last sequence returned
+    When 20 state changes of "r1" and 20 state changes of "r2" are recorded at the same time, each recording "node.started", while the principal of "acme" reads "r1" after sequence 3 and then reads again after they finish from the resulting cursor
     Then the two reads together return events of "r1" with sequences 4 to 23 in order with no gap and no duplicate
 
   @REQ-STRM-021 @id:STRM-021-01
@@ -136,8 +135,9 @@ Feature: Durable event log and relay
 
   @REQ-STRM-022 @security @id:STRM-022-01
   Scenario: A principal of another tenant cannot read a run's events
-    Given a tenant "globex" with a durable event log
+    Given a run "r1" of tenant "acme" in state "running"
     And the log of "r1" holds events with sequences 1 to 3 and types ["run.started", "node.started", "run.completed"]
+    And a tenant "globex" with a durable event log
     When the principal of "globex" reads "r1" after sequence 1
     Then the read fails with code "not_found"
 
