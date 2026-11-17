@@ -1,10 +1,10 @@
-@planned @wp:WP-L7-01 @level:component
+@planned @wp:WP-L7-01 @runtime:any @level:component
 Feature: Caps on steps, cost, tokens and time
 
   Background:
     Given the run clock starts at "2026-11-17T10:00:00Z"
 
-  @REQ-AGENT-008 @REQ-AGENT-013 @id:AGENT-008-01
+  @REQ-AGENT-008 @id:AGENT-008-01
   Scenario: The step cap stops the loop before the extra turn
     Given agent "worker" has a step cap of 2
     And the scripted model of "worker" requests tool "search" in each of 3 turns
@@ -16,21 +16,21 @@ Feature: Caps on steps, cost, tokens and time
   @REQ-AGENT-009 @cost @id:AGENT-009-01
   Scenario: A turn is reserved before it starts
     Given agent "worker" has a cost cap of 1000 milli-points
-    And the scripted model of "worker" answers "Done." in 1 turn costing 400 milli-points
+    And the scripted model of "worker" answers "Done." in 1 turn with an estimated cost of 500 milli-points and an actual cost of 400 milli-points
     When an agent run of "worker" completes
     Then 500 milli-points were reserved before the start of model turn 1
     And model turn 1 was charged 400 milli-points and its reservation was closed
 
-  @REQ-AGENT-010 @REQ-AGENT-013 @cost @id:AGENT-010-02
+  @REQ-AGENT-010 @cost @id:AGENT-010-01
   Scenario: The cost cap stops the loop before a turn over it
     Given agent "worker" has a cost cap of 1000 milli-points
-    And the scripted model of "worker" requests tool "search" in 2 turns each costing 600 milli-points
+    And the scripted model of "worker" requests tool "search" in 2 turns, each reserving and costing 600 milli-points
     When an agent run of "worker" runs
     Then the agent run is completed with state "cost_cap_reached"
     And the scripted model received 1 invocation
     And the agent run output holds only model turn 1
 
-  @REQ-AGENT-009 @cost @id:AGENT-009-02
+  @REQ-AGENT-009 @REQ-AGENT-010 @cost @id:AGENT-009-02
   Scenario: Spending exactly the cost cap does not stop the loop
     Given agent "worker" has a cost cap of 1000 milli-points
     And the scripted model of "worker" requests tool "search" in model turn 1 costing 1000 milli-points, then answers "Done." in 1 turn costing 0
@@ -38,7 +38,7 @@ Feature: Caps on steps, cost, tokens and time
     Then the scripted model received 2 invocations
     And the agent run is completed with output "Done."
 
-  @REQ-AGENT-011 @REQ-AGENT-013 @cost @id:AGENT-011-01
+  @REQ-AGENT-011 @cost @id:AGENT-011-01
   Scenario: The token cap stops the loop before a turn over it
     Given agent "worker" has a token cap of 10000 tokens
     And the scripted model of "worker" requests tool "search" in 2 turns, each turn using 5000 input and 1000 output tokens
@@ -55,10 +55,10 @@ Feature: Caps on steps, cost, tokens and time
     Then the scripted model received 2 invocations
     And the agent run is completed with output "Done."
 
-  @REQ-AGENT-012 @REQ-AGENT-013 @id:AGENT-012-01
+  @REQ-AGENT-012 @id:AGENT-012-01
   Scenario: The time cap stops the loop before the next turn
     Given agent "worker" has a time cap of 1 minute
-    And the scripted model of "worker" requests tool "search" in each of 2 turns, and model turn 1 starts on the run clock after 60 seconds
+    And the scripted model of "worker" requests tool "search" in each of 2 turns, and the tool call of model turn 1 takes 60 seconds on the run clock
     When an agent run of "worker" runs
     Then the agent run is completed with state "time_cap_reached"
     And the scripted model received 1 invocation
@@ -67,55 +67,15 @@ Feature: Caps on steps, cost, tokens and time
   @REQ-AGENT-012 @id:AGENT-012-02
   Scenario: A run under its time cap keeps running
     Given agent "worker" has a time cap of 1 minute
-    And a long tool call delays the scripted model of "worker" and keeps the run running
-    When an agent run of "worker" runs and 59 seconds pass on the run clock
+    And the scripted model of "worker" requests tool "search" in each of 2 turns, and the tool call of model turn 1 takes 60 seconds on the run clock
+    When an agent run of "worker" starts and 59 seconds pass on the run clock
     Then the agent run is still running
     And the scripted model received 1 invocation
-
-  @REQ-AGENT-014 @REQ-AGENT-008 @id:AGENT-014-01
-  Scenario: A turn that reaches the step cap is made
-    Given agent "worker" has a step cap of 3
-    And the scripted model of "worker" requests tool "search" in each of 3 turns, then answers "Done." in 2 more turns
-    When an agent run of "worker" runs
-    Then the scripted model received 3 invocations
-    And the agent run is completed with state "step_cap_reached"
-
-  @REQ-AGENT-014 @id:AGENT-014-02
-  Scenario: A turn that reaches the cost cap is made
-    Given agent "worker" has a cost cap of 1000 milli-points
-    And the scripted model of "worker" requests tool "search" in each of 2 turns, each costing 500 milli-points
-    When an agent run of "worker" runs
-    Then the scripted model received 2 invocations
-    And the agent run is completed with state "cost_cap_reached"
-
-  @REQ-AGENT-014 @id:AGENT-014-03
-  Scenario: A turn that reaches the token cap is made
-    Given agent "worker" has a token cap of 6000 tokens
-    And the scripted model of "worker" requests tool "search" in each of 2 turns, each turn using 1000 input and 2000 output tokens
-    When an agent run of "worker" runs
-    Then the scripted model received 2 invocations
-    And the agent run is completed with state "token_cap_reached"
-
-  @REQ-AGENT-015 @id:AGENT-015-01
-  Scenario: Caps count every turn of the run
-    Given agent "worker" has a step cap of 2
-    And the scripted model of "worker" requests tool "alpha" in model turn 1, then tool "beta" in model turn 2
-    When an agent run of "worker" runs
-    Then the agent run is completed with state "step_cap_reached"
-    And the agent run output holds model turns 1 and 2
-
-  @REQ-AGENT-015 @id:AGENT-015-02
-  Scenario: The time cap runs from the start of the run
-    Given agent "worker" holds 120 seconds before its first model turn
-    And agent "worker" has a time cap of 1 minute
-    When an agent run of "worker" is started
-    Then the agent run is completed with state "time_cap_reached"
-    And the scripted model received 0 invocations
 
   @REQ-AGENT-028 @id:AGENT-028-01
   Scenario: Cancelling between turns starts no further turn
     Given the scripted model of "worker" requests tool "search", then answers "Done." in 2 turns
-    And an agent run of "worker" waits at gate "review" after model turn 1 and its tool call
-    When the agent run is cancelled while it waits at gate "review"
+    And an agent run of "worker" has completed model turn 1 and its tool call
+    When the agent run is cancelled before model turn 2 starts
     Then the agent run fails with code "cancelled"
     And the scripted model received 1 invocation

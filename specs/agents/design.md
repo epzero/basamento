@@ -6,6 +6,59 @@ scenarios. They follow ADR-0002, ADR-0006, ADR-0011,
 They introduce no behavior the scenarios do not show; where a number is given
 below it is the one the scenarios use.
 
+## 0. Counting rules
+
+Every number in a scenario follows these rules.
+
+1. **When checks run.** Every check runs at the turn boundary before starting
+   model turn `n` (`n = 1, 2, …`), never after a turn completes when no next
+   turn is attempted. If model turn `n` answers without requesting a tool
+   (REQ-AGENT-007), the run ends immediately as completed with that turn's
+   output. If model turn `n` requests a handoff (REQ-AGENT-016), the run ends
+   immediately as completed with state `handoff`. Only when model turn `n`
+   requests one or more tools (REQ-AGENT-003) and those tool-call steps
+   complete (REQ-AGENT-004) does the loop advance to the boundary before model
+   turn `n+1`.
+2. **Order of the checks** at the boundary before model turn `n`: cancellation
+   (REQ-AGENT-028), the time cap (REQ-AGENT-012), the step cap (REQ-AGENT-008),
+   the memory policy (REQ-AGENT-023–025, REQ-AGENT-027), the token cap
+   (REQ-AGENT-011), the cost cap and reservation (REQ-AGENT-009,
+   REQ-AGENT-010) (see §6).
+3. **Reaching a cap is within it.** Step, token and cost caps are inclusive:
+   only a turn that would exceed (`>`) the cap is stopped. At equal values it
+   depends on the next turn's figures: with `spent cost == cost cap`, turn
+   `n+1` runs if its reservation is `0` and is stopped if the reservation is
+   `> 0`; with `used tokens == token cap`, turn `n+1` runs if its input tokens
+   are `0` and is stopped if they are `> 0`; turn `S` runs under a step cap
+   `S`, and turn `S+1` is stopped.
+4. **The time cap uses `>=`.** An elapsed time of at least `caps.time` at a
+   boundary stops the loop before the next turn; `59 seconds` under a
+   `1 minute` cap lets the run continue.
+5. **Reservation and charge.** A turn's reservation is its estimated cost in
+   whole milli-points, from the model's price formula on estimated usage
+   (REQ-MODEL-006), held against the remaining cost cap and settled to the
+   actual charge when the turn finishes. A scripted turn that writes
+   `costing X milli-points` reserves `X` and charges `X`; a scenario that tests
+   reservation against settlement states both the estimate and the actual cost
+   in its `Given`.
+6. **Token cap counts input plus output.** Each completed model turn adds its
+   input tokens and its output tokens to the run's used tokens; before a turn
+   starts only its input tokens are known, so the cap check uses used tokens
+   plus that turn's input tokens. Across a handoff the target's step count,
+   spent cost and used tokens start at `0` and count only its own turns; the
+   time cap is the chain's, measured from the run's start (§4).
+7. **Memory policy counts.** A completed model turn is one unit: its assistant
+   message (with any tool-call requests) plus the tool-result messages that
+   followed it; a turn with `k` tool calls is `1 + k` messages. Before model
+   turn `n`, let `T_sys` be the system messages' tokens and `T_i` turn `i`'s
+   tokens. If `T_sys + Σ T_i (i = 1…n-1) <= input_tokens`, nothing is dropped.
+   Otherwise the policy keeps `T_sys` and, when `n > 1`, turn `1`; if that set
+   alone exceeds `input_tokens` the run fails with `invalid_argument` before
+   invoking the model (REQ-AGENT-027); else with remainder
+   `R = input_tokens - (T_sys + T_1)` it keeps whole turns walking backward
+   from `n-1` to `2` while each fits in `R`, and drops the others
+   (REQ-AGENT-024, REQ-AGENT-025).
+
 ## 1. Where the agent loop lives
 
 `agent` provides the `agent` node handler, registered with the flow host at the
@@ -38,34 +91,37 @@ durable `message.completed`.
 `flow-engine.md` §1 shows `{ agent: planner }`. An agent is defined in that
 spec with the fields below. The implementer encodes them as the node spec
 schema of the `agent` handler; this is a decision of this work package, not a
-change to package `flow`.
+change to package `flow`. The node id is the node's key in `flow.IR.Nodes`, and
+`flow.Node.Out` names the state key receiving the run output.
 
 | Field | Meaning | Default |
 | --- | --- | --- |
-| `node` | the node id a handoff names (scenarios: `"triage"`, `"fixer"`) | — |
 | `model` | the model id of every turn | — |
 | `system` | the system messages, kept first by the memory policy | none |
-| `tools` | the tools the agent allows (each tool's own access rules are WP-L7-02) | none |
+| `tools` | the tools offered to the model (allowlists and tool access rules are WP-L7-02) | none |
 | `checks` | model turns between checks of the time cap and cancellation: **1** | 1 |
 | `caps.steps` | the step cap, in model turns | none = no cap |
 | `caps.cost_mpts` | the cost cap, in milli-points | none = no cap |
 | `caps.tokens` | the token cap, counted as input plus output tokens | none = no cap |
 | `caps.time` | the time cap, a duration on the run clock | none = no cap |
 | `input_tokens` | the input token limit of the model, in tokens | the model's descriptor |
-| `out` | the state key of the run output | `agent` |
 
-A cap that is absent is not applied. The scenarios are deterministic because
-the scripted model answers with the usage and cost written in the scenario;
-the reservation estimate is the price formula on estimated usage, as
-REQ-MODEL-006 (cost.feature) already specifies, and `model` node metering is
-not repeated here.
+A cap that is absent is not applied. For step, token and cost caps, reaching
+the cap (`==`) is within the cap; only a turn that would exceed (`>`) the cap is
+stopped before invoking the model. For the time cap, elapsed time on the run
+clock of at least (`>=`) `caps.time` stops the loop before starting the next
+turn. The scenarios are deterministic because the scripted model answers with
+the usage and cost written in the scenario: the reservation estimate is the
+price formula on estimated usage, as REQ-MODEL-006 (`cost.feature`) already
+specifies, and when a scripted turn states only `costing X milli-points`, its
+estimated reservation and actual charge are both `X` milli-points.
 
 ## 4. Handoff
 
 The model requests a handoff the way its provider expresses a tool call, with
 the tool name `handoff_to` and the argument naming a node id of the flow. The
 agent loop treats that request specially: it is not a `tool-call step`
-(REQ-AGENT-003 counts only the agent's allowed tools).
+(REQ-AGENT-003).
 
 The agent run ends completed with state `handoff` and an output:
 
@@ -75,18 +131,15 @@ The agent run ends completed with state `handoff` and an output:
 
 The node's outgoing edge leads to the target node, which receives this output
 as its input. When the target's handler sees `state: "handoff"`, it takes
-`turns` as its message history (REQ-AGENT-017) and its **chain**: the ordered
-list of node ids that ran, so that a second visit to one of them is a
-`conflict` (REQ-AGENT-022). A node that starts without a handoff starts a new
-chain with itself.
+`turns` as its message history (REQ-AGENT-017). Cycles between agent nodes in a
+flow are bounded by `flow.Guard` (`REQ-FLOW-003`), not by the agent handler.
 
 Caps (REQ-AGENT-018, REQ-AGENT-019): the target's `caps.steps` counts the
 target's own model turns (the carried turns are not the target's turns); the
 target's `caps.cost_mpts` and `caps.tokens` count the target's own spend and
-usage, so carried turns never refuse a handoff (only a handoff into a node
-that already ran does, REQ-AGENT-022); the target's **time cap is the value
-the chain started with**, measured from the run's start on the run clock, so
-a chain is bounded in time whatever its length. When the target has no time
+usage, so carried turns never refuse a handoff; the target's **time cap is the
+value the chain started with**, measured from the run's start on the run clock,
+so a chain is bounded in time whatever its length. When the target has no time
 cap and the first agent had one, the target runs under the first agent's time
 cap.
 
@@ -95,29 +148,38 @@ the chain continues.
 
 ## 5. Memory policy
 
-Before each model turn the agent loop builds the turn's messages: the
-history, then the new tool results. If they exceed `input_tokens`, the policy
-keeps:
+Before each model turn the agent loop builds the turn's messages: the system
+messages, the completed model turns (each turn's assistant message paired with
+the tool-result messages that followed it; a turn with `k` tool calls is `1 + k`
+messages), and any new tool results. If total message tokens exceed
+`input_tokens`, the policy keeps:
 
 1. every `system` message of the agent (REQ-AGENT-023);
-2. the **first model turn** and the tool results that followed it (the run's
-   opening request and its first answer, kept whole) (REQ-AGENT-023);
-3. the most recent model turns that fit in the limit's remainder, latest
-   first, a whole turn at a time: a model turn with the tool-call results it
-   asked for (REQ-AGENT-024, REQ-AGENT-025).
+2. when starting model turn 2 or later, the **first model turn** and the tool
+   results that followed it, kept whole (REQ-AGENT-023);
+3. the most recent model turns that fit in the limit's remainder, walking
+   backward from the latest turn (`n-1` down to `2`) a whole turn at a time: a
+   model turn with the tool-call results it asked for (REQ-AGENT-024,
+   REQ-AGENT-025).
 
-Messages dropped are counted and recorded in the step result, not kept
-elsewhere (REQ-AGENT-026): the run's messages stay complete for its output.
-A kept set that still exceeds the limit fails the run with `invalid_argument`
-(REQ-AGENT-027).
+The count of dropped messages is recorded in the turn's step result (`turn-<n>`),
+not kept elsewhere: the run's messages stay complete for its output. A kept set
+that still exceeds `input_tokens` fails the run with `invalid_argument` before
+invoking the model (REQ-AGENT-027).
 
 ## 6. Order of checks at a turn boundary
 
-At each boundary, in this order: cancellation (REQ-AGENT-028), then the time
-cap (REQ-AGENT-012), then the step cap (REQ-AGENT-008), then the token cap
-(REQ-AGENT-011), then the reservation (REQ-AGENT-009/010). The first check
-that stops the run decides its state, so a run that meets two caps reports
-the earlier one in this order.
+At each turn boundary before model turn `n`, in this order:
+1. cancellation (REQ-AGENT-028);
+2. the time cap (REQ-AGENT-012);
+3. the step cap (REQ-AGENT-008);
+4. the memory policy and input token limit (REQ-AGENT-023–025, REQ-AGENT-027),
+   which determines turn `n`'s messages and input tokens;
+5. the token cap (REQ-AGENT-011);
+6. the cost reservation (REQ-AGENT-009, REQ-AGENT-010).
+
+The first check that stops the run decides its state, so a run that meets two
+caps reports the earlier one in this order.
 
 ## 7. Changes outside this directory
 
@@ -127,3 +189,12 @@ registered by this work package. Should implementing the scenarios need a
 change outside the directories this WP owns (`agent`, `specs/agents`,
 `internal/bdd/steps/agent.go`), the implementer lands that change first, in a
 pull request of its own.
+
+## Open questions
+
+1. **Handoff mechanism (`design.md` §4):** Expressing a model handoff as a reserved `handoff_to` tool call intercepted by the agent loop (rather than a `model.Result` field or structured output convention) is an author choice not fixed by `docs/architecture/flow-engine.md` or `model-layer.md`.
+2. **Caps across a handoff (`REQ-AGENT-018`, `REQ-AGENT-019`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while carrying the first agent's time cap across the chain is an author choice; if the first agent had no time cap and the target agent declares `caps.time`, should the target's `caps.time` apply from the chain start or the target start?
+3. **Memory policy retention rule (`REQ-AGENT-023`–`025`, `design.md` §5):** Keeping `system` messages + whole model turn 1 (with its tool results) + the most recent whole turns that fit in `input_tokens` is a concrete policy chosen for WP-L7-01 (`docs/roadmap/L7-agents.md` names "memory policy" without prescribing the algorithm).
+4. **Turn-boundary check order (`design.md` §6):** Checking `cancellation → time cap → step cap → memory policy (input token limit) → token cap → cost reservation` is an author choice that determines which terminal state wins when two caps are reached at the same boundary.
+
+---
