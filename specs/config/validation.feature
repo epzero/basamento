@@ -25,22 +25,23 @@ Feature: Validating the configuration
 
   @REQ-CONFIG-007 @security @id:CONFIG-007-01
   Scenario: An error keeps every part of the value out but the scheme
-    Given the environment sets "KIT_BUS_URL" to "nats://ana:hunter2@nats.example.test:4222"
+    Given the environment sets "KIT_BUS_URL" to "nats://ana:hunter2@nats.example.test:4222/bus?token=s3cr3t"
     When the configuration is validated
     Then validation fails with 1 error naming "bus.url"
-    And the error text does not contain "ana", "hunter2", "nats.example.test", "4222", "/bus" or "s3cr3t"
+    And the error text names the scheme "nats"
+    And the error text does not contain "ana", "hunter2", "nats.example.test", "4222", "/bus", "token" or "s3cr3t"
 
   @REQ-CONFIG-007 @REQ-CONFIG-017 @security @id:CONFIG-007-02
   Scenario Outline: An unparseable URL and a non-URL value are not echoed
     Given a configuration file sets "<key>" to "<value>"
     When the configuration is validated
     Then validation fails with 1 error naming "<key>"
-    And the error text does not contain "ana", "hunter2", "/bus" or "secret-profile"
+    And the error text does not contain any of "<key>", "postgres", "ana", "hunter2", "[bad", "secret-profile", "://"
 
     Examples:
-      | key     | value                           |
-      | sql.url | postgres://ana:hunter2@[bad     |
-      | profile | secret-profile                  |
+      | key     | value                       |
+      | sql.url | postgres://ana:hunter2@[bad |
+      | profile | secret-profile              |
 
   @REQ-CONFIG-017 @id:CONFIG-017-01
   Scenario: An unparseable port URL is rejected

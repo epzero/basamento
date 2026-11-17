@@ -28,11 +28,29 @@ to `layering.yaml`, through its own ADR and layering pull request (changing
 the graph needs an ADR, AGENTS.md). Until that lands, the implementer does
 not create `internal/config`.
 
+The same prerequisite move lets `cmd/kit` and `internal/bdd` import
+`internal/config`: the `layers` entry is the only place `internal/gate/layering.go`
+reads what a layer may import (it forbids an import only when the imported
+layer is neither the importing layer nor in its list), so their existing
+lines each gain `internal`, named with the top-level package on purpose.
+Every `layers` value names a layer, so no value may say `internal/config`
+(that exact key would be a layer that `deny_external` cannot attach to), and
+two layers in `internal/` (`internal/bdd`, `internal/gate`) outside a shared
+enclosing layer make the whole `internal` directory the only entry that lets
+`internal/bdd` reach `internal/config`. As a consequence `cmd/kit`,
+`internal/bdd`, `internal/gate` and `tools/gate` (whose list names
+`internal/gate`) may each import any nested package under `internal/` that
+`layers` does not name, and `internal/gate` itself may now import the
+repository's public packages (`core`, `platform`, …). `internal/gate` and
+`internal/bdd` stay layers of their own and keep their current lists,
+because the longest match wins. Keep untrusted code out of `internal/`: such
+a package is importable by those four layers without another graph change.
+
 Keep `internal/config` free of every port implementation and of
 `go.temporal.io/`: it returns validated values and lets `cmd/kit` import the
-implementations, and it imports `core` only. `cmd/kit` already may import
-`platform`, `internal/config` and `runtime`, so the rest of the graph needs
-no change.
+implementations, and it imports `core` only. `cmd/kit` may already import
+`platform` and `runtime`; with the prerequisite move it also imports
+`internal/config`.
 
 ## 2. Keys, types and defaults
 
@@ -136,9 +154,20 @@ validated URL and is never called on an unvalidated one.
 
 1. `config.Load`, then `Validate`. Any error: print every error to stderr,
    exit 1. Nothing is opened (REQ-CONFIG-005).
-2. Use the runtime the profile selects: temporal, the default runtime for
-   both profiles, in-process for `embedded` (REQ-RT-003). Configuration has
-   no runtime setting. Then open the ports in the order sql, blob, bus, secrets. Each `Open`
+2. WP-L1-05 does not start the temporal runtime. The runtime the profile
+   selects is temporal, the default for both profiles, in-process for
+   `embedded` (REQ-RT-003), and configuration has no runtime setting; but
+   WP-L5-02 and WP-L5-03 own `runtime/temporal` and
+   `runtime/temporal/embedded` and depend on WP-L1-05, so WP-L1-05 must not
+   wait for them. WP-L1-05 writes the start-up order with the step where the
+   runtime starts at its place, selected by profile and named in the `ready`
+   line as below, opening and closing nothing itself. WP-L5-02 and WP-L5-03
+   wire starting the temporal runtime there into `kit serve`, their own
+   scenario `RT-003-01` proving it; until then that step is a no-op and
+   `kit serve` opens the ports and binds its listener without a runtime
+   (REQ-CONFIG-020 and the `ready` line stay one requirement, met when the
+   line is printed once the ports are open and the listener is bound).
+   Then open the ports in the order sql, blob, bus, secrets. Each `Open`
    takes a `context.Context`. An error names what failed the same way: close
    what is already open in reverse order, print `port "sql" could not open:
    …`, exit 1 (REQ-CONFIG-021).
