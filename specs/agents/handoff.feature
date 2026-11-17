@@ -33,11 +33,22 @@ Feature: Handoff to another agent
   Scenario: The target applies its own token cap
     Given agent "triage" has a token cap of 2000 tokens
     And agent "fixer" has a token cap of 10000 tokens
-    And the scripted model of "triage" requests a handoff to agent "fixer" in 1 turn using 500 input and 500 output tokens
+    And the scripted model of "triage" requests a handoff to agent "fixer" in 1 turn using 1000 input and 500 output tokens
     And the scripted model of "fixer" requests tool "search" in 2 turns after the handoff, each using 4000 input and 1000 output tokens, then answers "Fixed." in 1 turn using 1000 input and 100 output tokens
     When the agent runs of "triage" and then "fixer" complete
     Then the agent run of "fixer" runs its own model turns 1 and 2
     And the agent run of "fixer" is completed with state "token_cap_reached"
+
+  @REQ-AGENT-018 @cost @id:AGENT-018-03
+  Scenario: The target applies its own cost cap
+    Given agent "triage" has a cost cap of 5000 milli-points
+    And agent "fixer" has a cost cap of 1000 milli-points
+    And the scripted model of "triage" requests a handoff to agent "fixer" in 1 turn costing 3000 milli-points
+    And the scripted model of "fixer" requests tool "search" in 2 turns after the handoff, each costing 600 milli-points
+    When the agent runs of "triage" and then "fixer" run
+    Then the agent run of "triage" is completed with state "handoff"
+    And the agent run of "fixer" is completed with state "cost_cap_reached"
+    And the scripted model of "fixer" received 1 invocation
 
   @REQ-AGENT-019 @id:AGENT-019-01
   Scenario: The time cap covers the target from the start of the chain
@@ -71,7 +82,7 @@ Feature: Handoff to another agent
     And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
     And the scripted model of "fixer" requests tool "search" in each of 2 turns after the handoff, and its model turn 1 takes 20 seconds on the run clock
     When the agent runs of "triage" and then "fixer" run
-    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "1m"
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and no time cap
     And the agent run of "fixer" is completed with state "time_cap_reached"
     And the scripted model of "fixer" received 1 invocation
 
@@ -116,3 +127,10 @@ Feature: Handoff to another agent
     Given the scripted model of "triage" requests a handoff to agent "ghost" in 1 turn
     When an agent run of "triage" runs
     Then the agent run fails with code "not_found" naming agent "ghost"
+
+  @REQ-AGENT-030 @id:AGENT-030-01
+  Scenario: Multiple handoff requests in one turn fail the run
+    Given the scripted model of "triage" requests handoffs to agents "fixer" and "reviewer" in 1 turn
+    When an agent run of "triage" runs
+    Then the agent run fails with code "invalid_argument"
+    And the agent run has 0 tool-call steps

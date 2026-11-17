@@ -21,7 +21,7 @@ While an agent run is running, the agent loop shall make each model turn one ste
 When an agent run resumes, the agent loop shall feed every model turn recorded as completed from its step result.
 
 ### REQ-AGENT-003 — A request for a tool becomes a tool call
-When a model turn requests `n` non-handoff tools, the agent loop shall make `n` tool-call steps for those requests, one for each.
+When a model turn requests `n` non-handoff tools and no handoff, the agent loop shall make `n` tool-call steps for those requests, one for each.
 
 ### REQ-AGENT-004 — A tool result is fed to the next turn
 When a tool-call step completes, the agent loop shall include its result in the next model turn's messages.
@@ -48,7 +48,7 @@ If the agent run's used tokens plus a model turn's input tokens would exceed the
 If the agent run's elapsed time from the start of the run on the run clock is at least the time cap when starting a model turn, then the agent loop shall end the agent run as completed with state `time_cap_reached` and its completed model turns in order without invoking the model.
 
 ### REQ-AGENT-016 — A handoff carries the turns
-When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node, every model turn of the run in order, the run's start time on the run clock and the time cap in effect.
+When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node, every model turn of the run in order, the run's start time on the run clock and the time cap in effect for the run: that agent's own time cap, or, when it has none, the time cap its input carries, or `null` when neither exists.
 
 ### REQ-AGENT-017 — A handoff starts the target with the turns
 When an `agent` node's input carries a handoff with the target node, the agent loop shall make the target agent's first model turn with the carried turns in the message history.
@@ -64,6 +64,9 @@ When an `agent` node's input carries a handoff with the target node, the first a
 
 ### REQ-AGENT-020 — A handoff to an agent the flow does not define
 If a model turn requests a handoff to an agent whose node the flow does not define, then the agent run shall fail with code `not_found` naming the agent.
+
+### REQ-AGENT-030 — Multiple handoffs in one turn fail
+If a model turn requests more than one handoff, then the agent run shall fail with code `invalid_argument` without making a tool-call step.
 
 ### REQ-AGENT-023 — The memory policy keeps the start
 If the messages of a model turn exceed the agent's input token limit when starting the turn, then the memory policy shall keep the agent's system messages and the agent run's first model turn.

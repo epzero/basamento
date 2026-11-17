@@ -18,7 +18,8 @@ Feature: One model turn per step
     And the step results of model turn 1 and its tool call are already recorded
     When an agent run of "worker" resumes from that record
     Then the agent run is completed with output "Done."
-    And the scripted model received 2 invocations
+    And the scripted model received 1 invocation after resuming
+    And tool "search" was invoked 0 times after resuming
     And the messages of model turn 2 contain model turn 1 and the result of tool "search": "42"
 
   @REQ-AGENT-003 @id:AGENT-003-01
