@@ -78,7 +78,7 @@ handler to that handler. Scenarios: `host.feature`.
 While a run is in progress, the flow host shall run the flow definition the run was started with, even if a different version of the flow is registered while the run is in progress.
 
 ### REQ-FLOW-028 — A node kind without a node handler
-If a run reaches a node whose kind is `model`, `agent`, `tool` or `task` and no node handler is registered for that kind, then the flow host shall fail the run with code `unsupported` naming the node, and run no node of the run.
+If a flow has a node whose kind is `model` or `agent` and no node handler is registered for that kind, then the flow host shall fail the run with code `unsupported` naming the node, and run no node of the run.
 
 ### REQ-FLOW-029 — Effectful nodes become steps
 When the flow machine runs a node of kind `tool` or `task`, the flow host shall execute it as one step named after the node, whose input is the node's input and whose result is the node's output.
@@ -90,13 +90,10 @@ When the flow machine runs a node of a kind that has a registered node handler, 
 When the flow machine runs a node of kind `wait` whose specification gives a duration, the flow host shall wait that duration before the node completes, and complete the node with no result.
 
 ### REQ-FLOW-032 — Gates open on a durable wait
-When the flow machine runs a node of kind `gate`, the flow host shall wait for the gate named as the node to be resolved, validating its payload against the schema, acceptance condition and timeout of the node's specification, and complete the node with the accepted payload.
+When the flow machine runs a node of kind `gate`, the flow host shall wait for the gate named after the node with the schema, acceptance condition and timeout of the node's specification, and complete the node with the accepted payload.
 
 ### REQ-FLOW-033 — A subflow runs as a child run
 When the flow machine runs a node of kind `subflow`, the flow host shall start a child run of the flow named in the node's specification with the node's input, and complete the node with the child run's result.
-
-### REQ-FLOW-034 — Run progress is durable
-When the flow host completes a node, the flow host shall emit a durable event named `node_completed` whose data is the name of the node and its result.
 
 ### REQ-FLOW-035 — A handler's failure fails the node
 If a node handler returns an error while running a node, then the flow host shall report the node as failed to the flow machine, with that error as the failure.
