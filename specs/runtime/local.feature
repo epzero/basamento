@@ -171,7 +171,7 @@ Feature: The local runtime
   @REQ-RT-017 @id:RT-017-01
   Scenario: A retryable step that never succeeds fails after its configured attempt limit
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And step "charge" fails with code "vendor_error" marked retryable true
+    And step "charge" fails with code "rate_limited" on execution 1 and with code "vendor_error" on execution 2, each marked retryable true
     And the step allows 2 attempts
     When a run of "pay" runs
     Then step "charge" was executed 2 times
@@ -179,7 +179,7 @@ Feature: The local runtime
     And no retry waited for the clock to advance
     And the run is "failed"
 
-  @REQ-RT-017 @id:RT-017-02
+  @REQ-RT-027 @id:RT-027-01
   Scenario: A retryable step that succeeds before its attempt limit stops retrying
     Given step "charge" fails with code "vendor_error" marked retryable true on execution 1 and returns {"charged": true} on execution 2
     And the step allows 3 attempts
@@ -212,8 +212,8 @@ Feature: The local runtime
     And tenant "globex" runs flow "work" as run "shared-1" that calls step "fetch"
     When both runs complete on one local runtime
     Then step "fetch" was executed 2 times
-    And tenant "acme" describes run "shared-1" as returning {"tenant": "acme"}
-    And tenant "globex" describes run "shared-1" as returning {"tenant": "globex"}
+    And run "shared-1" of tenant "acme" returns {"tenant": "acme"}
+    And run "shared-1" of tenant "globex" returns {"tenant": "globex"}
 
   @REQ-RT-022 @id:RT-022-01
   Scenario: Shutting down the local runtime leaves in-flight runs in state running
@@ -258,7 +258,7 @@ Feature: The local runtime
 
   @REQ-RT-026 @security @id:RT-026-01
   Scenario: Listing runs returns only the caller's tenant's runs
-    Given tenant "acme" has run "shared-1" waiting at gate "approve"
-    And tenant "globex" has run "shared-1" waiting at gate "approve"
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    And tenant "globex" has run "shared-1" of flow "review" waiting at gate "approve"
     When tenant "globex" lists runs of flow "review"
-    Then tenant "globex" lists 1 run with run id "shared-1"
+    Then tenant "globex" lists 1 run for tenant "globex" with run id "shared-1"

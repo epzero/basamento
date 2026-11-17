@@ -3,7 +3,7 @@
 ## Local runtime (WP-L5-01)
 
 Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019` and
-`REQ-RT-021` … `REQ-RT-026` in `local.feature` to the implementer. This work
+`REQ-RT-021` … `REQ-RT-027` in `local.feature` to the implementer. This work
 package changes no contract file.
 
 ### Ports the composition root supplies
@@ -55,11 +55,16 @@ goroutine goes on and reads futures through `Select` or `Get`.
 
 `MaxAttempts == 0` means 3 attempts (`REQ-RT-018`). A failed attempt repeats
 immediately without backoff on the local runtime while the error's code is not
-listed in `StepOptions.NonRetryable` and `core.IsRetryable(err)` holds. When a
-step fails with a non-retryable error (`REQ-RT-016`) or exhausts its attempt
-limit (`REQ-RT-017`), `Future.Get` returns the step's error (preserving its
-`*core.Error` and `core.CodeOf(err)`) and, if unhandled by the flow, the run
-moves to `failed`.
+listed in `StepOptions.NonRetryable` and `core.IsRetryable(err)` holds. As soon
+as an attempt succeeds before the limit, retrying stops and that attempt's
+result is the step's result (`REQ-RT-027`). When a step fails with a
+non-retryable error (`REQ-RT-016`) or exhausts its attempt limit
+(`REQ-RT-017`), `Future.Get` returns the step's error (preserving its
+`*core.Error` and `core.CodeOf(err)`; for an exhausted limit, the last
+attempt's error) and, if unhandled by the flow, the run moves to `failed`.
+The flow's handling is what decides whether the run fails: the runtime delays
+the run's `failed` state until the step error reaches the run goroutine
+uncaught: only then does the run move to `failed`.
 
 ### Cancellation and shutdown
 

@@ -30,7 +30,7 @@ When a local runtime starts, the local runtime shall have no record of any run f
 When a run on the local runtime calls a step with a name that already completed in that run, the local runtime shall return the recorded result without executing the step again.
 
 ### REQ-RT-008 — Timers move only with the runtime's clock
-While the local runtime runs, the local runtime shall complete a timer of duration `d` only after the runtime's clock has advanced by at least `d` on every runtime, durable or not.
+While the local runtime runs, the local runtime shall complete a timer of duration `d` only after the runtime's clock has advanced by at least `d`.
 
 ### REQ-RT-009 — Awaited gates
 When a gate is resolved on a run waiting at that gate, the local runtime shall complete the run's gate wait with the resolved payload.
@@ -54,10 +54,10 @@ When a parent run starts a child flow with a child run id, the local runtime sha
 When a parent run ends, the local runtime shall apply each in-flight child run's close policy: `terminate` moves the child run to `terminated`, `request_cancel` moves it to `cancelled`, and `abandon` leaves it `running`.
 
 ### REQ-RT-016 — Non-retryable step failures
-When a step attempt fails with an error that is not marked retryable or whose code is listed as non-retryable for the step, and the error is unhandled by the flow, the local runtime shall stop retrying, fail the step with that error, and fail the run.
+When a step attempt fails with an error that is not marked retryable or whose code is listed as non-retryable for the step, the local runtime shall stop retrying and fail the step with that error, and shall fail the run if the error is unhandled by the flow.
 
 ### REQ-RT-017 — Step attempt limit
-If every attempt of a step fails with a retryable error whose code is not listed as non-retryable, then the local runtime shall retry immediately without backoff up to the step's attempt limit; when the last attempt also fails and the error is unhandled by the flow, the local runtime shall fail the step with the last attempt's error and fail the run; while an attempt succeeds before the limit, the local runtime shall stop retrying and return that attempt's result to the flow as the step's result.
+If every attempt of a step fails with a retryable error whose code is not listed as non-retryable, then the local runtime shall retry immediately without backoff up to the step's attempt limit, and when the last attempt also fails, the local runtime shall fail the step with the last attempt's error, and shall fail the run if the error is unhandled by the flow.
 
 ### REQ-RT-018 — Default attempt count
 Where a step leaves its attempt limit at 0, the local runtime shall allow at most 3 attempts of that step.
@@ -82,3 +82,6 @@ If a tenant describes, cancels or resolves a gate of a run belonging to another 
 
 ### REQ-RT-026 — Run listing is per tenant
 When a tenant lists runs of a flow on the local runtime, the local runtime shall return only the runs that belong to that tenant.
+
+### REQ-RT-027 — A successful retry ends the step
+When an attempt of a step succeeds before its attempt limit, the local runtime shall stop retrying and return that attempt's result to the flow as the step's result.
