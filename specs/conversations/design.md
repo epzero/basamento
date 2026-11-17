@@ -139,8 +139,17 @@ Step definitions go in `internal/bdd/steps/conversation.go`. The scripted
 model, the runtime and the tenant context are built in `internal/bdd` and
 test-only packages; no test double is imported by `agent/conversation`.
 
+## 8. Crash-resume
+
+WP-L7-03 takes no dependency on the Temporal runtime (owner decision,
+2026-11-17). Surviving a crash is the runtime's guarantee, proved by the
+conformance suite (WP-L5-04, `specs/runtime/conformance.feature`); the
+conversation logic here is specified on `@runtime:any` / local and does not
+restate it. A conversation crash-resume scenario on Temporal (queued and
+steering messages surviving a restart) is a tracked follow-up for a later work
+package that depends on both WP-L7-03 and the Temporal runtime.
+
 ## Open questions
 
 1. **Interrupted turns in subsequent turn history (`REQ-CONV-012`, `CONV-012-02`, `CONV-013-03`):** `ADR-0007` specifies that `cancel` keeps the partial message marked `interrupted`, and `REQ-STRM-005` records interrupted partial messages, but `ADR-0007` does not explicitly say whether failed and cancelled turns' user and interrupted model messages are passed to subsequent turns' child runs. This spec includes both `failed` and `cancelled` turns (with partial model messages marked `interrupted`) in the history later turns see so follow-up turns and retries have context. Confirm whether both should be included, only `failed`, or neither.
-2. Crash-resume of a conversation on a durable runtime (queued and steering messages surviving a restart) is not specified here, because the roadmap gives WP-L7-03 no dependency on the Temporal runtime. Should the roadmap add that dependency, or should a follow-up work package own those scenarios?
 3. **Default checkpoint threshold of 1000 durable calls (`REQ-CONV-014`):** `docs/architecture/runtime.md` §3 says *"Histories are bounded with `Checkpoint` at a fixed event threshold"* without naming a number, and `ADR-0007` says *"The coordinator checkpoints regularly"*. This spec chooses `1000` durable calls as the default threshold. Confirm whether `1000` is the intended default.
