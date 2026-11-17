@@ -56,9 +56,10 @@ failure edge target in the IR (REQ-FLOW-014).
 | more than one marked entry node | `invalid_argument` | FLOW-018 |
 | no edge from `START` and no marked entry node | `invalid_argument` | FLOW-017 |
 
-The builder's errors are `*core.Error` with code `invalid_argument` naming the
-state key and type, the reducer's state key, the duplicated node, the node and
-key, the missing edge end, or the marked entry nodes, as the scenarios say.
+The builder's errors are `*core.Error` with code `invalid_argument` carrying
+the schema violation location (from `core/schema`), or naming the reducer's
+state key, the duplicated node, the node and key, the missing edge end, or the
+marked entry nodes, as the scenarios say.
 
 **Left to the compiler:** node spec shape and kind (an unknown kind is
 `invalid_argument` from the decoder or the compiler,

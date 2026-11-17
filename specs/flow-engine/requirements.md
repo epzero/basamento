@@ -64,7 +64,7 @@ The flow builder shall write into the IR, as the flow's state schema, the JSON S
 If a flow declares a reducer for a key that is not a key of the flow's state schema, then the flow builder shall reject it with code `invalid_argument`, naming the state key.
 
 ### REQ-FLOW-026 — An invalid state schema
-If a flow declares a state schema that is not a valid JSON Schema, then the flow builder shall reject it with code `invalid_argument`, naming the offending state key and type.
+If a flow declares a state schema that is not a valid JSON Schema, then the flow builder shall reject it with code `invalid_argument`, naming the location in the schema of the violation.
 
 ## Flow host (WP-L4-04)
 

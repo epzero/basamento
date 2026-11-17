@@ -46,7 +46,7 @@ Feature: Building flows in Go
       | sub  | subflow  |
       | g    | gate     |
       | w    | wait     |
-    And edges from START to every node without a condition
+    And an edge START -> "s" without a condition
     And the node "g" has the node spec {"schema": "review.json"}, the input "state.plan", the output "approved" and the guard of 3 visits, 5000 milli-points and the condition "state.go"
     When the flow is built
     Then the IR has exactly 10 nodes
@@ -113,13 +113,17 @@ Feature: Building flows in Go
 
   @REQ-FLOW-021 @id:FLOW-021-01
   Scenario: The state schema and reducers are the ones declared
-    Given a Go struct type "CodegenState" with the fields:
+    Given a Go struct type "File" with the fields:
+      | field | type   | json tag |
+      | Path  | string | path     |
+    And a Go struct type "CodegenState" with the fields:
       | field      | type              | json tag            |
       | Messages   | []string          | messages            |
       | Files      | []File            | files               |
       | Attempts   | int               | attempts,omitempty  |
     And the reducer of "messages" declared as "append", of "files" as "merge_by(path)" and of "attempts" as "sum"
-    When a flow is built declaring its state as the Go type "CodegenState"
+    And node "plan" of kind "agent" and the edge START -> "plan"
+    When the flow is built declaring its state as the Go type "CodegenState"
     Then the state schema of the built flow equals the schema generated from "CodegenState"
     And the reducers of the built flow are messages "append", files "merge_by(path)" and attempts "sum"
 
@@ -134,4 +138,4 @@ Feature: Building flows in Go
   Scenario: An invalid state schema is rejected at build time
     Given a state schema declaring the key "tests" as the type "count"
     When the flow is built
-    Then the build fails with code "invalid_argument" naming the state key "tests" and the type "count"
+    Then the build fails with code "invalid_argument" at schema location "/properties/tests/type"
