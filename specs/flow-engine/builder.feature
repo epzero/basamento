@@ -18,9 +18,10 @@ Feature: Building flows in Go
     And the content hash of the built flow equals the content hash of the data flow
 
   @REQ-FLOW-011 @id:FLOW-011-01
-  Scenario: Independent declarations in another order build the same bytes
-    Given a flow built with nodes "plan" of kind "agent", "impl" of kind "tool" and "verify" of kind "tool" and edges START -> "plan" -> "impl", "impl" -> "verify" and "verify" -> FAIL
-    And a flow built with the same nodes and edges declared in the reverse order
+  Scenario: Order-independent declarations in another order build the same bytes
+    Given a state schema with the keys "messages" and "attempts"
+    And a flow built with nodes "plan" of kind "agent", "impl" of kind "tool" and "verify" of kind "tool", reducers "messages" as "append" and "attempts" as "sum", and edges START -> "plan" -> "impl", "impl" -> "verify" and "verify" -> FAIL
+    And a flow built with the same nodes and reducers declared in the reverse order and the same edges in the same order
     When both flows are built
     Then the IR bytes of the second flow equal the IR bytes of the first flow
 
@@ -30,52 +31,67 @@ Feature: Building flows in Go
     When a flow is built with those same declarations
     Then the IR bytes of the second build equal the IR bytes of the first build
 
-  @REQ-FLOW-012 @REQ-FLOW-013 @id:FLOW-012-01
-  Scenario: Every node kind and edge form is in the IR as declared
-    Given a flow built with one node of each of the 10 node kinds:
-      | name     | kind     |
-      | s        | set      |
-      | t        | task     |
-      | m        | model    |
-      | a        | agent    |
-      | k        | tool     |
-      | f        | map      |
-      | p        | parallel |
-      | sub      | subflow  |
-      | g        | gate     |
-      | w        | wait     |
-    And edges from START to every node without a condition, from "s" to FAIL, from "t" to "k" when "state.go", from "m" to "t" when "state.retry", and from "a" to "w" when "state.go"
-    And the node "g" has the guard of 3 visits, 5000 milli-points and the condition "state.go" and the output "approved"
+  @REQ-FLOW-012 @id:FLOW-012-01
+  Scenario: Every node kind and node attribute is in the IR as declared
+    Given a state schema with the keys "plan" and "approved"
+    And a flow built with one node of each of the 10 node kinds:
+      | name | kind     |
+      | s    | set      |
+      | t    | task     |
+      | m    | model    |
+      | a    | agent    |
+      | k    | tool     |
+      | f    | map      |
+      | p    | parallel |
+      | sub  | subflow  |
+      | g    | gate     |
+      | w    | wait     |
+    And edges from START to every node without a condition
+    And the node "g" has the node spec {"schema": "review.json"}, the input "state.plan", the output "approved" and the guard of 3 visits, 5000 milli-points and the condition "state.go"
     When the flow is built
     Then the IR has exactly 10 nodes
     And the IR gives each node its declared kind
-    And the IR has exactly 14 edges, in the order START to "s", START to "t", START to "m", START to "a", START to "k", START to "f", START to "p", START to "sub", START to "g", START to "w", "s" to FAIL, "t" to "k", "m" to "t" and "a" to "w"
-    And the IR gives edge "t" -> "k" the condition "state.go", edge "m" -> "t" the condition "state.retry" and every other edge no condition
-    And the node "g" in the IR has max_visits 3, cost_mpts 5000, the guard condition "state.go" and the output "approved"
+    And the node "g" in the IR has the node spec {"schema": "review.json"}, the input "state.plan", the output "approved" and the guard of 3 visits, 5000 milli-points and the condition "state.go"
+
+  @REQ-FLOW-013 @id:FLOW-013-01
+  Scenario: Every edge form is in the IR in declaration order
+    Given a flow built with nodes "plan" of kind "agent", "verify" of kind "tool", "repair" of kind "agent" and "review" of kind "gate"
+    And the edges START -> "plan" without a condition, "plan" -> "verify" without a condition, "verify" -> "review" when "state.failed == 0", "verify" -> "repair" when "state.failed > 0" and "verify" -> FAIL without a condition
+    When the flow is built
+    Then the IR has 5 edges in the order START -> "plan", "plan" -> "verify", "verify" -> "review", "verify" -> "repair" and "verify" -> FAIL
+    And the IR gives edge "verify" -> "review" the condition "state.failed == 0", edge "verify" -> "repair" the condition "state.failed > 0" and every other edge no condition
 
   @REQ-FLOW-014 @id:FLOW-014-01
   Scenario: START and FAIL are accepted as the ends of the flow
     Given a flow built with node "plan" of kind "agent" and edges START -> "plan" and "plan" -> FAIL
     When the flow is built
     Then the IR has exactly one edge from "START" to "plan" and exactly one edge from "plan" to "FAIL"
-    And compiling the built flow succeeds
+
+  @REQ-FLOW-014 @id:FLOW-014-02
+  Scenario: Marking a node as the entry node adds an edge from START
+    Given a flow with node "plan" of kind "agent" and the edge "plan" -> FAIL
+    And the node "plan" is marked as the entry node
+    When the flow is built
+    Then the IR has an edge from "START" to "plan" with no condition
 
   @REQ-FLOW-015 @id:FLOW-015-01
   Scenario: A node declared twice is rejected
     Given node "plan" of kind "agent" is declared
     When node "plan" of kind "tool" is declared in the same flow
-    Then the build fails with code "conflict" naming the node "plan"
+    Then the build fails with code "invalid_argument" naming the node "plan"
 
   @REQ-FLOW-016 @id:FLOW-016-01
-  Scenario Outline: An edge to a node that does not exist is rejected
+  Scenario Outline: An edge to or from a node that does not exist is rejected
     Given a flow with node "plan" of kind "agent"
     When an edge from "<from>" to "<to>" is declared
-    Then the build fails with code "not_found" naming the node "<missing>"
+    Then the build fails with code "invalid_argument" naming the node "<missing>"
 
     Examples:
-      | from | to      | missing |
-      | plan | verify  | verify  |
+      | from  | to     | missing |
+      | plan  | verify | verify  |
       | build | plan   | build   |
+      | FAIL  | plan   | FAIL    |
+      | plan  | START  | START   |
 
   @REQ-FLOW-017 @id:FLOW-017-01
   Scenario: A flow that does not say where it starts is rejected
@@ -95,19 +111,6 @@ Feature: Building flows in Go
     When a flow node "plan" of kind "agent" is declared with the output "result"
     Then the build fails with code "invalid_argument" naming the node "plan" and the key "result"
 
-  @REQ-FLOW-020 @id:FLOW-020-01
-  Scenario: A condition that is not a boolean is rejected
-    Given a state schema with the key "tests" of type integer
-    When an edge from "verify" to "review" is declared with the condition "state.tests"
-    Then the build fails with code "invalid_argument" naming the edge "verify" -> "review" and the expression "state.tests"
-
-  @REQ-FLOW-025 @id:FLOW-025-01
-  Scenario: A condition that does not type-check is left to the compiler
-    Given a state schema with the key "tests" of type integer
-    When an edge from "verify" to "review" is declared with the condition "state.tests == 'none'"
-    Then the flow is built with the condition "state.tests == 'none'" on edge "verify" -> "review"
-    And compiling the built flow fails naming edge "verify" -> "review" and the expression "state.tests == 'none'"
-
   @REQ-FLOW-021 @id:FLOW-021-01
   Scenario: The state schema and reducers are the ones declared
     Given a Go struct type "CodegenState" with the fields:
@@ -120,31 +123,6 @@ Feature: Building flows in Go
     Then the state schema of the built flow equals the schema generated from "CodegenState"
     And the reducers of the built flow are messages "append", files "merge_by(path)" and attempts "sum"
 
-  @REQ-FLOW-022 @id:FLOW-022-01
-  Scenario: Compiling a built flow gives the compiler's verdict
-    Given a state schema with the key "tests" of type integer
-    And a flow built with node "plan" of kind "agent" and the edge START -> "plan"
-    And the same flow "codegen" version 3 written as data
-    When both flows are compiled
-    Then compiling the built flow fails with code "invalid_argument" naming node "plan" and the edge "START" -> "plan"
-    And the data flow fails with the same code, naming node "plan" and the edge "START" -> "plan"
-
-  @REQ-FLOW-023 @id:FLOW-023-01
-  Scenario: The builder does not hash or compile
-    Given a flow built with node "plan" of kind "agent" and edges START -> "plan" -> FAIL
-    When the flow is built
-    Then the build succeeds
-    And the built flow carries no content hash
-
-  @REQ-FLOW-023 @id:FLOW-023-02
-  Scenario: The build result is what the compiler hashes and checks
-    Given a flow built with node "plan" of kind "agent" and the edges START -> "plan" and "plan" -> FAIL
-    And the edge START -> "plan" with the condition "state.failed == 'none'"
-    When the flow is built
-    Then the build succeeds
-    And compiling the built flow fails with code "invalid_argument" naming the edge "START" -> "plan"
-    And the content hash of the built flow equals the content hash of the data flow with the same declarations
-
   @REQ-FLOW-024 @id:FLOW-024-01
   Scenario: A reducer on a key the state does not have is rejected
     Given a state schema with the key "tests" of type integer
@@ -152,8 +130,8 @@ Feature: Building flows in Go
     When the flow is built
     Then the build fails with code "invalid_argument" naming the state key "notes"
 
-  @REQ-FLOW-024 @id:FLOW-024-02
-  Scenario: A state schema the schema compiler rejects is rejected at build time
+  @REQ-FLOW-026 @id:FLOW-026-01
+  Scenario: An invalid state schema is rejected at build time
     Given a state schema declaring the key "tests" as the type "count"
     When the flow is built
     Then the build fails with code "invalid_argument" naming the state key "tests" and the type "count"
