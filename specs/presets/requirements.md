@@ -6,7 +6,10 @@ The code generator is a preset: its own Go module and binary, importing
 Basamento as a library, not compiled into `kit` (owner decision, 2026-11-17).
 It defines two flows, `codegen.bootstrap` and
 `codegen.iterate`, over one loop — plan, implement each planned module, verify
-in a sandbox, repair under a guard, review gate, commit. A **preset version**
+in a sandbox, repair under a guard, self-review, commit (owner decision,
+2026-11-17). The loop mirrors the developer's own workflow (`AGENTS.md`): it
+starts no reviewer session, and no person decides before the commit. A
+**preset version**
 is the content hash of the flows, prompts and evals, with its recorded `@eval`
 scores. A **run** of either flow pins the version it started with.
 
@@ -36,20 +39,20 @@ If the plan's tests fail in the sandbox, then the codegen flow shall run the rep
 ### REQ-PRESET-007 — The repair guard bounds the loop
 If the repair stage reaches its visit limit or its cost limit, then the codegen flow shall end the run in the `failed` state with code `budget_exceeded`, naming the limit reached and the last test failures.
 
-### REQ-PRESET-008 — Passing verification goes to the review
-When the plan's tests pass in the `verify` stage, the codegen flow shall wait at the review gate.
+### REQ-PRESET-008 — Passing verification goes to the author's self-review
+When the plan's tests pass in the `verify` stage, the codegen flow shall run the `self-review` stage, in which no person decides and no reviewer session is started.
 
-### REQ-PRESET-009 — Nothing is written before the review
-While the run's review gate is unresolved, the codegen flow shall make no write to the repository and no commit on any branch.
+### REQ-PRESET-009 — Self-review findings go back to repair or end the run
+If the `self-review` stage raises findings, then the codegen flow shall run the repair stage with those findings, and if it raises none, then the codegen flow shall commit. A `self-review` stage that has raised findings and has reached its visit limit shall end the run in the `failed` state with code `budget_exceeded`.
 
-### REQ-PRESET-010 — An approved review commits once
-When the review gate is resolved with an approved decision, the codegen flow shall commit the reviewed workspace once, as the only commit on a new repository's default branch for a bootstrap run.
+### REQ-PRESET-010 — A bootstrap run commits once
+When the plan's tests pass and the `self-review` stage raises no findings, the codegen flow shall commit the workspace of the last `verify` stage once, as the only commit on a new repository's default branch for a bootstrap run.
 
-### REQ-PRESET-011 — A rejected review commits nothing
-If the review gate is resolved with a rejected decision, then the codegen flow shall end the run in the `cancelled` state without a commit.
+### REQ-PRESET-011 — Only the commit writes
+While a run has not reached its `commit` stage, the codegen flow shall make no write to the repository and no commit on any branch.
 
-### REQ-PRESET-012 — Iteration branches on approval
-When an iterate run's review gate is resolved with an approved decision, the codegen flow shall open a new branch `codegen/<run id>` from the base branch and make its only commit there.
+### REQ-PRESET-012 — An iteration commits on a new branch
+When an iterate run's `self-review` stage raises no findings, the codegen flow shall open a new branch `codegen/<run id>` from the base branch and make its only commit there.
 
 ### REQ-PRESET-013 — Iteration never writes the default branch
 The `codegen.iterate` flow shall never commit to the repository's default branch.

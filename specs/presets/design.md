@@ -38,19 +38,29 @@ codegen.bootstrap                      codegen.iterate
   brief ─► plan ─► implement(plan)       repository, base branch, change request
           ─► verify(sandbox)             ─► plan ─► implement(plan)
           ─► repair(guard) ─► verify     ─► verify(sandbox)
-          ─► gate "review"               ─► repair(guard) ─► verify
-          ─► commit                      ─► gate "review"
+          ─► self-review                 ─► repair(guard) ─► verify
+          ─► commit                      ─► self-review
                                          ─► commit on codegen/<run id>
 ```
+
+The loop mirrors the developer's workflow (`AGENTS.md`): no `gate` node and
+no reviewer session in either flow. The platform's `gate` node
+(`await_gate`, `dc.Await`) still exists for a long-lived human wait after the
+commit or on the pull request, owned by an outer orchestrator; the codegen
+preset does not use it.
 
 | Stage | Nodes | Requirement |
 | --- | --- | --- |
 | `plan` | One `agent` node, `planner` agent, structured output `plan` | 001 |
 | `implement` | `map` over `plan.modules`, `max_parallel` 0 (one at a time), node `implement_module` (`agent` with `output_schema: workspace`) | 004 |
 | `verify` | One `tool` node per plan test, in plan order, on the workspace the last stage returned | 005 |
-| `repair` | `agent` node `repair` with `guard: {max_visits: 3, cost_mpts: 5000}`; an edge back to `verify` | 006, 007 |
-| `review` | `gate` node with payload schema `decision: approved | rejected` | 008–012 |
-| `commit` | One `tool` node, the only writer the flow calls | 009–013 |
+| `repair` | `agent` node `repair` with `guard: {max_visits: 3, cost_mpts: 5000}`; it receives the failing tests or the self-review findings; an edge back to `verify` | 006, 007, 009 |
+| `self-review` | `agent` node `reviewer` with `output_schema: findings` and its own `guard: {max_visits: 3}`; one edge to `commit`, taken when it raises no findings, one to `repair` | 008, 009, 012 |
+| `commit` | One `tool` node, the only writer the flow calls | 010–013 |
+
+The `reviewer` agent returns a list of findings. It is a stage of the run,
+not a reviewer session in the sense of `AGENTS.md`, and it never asks a
+person.
 
 Rules the implementer keeps:
 
@@ -62,13 +72,14 @@ Rules the implementer keeps:
   with its own spec change (P1).
 - **One writer.** `commit` is the only node that calls the git host's write
   side. The sandbox is isolated; the read side of the git host (clone, in
-  `plan`) is allowed before `review` (`REQ-PRESET-009` covers writes only).
-- **The commit carries the reviewed workspace**, the same value `verify`
-  tested, so what a person approved is what is committed.
+  `plan`) is allowed before `commit` (`REQ-PRESET-011` covers writes only).
+- **The commit carries the workspace the last `verify` tested**, so what was
+  tested is what is committed.
 - **`budget_exceeded` is the platform's code for a guarded cycle that ends**
   (`core.CodeBudgetExceeded`); `flow` reports it with the guard reached and
-  the failing tests, which the codegen flow surfaces as the run's error. No
-  code is added to `core` for it.
+  the failing tests, which the codegen flow surfaces as the run's error. The
+  `self-review` guard ends the run the same way with its visits. No code is
+  added to `core` for it.
 - **The version** is `sha256` over the canonical IR of both flows plus the
   prompt and eval files, sorted by path: the definition the run pins
   (`REQ-PRESET-014`).
@@ -122,7 +133,7 @@ import it (`AGENTS.md`, constitution 11).
 
 | Double | Place | Drives |
 | --- | --- | --- |
-| Scripted codegen model | `internal/bdd/codegen/model.go` | Answers `planner` with the brief's `plan` table; answers each `implement_module` with the scripted workspace; answers `repair` with the next scripted workspace. Records every request with its agent, module and prompt version. |
+| Scripted codegen model | `internal/bdd/codegen/model.go` | Answers `planner` with the brief's `plan` table; answers each `implement_module` with the scripted workspace; answers `repair` with the next scripted workspace; answers `reviewer` with the next scripted findings. Records every request with its agent, module and prompt version. |
 | Simulated sandbox | same package | Owns workspaces by id. A test command returns the next scripted result and records `(workspace, command)`. |
 | Simulated git host | same package | Branches, commits and repositories in memory. Records writer calls apart from reader calls; asserts "no branch", "still at its Nth commit". |
 | Restart | `coretest` fake clock plus a harness that drops the run's process state | Stops a run after a named stage and resumes it against the same store (`PRESET-003-01`). |

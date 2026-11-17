@@ -59,8 +59,9 @@ the same change that first uses it.
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Preset version** | The content hash of a preset's flows, prompts and evals, together with the `@eval` scores recorded for it. A run pins the version it started with; a new version becomes current only when it compiles, does not regress, and a person resolves its review gate. |
-| **Codegen stage** | One of `plan`, `implement`, `verify`, `repair`, `review` and `commit` in `codegen.bootstrap` and `codegen.iterate`. A completed stage is checkpointed; a resumed run starts again no stage that has a checkpoint. |
+| **Codegen stage** | One of `plan`, `implement`, `verify`, `repair`, `self-review` and `commit` in `codegen.bootstrap` and `codegen.iterate`. A completed stage is checkpointed; a resumed run starts again no stage that has a checkpoint. |
 | **Repair guard** | The bound on the codegen loop: a visit limit (how many times `repair` may run) and a cost limit in milli-points. A guard that is reached ends the run `failed` with code `budget_exceeded`. |
 | **Sandbox** | An isolated workspace in which a codegen run writes modules and runs the plan's tests; nothing it writes reaches a repository. A **simulated sandbox** is its deterministic stand-in in the gate. |
 | **Git host** | The remote a codegen run reads a repository from and commits to, behind the repository's own port. A **simulated git host** is its deterministic stand-in in the gate, recording commits, branches and writer calls. |
-| **Review gate** | A gate node where a person approves or rejects what a run produced; nothing of the run is committed before it is resolved. |
+| **Review gate** | A `gate` node where a person approves or rejects a proposal. The preset uses it only for a new preset version, never in a codegen run, which commits without one. |
+| **Self-review** | The `self-review` codegen stage, in which an agent reviews the workspace for findings before the commit; findings go back to repair. It starts no reviewer session and asks no person. |
