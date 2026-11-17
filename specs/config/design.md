@@ -44,7 +44,7 @@ renders and what the environment mapping is derived from.
 | `blob.url` | URL | profile-dependent | scheme per profile |
 | `bus.url` | URL | profile-dependent | scheme per profile |
 | `secrets.url` | URL | profile-dependent | scheme per profile |
-| `runtime.url` | URL | empty | empty, `local://`, `temporal-embedded://…`, `temporal://…` |
+| `runtime.url` | URL | empty | empty or `local://` |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
 
 The embedded profile defaults the four port URLs to
@@ -66,15 +66,16 @@ type Result struct {
 }
 
 // Load reads the sources in precedence order and returns the effective
-// configuration. It returns *core.Error{Code: invalid_argument} when a URL
-// cannot be parsed (REQ-CONFIG-017); it does not validate further.
+// configuration. It returns an error only when a configuration file cannot
+// be read or parsed.
 func Load(opts Options) (Result, error)
 
-// Validate returns every error, one per offending key, in key order.
+// Validate checks every setting rule (including URL syntax, REQ-CONFIG-017)
+// and returns every error, one per offending key, in key order.
 func (r Result) Validate() []error
 
-// Report renders the effective configuration with its sources; secret keys
-// (key contains secret, password or token) print as ***.
+// Report renders the effective configuration with its sources; any password
+// in a URL setting prints as *** (REQ-CONFIG-008).
 func (r Result) Report(w io.Writer)
 
 type Options struct {
@@ -126,12 +127,11 @@ validated URL and is never called on an unvalidated one.
 
 1. `config.Load`, then `Validate`. Any error: print every error to stderr,
    exit 1. Nothing is opened (REQ-CONFIG-005).
-2. Select the runtime and start it (embedded Temporal server when asked),
+2. Select the runtime (`local` when `runtime.url` is empty or `local://`),
    then open the ports in the order sql, blob, bus, secrets. Each `Open`
    takes a `context.Context`. An error names what failed the same way: close
    what is already open in reverse order, print `port "sql" could not open:
-   …` (or `runtime "temporal-embedded" could not start: …`), exit 1
-   (REQ-CONFIG-021).
+   …`, exit 1 (REQ-CONFIG-021).
 3. Bind the listener. On error, close everything, report `listen.addr`, exit
    1 (REQ-CONFIG-022).
 4. Serve, and print one `ready` line on stdout once everything above
@@ -139,59 +139,28 @@ validated URL and is never called on an unvalidated one.
    is the observable "ready" of the scenarios (REQ-CONFIG-020). `GET
    /healthz` returns `200` from the moment the listener is bound.
 
-**The out-of-process test hook.** The system driver must observe the ports
-that `kit serve` holds and an in-flight request that it can make finish or
-slow down, on a binary that, until WP-L6-03, serves only `/healthz`. `kit
-serve` therefore mounts a `net/http/pprof` handler on the same listener,
-guarded by `KIT_DEBUG=1`, added in `cmd/kit/debug_ports.go` to every build
-(CGO stays off and the binary stays static; the routes return 404 unless the
-variable is set at start).
-It provides:
+`serve` waits for a termination signal (`SIGTERM`, `SIGINT`). Shutdown: the
+listener stops accepting, requests in flight on it get `shutdown.timeout`,
+then every port closes regardless and the process exits 0 if all finished in
+time and 1 otherwise (REQ-CONFIG-023, REQ-CONFIG-024).
 
-- `GET /debug/pprof/ports`: JSON `{"sql":"open","blob":"open",…}`.
-- `POST /debug/pprof/hold?ms=1000|10000`: an HTTP handler that blocks for
-  `ms` of real time before responding. This is what "a request in flight"
-  means in CONFIG-023-01 and CONFIG-024-01.
+## 6. Test harness
 
-It is present in production builds, behind the variable, and contains no
-fake port: the ports it lists are the real ones. To be weighed at review:
-if the owner prefers it out of the binary, the alternative is to land
-WP-L6-03's `config` connect service first and drive the scenarios through it,
-which makes WP-L1-05 wait on WP-L6-03.
+- Component scenarios call `config.Load`, `Result.Validate`, `Result.Report`
+  and the server lifecycle runner in-process. `CONFIG-023-01` and
+  `CONFIG-024-01` drive the in-process server runner with the
+  `core/coretest` fake clock and an in-flight request controlled by the
+  component driver.
+- System scenarios run the built `kit` binary (`kit serve` and `kit config
+  validate`) and observe only its stdout `ready` line, stderr messages,
+  `GET /healthz`, `SIGTERM` and process exit status.
+- In `CONFIG-021-01` ("a data directory that cannot be written"), the system
+  driver points `data.dir` at a path occupied by a regular file so that
+  opening the first port (`sql`) fails deterministically without any test
+  hook or vendor call. In `CONFIG-022-01`, the test holds `127.0.0.1:8080`
+  with a loopback listener of its own before starting `kit serve`.
 
-**Do not use `KIT_DEBUG` in a scenario:** the probe is started by the
-system driver before the scenario's steps, never by a step.
+## Open questions
 
-`serve` waits for a termination signal (`SIGTERM`, `SIGINT`); `kit config
-validate` does not install a handler, so the same signal kills it during its
-work (that is the "in flight" of CONFIG-023-01). Shutdown: the listener
-stops accepting, requests in flight on it get `shutdown.timeout`, then every
-port closes regardless and the process exits 0 if all finished in time and 1
-otherwise (REQ-CONFIG-023, REQ-CONFIG-024). The ports close only after the
-in-flight request has finished or the timeout has passed, whichever is first;
-that is what "closes its sql port at 1 second" and "at 5 seconds" check.
-
-## 6. Test harness and points that touch other work packages
-
-- Component scenarios call `config.Load` and `Result.Validate` in process.
-- System scenarios run the built binary. CONFIG-021-01 needs a port whose
-  `Open` fails without a vendor: the test starts the real binary with
-  `--config` naming `sql.url: sql://prod`, and the system driver registers a
-  `sql` implementation for that scheme that refuses to open. The other
-  three ports are the binary's real embedded ones. Nothing reaches a
-  vendor, and the bind failure in CONFIG-022-01 holds the listener with a
-  socket of the test, so both are deterministic.
-- Timeouts: in-process uses the `core/coretest` fake clock; the
-  out-of-process binary uses the real timer with short durations
-  (`shutdown.timeout` `5s`, a request that takes 1 s and one that takes
-  10 s). No test sleeps waiting for an event; it waits on the process.
-- The `@level:system` scenarios use only the `ready` line, `/healthz`,
-  signals and exit status, so they do not wait on WP-L6-03. They do not call
-  the connect API; the G6 smoke run drives the binary's existing surface.
-- **Lands in WP-L8-01:** the `auth.*` keys the report masks
-  (CONFIG-008-01) are declared by that work package; until then the schema
-  table has no `auth.*` key and the loader ignores unknown file keys.
-- **Lands in WP-L5-03:** the `temporal-embedded` runtime constructor. This
-  work package validates the scheme, calls the constructor before it opens
-  the ports' `ready` line, and fails start-up naming `runtime` if the
-  constructor errors; CONFIG-026-01 activates with that work package.
+- **Secret keys outside URL userinfo**: In WP-L1-05, every secret in configuration is a URL password (`REQ-CONFIG-008`). When `WP-L8-01` (`specs/auth`) introduces non-URL secret settings (if any are not stored in the `Credentials` vault), should key-name masking be specified in `specs/auth` at that time?
+- **Temporal runtime schemes**: Deferred to `WP-L5-02` and `WP-L5-03`, which own the Temporal runtime and embedded Temporal server.

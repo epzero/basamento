@@ -1,4 +1,4 @@
-@wp:WP-L1-05 @level:component
+@planned @wp:WP-L1-05 @level:component
 Feature: Loading the configuration
   Every `kit` process builds one effective configuration from command-line
   flags, environment variables, a configuration file and the built-in
@@ -37,7 +37,7 @@ Feature: Loading the configuration
   Scenario: A setting no source sets comes from the default
     Given a configuration file sets "log.level" to "debug"
     When the configuration is loaded
-    Then "data.dir" is "./.kit/data" from "default"
+    Then "log.format" is "text" from "default"
 
   @REQ-CONFIG-016 @id:CONFIG-016-01
   Scenario: The listener is on loopback by default
@@ -57,14 +57,6 @@ Feature: Loading the configuration
     Then "profile" is "cloud" from "env"
 
   @REQ-CONFIG-015 @id:CONFIG-015-01
-  Scenario: The data directory comes from a setting
-    Given a configuration file sets "data.dir" to "/srv/kit"
+  Scenario: The data directory is under the working directory by default
     When the configuration is loaded
-    Then "data.dir" is "/srv/kit" from "file"
-
-  @REQ-CONFIG-016 @wp:WP-L1-05 @level:system @smoke @id:CONFIG-016-02
-  Scenario: The server listens on loopback with the defaults
-    Given an empty data directory and the port "127.0.0.1:8080" free
-    When "kit serve --profile embedded" starts with no other setting
-    Then it reports the listener "127.0.0.1:8080"
-    And its health check on "127.0.0.1:8080" answers "200"
+    Then "data.dir" is "./.kit/data" from "default"

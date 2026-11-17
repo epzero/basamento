@@ -3,7 +3,7 @@ Feature: Profiles and port selection
   Each port has an embedded implementation and cloud ones; the scheme of the
   port's URL says which one a `kit` process uses (ADR-0004).
 
-  @REQ-CONFIG-011 @profile:embedded @id:CONFIG-011-01
+  @REQ-CONFIG-011 @REQ-CONFIG-013 @profile:embedded @id:CONFIG-011-01
   Scenario Outline: The embedded profile accepts its schemes
     Given the embedded profile with "<scheme>:///data"
     When the configuration is loaded
@@ -16,7 +16,7 @@ Feature: Profiles and port selection
       | bus.url     | nats-embedded | nats-embedded  |
       | secrets.url | localsecrets  | localsecrets   |
 
-  @REQ-CONFIG-012 @profile:cloud @id:CONFIG-012-01
+  @REQ-CONFIG-012 @REQ-CONFIG-013 @profile:cloud @id:CONFIG-012-01
   Scenario Outline: The cloud profile accepts its schemes
     Given the cloud profile with "<key>" set to "<url>"
     When the configuration is loaded
@@ -32,9 +32,3 @@ Feature: Profiles and port selection
       | secrets.url | awskms:///arn:aws:kms:kit        | awskms         |
       | secrets.url | gcpkms://projects/kit            | gcpkms         |
       | secrets.url | hashivault://vault.example.test  | hashivault     |
-
-  @REQ-CONFIG-013 @id:CONFIG-013-01
-  Scenario: The bus URL selects the embedded bus in one process
-    Given the embedded profile with "nats-embedded:///data/nats" for the bus
-    When "kit serve" starts
-    Then the bus implementation is "nats-embedded"

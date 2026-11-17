@@ -1,8 +1,7 @@
-@planned @wp:WP-L1-05 @level:component @profile:embedded
-Feature: Inspecting the configuration and the smoke check
+@planned @wp:WP-L1-05 @level:system @profile:embedded
+Feature: Inspecting the configuration with kit config validate
   `kit config validate` shows the effective configuration and where each
-  setting came from, so a deployment can be checked before it starts. The
-  `@smoke` scenarios run against the real embedded binary (gate G6).
+  setting came from, so a deployment can be checked before it starts.
 
   @REQ-CONFIG-018 @id:CONFIG-018-01
   Scenario: A valid configuration is printed with its sources
@@ -19,11 +18,3 @@ Feature: Inspecting the configuration and the smoke check
     When "kit config validate" runs
     Then it exits with status 2
     And it prints 2 errors naming "profile" and "listen.addr"
-
-  @REQ-CONFIG-027 @smoke @id:CONFIG-027-01
-  Scenario: The built binary serves from an empty directory
-    Given a fresh build of the "kit" binary in an empty temporary directory
-    When it is started with "kit serve --profile embedded" at the default settings
-    Then it reports the listener "127.0.0.1:8080"
-    And it creates its data directory "./.kit/data" in that directory
-    And its health check answers before the smoke check times out

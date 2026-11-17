@@ -14,22 +14,22 @@ The configuration loader shall take each `kit` setting from the highest of its s
 The configuration loader shall map a setting key `A.b` to the environment variable `KIT_A_B`, uppercasing every letter.
 
 ### REQ-CONFIG-003 — Unset sources
-Where a source does not set a key, the configuration loader shall take that key from the next lower source.
+If a source does not set a key, then the configuration loader shall take that key from the next lower source.
 
 ### REQ-CONFIG-004 — Default profile
 The configuration loader shall default `profile` to `embedded` when no source sets it.
 
 ### REQ-CONFIG-005 — Validation before start-up
-Before opening any port, `kit serve` shall validate the effective configuration and report every invalid setting at once.
+When `kit serve` starts, it shall validate the effective configuration and report every invalid setting before opening any port.
 
 ### REQ-CONFIG-006 — Errors name the offending key
-When a setting fails validation, the configuration loader shall name the offending key in the error.
+If a setting fails validation, then the configuration loader shall name the offending key in the error.
 
 ### REQ-CONFIG-007 — Secrets stay out of errors
-If a setting fails validation, then the configuration loader shall keep its value out of the error.
+If a setting fails validation, then the configuration loader shall not include the setting's value, other than a URL's scheme, in the error.
 
 ### REQ-CONFIG-008 — Report secrets are masked
-When `kit serve` reports the effective configuration, it shall print each setting whose key contains `secret`, `password` or `token` as `***`.
+When the configuration loader reports the effective configuration, it shall print any password in a URL setting as `***`.
 
 ### REQ-CONFIG-009 — Supported profiles
 If the effective `profile` is not `embedded` or `cloud`, then the configuration loader shall reject it with code `invalid_argument`.
@@ -59,13 +59,13 @@ The configuration loader shall default `listen.addr` to `127.0.0.1:8080` when no
 If a port URL cannot be parsed, then the configuration loader shall reject it with code `invalid_argument`.
 
 ### REQ-CONFIG-018 — Validate command
-When `kit config validate` runs, the configuration loader shall print the effective configuration with its sources and exit with status 0 if it is valid.
+When `kit config validate` runs on a valid configuration, it shall print the effective configuration with its sources and exit with status 0.
 
 ### REQ-CONFIG-019 — Validate reports problems
 If the configuration is invalid, then `kit config validate` shall print every error and exit with status 2.
 
 ### REQ-CONFIG-020 — Ready only when every port opened
-When `kit serve` reports itself ready, every port shall have opened.
+When `kit serve` starts, it shall open every port before it reports itself ready.
 
 ### REQ-CONFIG-021 — Failed port
 If a port cannot open, then `kit serve` shall stop and name that port.
@@ -81,9 +81,3 @@ If the requests in flight outlast `shutdown.timeout`, then `kit serve` shall clo
 
 ### REQ-CONFIG-025 — Local runtime
 When the embedded profile starts and `runtime.url` is unset, `kit serve` shall use the `local` runtime.
-
-### REQ-CONFIG-026 — Embedded Temporal
-When `kit serve` selects the `temporal-embedded` runtime, it shall start the embedded Temporal server before reporting itself ready.
-
-### REQ-CONFIG-027 — Smoke checks the embedded binary
-`@smoke` scenarios shall pass against `kit serve --profile embedded` started in an empty directory with a loopback listener.
