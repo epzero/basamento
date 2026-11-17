@@ -144,13 +144,17 @@ decides, for the whole price of the call.
   layer; the phrase `has the rate rules "input <a> and output <b>" per million
   tokens` sets one unconditional rule.
 - The rules are tried in their table order; the first whose `when` holds for
-  the invocation applies to all its tokens (MODEL-068-01). A rule without
-  `when` always holds (`always` in the scenarios). Prices are per **million**
-  tokens: a million input tokens cost `input` milli-points (rate `0.28` =
-  0.28 milli-points per thousand tokens), million output tokens cost `output`.
+  the invocation applies to all its tokens (MODEL-068-01, MODEL-069-01). A rule
+  without `when` always holds (`always` in the scenarios). Token rates are in
+  **milli-points per million tokens**: a million input tokens cost `input`
+  milli-points (rate `280` = 280 milli-points per million tokens = 0.28
+  milli-points per thousand tokens), and a million output tokens cost `output`
+  milli-points.
 - `when` is CEL over `at` (the start time of the invocation, `core.Clock` at
   its start, recorded with it), `params`, `usage` and `tenant`. `usage` is the
-  usage being priced: actual at settlement. The evaluation sees no clock.
+  usage being priced: the estimated usage (`input_tokens` = counted input
+  tokens, `output_tokens` = output limit) when estimating before start, and
+  actual usage at settlement. The evaluation sees no clock.
 - The tenant is taken from the tenant context of the call (constitution
   article 8); the catalog never keys an override by a value in the request
   (REQ-MODEL-071). A call made outside any tenant uses the deployment layer:
@@ -194,19 +198,17 @@ decides, for the whole price of the call.
   the `when` chooses with that estimated usage and the recorded start time.
   The estimate is what REQ-MODEL-006 reserves; the budget comparison and the
   `budget_exceeded` failure are REQ-MODEL-007's and not specified here.
-- In MODEL-076-01 the provider would use 4000 input tokens on its own, yet
-  the estimate counts the request's tokens, not the provider's: the step's
-  request carries messages the model's tokenizer gives 1000 tokens, so
-  `1000 × 1 + 500 × 8 = 5000`. The implementer writes the messages so the
-  count is 1000 under the test tokenizer and notes it in the step.
+- In MODEL-076-01 the provider would use 4000 input tokens and 100 output
+  tokens on its own, yet the estimate counts the request's counted input
+  tokens (1000) and the output limit (500), so `1000 × 1 + 500 × 8 = 5000`.
 
 ## C5. Pricing is fixed when the invocation starts
 
 - The layer, the rule and the formula a call uses are chosen when its
   invocation starts, and recorded with the invocation (the start time `at` is
   already recorded with it, `docs/architecture/model-layer.md` §7). The
-  reservation and the settlement of that call use them, whatever the price
-  table changes meanwhile (REQ-MODEL-077, MODEL-077-01). A retry of the same
+  settlement of that call uses them, whatever the price table changes while
+  the call is running (REQ-MODEL-077, MODEL-077-01). A retry of the same
   logical call (same client ref) is priced the same.
 
 ## C6. Consumers of this section
@@ -226,8 +228,9 @@ decides, for the whole price of the call.
 ## Open questions
 
 1. **Cost requirement: REQ-MODEL-006 re-locking (`requirements.md`, approved text).** REQ-MODEL-076 says the reservation uses the estimate of C4 for **every** paid call, while REQ-MODEL-006 says "estimated by the model's price formula". They agree for a model with rules; for a model that declares its own formula (a video model priced on `params.duration_s`), REQ-MODEL-006 read literally leaves the estimate to that formula, which the docs define no usage for; under C4 it gets the same usage (counted input tokens, output limit). Should REQ-MODEL-006 be re-locked to cite REQ-MODEL-076, or does this WP leave it (cost, P1 re-review either way)?
-2. **Default formula and the WP-L3-02 fixture (`design.md` §5, MODEL-060-01, MODEL-061-01).** `middleware.feature` and the earlier section's §5 price `sim-chat` with `(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000` milli-points, which at per-million rates of 1 and 8 per token would be 1,000,000,000× the default formula of REQ-MODEL-073 (`input × 1e-6 + output × 8e-6`). The scenarios are approved text; the implementer of WP-L3-02 must state that price as a model formula in the manner of C2 (a fixture), not as rules fed to the default formula. If the owner wants the two reconciled, it is a WP-L3-02 spec change (P1).
-3. **Where overrides are configured.** The roadmap and docs name the layers but not who writes deployment and tenant overrides (a config file for the deployment, which API or command for a tenant). This WP only reads them; should the write side be a task of WP-L3-06, or another work package?
-4. **Rounding of an exact half (REQ-MODEL-075).** The docs give no rule; half up was chosen (MODEL-075-01) because it never under-charges a fraction of cost. Confirm, or choose half to even.
-5. **The estimate's counted input tokens (C4).** The docs say "counted input tokens" without saying by which tokenizer. The model's own tokenizer is proposed; where a descriptor names none, the implementer must pick one and say so.
-6. **`not_found` for an unknown model id (REQ-MODEL-067).** `core` already has the code, and ADR-0012 §2 uses the word for the catalog; confirm it over `invalid_argument`.
+2. **Default token formula and cached/reasoning tokens (REQ-MODEL-073, REQ-MODEL-074).** `model-layer.md` §7 leaves the exact default token formula open; the spec prices `input_tokens` and `output_tokens` at the chosen rule's per-million rates and ignores `cached_tokens` and `reasoning_tokens` unless a model provides its own formula or rule (MODEL-073-01, MODEL-074-01).
+3. **Default formula and the WP-L3-02 fixture (`design.md` §5, MODEL-060-01, MODEL-061-01).** `middleware.feature` and the earlier section's §5 price `sim-chat` with `(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000` milli-points, which at per-million rates of 1 and 8 per token would be 1,000,000,000× the default formula of REQ-MODEL-073 (`input × 1e-6 + output × 8e-6`). The scenarios are approved text; the implementer of WP-L3-02 must state that price as a model formula in the manner of C2 (a fixture), not as rules fed to the default formula. If the owner wants the two reconciled, it is a WP-L3-02 spec change (P1).
+4. **Where overrides are configured (Open Question 3).** The roadmap and docs name the layers but not who writes deployment and tenant overrides (a config file for the deployment, which API or command for a tenant). WP-L3-06 specifies only reading and applying the three layers in `model/catalog`; should the write side be a task of WP-L3-06, or another work package?
+5. **Rounding of an exact half (REQ-MODEL-075, MODEL-075-01..02).** The docs give no rule; half up was chosen (MODEL-075-01) because it never under-charges a fraction of cost. Confirm, or choose half to even.
+6. **The estimate's counted input tokens (REQ-MODEL-076, C4, MODEL-076-01, MODEL-077-01).** The docs say "counted input tokens" without saying by which tokenizer. The model's own tokenizer is proposed, with a deterministic test tokenizer in the gate; where a descriptor names none, the implementer must pick one and say so.
+7. **Error codes when no price rule holds (REQ-MODEL-072, MODEL-072-01) and for an unknown model id (REQ-MODEL-067, MODEL-067-01).** The price table uses the existing `core.CodeUnsupported` (`"unsupported"`) when no price rule matches and `core.CodeNotFound` (`"not_found"`) when a model id is not in the catalog (`core` already has the code, and ADR-0012 §2 uses the word for the catalog), adding nothing to `core/errors.go`; confirm both codes, the latter over `invalid_argument`.

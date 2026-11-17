@@ -244,10 +244,10 @@ When several of a model's rate rules hold for an invocation, the price table sha
 When a call of a model is priced in a tenant that has a price for that model, the price table shall take the price from the tenant's override; otherwise, when the deployment has one, from the deployment's override; and otherwise from the snapshot shipped with the binary.
 
 ### REQ-MODEL-071 — Tenant prices stay in their tenant
-The price table shall never apply one tenant's override to a call of another tenant.
+The price table shall never apply a tenant's override to a call outside that tenant.
 
 ### REQ-MODEL-072 — A model without a price is not called
-If no layer of the price table has a price that holds for a call, then the system shall fail the call with code `unsupported` and shall start no invocation.
+If no layer of the price table has a price that holds for a call, then the system shall fail the call with code `unsupported` and start no invocation.
 
 ### REQ-MODEL-073 — The default token formula
 Where a model declares no price formula of its own, the model layer shall price its call with the formula the chosen rates' per-million-token rates give, where a million input tokens cost as many milli-points as the input rate and a million output tokens as the output rate.
@@ -262,4 +262,4 @@ The price table and the price formulas shall return a whole number of milli-poin
 When the price table estimates the cost of a call before it starts, the estimate shall be the model's price formula on the call's parameters, its counted input tokens and its output limit as usage.
 
 ### REQ-MODEL-077 — Prices do not change what a call was charged
-When a price changes after a call has started, the system shall price that call, at its reservation and at its settlement, by the price that held when its invocation started.
+When a price changes after a call has started, the system shall price that call at its settlement by the price that held when its invocation started.
