@@ -105,7 +105,7 @@ requirements REQ-FLOW-001 … 006, scenarios `compile.feature`,
 `core`, `expr`, `flow` and `runtime`, never a durable-execution vendor, and it
 imports no node handler. It provides the one `runtime.FlowHost`
 (`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
-owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038, scenarios
+owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038 and 044, scenarios
 `host.feature`.
 
 ```go
@@ -143,7 +143,7 @@ then drives the machine, and turns its commands into calls:
 
 | Command, node kind | Durable call | Node event fed back |
 | --- | --- | --- |
-| `run_node`, kind `tool` or `task` | `dc.Step(cmd.Node, cmd.Input, runtime.StepOptions{IdempotencyKey: ...})` | `node_completed` with the step result |
+| `run_node`, kind `tool` or `task` | `dc.Step(stepName, cmd.Input, runtime.StepOptions{IdempotencyKey: ...})` where `stepName` is `spec["tool"]` / `spec["task"]` | `node_completed` with the step result |
 | `run_node`, kind with a registered handler (`model`, `agent`) | `handler(dc, node, cmd.Input)` called directly as deterministic flow code; its own side effects are `dc.Step` calls | `node_completed` with the handler's output |
 | `run_node`, kind `map` or `parallel` | the fan-out commands the machine returns for the node (WP-L4-02) | as the machine defines |
 | `start_timer`, kind `wait` | `dc.Sleep(duration of the node spec)` | `timer_fired`, then `node_completed` with no result |
@@ -155,12 +155,18 @@ then drives the machine, and turns its commands into calls:
 Pure `set` nodes and edge routing are evaluated by `flow/machine` itself without
 host durable calls (REQ-FLOW-036, `docs/architecture/flow-engine.md` §4).
 
-**Handler failure (REQ-FLOW-035).** A handler error becomes a `node_failed`
-event carrying the error's `core.Code` and message (a non-`*core.Error` is
-`internal`, `core.CodeOf`). Handing it to the machine is the whole decision;
-routing to the failure edge or failing the run is the machine's (REQ-FLOW-001,
-`routing.feature`). The run's error is the handler's error, so the run fails
-with the same `core.Code`.
+**Superstep concurrency (REQ-FLOW-044).** When `Machine.Start` or
+`Machine.Apply` returns multiple commands in one superstep, the host starts
+every durable command's `Future` (and any `NodeHandler` calls) in command order
+before waiting for completions with `dc.Select`, rather than blocking on each
+command sequentially.
+
+**Node failure (REQ-FLOW-035).** Any error from a `NodeHandler`, `dc.Step`,
+`dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a `node_failed`
+event carrying the error's `core.Code` and message (`core.CodeOf`, so a
+non-`*core.Error` becomes `internal`). Handing `node_failed` to the machine is
+the host's whole decision; when the machine returns `fail`, the host returns a
+`*core.Error` with that code.
 
 **Replay and state (REQ-FLOW-037, 038).** The host keeps no state between calls
 other than local variables of the `FlowHost` call and the machine `Snapshot`

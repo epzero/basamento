@@ -13,16 +13,16 @@ Feature: The flow host
 
   @REQ-FLOW-027 @id:FLOW-027-01
   Scenario: A run keeps its pinned definition when another version is registered
-    Given flow "review" version 1 whose node "plan" of kind "agent" has a registered node handler and precedes node "done" of kind "set" setting "v" to 1
+    Given flow "review" version 1 whose node "plan" of kind "agent" with output "plan" has a registered node handler and precedes node "done" of kind "set" setting "v" to 1
     And flow "review" version 1 is registered
     And a run of "review" version 1 starts and waits at the node "plan"
-    And flow "review" version 2, where node "plan" precedes node "done" of kind "set" setting "v" to 2, is registered
+    And flow "review" version 2, where node "plan" with output "plan" precedes node "done" of kind "set" setting "v" to 2, is registered
     When the node handler of "plan" returns {"ok": true}
     Then the run completes with state {"plan": {"ok": true}, "v": 1}
 
   @REQ-FLOW-028 @id:FLOW-028-01
   Scenario Outline: A node kind without a registered handler fails the run before any node runs
-    Given flow "triage" whose node "prep" of kind "set" precedes the node "worker" of kind "<kind>"
+    Given flow "triage" whose node "prep" of kind "tool" with node spec {"tool": "t1"} precedes the node "worker" of kind "<kind>"
     And no node handler is registered for the kind "<kind>"
     When a run of "triage" starts with input {}
     Then the run fails with code "unsupported" naming node "worker"
@@ -35,10 +35,10 @@ Feature: The flow host
 
   @REQ-FLOW-029 @id:FLOW-029-01
   Scenario Outline: A tool or task node runs as one step
-    Given a flow whose node "worker" of kind "<kind>" maps in the input from "state.draft" and has the node spec {"<kind>": "w1"}
-    And the step "worker" returns {"said": "done"}
-    When a run of the flow starts with input {"draft": "hello"}
-    Then the run made exactly one step, named "worker", with input {"draft": "hello"}
+    Given a flow whose node "worker" of kind "<kind>" maps in the input from "state.draft", writes output to "worker", and has the node spec {"<kind>": "w1"}
+    And the step "w1" returns {"said": "done"}
+    When a run of the flow starts with input {"draft": {"text": "hello"}, "extra": 1}
+    Then the run made exactly one step, named "w1", with input {"text": "hello"}
     And the run completes with state worker = {"said": "done"}
 
     Examples:
@@ -49,10 +49,10 @@ Feature: The flow host
   @REQ-FLOW-030 @id:FLOW-030-01
   Scenario Outline: A node of a kind with a registered handler runs through that handler
     Given a flow whose node "worker" of kind "<kind>" has a registered node handler
-    And the node "worker" maps in the input from "state.draft" and has the node spec {"<kind>": "w1"}
+    And the node "worker" maps in the input from "state.draft", writes output to "worker", and has the node spec {"<kind>": "w1"}
     And the node handler of "worker" returns {"said": "done"}
-    When a run of the flow starts with input {"draft": "hello"}
-    Then the node handler of "worker" was called with input {"draft": "hello"}
+    When a run of the flow starts with input {"draft": {"text": "hello"}, "extra": 1}
+    Then the node handler of "worker" was called with node "worker" and input {"text": "hello"}
     And the run completes with state worker = {"said": "done"}
 
     Examples:
@@ -93,33 +93,58 @@ Feature: The flow host
     And the run completed node "verify" with the result {"passed": 4}
 
   @REQ-FLOW-035 @id:FLOW-035-01
-  Scenario: A handler that fails makes its node fail
-    Given a flow routing node "plan" to node "review" by the default edge and to node "repair" on a failure
-    And the node "plan" of kind "agent" has a registered node handler
+  Scenario: A failing handler fails the run and stops later nodes
+    Given a flow whose node "plan" of kind "agent" has a registered node handler and precedes node "review" of kind "tool" with node spec {"tool": "t1"}
     And the node handler of "plan" returns the error "vendor_error"
-    And the node "repair" of kind "agent" has a registered node handler that returns {"error": "vendor_error"}
-    When a run of the flow starts
-    Then the run went to node "repair" on the failure of node "plan"
-    And the run completed node "repair" with the result {"error": "vendor_error"}
+    When a run of the flow starts with input {}
+    Then the run fails with code "vendor_error"
+    And the run made no step, timer, gate wait, child run or durable event
 
   @REQ-FLOW-035 @id:FLOW-035-02
-  Scenario: A failing handler with no failure edge fails the run
-    Given a flow routing node "plan" to node "review" by the default edge and to no node on a failure
-    And the node "plan" of kind "agent" has a registered node handler
-    And the node handler of "plan" returns the error "vendor_error"
-    When a run of the flow starts
-    Then the run fails with code "vendor_error"
+  Scenario: An unclassified handler error fails the run with code internal
+    Given a flow whose node "plan" of kind "agent" has a registered node handler
+    And the node handler of "plan" returns an unclassified error "unexpected panic"
+    When a run of the flow starts with input {}
+    Then the run fails with code "internal"
+
+  @REQ-FLOW-035 @id:FLOW-035-03
+  Scenario Outline: A failing tool or task step fails the run with its error code
+    Given a flow whose node "worker" of kind "<kind>" has the node spec {"<kind>": "w1"} and precedes node "after" of kind "tool" with node spec {"tool": "t2"}
+    And the step "w1" fails with code "unavailable"
+    When a run of the flow starts with input {}
+    Then the run fails with code "unavailable"
+    And the run made exactly one step, named "w1", with input {}
+
+    Examples:
+      | kind |
+      | tool |
+      | task |
+
+  @REQ-FLOW-035 @id:FLOW-035-04
+  Scenario: A gate node that times out fails the run with code timeout
+    Given a flow whose node "approve" of kind "gate" has the node spec {"schema": "review.json", "accept_if": "input.approved", "timeout": "72h"}
+    And a run of the flow has started
+    When 72 hours pass without the gate "approve" being resolved
+    Then the run fails with code "timeout"
+
+  @REQ-FLOW-035 @id:FLOW-035-05
+  Scenario: A failing subflow child run fails the run with its error code
+    Given a flow whose node "verify" of kind "subflow" has the node spec {"flow": "checks"} and precedes node "after" of kind "tool" with node spec {"tool": "t2"}
+    And the child run "checks" fails with code "unavailable"
+    When a run of the flow starts with input {}
+    Then the run fails with code "unavailable"
+    And the run made no step
 
   @REQ-FLOW-036 @id:FLOW-036-01
   Scenario: Pure nodes and routing make no durable call
-    Given a flow routing node "prep" of kind "set" to node "fast" when "state.n < 3", otherwise to node "slow"
+    Given a flow routing node "prep" of kind "set" to node "fast" of kind "set" setting "route" to "fast" when "state.n < 3", otherwise to node "slow" of kind "set" setting "route" to "slow"
     When a run of the flow starts with input {"n": 5}
-    Then the run went to node "slow"
+    Then the run completes with state {"n": 5, "route": "slow"}
     And the run made no step, timer, gate wait, child run or durable event
 
   @REQ-FLOW-037 @id:FLOW-037-01
   Scenario: A replay makes the same durable calls in the same order
-    Given a flow with node "a" of kind "tool", then node "b" of kind "wait" for "10s", then node "c" of kind "agent" whose handler calls step "c_step"
+    Given a flow with node "a" of kind "tool" with node spec {"tool": "a"}, then node "b" of kind "wait" for "10s", then node "c" of kind "agent" whose handler calls step "c_step"
     And a first run recorded tool "a" failing with code "unavailable" 4 times then returning {"t": 1}, the 10s timer of "b" firing, and step "c_step" returning {"ok": true}
     When the run is replayed from its recorded history
     Then the replayed run made the same durable calls in the same order as the first run
@@ -132,3 +157,10 @@ Feature: The flow host
     When a run of the flow starts with input {}
     Then the run completes with state {"greeting": "hi"}
     And the run made no durable call after it completed
+
+  @REQ-FLOW-044 @id:FLOW-044-01
+  Scenario: Multiple commands in one superstep start before waiting for any to complete
+    Given a flow with edges from START to node "fan" of kind "set" setting "spread" to true, from node "fan" to node "a" of kind "wait" with node spec {"duration": "10s"} and to node "b" of kind "wait" with node spec {"duration": "30s"}
+    When a run of the flow starts with input {}
+    Then the run made a timer for 10s and a timer for 30s
+    And the run is waiting
