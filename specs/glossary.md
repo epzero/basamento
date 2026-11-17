@@ -57,4 +57,6 @@ the same change that first uses it.
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
+| **SQL store** | The SQL database of a profile: SQLite in the embedded profile, Postgres in the cloud one (ADR-0004), behind the repository layer of WP-L1-01. |
+| **Telemetry** | Log records, spans and metrics, with their setup, span store, export, simulated collector and redaction; the terms are listed in [`telemetry/glossary.md`](telemetry/glossary.md). |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
