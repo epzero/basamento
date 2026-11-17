@@ -116,6 +116,32 @@ flowchart TD
 | `auth` | Authentication modes and in-app authorization. |
 | `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
 
+### Security in the contracts
+
+Three rules hold across the ports that touch tenant data; the doc comments in
+`core/tenant.go` and `platform/platform.go` are the contract (ADR-0004,
+ADR-0012 §10, constitution §7–8).
+
+- **The tenant comes from the context, only.** Callers set it with
+  `core.WithTenant` and read it with `core.TenantFrom`, which reports a nil
+  or empty context as tenantless. A port that needs a tenant fails closed
+  with `invalid_argument` when there is none; nothing falls back to an empty
+  or default tenant.
+- **Credentials.** The vault stores named secrets per tenant, reached only by
+  the reference `cred://<name>`. Names match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`,
+  so a name cannot walk the store key (`<prefix>/<tenant>/<name>`, ADR-0004)
+  out of its tenant's entries or carry query, fragment or control characters
+  into an error or an audit event; an invalid name is rejected without being
+  echoed. `Resolve` records the use through `Audit` before it returns the
+  value, and returns `unavailable` with no value if the record fails.
+- **Audit.** One append-only store for every producer. An event's tenant is
+  the context's; `Record` rejects an event whose tenant disagrees with the
+  context, and a producer with no tenant cannot write under one. Events with
+  no tenant are **deployment-level**: refused joins with an unknown pool
+  token (REQ-MODEL-029), shared-pool and launch events, and operator actions.
+  They belong to the deployment and tenant-scoped reads never return them.
+  An event carries IDs, never a secret or a raw token.
+
 ## 4. Where to read more
 
 | Topic | Document | ADR |

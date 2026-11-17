@@ -20,7 +20,15 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
   records through `platform.Audit`. There is one audit store, owned by the
   credential store (WP-L1-06): an append-only table with tenant-scoped reads.
   Authorization is another producer (denials), not the owner of a second
-  store. An event never carries a secret value.
+  store. An event never carries a secret value or a raw token: `Principal`
+  is a user ID or service token ID, and pool and join tokens are logged
+  only as hashed identifiers. An event's tenant comes from the context;
+  `Record` rejects an event that names a different tenant, and a producer
+  on a tenant path fails closed when it has no tenant. Events with no tenant
+  are deployment-level: refused joins with an unknown pool token
+  (REQ-MODEL-029), shared-pool and launch events (ADR-0012 §10, §12), and
+  operator actions. Tenant-scoped reads never return them. See
+  [`overview.md`](overview.md) §3.
 - Optional **CEL conditions** for attribute rules (`resource.owner ==
   principal.id`), reusing the expression engine. No Casbin.
 - **Tenancy**: every repository call takes a tenant context, set with

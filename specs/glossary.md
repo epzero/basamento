@@ -41,7 +41,7 @@ the same change that first uses it.
 | **Worker template** | The description of workers a pool can start on demand: what one serves, its capacity, the minimum and maximum to run, its **cold start** (the usual time from launch to joining) and its launcher. A template is `degraded` after repeated failed launches. |
 | **Launcher** | What starts workers from a worker template when the **scaler** asks. A **launch** is pending until its worker joins or its **cold-start deadline** passes. A launched worker joins with a single-use **join token**. |
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
-| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). |
+| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names match `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`. |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical call. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |
@@ -53,7 +53,7 @@ the same change that first uses it.
 | **Project** | A container of flows, runs and assets inside a tenant; roles are granted per project. |
 | **Principal** | An authenticated user or service token acting within a tenant. |
 | **Worker token** | A token issued to an external service for one session (such as a browser session), limited to that session's resources and a fixed expiry. A **pool token** instead lets a worker join one pool, and a **join token** admits one launched worker. |
-| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value. |
+| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value or a raw token. Its tenant is the caller's; an event with no tenant is **deployment-level** (a refused join with an unknown pool token, shared-pool and launch events, operator actions), kept out of tenant-scoped reads. |
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
