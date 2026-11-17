@@ -86,7 +86,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
     FLOW-011-01:
         hash: sha256:6f8c868bd393ddc5080c9c5e9306b0a1f577408ace7eb521efc25a02cfaee56f
         reqs:
@@ -97,7 +100,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
     FLOW-011-02:
         hash: sha256:8d7cab5be25b7c8f27503f9fae1943f9c5c81ee1783e91922b32c20bccac2d4e
         reqs:
@@ -108,7 +114,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
     FLOW-012-01:
         hash: sha256:2ee05668151ee2eb9e60bf35e6009a9e062fb1265ad1e77b1ebc4dffaaa68ae6
         reqs:
