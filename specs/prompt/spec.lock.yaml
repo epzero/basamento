@@ -23,7 +23,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism: registered template versions are immutable so pinned id@version references replay identically.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-002-02:
         hash: sha256:b8d364b601f0a2539a78cb7a7025cffac622a9da1e21f872912af5a7a2aab680
         reqs:
@@ -78,7 +81,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: literal value insertion prevents template syntax expansion.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-007-01:
         hash: sha256:e0c8deb3addc9128f40c3cdf7a09c5e1c4cc89ca0187af14b87af1f56d6f9b1a
         reqs:
@@ -89,7 +95,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism: prompt assembly and canonical content hash are independent of input order.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-008-01:
         hash: sha256:b8065e604a3ec9ca91847e2edf8fc42b97eabd72d734f49842db4aae56fbc2b3
         reqs:
@@ -221,7 +230,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-014-02:
         hash: sha256:fe0e2541d3b80253a1e53dfd10cc0db1ff8536d0db979e2f8f5ff84e4b2a12d6
         reqs:
@@ -232,7 +244,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-014-03:
         hash: sha256:16c41afc649ac6a66b33ccdef57683eb463f2da6a9add4860f18d36bf6e06f5d
         reqs:
@@ -243,7 +258,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-014-04:
         hash: sha256:54155384bbc0c6817bcecf9f1ca182191fab755152e2edf3f563410d0f88a949
         reqs:
@@ -254,7 +272,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-015-01:
         hash: sha256:f23a0ce9a650e0278c19f98245a9afe419a870de7958383db342ad20c2d6f21a
         reqs:
@@ -265,7 +286,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-015-02:
         hash: sha256:b3d26b39188b1642b4282dc441427c5debcf8edfd18415727d9c57bbe9c0d201
         reqs:
@@ -276,7 +300,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-015-03:
         hash: sha256:be73c8c2407d9683a06c3d63d44e65af1fb32ecfe0f5956e4c481a5c58704e58
         reqs:
@@ -287,7 +314,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-016-01:
         hash: sha256:eff956764dcf160474cc4d85b1b908fb4987bc7657b790a5074486da73066e8b
         reqs:
@@ -309,7 +339,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: untrusted inputs are rejected in cacheable static and semi-static segments.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-017-02:
         hash: sha256:cd3f6e2ef77c62a14e4882c83f88b960565ea120719dedb4c1cdc030e98f3409
         reqs:
@@ -365,7 +398,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: assembled-prompt lint detects unpaired untrusted delimiters and accepts neutralized values.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-021-02:
         hash: sha256:ce88c0aee4de39b5f86bfdcab57bbef7ca85067ad923d4ceae93e2f0e51c9478
         reqs:
@@ -376,7 +412,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: assembled-prompt lint detects unpaired untrusted delimiters and accepts neutralized values.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
     PROMPT-022-01:
         hash: sha256:14b912469ec828c5b8820136af641c7300a3e828b308197f73125d69aca119c2
         reqs:
