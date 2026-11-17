@@ -33,10 +33,10 @@ Feature: The history a new turn sees
   @REQ-CONV-012 @id:CONV-012-03
   Scenario: The message that starts a turn is in the history its steering messages extend
     Given ana sent "Hello" and the turn completed with the model message "Hi Ana"
-    And ana sends "Write a poem"
+    And ana sends "Write a poem" and the turn is in its first step
     And the scripted model starts writing "Roses are" as the first model message
-    When the turn finishes its first step
-    And ana steers "About the sea"
+    When ana steers "About the sea"
+    And the turn finishes its first step
     And the turn completes
     Then the scripted model's second call records these texts in order:
       | Hello      |

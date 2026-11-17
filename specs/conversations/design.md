@@ -94,19 +94,22 @@ message sent afterwards is refused with `conflict` (REQ-CONV-019).
 
 ## 4. Checkpoint (REQ-CONV-014)
 
-The coordinator counts the durable calls it made since it last started
-(`dc.Capabilities()` and the runtime's event count, not a timer). At each turn
-boundary, if the count is at or above the threshold it calls
-`dc.Checkpoint()`; the new run is `conv-<id>` with the same record. The
-threshold is configuration with a default of 1000 durable calls (chosen by this
-spec; `docs/architecture/runtime.md` §3 leaves the fixed event threshold open).
-When `dc.Capabilities().ContinueAsNew` is true, the coordinator checkpoints at
-the turn boundary; when it is false (on the `local` runtime), the coordinator
-does not checkpoint (no fake semantics, ADR-0002; CONV-014-04).
-A child run's durable calls count toward the coordinator's threshold: each child
-run the coordinator starts is itself a durable call of the coordinator, so the
-scenarios count a turn as the child run's durable calls (4 or 40) once the
-coordinator has started it.
+The coordinator counts the durable calls it made **itself** since it last
+started: its gate awaits, gate selections, steps, child runs, sleeps and emits
+(`dc.Await`, `dc.Select`, `dc.Step`, `dc.Child`, `dc.Sleep`, `dc.Emit`), taken
+from the runtime's event count since the run started, not from a timer. The
+durable calls a child run makes inside itself belong to the child run's own
+history and are **not** counted (REQ-CONV-014). At each turn boundary, if the
+count is at or above the threshold the coordinator calls `dc.Checkpoint()`; the
+new run is `conv-<id>` with the same record, and its count starts again from
+zero. The threshold is configuration with a default of 1000 durable calls
+(chosen by this spec; `docs/architecture/runtime.md` §3 leaves the fixed event
+threshold open). When `dc.Capabilities().ContinueAsNew` is true, the coordinator
+checkpoints at the turn boundary; when it is false (on the `local` runtime), the
+coordinator does not checkpoint (no fake semantics, ADR-0002; CONV-014-04).
+A turn of the coordinator shape in §1 is four durable calls of the coordinator:
+`Await`, `Select`, `Step` and `Child`; the model and tool calls of the child run
+do not add to them.
 
 ## 5. Isolation (REQ-CONV-016 to REQ-CONV-018)
 

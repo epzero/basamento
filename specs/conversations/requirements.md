@@ -43,10 +43,10 @@ When a conversation is cancelled, the conversation coordinator shall cancel the 
 When a turn starts, the conversation coordinator shall give its child run the user and model messages of the conversation's completed, failed and cancelled turns in order, including the interrupted model message of a failed or cancelled turn, followed by the user message that starts the turn.
 
 ### REQ-CONV-013 — A failed turn leaves the conversation usable
-When a turn's child run fails, the conversation coordinator shall record what it produced as a failed turn and keep the conversation open for a further user message.
+When a turn's child run fails, the conversation coordinator shall record the turn as failed with the child run's failure code, record any partial model message the turn was writing as interrupted with the text received so far, and keep the conversation open for a further user message.
 
 ### REQ-CONV-014 — The coordinator continues as new
-Where the runtime supports continuing as new, when the conversation coordinator reaches a turn boundary after it has made at least its checkpoint threshold of durable calls (1000 by default) since it last started, the conversation coordinator shall checkpoint and continue as a new run of the same conversation.
+Where the runtime supports continuing as new, when the conversation coordinator reaches a turn boundary after it has made at least its checkpoint threshold of durable calls (1000 by default) since it last started, the conversation coordinator shall checkpoint and continue as a new run of the same conversation. The coordinator counts only its own durable calls (gate awaits, gate selections, steps, child runs, sleeps and emits); the durable calls a child run makes inside itself are not counted.
 
 ### REQ-CONV-016 — Conversations belong to one tenant and one user
 While a conversation is open, the conversation coordinator shall run every turn of it, and read and write its history, only for the conversation's tenant and user.
