@@ -23,6 +23,9 @@ Feature: Secrets never reach a log record, span attribute or metric label
       | secret         |
       | token          |
       | authorization  |
+      | Authorization  |
+      | PASSWORD       |
+      | User.Secret    |
       | user.password  |
       | request.token  |
 
@@ -36,7 +39,10 @@ Feature: Secrets never reach a log record, span attribute or metric label
   Scenario: A redacted value is redacted before it is kept
     Given an embedded telemetry setup with a fake clock
     And the telemetry setup holds a credential "openai" with the value "sk-live-7f3a9c1b"
-    When a span "step a" records attribute "note" with the value "sk-live-7f3a9c1b"
+    And run "run_01" of tenant "acme" is running
+    And span "step a" is started
+    When span "step a" records attribute "note" with the value "sk-live-7f3a9c1b"
+    And span "step a" is ended
     Then the kept span "step a" has attribute "note" with the value "[REDACTED]"
 
   @REQ-TELEM-007 @security @profile:cloud @id:TELEM-007-02
