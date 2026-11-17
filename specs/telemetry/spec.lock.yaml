@@ -1,0 +1,323 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    TELEM-001-01:
+        hash: sha256:80a2b06e084e6615d8338e4dcfc66e085920361cd3bc2f368fe92a92a754cbc0
+        reqs:
+            - REQ-TELEM-001
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-003-01:
+        hash: sha256:fab344db4d9836aab0069b02786c18fd011eaa1d3d8c69d36d1eef2f5722c604
+        reqs:
+            - REQ-TELEM-003
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-003-02:
+        hash: sha256:2d0d38d897c488d05e83160ca42a41ff1c81a403324fa400775fa07e7b7805a5
+        reqs:
+            - REQ-TELEM-003
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-005-01:
+        hash: sha256:8f795f5652b30d1fd1e4c5ca48259b29530a850df3a9fffaa69779efdda6c71e
+        reqs:
+            - REQ-TELEM-005
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-005-02:
+        hash: sha256:bfc49b4b611726a052448455ae511f55a954abb90de523548cd56477c79db27c
+        reqs:
+            - REQ-TELEM-005
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-006-01:
+        hash: sha256:7ef1b6520f8bf440c0ad576f0c84ed1820c8e817acf1c1be92a2706f946ff03e
+        reqs:
+            - REQ-TELEM-006
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
+        human:
+            status: pending
+    TELEM-006-03:
+        hash: sha256:daf152ede19cef2323a2fcd90bf6b0de401e2f87feed781343127d77466f5746
+        reqs:
+            - REQ-TELEM-006
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
+        human:
+            status: pending
+    TELEM-006-04:
+        hash: sha256:287a1e085f130945d69001801b87dc7ea738fad2b078c2d4163a24a85a501c7b
+        reqs:
+            - REQ-TELEM-006
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
+        human:
+            status: pending
+    TELEM-007-01:
+        hash: sha256:c81239fe5fe04f5fb720242f24a434ed2a953fa7e67dcd142b93c4c44b57aba5
+        reqs:
+            - REQ-TELEM-007
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
+        human:
+            status: pending
+    TELEM-007-02:
+        hash: sha256:cee5550b5fdab1d9240e53582390821c7250f533645989e4970ef10ddc26a217
+        reqs:
+            - REQ-TELEM-007
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
+        human:
+            status: pending
+    TELEM-010-01:
+        hash: sha256:d9ac3e201a25e7a092946066795ad20776520bd42b8158d9c998903ef1ef1d4e
+        reqs:
+            - REQ-TELEM-010
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-011-01:
+        hash: sha256:65b673457422d279e5989b056d13e546a70ad3216e84bba2322dec2865a0c7f7
+        reqs:
+            - REQ-TELEM-011
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-012-01:
+        hash: sha256:7f39ac0d3eaa5749148be540a01b3ebb8ef64960da310530f5c59adc363e2a8b
+        reqs:
+            - REQ-TELEM-012
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-012-02:
+        hash: sha256:a0dda16aacf8f5a4fe7ab8e90f77bd8fdc5f878c5878808ae40ee92189e4bc04
+        reqs:
+            - REQ-TELEM-012
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-012-03:
+        hash: sha256:504be52f6d7dc895d6a8084f2696e9d4092f1d6a8f06fbc0ab63a09abc3c5139
+        reqs:
+            - REQ-TELEM-012
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-013-01:
+        hash: sha256:f8c4e95ec7b1334a4b1073eb25e58eb9cbc1a77598fbac845b8381555d31869c
+        reqs:
+            - REQ-TELEM-013
+        tier: P0
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'Security: tenant isolation on embedded span-store reads prevents cross-tenant data access.'
+        human:
+            status: pending
+    TELEM-014-01:
+        hash: sha256:e1bea974a1c0a67b71533bed016749f501f622ee3ebe7166f4b8b22b44401382
+        reqs:
+            - REQ-TELEM-014
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-014-02:
+        hash: sha256:2fb855bc187db0eeadcfb61b9b97be6b9d31cfa7b00830eec761ddebea5e35ca
+        reqs:
+            - REQ-TELEM-014
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-015-01:
+        hash: sha256:c30684d28aa2c2176c30e6df4e7c96e6c584c5775c0c00c6469fbd8aa8147724
+        reqs:
+            - REQ-TELEM-015
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-015-02:
+        hash: sha256:c03099119ed062e92b41ae9d474f8472cbbde70880bb4e83315ba7dc85ef1987
+        reqs:
+            - REQ-TELEM-015
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-016-01:
+        hash: sha256:3e9013e40e150593db30af87d800b0491b84719042b70d37cfd2c2e361352c07
+        reqs:
+            - REQ-TELEM-016
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-016-02:
+        hash: sha256:0496f6b579201384e9ac17bbf9dd2f4ac05bb5dbc67ee7afbec409ef334013f0
+        reqs:
+            - REQ-TELEM-016
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-017-01:
+        hash: sha256:7288c9ef418e23a53811aa56075daabed0704144ba7a4b797ba2b92f6f462655
+        reqs:
+            - REQ-TELEM-017
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-019-01:
+        hash: sha256:ef3a17a123b082dc8fe42f1bc8ee817fafa0807823791e68e3105aa824d44fd4
+        reqs:
+            - REQ-TELEM-019
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-019-02:
+        hash: sha256:2f6341470ec8a8c6211b17130a77776c1a3449ea8597824476dc8391e48d40f5
+        reqs:
+            - REQ-TELEM-019
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-021-01:
+        hash: sha256:b893517e6bc0b01523a90bcd969ed5b2e0fc57037ffd7bc91897a4b60e0b8afc
+        reqs:
+            - REQ-TELEM-021
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-022-01:
+        hash: sha256:2af30658dbd445f7c7e8932b3fe5401ca2dd4287014f9f7c5976f026e052df9d
+        reqs:
+            - REQ-TELEM-022
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-022-02:
+        hash: sha256:017323f184494359891d6cab0ed84ca7a5d84b2639e1169ffe6c6285f0fec8c2
+        reqs:
+            - REQ-TELEM-022
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
+    TELEM-023-01:
+        hash: sha256:980f4ae763e18c2f2d288647ab20eaa9008351b3d89c8c0d330804d48d683473
+        reqs:
+            - REQ-TELEM-023
+        tier: P2
+        author: claude-code:spec-author:df280e
+        reviewer: antigravity:spec-reviewer:ae7fd7
+        approved_at: "2026-11-17"
+        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        human:
+            status: pending
