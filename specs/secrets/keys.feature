@@ -62,14 +62,26 @@ Feature: Data keys and master keys
     And the stored keyset of tenant "acme" names master key "mk-2" as the key that wrapped it
 
   @security @REQ-SECRET-014 @REQ-SECRET-016 @id:SECRET-014-01
-  Scenario: A master key rotation that stops halfway fails and every payload still decodes with both master keys
+  Scenario: A master key rotation that stops halfway fails and leaves each keyset under one master key
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
     And the simulated key service also holds master key "mk-2"
     And the simulated key service becomes unreachable once one keyset has been rewrapped
     When the master key is rotated from "mk-1" to "mk-2"
     Then the rotation fails with code "unavailable"
-    And encoded payloads "p1" and "g1" decode for their tenants with master keys "mk-1" and "mk-2" configured
+    And one stored keyset names master key "mk-1" and the other names master key "mk-2"
+
+  @security @REQ-SECRET-014 @id:SECRET-014-03
+  Scenario: After an interrupted master key rotation, payloads decode with both master keys configured
+    Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
+    And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
+    And the simulated key service also holds master key "mk-2"
+    And the simulated key service becomes unreachable once one keyset has been rewrapped
+    And a master key rotation from "mk-1" to "mk-2" has failed once
+    And the simulated key service is reachable again
+    When the payload codec restarts with the same keyset store and master keys "mk-1" and "mk-2"
+    Then encoded payload "p1" decodes for tenant "acme" to "sk-live-4f9a2c"
+    And encoded payload "g1" decodes for tenant "globex" to "sk-live-77b0e1"
 
   @security @REQ-SECRET-014 @id:SECRET-014-02
   Scenario: Running the rotation again rewraps the remaining keysets under the new master key
@@ -105,9 +117,10 @@ Feature: Data keys and master keys
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And the simulated key service also holds master key "mk-other"
     And the payload codec has restarted with the same keyset store and master key "mk-other"
+    And decoding encoded payload "p1" for tenant "acme" has failed
     When the payload codec restarts with the same keyset store and master key "mk-1"
     And encoded payload "p1" is decoded for tenant "acme"
-    Then encoded payload "p1" decodes for tenant "acme" to "sk-live-4f9a2c"
+    Then the decoded payload data is "sk-live-4f9a2c"
 
   @security @REQ-SECRET-016 @id:SECRET-016-01
   Scenario: Encoding fails while the key service is unreachable, and nothing leaves unencrypted
