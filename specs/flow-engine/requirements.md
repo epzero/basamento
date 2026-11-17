@@ -65,3 +65,47 @@ If a flow declares a reducer for a key that is not a key of the flow's state sch
 
 ### REQ-FLOW-026 — An invalid state schema
 If a flow declares a state schema that is not a valid JSON Schema, then the flow builder shall reject it with code `invalid_argument`, naming the offending state key and type.
+
+## Flow host (WP-L4-04)
+
+The flow host is the one durable entrypoint, `runtime.FlowHost` (ADR-0011): it
+loads the flow definition pinned by a run, drives the pure flow machine, turns
+the machine's commands into durable calls on the run's `DurableContext`, and
+dispatches the nodes of an effectful kind whose kind has a registered node
+handler to that handler. Scenarios: `host.feature`.
+
+### REQ-FLOW-027 — The pinned definition
+While a run is in progress, the flow host shall run the flow definition the run was started with, even if a different version of the flow is registered while the run is in progress.
+
+### REQ-FLOW-028 — A node kind without a node handler
+If a run reaches a node whose kind is `model`, `agent`, `tool` or `task` and no node handler is registered for that kind, then the flow host shall fail the run with code `unsupported` naming the node, and run no node of the run.
+
+### REQ-FLOW-029 — Effectful nodes become steps
+When the flow machine runs a node of kind `tool` or `task`, the flow host shall execute it as one step named after the node, whose input is the node's input and whose result is the node's output.
+
+### REQ-FLOW-030 — Nodes of a kind with a node handler
+When the flow machine runs a node of a kind that has a registered node handler, the flow host shall run that node by calling the node handler registered for its kind with the node and the node's input, and take the handler's output as the node's output.
+
+### REQ-FLOW-031 — A waiting node settles through the run
+When the flow machine runs a node of kind `wait` whose specification gives a duration, the flow host shall wait that duration before the node completes, and complete the node with no result.
+
+### REQ-FLOW-032 — Gates open on a durable wait
+When the flow machine runs a node of kind `gate`, the flow host shall wait for the gate named as the node to be resolved, validating its payload against the schema, acceptance condition and timeout of the node's specification, and complete the node with the accepted payload.
+
+### REQ-FLOW-033 — A subflow runs as a child run
+When the flow machine runs a node of kind `subflow`, the flow host shall start a child run of the flow named in the node's specification with the node's input, and complete the node with the child run's result.
+
+### REQ-FLOW-034 — Run progress is durable
+When the flow host completes a node, the flow host shall emit a durable event named `node_completed` whose data is the name of the node and its result.
+
+### REQ-FLOW-035 — A handler's failure fails the node
+If a node handler returns an error while running a node, then the flow host shall report the node as failed to the flow machine, with that error as the failure.
+
+### REQ-FLOW-036 — Pure nodes make no durable calls
+The flow host shall make no durable call for a node of kind `set`, and none for the routing of the flow.
+
+### REQ-FLOW-037 — Replay makes the same durable calls
+While a runtime replays a run from its recorded history, the flow host shall make the same durable calls in the same order as when the run first made them, and take their results from the history.
+
+### REQ-FLOW-038 — A run finishes with its result
+When the flow machine completes a run, the flow host shall complete the run with the run's final state and make no further durable call for it.
