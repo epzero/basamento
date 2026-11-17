@@ -58,3 +58,6 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Inspector** | The run inspector, a web UI that reads runs through the API: the runs a person may see, a run's events, its open gates and the recordings attached to it. |
+| **Account** | A person's login in the inspector, identified by a username (`"ana"`). |
+| **Recording** | The rrweb DOM recording of a browser session, replayed in the inspector. |
