@@ -1,0 +1,72 @@
+# Presets: code generation as flows
+
+Status: **Planned** (WP-L10-01). Roadmap: `docs/roadmap/L10-presets.md`. Design: ADR-0003, ADR-0011, `design.md`.
+
+The code generator is a preset: two flows, `codegen.bootstrap` and
+`codegen.iterate`, over one loop — plan, implement each planned module, verify
+in a sandbox, repair under a guard, review gate, commit. A **preset version**
+is the content hash of the flows, prompts and analysis bundle, with its
+recorded `@eval` scores. A **run** of either flow pins the version it started
+with.
+
+The gate drives the preset with a scripted model and a simulated sandbox and
+git host, so it proves the loop's order, its bounds, its checkpoints and its
+refusals. What the model generates is a quality question, answered by the
+`@eval` suite and never by a scenario.
+
+### REQ-PRESET-001 — The loop's order
+When a run starts, the codegen flow shall start its `plan` stage before any other stage, and start `implement` only after `plan` has completed.
+
+### REQ-PRESET-002 — A stage is checkpointed when it completes
+When a codegen stage completes, the codegen flow shall record its outcome as a stage checkpoint of the run.
+
+### REQ-PRESET-003 — A resumed run keeps its completed stages
+When a codegen run resumes after a restart, the codegen flow shall resume from the last stage checkpoint, without starting again any stage that has a checkpoint or repeating its sandbox calls.
+
+### REQ-PRESET-004 — One implement step per planned module
+The `implement` stage shall run exactly one implement step for each module of the plan, in plan order.
+
+### REQ-PRESET-005 — Verification follows implementation
+When every implement step of the `implement` stage has completed, the codegen flow shall run the plan's tests in the run's sandbox in the next stage.
+
+### REQ-PRESET-006 — Failed verification leads to repair
+If the plan's tests fail in the sandbox, then the codegen flow shall run the repair stage, and run it again after each further failing verification.
+
+### REQ-PRESET-007 — The repair guard bounds the loop
+If the repair stage reaches its visit limit or its cost limit, then the codegen flow shall end the run in the `failed` state with code `budget_exceeded`, naming the limit reached and the last test failures.
+
+### REQ-PRESET-008 — A repair that passes goes to the review
+When the plan's tests pass after a repair, the codegen flow shall wait at the review gate.
+
+### REQ-PRESET-009 — Nothing is written before the review
+Before the run's review gate is resolved, the codegen flow shall make no write to the repository, and no commit on any branch.
+
+### REQ-PRESET-010 — An approved review commits once
+When the review gate is resolved with an approved decision, the codegen flow shall commit the run's changes once, and the commit of a bootstrap run shall be the only commit on its new repository.
+
+### REQ-PRESET-011 — A rejected review commits nothing
+If the review gate is resolved with a rejected decision, then the codegen flow shall end the run in the `cancelled` state without a commit.
+
+### REQ-PRESET-012 — Iteration branches, never the default branch
+When an iterate run is started with a change request and a base branch, the codegen flow shall open a new branch `codegen/<run id>` from the base branch and make its only commit there.
+
+### REQ-PRESET-013 — The default branch is never written
+The codegen flow shall never commit to the default branch.
+
+### REQ-PRESET-014 — The pin survives a version change
+While a version of a codegen flow is superseded by a new one, runs of it shall keep the version they started with.
+
+### REQ-PRESET-015 — The pin is visible
+The codegen flow shall expose the flow, prompts and analysis bundle of a run, and their version, with that run's events.
+
+### REQ-PRESET-016 — New versions must compile
+If a new version of the preset does not compile, then the system shall record the version as rejected with code `invalid_argument`.
+
+### REQ-PRESET-017 — New versions must not regress
+If a new version of the preset scores lower than its predecessor on any case of the `@eval` suite, then the system shall record the version as rejected with code `conflict`.
+
+### REQ-PRESET-018 — A person accepts a new version
+Where a new version of the preset compiles and does not regress its predecessor on any `@eval` case, when a person resolves the version's review gate with an approved decision, the system shall record the version as accepted.
+
+### REQ-PRESET-019 — Generated code quality is measured, not asserted
+The preset's `@eval` suite shall score the analyses of generated code on recorded fixtures against the thresholds in `design.md`.
