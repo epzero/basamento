@@ -36,18 +36,28 @@ Feature: Credential audit
       | principal | action             | resource      | run | step | outcome | reason    | time                 |
       | human:ana | credential.resolve | vendor/absent | r1  | s2   | failed  | not_found | 2026-10-01T09:00:00Z |
 
-  @security @REQ-CRED-018 @REQ-CRED-009 @id:CRED-018-02
-  Scenario: A malformed reference is rejected without an audit record
+  @security @REQ-CRED-032 @REQ-CRED-009 @id:CRED-032-01
+  Scenario: A malformed reference is rejected without an audit event
     When the reference "vault://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
     Then the resolution fails with code "invalid_argument"
+    And the audit port received 0 events
+    And the audit log of tenant "acme" is empty
+
+  @security @REQ-CRED-032 @REQ-CRED-005 @id:CRED-032-02
+  Scenario: A resolution without a tenant records no audit event
+    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    When the credential store resolves "cred://vendor/anthropic" without a tenant
+    Then the resolution fails with code "invalid_argument"
+    And the audit port received 0 events
     And the audit log of tenant "acme" is empty
 
   @security @REQ-CRED-019 @id:CRED-019-01
-  Scenario: No value appears in an error, the audit log or the log
+  Scenario: No value appears in an error, the audit log or the log on a failed resolution
     Given the log is captured
     And the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
-    When the reference "cred://vendor/absent" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
-    Then the resolution fails with code "not_found"
+    And the simulated key service is unreachable
+    When the reference "cred://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
+    Then the resolution fails with code "unavailable"
     And neither the error nor the audit log of tenant "acme" nor the captured log contains "sk-live-4f9a2c"
 
   @security @REQ-CRED-019 @id:CRED-019-02
@@ -57,6 +67,15 @@ Feature: Credential audit
     When the reference "cred://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
     Then the resolution returns "sk-live-4f9a2c"
     And neither the audit log of tenant "acme" nor the captured log contains "sk-live-4f9a2c"
+
+  @security @REQ-CRED-019 @REQ-CRED-028 @id:CRED-019-03
+  Scenario: A resolution whose audit write fails writes no value to the error or log
+    Given the log is captured
+    And the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    And the audit store rejects every record
+    When the reference "cred://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
+    Then the resolution fails with code "unavailable"
+    And neither the error nor the captured log contains "sk-live-4f9a2c"
 
   @security @REQ-CRED-028 @id:CRED-028-01
   Scenario: A resolution fails closed when its audit event cannot be written

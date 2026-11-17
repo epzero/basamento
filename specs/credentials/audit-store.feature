@@ -9,9 +9,10 @@ Feature: Credential audit store
     And a credential store over an empty SQL store with master key "mk-1"
 
   @security @REQ-CRED-029 @id:CRED-029-01
-  Scenario: A credential use is persisted as an audit event
+  Scenario: Recorded audit events survive a restart
     Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
-    When the reference "cred://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
+    And principal "human:ana" in run "r1" at step "s2" resolves "cred://vendor/anthropic" for tenant "acme" to "sk-live-4f9a2c"
+    When the audit store reopens on the same SQL store
     Then the audit store of tenant "acme" holds exactly 1 event:
       | tenant | principal | action             | resource         | run | step | outcome | reason | time                 |
       | acme   | human:ana | credential.resolve | vendor/anthropic | r1  | s2   | allowed |        | 2026-10-01T09:00:00Z |
@@ -36,3 +37,16 @@ Feature: Credential audit store
     Then the audit events read for tenant "acme" are exactly:
       | tenant | principal | action             | resource | run | step | outcome | reason | time                 |
       | acme   | human:ana | credential.resolve | vendor/a | r1  | s1   | allowed |        | 2026-10-01T09:00:00Z |
+
+  @security @REQ-CRED-033 @id:CRED-033-01
+  Scenario: Recording a tenant audit event without a tenant is rejected
+    When the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    And the audit store records a "credential.resolve" event for tenant "acme" without a tenant
+    Then the audit store call fails with code "invalid_argument"
+
+  @security @REQ-CRED-033 @id:CRED-033-02
+  Scenario: Reading audit events without a tenant is rejected
+    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
+    And principal "human:ana" in run "r1" at step "s2" resolves "cred://vendor/anthropic" for tenant "acme" to "sk-live-4f9a2c"
+    When audit events are read from the audit store without a tenant
+    Then the audit store call fails with code "invalid_argument"

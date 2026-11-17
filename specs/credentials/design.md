@@ -129,7 +129,8 @@ func UseFrom(ctx context.Context) Use
 ```
 
 The audit sink is the `platform.Audit` port; `platform.AuditEvent` is declared
-in `platform/platform.go` (owner decision, 2026-11-17):
+in `platform/platform.go` (owner decision, 2026-11-17), and lands first in its
+own `feat(platform)` contract pull request before this work package:
 
 ```go
 type AuditEvent struct {
@@ -173,7 +174,7 @@ proceeds and audits those empty fields (REQ-CRED-017).
 
 A malformed reference is rejected before a credential is named and is not
 audited. A call without a tenant is rejected before any audit event can be
-scoped, and is not audited (REQ-CRED-018).
+scoped, and is not audited (REQ-CRED-032).
 
 The value is never written to the audit event; the event carries only the
 fields above (REQ-CRED-019).
@@ -201,9 +202,16 @@ CREATE TABLE audit_events (
 CREATE INDEX audit_events_tenant_at ON audit_events (tenant_id, at, id);
 ```
 
-`Record` requires a tenant, takes `Tenant` from `core.TenantFrom(ctx)` and
-appends one row (REQ-CRED-029); optional fields are stored as empty strings,
-never `NULL`, so a read returns the event as recorded. The table is
+`Record` takes `Tenant` from `core.TenantFrom(ctx)` and appends one row
+(REQ-CRED-029); optional fields are stored as empty strings, never `NULL`, so
+a read returns the event as recorded. A `Record` call with no tenant in its
+context is rejected with `invalid_argument` (REQ-CRED-033): this is the
+credentials store's fail-closed rule (REQ-CRED-005), stricter than the port,
+whose contract (PR #25, `platform/platform.go`) lets a producer write a
+deployment-level event with no tenant. `AuditStore` is that contract's store
+for every producer, and its table keys rows by `tenant_id`, so it admits
+only tenant audit events; a future producer needs deployment-level events,
+it is added then, additively, with its own review. The table is
 append-only: `AuditStore` exposes `Record` and `Read` and no update or delete,
 and the package's SQL uses only `INSERT` and `SELECT` on it (REQ-CRED-030).
 
@@ -214,7 +222,7 @@ func (a *AuditStore) Read(ctx context.Context) ([]platform.AuditEvent, error)
 
 `Read` takes the tenant from `core.TenantFrom(ctx)` and returns only that
 tenant's rows (REQ-CRED-031); a context without a tenant fails with
-`invalid_argument`. `Read` is not on `platform.Audit`, whose only operation is
+`invalid_argument` (REQ-CRED-033). `Read` is not on `platform.Audit`, whose only operation is
 `Record`; it is the package's inspection API for the console and the BDD
 driver.
 
@@ -264,7 +272,7 @@ Codes come from `core`; no new code is added.
 | The key service is unavailable during put or resolve (REQ-CRED-027) | `unavailable` | the Secrets port's error, naming the scheme only |
 | The audit event of a resolution cannot be written (REQ-CRED-028) | `unavailable` | the audit store's error, naming the store only |
 | An external backend is unreachable | `unavailable` | the backend's error, naming the store only |
-| An audit read without a tenant | `invalid_argument` | from the shared tenant accessor, `tenant is required` |
+| An audit record or read without a tenant (REQ-CRED-033) | `invalid_argument` | from the shared tenant accessor, tenant is required |
 
 Missing and another tenant's credential share code and message, so a caller
 cannot tell them apart. Errors use fixed messages and never echo the value,
@@ -280,12 +288,18 @@ it, in the `internal/bdd` package:
   this package's migration set (credentials and audit events), a simulated key
   service holding the named master key (reusing the secrets steps' helper),
   the fake clock from `core/coretest`, and the SQL audit store wired as
-  `platform.Audit`.
+  `platform.Audit` through a **counting `platform.Audit` wrapper** in
+  `internal/bdd` that passes every `Record` on to the SQL audit store and
+  counts the calls, so "the audit port received 0 events" holds for
+  `CRED-032-01` and `CRED-032-02`.
+- Audit inspection reopens `AuditStore` on the same SQL store, so
+  `CRED-029-01` reads back events recorded before the restart.
 - When a step names a principal, run and step, the driver attaches `Use` to
   the context; when a step does not name them, the driver attaches no `Use`,
   so `UseFrom(ctx)` returns empty strings.
 - A **failing `platform.Audit` wrapper** in `internal/bdd` implements `Record`
-  by returning an error, for `CRED-028-01`.
+  by returning an error, for `CRED-028-01`; `CRED-019-03` uses the same
+  wrapper to prove the failed resolution's error and log carry no value.
 - A **simulated external store** implements `credentials.Backend` in
   `internal/bdd`: it keeps records per tenant and exposes what it stored, so a
   scenario can assert ciphertext-only rows and that no SQL credential row

@@ -99,14 +99,7 @@ Feature: Credential values
     When the credential "vendor anthropic" is deleted for tenant "acme"
     Then the deletion fails with code "invalid_argument"
 
-  @security @REQ-CRED-014 @id:CRED-014-01
-  Scenario: A listing exposes names and no value
-    Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
-    When tenant "acme" lists its credentials
-    Then the listing of tenant "acme" names "vendor/anthropic"
-    And the listing of tenant "acme" contains no "sk-live-4f9a2c"
-
-  @security @REQ-CRED-015 @id:CRED-015-01
+  @security @REQ-CRED-015 @REQ-CRED-014 @id:CRED-015-01
   Scenario: A listing returns the tenant's credential names and never a value
     Given the value "sk-a" is put as "vendor/a" for tenant "acme"
     And the value "sk-b" is put as "vendor/b" for tenant "acme"

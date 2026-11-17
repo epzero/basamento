@@ -64,13 +64,16 @@ When a caller lists credentials, the credential store shall return them ordered 
 ## Audit
 
 ### REQ-CRED-017 — Audit of a use
-When a credential reference is resolved for a tenant, the credential store shall hand the audit sink it is given an audit record carrying the principal, the credential, the run, the step and the outcome, with empty values for any of principal, run or step absent from the context.
+When a credential reference is resolved for a tenant, the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, credential name as resource, outcome `allowed`, and the principal, run and step from context or empty when absent.
 
 ### REQ-CRED-018 — Audit of a failed use
-If a resolution of a well-formed reference with a tenant in context fails, then the credential store shall hand the audit sink it is given an audit record carrying the principal, the requested credential, the run, the step and the failure, and hand it no record when a call carries no tenant or a malformed reference.
+If a resolution of a well-formed reference with a tenant in context fails during lookup or decryption, then the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, requested credential name as resource, outcome `failed`, failure code as reason, and the principal, run and step from context or empty when absent.
+
+### REQ-CRED-032 — No audit without tenant or valid reference
+If a resolution carries no tenant or a malformed reference, then the credential store shall hand the `platform.Audit` port no audit event.
 
 ### REQ-CRED-019 — No value in audit, errors or logs
-The credential store shall write a credential value into no audit record, error or log record.
+The credential store shall write a credential value into no audit event, error or log record.
 
 ### REQ-CRED-028 — Audit write failure
 If the credential store cannot write the audit event of a resolution, then the credential store shall fail the resolution with code `unavailable` and return no value.
@@ -83,6 +86,9 @@ The audit store shall append every recorded audit event as a new row and shall n
 
 ### REQ-CRED-031 — Audit reads are scoped to the tenant
 When a caller reads audit events, the audit store shall return only the events recorded for the calling tenant.
+
+### REQ-CRED-033 — Tenant required by the audit store
+If an audit store call carries no tenant in its context, then the audit store shall reject the call with code `invalid_argument`.
 
 ## Storage
 
