@@ -15,7 +15,7 @@ person sees after leaving, or after a run ends, is the stored history
 (REQ-INSP-003).
 
 ### REQ-INSP-001 — The runs a person may see
-The inspector shall list the runs of the principal's projects with each run's id, flow and state.
+The inspector shall list the runs of the principal's projects that the principal has permission to read, with each run's id, flow and state.
 
 ### REQ-INSP-002 — No other tenant's run
 The inspector shall show no record of a tenant other than the principal's tenant.

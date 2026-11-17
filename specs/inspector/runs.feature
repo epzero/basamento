@@ -28,7 +28,7 @@ Feature: The runs a person may see
 
   @planned @wp:WP-L6-04 @security @REQ-INSP-013 @id:INSP-013-01
   Scenario: A person without the permission to read a run sees nothing of it
-    Given account "vic" is a "viewer" in project "p1" of tenant "acme" without the permission to read runs
+    Given account "vic" is in project "p1" of tenant "acme" without the permission to read runs
     When vic opens run "r2"
     Then vic is denied access to run "r2"
     And vic sees no event, gate or state of run "r2"
