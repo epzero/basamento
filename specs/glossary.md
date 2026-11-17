@@ -58,3 +58,11 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
+| **User message** | A message a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
+| **Conversation coordinator** | The single run of a conversation (named `conv-<id>`) that orders turns, starts one child run per turn, and checkpoints by continuing as new. |
+| **Turn** | One user message and the model's answer to it, run as one child run of the conversation coordinator. It ends with state `completed`, `failed` or `cancelled`. |
+| **Child run** | A run started by another run; a turn is a child run of its conversation coordinator. |
+| **Queued message** | A user message sent while a turn is running, whose turn starts after it. |
+| **Interrupted message** | A model message of a cancelled or failed turn, kept with the text produced so far and marked interrupted. |
+| **Checkpoint threshold** | How many durable calls the conversation coordinator may make since it last started before it checkpoints and continues as new at the next turn boundary; 1000 by default. |
