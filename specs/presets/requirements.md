@@ -64,10 +64,10 @@ The codegen flow shall expose the flow, prompts and evals of a run, and their ve
 If a new version of the preset does not compile, then the system shall record the version as rejected with code `invalid_argument`.
 
 ### REQ-PRESET-017 — New versions must not regress
-If a new version of the preset scores lower than its predecessor on any case of the `@eval` suite, then the system shall record the version as rejected with code `conflict`.
+If a new version of the preset scores lower than its predecessor on any case of the `@eval` suite, or has no recorded score for a case its predecessor scored, then the system shall record the version as rejected with code `conflict` naming that case.
 
 ### REQ-PRESET-018 — A person decides on a new version
-Where a new version of the preset compiles and does not regress its predecessor on any `@eval` case, when a person resolves the version's review gate, the system shall record the version as accepted if approved, and otherwise as rejected with code `cancelled`.
+Where a new version of the preset compiles and does not regress its predecessor on any `@eval` case, when a person resolves the version's review gate with a rejected decision, the system shall record the version as rejected with code `cancelled`, and with an approved decision as accepted.
 
 ### REQ-PRESET-019 — Generated code quality is measured, not asserted
 The preset's `@eval` suite shall score the plans, prompts and generated code on recorded fixtures against the thresholds in `eval.feature`.

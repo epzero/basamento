@@ -13,20 +13,21 @@ Feature: The codegen loop
 
   @REQ-PRESET-001 @id:PRESET-001-01
   Scenario: Planning comes before everything the plan needs
-    Given a bootstrap brief whose plan has no module
-    When a bootstrap run of brief "invoices" is started
-    Then the stage log is ["plan"]
-    And the scripted model received 1 request
+    Given a bootstrap brief whose plan has 1 module "store" and plans, implements and verifies it
+    And a bootstrap run of brief "invoices" is holding before stage "plan"
+    When the hold before stage "plan" is released
+    Then the stage log is ["plan", "implement", "verify", "review"]
+    And the scripted model received 0 implement requests before stage "plan" completed
 
   @REQ-PRESET-002 @id:PRESET-002-01
   Scenario: A completed stage leaves a checkpoint
-    Given a bootstrap brief whose plan has 2 modules and plans, implements and verifies each
+    Given a bootstrap brief whose plan has 2 modules and plans and implements them and verifies once
     When a bootstrap run of brief "invoices" is started
     Then the run has checkpoints for stages "plan", "implement" and "verify" and not "review"
 
   @REQ-PRESET-004 @id:PRESET-004-01
   Scenario: One implement step per planned module, in plan order
-    Given a bootstrap brief whose plan has 3 modules "store", "api" and "cli", in that order, and plans, implements and verifies each
+    Given a bootstrap brief whose plan has 3 modules "store", "api" and "cli", in that order, and plans and implements them and verifies once
     When a bootstrap run of brief "invoices" is started
     Then the stage log is ["plan", "implement", "verify", "review"]
     And the scripted model received 3 requests to implement a module
@@ -42,9 +43,9 @@ Feature: The codegen loop
 
   @REQ-PRESET-006 @id:PRESET-006-01
   Scenario: A failing verification is repaired
-    Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies with 1 failing, then 0 failing, tests
+    Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies with 2 failing, then 1 failing, then 0 failing, tests
     When a bootstrap run of brief "invoices" is started
-    Then the stage log is ["plan", "implement", "verify", "repair", "verify", "review"]
+    Then the stage log is ["plan", "implement", "verify", "repair", "verify", "repair", "verify", "review"]
 
   @REQ-PRESET-008 @id:PRESET-008-01
   Scenario: A repair that passes the tests goes to a person
@@ -65,7 +66,7 @@ Feature: The codegen loop
   @REQ-PRESET-007 @cost @id:PRESET-007-02
   Scenario: The cost limit ends a repair loop before its visit limit
     Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies "tests fail" every time
-    And a repair visit costs 2000 milli-points
+    And a repair visit costs 2500 milli-points
     When a bootstrap run of brief "invoices" is started
     Then the run ends in state "failed" with code "budget_exceeded"
     And the repair stage ran 2 times
@@ -115,7 +116,7 @@ Feature: The codegen loop
     Given a bootstrap brief whose plan has 2 modules and plans and implements them and verifies once
     And a bootstrap run of brief "invoices" is stopped after stage "<stage>"
     When the run resumes and completes with an approved review
-    Then the stage log is ["plan", "implement", "verify", "review"]
+    Then the stage log is ["plan", "implement", "verify", "review", "commit"]
     And the model made 3 plan and implement requests and 0 repair requests in both attempts together
     And the sandbox made 1 call in both attempts together
     And the git host recorded 1 commit in both attempts together
@@ -125,4 +126,3 @@ Feature: The codegen loop
       | plan      |
       | implement |
       | verify    |
-      | review    |

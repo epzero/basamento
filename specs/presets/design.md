@@ -87,10 +87,12 @@ propose(v2) ─► compile ─┬─ fails ─► rejected invalid_argument, no 
                                                               accepted, current; v1 superseded
 ```
 
-- The `@eval` scenarios in `eval.feature` cover cases `plan-modules` and
-  `iterate-minimal`; `versions.feature` tests version regression against
-  recorded per-case scores (0–100), where a case with no score counts as a
-  regression (`PRESET-017-03`).
+- The `@eval` scenarios in `eval.feature` cover, and `versions.feature`
+  scores, the suite's two cases, `plan-modules` and `iterate-minimal`. A
+  version's score for a case is a recorded per-case score (0–100); a case
+  itself is identified by its id in `eval.feature`. `versions.feature` tests
+  version regression against those scores, where a case the suite did not run
+  for the new version counts as a regression (`PRESET-017-03`).
 - **Scores are records, not calls.** In the gate and in the preset's own
   binary, `eval --scores <file>`, they come from a recorded file. Nightly fills the file from
   live runs and the judge. The judge contract (`design.md` §4) is fixed; a

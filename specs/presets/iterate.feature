@@ -10,18 +10,19 @@ Feature: Codegen iteration
 
   @REQ-PRESET-012 @id:PRESET-012-01
   Scenario: An approved iteration commits on a new branch only
-    Given repository "acme/app" has 3 commits on branch "main"
-    And a change request whose plan has 1 module "parser" and plans, implements and verifies it
-    And an iterate run of the change request on branch "main" is waiting at gate "review"
+    Given repository "acme/app" has 3 commits on default branch "main" and a branch "release/v1" at its 3rd commit
+    And a change request whose plan has 1 module "parser" and plans and implements it and verifies once
+    And an iterate run of the change request on branch "release/v1" is waiting at gate "review"
     When a person resolves gate "review" with "approved"
-    Then the git host recorded 1 commit, on new branch "codegen/<run id>" from branch "main"
-    And branch "main" is still at its 3rd commit
+    Then the run completes
+    And the git host recorded 1 commit, on new branch "codegen/<run id>" from branch "release/v1"
+    And branch "release/v1" is still at its 3rd commit
 
   @REQ-PRESET-012 @id:PRESET-012-02
   Scenario: A rejected iteration opens no branch
-    Given repository "acme/app" has 3 commits on branch "main"
-    And a change request whose plan has 1 module "parser" and plans, implements and verifies it
-    And an iterate run of the change request on branch "main" is waiting at gate "review"
+    Given repository "acme/app" has 3 commits on default branch "main" and a branch "release/v1" at its 3rd commit
+    And a change request whose plan has 1 module "parser" and plans and implements it and verifies once
+    And an iterate run of the change request on branch "release/v1" is waiting at gate "review"
     When a person resolves gate "review" with "rejected"
     Then the run ends in state "cancelled"
     And the git host has no branch "codegen/<run id>"
@@ -30,8 +31,9 @@ Feature: Codegen iteration
   @REQ-PRESET-013 @id:PRESET-013-01
   Scenario: An iteration targeting the default branch leaves the default branch untouched
     Given repository "acme/app" has 3 commits on default branch "main"
-    And a change request whose plan has 1 module "parser" and plans, implements and verifies it
+    And a change request whose plan has 1 module "parser" and plans and implements it and verifies once
     And an iterate run of the change request on branch "main" is waiting at gate "review"
     When a person resolves gate "review" with "approved"
-    Then the git host recorded 1 commit, on new branch "codegen/<run id>" from branch "main"
+    Then the run completes
+    And the git host recorded 1 commit, on new branch "codegen/<run id>" from branch "main"
     And default branch "main" is still at its 3rd commit
