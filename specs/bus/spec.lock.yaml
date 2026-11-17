@@ -1,0 +1,424 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    BUS-002-01:
+        hash: sha256:466bbe3ff7f7527bb1301a56aa4e86ee5425c906a8ec534614bb5b41e5cc930a
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-002
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-003-01:
+        hash: sha256:3c4878c956ea44133345221e2e5d475c65dcadf4a330a55d88d81daa37284049
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-003
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-003-02:
+        hash: sha256:fc8cf090fa686ff5e4a741f7f5ff7184c8ed5429d7ebe7322974bf4a7a816107
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-003
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-004-01:
+        hash: sha256:70ae90424b56e5239bb807bc4425942d813007d9af8ffc7b4c41b171d0e6ec81
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-004
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-005-01:
+        hash: sha256:1432967d9c53594a133a76a59baf2f253cdcb22cbb5df053788100615ee55c26
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-005
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-006-01:
+        hash: sha256:4cb0f290fb5ca9b69de4f2e1698a7287acaba3d301808eb592706ab9b6620ba5
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-006
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-007-01:
+        hash: sha256:1d6ef9d00299ad2b81c1027da686fc98611d465b123e73567491b1b095f94c16
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-007
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-007-02:
+        hash: sha256:01dc098ea5bc786b34c9736e9933d49cb18dd99a71505dbc8e56ac330ba12d77
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-007
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-008-01:
+        hash: sha256:b3fe0ceeb20642e9df4ccc43ea47dcfcea9b3497e9aedec8bb8759568769d787
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-008
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-008-02:
+        hash: sha256:4fe2b16730d8d3d5b7e433124d86dfb83f081b729e07ef9c271a2a0803fb5525
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-008
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-009-01:
+        hash: sha256:5902347a11cc2dec5ffff582bb012f8e16451ac5068f4b4cb33ba356aac03a5a
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-009
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-010-01:
+        hash: sha256:71c7f6b6b2cabcaabcd7d2e80acb827c7743b6e4f3270c885122058aae191731
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-010
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Gapless replay and purge safety: monotonic per-subject sequences, no gaps or duplicates across replay, live delivery, and slow-subscriber resume, subject-scoped purge, and not_found below purged_through.'
+        human:
+            status: pending
+    BUS-011-01:
+        hash: sha256:ecbcd40dc3678994ba50f602fd7a57ac51c85cc01af67ed1578e70ad3aa6cdac
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-011
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-012-01:
+        hash: sha256:4e33bc4f55a981d7ea7ce21b741bfd25463eba2404dfc2f362914b73d180cb9b
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-012
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-012-02:
+        hash: sha256:5e7e8fc151feacf94544b3606cbbb30bc1f6d518e24c0098c13d89831a029a8d
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-012
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-013-01:
+        hash: sha256:112b2f2d4521c00e48f4f81d998d14b1a8abda2453d5e089dd14dfe86baf810b
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-013
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-014-01:
+        hash: sha256:bf4ba80576a1d4c1b2ad80723a7c804b66c34ff2ef41a64b5f57e1a56a7db06e
+        reqs:
+            - REQ-BUS-002
+            - REQ-BUS-014
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Durability: embedded messages, bus sequences, purge floors, KV entries, revisions, and TTL deadlines survive restarts.'
+        human:
+            status: pending
+    BUS-014-02:
+        hash: sha256:f1c5b5bd2542eb4c48dd2bdf80d4d5505379240e3c02fb064575f9c47eb5f5f4
+        reqs:
+            - REQ-BUS-014
+            - REQ-BUS-018
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Durability: embedded messages, bus sequences, purge floors, KV entries, revisions, and TTL deadlines survive restarts.'
+        human:
+            status: pending
+    BUS-014-03:
+        hash: sha256:3027c93b28a2a39d5fa28e613f21b21c07cfaf4b6f43cd955e7755bdeb661d01
+        reqs:
+            - REQ-BUS-007
+            - REQ-BUS-008
+            - REQ-BUS-014
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Durability: embedded messages, bus sequences, purge floors, KV entries, revisions, and TTL deadlines survive restarts.'
+        human:
+            status: pending
+    BUS-015-01:
+        hash: sha256:231d08957eb0afb050432ec282dc1863c76ecaba128cc50cb8854f6225445b05
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-015
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-016-01:
+        hash: sha256:74f397e9c410c17fbc037216a4c406df5c82e9e6ceb544cf47ddab981067f584
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-016
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-016-02:
+        hash: sha256:d1577209fcedf463e79433cf07f4b5bf3db45906cb7b1f721c495670da7c6a93
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-016
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-016-03:
+        hash: sha256:9fb535f793204154f75b9c8455a50c0bd915d4ba5342bfc4e34222078604be2e
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-016
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-016-04:
+        hash: sha256:97b683e180a0fc071cafc5502dc2f76ff7ed9ec786f5f88145998725c4e6d2a4
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-016
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-017-01:
+        hash: sha256:52d98180e5cf7297e29221d6f4eb429bd536367146cf6475dccd54f4e08e4a1d
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-017
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-017-02:
+        hash: sha256:3ef0b8149a4e2e7a61698cb58b2ee42e0375c72b25bb45ca5b16d68fe5b2acb9
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-017
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-017-03:
+        hash: sha256:ea4450021c7b478e59bd5e5195dd797bc4781d5980ee43db071c3a03b0fd1e01
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-017
+            - REQ-BUS-021
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-018-01:
+        hash: sha256:e97cfca1ad2ae26682668205bfcf30e2f8a6ed1fc728a15d0ae48d5c4e04b153
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-018
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-019-01:
+        hash: sha256:0f653175f5b11d3fa0567cdf8a095fb4ad0b8540d41b41fb850b21afbce1f68d
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-019
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-020-01:
+        hash: sha256:890bf9047caea7b49e029ae12b179a278ea897334d6855de80988ba4034ff95d
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-020
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-021-01:
+        hash: sha256:4ae80f67cfd334b64bf9eb633461b67e07a7bed091dfa6bebfc41b14b3299279
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-021
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-022-01:
+        hash: sha256:34b1e7fd6e6db92799b0de71a450dfa21c964131f994f75ec5832c60f4c46a4c
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-022
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-023-01:
+        hash: sha256:681831028a1a89e1ba7664969128abbd40432d9082203bd927374fa23c0a65ae
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-023
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-024-01:
+        hash: sha256:81ea39da45c24b698166e7f848cc69a8ac012292aac7ba364f0c367c7af900c0
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-024
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BUS-025-01:
+        hash: sha256:c8e1344c72a6764a2f8ef39fcf83f67d28b93dcdcad75317587a8a5d62e78905
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-025
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
+    BUS-025-02:
+        hash: sha256:a26cd4d75b1d219da67a8d282420f3f3a838bad9bbe56950cc5c03b24841e3f1
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-016
+            - REQ-BUS-025
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: antigravity:spec-reviewer:e84446
+        approved_at: "2026-11-17"
+        note: 'Lock and lease safety: atomic CAS mutual exclusion, deterministic clock-driven TTL expiry and renewal, expired takeover, and rejection of expired lease renewals.'
+        human:
+            status: pending
