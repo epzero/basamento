@@ -13,7 +13,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
     INSP-001-02:
         hash: sha256:299fb31b1cf7b1c7682646e5e850015cdcee137967357f4177d61604cf9c4b6b
         reqs:
@@ -24,7 +27,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
     INSP-002-01:
         hash: sha256:ea293f5b8f8e00c4bb3ca5d320d3e1ef978adbbc073e29110e47f20b86577785
         reqs:
@@ -35,7 +41,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
     INSP-003-01:
         hash: sha256:8d9527fc031bab16f5a1a3f72713c1cc1dbbc9ed8b13220e4784342be507ede3
         reqs:
@@ -207,4 +216,7 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
