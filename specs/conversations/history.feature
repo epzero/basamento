@@ -24,10 +24,11 @@ Feature: The history a new turn sees
     And ana cancels the turn
     When ana sends "What next?"
     Then the scripted model's call for the third turn records these texts in order:
-      | Hello                |
-      | Hi Ana               |
-      | Write 100 paragraphs |
-      | What next?           |
+      | Hello                   |
+      | Hi Ana                  |
+      | Write 100 paragraphs    |
+      | Chapter one begins with |
+      | What next?              |
 
   @REQ-CONV-012 @id:CONV-012-03
   Scenario: The message that starts a turn is in the history its steering messages extend

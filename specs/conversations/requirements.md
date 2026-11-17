@@ -40,7 +40,7 @@ When a running turn is cancelled, the conversation coordinator shall keep every 
 When a conversation is cancelled, the conversation coordinator shall cancel the running turn, discard the queued messages, and end the conversation's coordinator run in state `cancelled`.
 
 ### REQ-CONV-012 — A new turn sees prior turns and the message that starts it
-When a turn starts, the conversation coordinator shall give its child run the user and model messages of the conversation's completed, failed and cancelled turns (with partial model messages marked interrupted), in order, followed by the user message that starts the turn.
+When a turn starts, the conversation coordinator shall give its child run the user and model messages of the conversation's completed, failed and cancelled turns in order, including the interrupted model message of a failed or cancelled turn, followed by the user message that starts the turn.
 
 ### REQ-CONV-013 — A failed turn leaves the conversation usable
 When a turn's child run fails, the conversation coordinator shall record what it produced as a failed turn and keep the conversation open for a further user message.
