@@ -25,8 +25,9 @@ If a gate payload does not satisfy the gate's schema or acceptance condition, th
 `START` and `FAIL` are reserved names for the entry and the failure exit of a flow
 (owner decision D2, 2026-11-17; `docs/architecture/flow-engine.md` §1). They are
 edge endpoints only: neither is declared as a node. Every rejection below fails
-with code `invalid_argument` and names the node or the edge at fault, as
-REQ-FLOW-003 and REQ-FLOW-004 name theirs.
+with code `invalid_argument`, naming the node or edge at fault (REQ-FLOW-040 to
+REQ-FLOW-042) or stating that the flow needs exactly one edge from `START`
+(REQ-FLOW-043).
 
 ### REQ-FLOW-039 — START and FAIL need no node
 The flow compiler shall accept an edge from `START` and an edge to `FAIL` without `START` or `FAIL` being declared as a node.
@@ -41,4 +42,4 @@ If an edge targets `START`, then the flow compiler shall reject the flow with co
 If an edge starts at `FAIL`, then the flow compiler shall reject the flow with code `invalid_argument` and name the edge.
 
 ### REQ-FLOW-043 — Exactly one edge starts at START
-If a flow has no edge from `START`, or more than one, then the flow compiler shall reject the flow with code `invalid_argument` and name the edges from `START`.
+If a flow has no edge from `START`, or more than one, then the flow compiler shall reject the flow with code `invalid_argument`, stating that the flow needs exactly one edge from `START`.
