@@ -72,6 +72,18 @@ If a resolution of a well-formed reference with a tenant in context fails, then 
 ### REQ-CRED-019 — No value in audit, errors or logs
 The credential store shall write a credential value into no audit record, error or log record.
 
+### REQ-CRED-028 — Audit write failure
+If the credential store cannot write the audit event of a resolution, then the credential store shall fail the resolution with code `unavailable` and return no value.
+
+### REQ-CRED-029 — Audit persistence
+When an audit event is recorded, the audit store shall append it to the audit table.
+
+### REQ-CRED-030 — Append-only audit
+The audit store shall append every recorded audit event as a new row and shall never update or delete a stored row.
+
+### REQ-CRED-031 — Audit reads are scoped to the tenant
+When a caller reads audit events, the audit store shall return only the events recorded for the calling tenant.
+
 ## Storage
 
 ### REQ-CRED-021 — Encrypted at rest

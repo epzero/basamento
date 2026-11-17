@@ -32,8 +32,8 @@ Feature: Credential storage at rest
     Then the resolution fails with code "internal"
     And no value is returned
     And the audit log of tenant "acme" is exactly:
-      | principal | credential       | run | step | outcome  | at                   |
-      | human:ana | vendor/anthropic | r1  | s2   | internal | 2026-10-01T09:00:00Z |
+      | principal | action             | resource         | run | step | outcome | reason   | time                 |
+      | human:ana | credential.resolve | vendor/anthropic | r1  | s2   | failed  | internal | 2026-10-01T09:00:00Z |
 
   @security @REQ-CRED-027 @REQ-CRED-018 @id:CRED-027-01
   Scenario: A resolution fails with unavailable when the key service is unreachable
@@ -43,8 +43,8 @@ Feature: Credential storage at rest
     Then the resolution fails with code "unavailable"
     And no value is returned
     And the audit log of tenant "acme" is exactly:
-      | principal | credential       | run | step | outcome     | at                   |
-      | human:ana | vendor/anthropic | r1  | s2   | unavailable | 2026-10-01T09:00:00Z |
+      | principal | action             | resource         | run | step | outcome | reason      | time                 |
+      | human:ana | credential.resolve | vendor/anthropic | r1  | s2   | failed  | unavailable | 2026-10-01T09:00:00Z |
 
   @security @REQ-CRED-027 @id:CRED-027-02
   Scenario: A put fails with unavailable when the key service is unreachable

@@ -49,11 +49,12 @@ the same change that first uses it.
 | **Budget** | The most a run may spend, in milli-points. A browser session's budget also limits steps and time. |
 | **Reservation** | Estimated cost held against a budget before a paid call; settled to a charge or released after. |
 | **Asset** | An output file stored in blob storage under its content hash, with the model, parameter hash, seed and cost that produced it. |
-| **Tenant** | The isolation boundary for data and spend. The embedded profile has one tenant. |
+| **Tenant** | The isolation boundary for data and spend. The embedded profile has one tenant. It travels in the context (`core.TenantFrom`); an empty id means no tenant. |
 | **Project** | A container of flows, runs and assets inside a tenant; roles are granted per project. |
 | **Principal** | An authenticated user or service token acting within a tenant. |
 | **Worker token** | A token issued to an external service for one session (such as a browser session), limited to that session's resources and a fixed expiry. A **pool token** instead lets a worker join one pool, and a **join token** admits one launched worker. |
-| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it. |
+| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value. |
+| **Audit store** | The append-only, tenant-scoped table that the SQL implementation of `platform.Audit` writes; one store serves every producer. Reading it returns only the calling tenant's events. |
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |

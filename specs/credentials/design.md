@@ -4,7 +4,8 @@ Decisions the implementer of WP-L1-06 follows. Package:
 `platform/credentials`. It sits in the `platform` layer of `layering.yaml`, so
 it may import `core`, `platform` and the packages under `platform/` (including
 the SQL store); it imports no runtime, model or vendor package. Decisions:
-ADR-0004. Key wrapping and payload encryption are WP-L1-04's
+ADR-0004 and the owner decisions of 2026-11-17 on the audit port and the
+tenant context. Key wrapping and payload encryption are WP-L1-04's
 ([`../secrets/design.md`](../secrets/design.md)); their terms (master key,
 data key, keyset) apply here but are not respecified.
 
@@ -12,16 +13,18 @@ data key, keyset) apply here but are not respecified.
 
 | Part | What it is |
 | --- | --- |
-| Store | Implements `platform.Credentials` over a backing store, the Secrets port, an auditor and the clock. |
+| Store | Implements `platform.Credentials` over a backing store, the Secrets port, `platform.Audit` and the clock. |
 | Backing store | `Backend`: where encrypted credential rows live. One SQL backend ships here; an external secret manager implements the same interface. It never sees a plaintext value. |
 | Secrets port | `platform.Secrets`: `Encrypt` on put, `Decrypt` on resolve. The master key, data keys and keysets belong to WP-L1-04 and never to this package. |
-| Auditor | `Auditor`: the audit sink interface the store is given; it receives one `AuditRecord` per resolution of a well-formed reference with a tenant in context. |
+| Audit port | `platform.Audit`: the audit sink the store is given, `Record(ctx, platform.AuditEvent) error`, called once per resolution of a well-formed reference with a tenant in context (owner decision, 2026-11-17). |
+| Audit store | `AuditStore`: this package's SQL implementation of `platform.Audit`, an append-only, tenant-scoped table (REQ-CRED-029 to REQ-CRED-031). |
 | Use context | `Use`: principal, run and step, carried by the context of a resolution. |
 
-The constructor is `New(backend Backend, auditor Auditor, secrets platform.Secrets, clock core.Clock) *Store`;
+The constructor is `New(backend Backend, audit platform.Audit, secrets platform.Secrets, clock core.Clock) *Store`;
 the composition root supplies non-nil dependencies. The package opens no
 database and parses no URL itself: the SQL store (WP-L1-01) owns opening and
-migrating, and wiring (WP-L1-05) selects the backend.
+migrating, and wiring (WP-L1-05) selects the backend and passes the SQL audit
+store as `platform.Audit`.
 
 ## 2. Values and rows
 
@@ -32,15 +35,16 @@ Every value is encrypted exactly once, by the Secrets port:
 - Resolve: `record := backend.Get(ctx, name)`, then
   `value := secrets.Decrypt(ctx, record.Ciphertext)`.
 
-The plaintext never reaches a backend, the auditor, a log record, an error or
-any other stored field. The store holds no key and does no key wrapping or
+The plaintext never reaches a backend, the audit store, a log record, an error
+or any other stored field. The store holds no key and does no key wrapping or
 payload encoding; it stores the opaque bytes the Secrets port returned
 (REQ-CRED-021).
 
-The SQL backend ships its goose migration, embedded from
-`platform/credentials/migrations`; the package exposes it as `Migrations() fs.FS`
-for the composition root and the BDD driver. The composition root includes it
-in the SQL store's migration set.
+The SQL implementation ships its goose migrations, embedded from
+`platform/credentials/migrations`; the package exposes them as `Migrations() fs.FS`
+for the composition root and the BDD driver. The set holds the `credentials`
+table below and the `audit_events` table of §6. The composition root includes
+it in the SQL store's migration set.
 
 ```sql
 CREATE TABLE credentials (
@@ -70,14 +74,17 @@ caches nothing.
   it. A malformed reference is rejected before any lookup or audit.
 - Listing order is the byte order of the UTF-8 names; the store sorts, and
   does not rely on the backend's order.
+- `platform.Credentials` keeps `Names(ctx) ([]string, error)` only: there is no
+  listing metadata (`CreatedAt`, `UpdatedAt`) on the port. That is the owner
+  decision of 2026-11-17; metadata may be added additively later, when needed.
 
 ## 4. Operations
 
 | Call | Does |
 | --- | --- |
-| `Put(ctx, name, value)` | Requires a tenant; validates the name; encrypts; upserts the row, setting `created_at` and `updated_at` to the clock's time. On an existing name the backend keeps the stored `created_at` and updates `ciphertext` and `updated_at`. No audit record. |
-| `Resolve(ctx, ref)` | Requires a tenant; parses the reference; reads the row; decrypts; hands an audit record to the audit sink; returns the value. On a failure after reference parsing it hands a failure audit record to the audit sink and returns the failure. |
-| `Delete(ctx, name)` | Requires a tenant; validates the name; deletes the tenant's row. No audit record. |
+| `Put(ctx, name, value)` | Requires a tenant; validates the name; encrypts; upserts the row, setting `created_at` and `updated_at` to the clock's time. On an existing name the backend keeps the stored `created_at` and updates `ciphertext` and `updated_at`. No audit event. |
+| `Resolve(ctx, ref)` | Requires a tenant; parses the reference; reads the row; decrypts; records one `platform.AuditEvent` through `platform.Audit`; returns the value. On a failure after reference parsing it records a failure event and returns the failure. If the event cannot be written, it returns no value and fails with `unavailable` (REQ-CRED-028). |
+| `Delete(ctx, name)` | Requires a tenant; validates the name; deletes the tenant's row. No audit event. |
 | `Names(ctx)` | Requires a tenant; returns the tenant's credential names sorted by the bytes of their UTF-8 names, and never a value (REQ-CRED-012, REQ-CRED-015, REQ-CRED-016). |
 
 `Resolve` is the only call that decrypts and the only call that returns a
@@ -94,19 +101,18 @@ store itself writes the plaintext nowhere.
 
 ## 5. Tenancy
 
-The tenant comes from the context, through the shared tenant context accessor
-used across `platform` ports. The credential store requires it at the start of
-every public method, so no backend, Secrets call or audit record happens
-without one (REQ-CRED-005). If the shared tenant context accessor has not yet
-landed in `core` or `platform`, the implementer lands that small prerequisite
-change first in a pull request of its own before this work package; where it
-lives (`core` vs `platform`) is an open question for the architect.
+The tenant comes from the context through `core.TenantFrom(ctx)`:
+`core.TenantID`, set with `core.WithTenant`, and an empty id counts as no
+tenant. Every layer reads the tenant through that helper (owner decision,
+2026-11-17). The credential store requires it at the start of every public
+method, so no backend, Secrets call or audit event happens without one
+(REQ-CRED-005). The helper lands first, in its own `feat(core)` contract pull
+request, before this work package.
 
 Every SQL query and external-backend operation is scoped to that tenant. The
-row key is
-`(tenant_id, name)`. Another tenant's credential is not found, with the same
-code and message as one that was never stored (REQ-CRED-010, REQ-CRED-011);
-delete, list and resolve never reveal that it exists.
+row key is `(tenant_id, name)`. Another tenant's credential is not found, with
+the same code and message as one that was never stored (REQ-CRED-010,
+REQ-CRED-011); delete, list and resolve never reveal that it exists.
 
 ## 6. Audit
 
@@ -120,39 +126,97 @@ type Use struct {
 }
 func WithUse(ctx context.Context, u Use) context.Context
 func UseFrom(ctx context.Context) Use
+```
 
-type AuditRecord struct {
-    Tenant     string
-    Principal  string
-    Credential string
-    RunID      string
-    StepID     string
-    Outcome    string
-    At         time.Time
+The audit sink is the `platform.Audit` port; `platform.AuditEvent` is declared
+in `platform/platform.go` (owner decision, 2026-11-17):
+
+```go
+type AuditEvent struct {
+    Time      time.Time     // from core.Clock
+    Tenant    core.TenantID // from core.TenantFrom(ctx)
+    Principal string
+    Action    string
+    Resource  string
+    Outcome   string // "allowed", "denied" or "failed"
+    RunID     string
+    Step      string
+    Reason    string
 }
 
-type Auditor interface {
-    Record(ctx context.Context, r AuditRecord)
+type Audit interface {
+    Record(ctx context.Context, e AuditEvent) error
 }
 ```
 
+A credential resolution fills one event as follows:
+
+| Field | Value |
+| --- | --- |
+| `Time` | the clock's time at the resolution |
+| `Tenant` | the tenant from `core.TenantFrom(ctx)` |
+| `Principal` | `Use.Principal`, empty when absent |
+| `Action` | `credential.resolve` |
+| `Resource` | the credential name, never the value or the ciphertext |
+| `Outcome` | `allowed` when the resolution returns a value, `failed` on any failure |
+| `RunID`, `Step` | `Use.RunID`, `Use.StepID`, empty when absent |
+| `Reason` | empty on success; on failure the error code (`not_found`, `internal` or `unavailable`) |
+
 For every resolution of a well-formed reference with a tenant in context,
-successful or not, the store hands `Auditor.Record` an `AuditRecord` with the
-tenant, the principal, the credential name, the run, the step, the outcome and
-the clock's time (REQ-CRED-017, REQ-CRED-018). Outcomes are `resolved`,
-`not_found`, `internal` and `unavailable`. When the context carries no `Use`
-(or omits any of principal, run or step), `UseFrom(ctx)` yields empty strings
-for those fields and the resolution still proceeds and audits those empty
-fields (REQ-CRED-017).
+successful or not, the store calls `Audit.Record` exactly once (REQ-CRED-017,
+REQ-CRED-018). If `Record` returns an error, the store returns no value and
+fails the resolution with code `unavailable` (REQ-CRED-028); that failure is
+logged, because the audit store is what failed (owner decision, 2026-11-17).
+When the context carries no `Use` (or omits any of principal, run or step),
+`UseFrom(ctx)` yields empty strings for those fields and the resolution still
+proceeds and audits those empty fields (REQ-CRED-017).
 
 A malformed reference is rejected before a credential is named and is not
-audited. A call without a tenant is rejected before any audit record can be
+audited. A call without a tenant is rejected before any audit event can be
 scoped, and is not audited (REQ-CRED-018).
 
-The value is never written to the audit record; the record carries only the
-fields above (REQ-CRED-019). This package defines no audit SQL table and no
-shared `platform` audit port: where audit records are finally persisted is
-WP-L8-02's and the architect's.
+The value is never written to the audit event; the event carries only the
+fields above (REQ-CRED-019).
+
+### The SQL audit store
+
+`AuditStore` is this package's implementation of `platform.Audit`, constructed
+with `NewSQLAudit(store)` over the SQL store. It keeps one table for every
+producer, this package and WP-L8-02's denials among them; there is no second
+audit store (owner decision, 2026-11-17).
+
+```sql
+CREATE TABLE audit_events (
+  id         INTEGER PRIMARY KEY, -- dialect-specific identity/auto-increment
+  tenant_id  TEXT NOT NULL,
+  at         TIMESTAMP NOT NULL,
+  principal  TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  resource   TEXT NOT NULL,
+  outcome    TEXT NOT NULL,
+  run_id     TEXT NOT NULL,
+  step       TEXT NOT NULL,
+  reason     TEXT NOT NULL
+);
+CREATE INDEX audit_events_tenant_at ON audit_events (tenant_id, at, id);
+```
+
+`Record` requires a tenant, takes `Tenant` from `core.TenantFrom(ctx)` and
+appends one row (REQ-CRED-029); optional fields are stored as empty strings,
+never `NULL`, so a read returns the event as recorded. The table is
+append-only: `AuditStore` exposes `Record` and `Read` and no update or delete,
+and the package's SQL uses only `INSERT` and `SELECT` on it (REQ-CRED-030).
+
+```go
+// Read returns the calling tenant's events, ordered by time then id.
+func (a *AuditStore) Read(ctx context.Context) ([]platform.AuditEvent, error)
+```
+
+`Read` takes the tenant from `core.TenantFrom(ctx)` and returns only that
+tenant's rows (REQ-CRED-031); a context without a tenant fails with
+`invalid_argument`. `Read` is not on `platform.Audit`, whose only operation is
+`Record`; it is the package's inspection API for the console and the BDD
+driver.
 
 ## 7. Backing stores
 
@@ -198,7 +262,9 @@ Codes come from `core`; no new code is added.
 | Delete names no credential of the tenant (REQ-CRED-004) | `not_found` | `credential not found` |
 | The Secrets port rejects the stored ciphertext with `invalid_argument` (REQ-CRED-023) | `internal` | `stored credential cannot be decrypted` |
 | The key service is unavailable during put or resolve (REQ-CRED-027) | `unavailable` | the Secrets port's error, naming the scheme only |
+| The audit event of a resolution cannot be written (REQ-CRED-028) | `unavailable` | the audit store's error, naming the store only |
 | An external backend is unreachable | `unavailable` | the backend's error, naming the store only |
+| An audit read without a tenant | `invalid_argument` | from the shared tenant accessor, `tenant is required` |
 
 Missing and another tenant's credential share code and message, so a caller
 cannot tell them apart. Errors use fixed messages and never echo the value,
@@ -211,13 +277,15 @@ The BDD steps live in `internal/bdd/steps/credentials.go` and helpers beside
 it, in the `internal/bdd` package:
 
 - Each scenario gets a fresh SQLite file opened through the SQL store with
-  this package's migration set, a simulated key service holding the named
-  master key (reusing the secrets steps' helper), the fake clock from
-  `core/coretest`, and a **recording `Auditor` sink** in `internal/bdd` that
-  stores the `AuditRecord` values per tenant for the audit assertions.
+  this package's migration set (credentials and audit events), a simulated key
+  service holding the named master key (reusing the secrets steps' helper),
+  the fake clock from `core/coretest`, and the SQL audit store wired as
+  `platform.Audit`.
 - When a step names a principal, run and step, the driver attaches `Use` to
   the context; when a step does not name them, the driver attaches no `Use`,
   so `UseFrom(ctx)` returns empty strings.
+- A **failing `platform.Audit` wrapper** in `internal/bdd` implements `Record`
+  by returning an error, for `CRED-028-01`.
 - A **simulated external store** implements `credentials.Backend` in
   `internal/bdd`: it keeps records per tenant and exposes what it stored, so a
   scenario can assert ciphertext-only rows and that no SQL credential row
@@ -226,18 +294,11 @@ it, in the `internal/bdd` package:
   reaches `Decrypt` and waits until the scenario releases it; it produces the
   in-flight replacement of REQ-CRED-025 deterministically.
 - Inspection steps read the `credentials` rows through the SQL store and the
-  recorded audit records from the recording `Auditor` sink; they are test
-  helpers, not a production API.
+  audit events through `AuditStore.Read` for the tenant in the step; they are
+  test helpers, not a production API.
 
 Unit tests in `platform/credentials` use fakes defined in their own `_test.go`
 files. No test double enters production code, and no new test-only package is
 added: `core/coretest` remains the only entry in `layering.yaml`'s
 `test_only`, importable from `_test.go` files and from `internal/bdd`. The
 gate uses no wall clock, no unseeded randomness and no live vendor call.
-
-## Open questions
-
-1. **Richer listing metadata on `platform.Credentials` (architect):** `platform.Credentials` in `platform/platform.go` currently declares `Names(ctx context.Context) ([]string, error)` (names only). Should the port stay names-only, or should the architect add a `List(ctx context.Context) ([]CredentialInfo, error)` method carrying `CreatedAt` and `UpdatedAt` timestamps in a separate contract change?
-2. **Final audit destination and shared audit port (WP-L8-02 / architect):** WP-L1-06 hands each credential-use `AuditRecord` to an injected `Auditor` sink (`platform/credentials`), tested with a recording sink in `internal/bdd`. Where audit records are finally persisted (and whether a shared `Auditor` port belongs in `platform` or `auth` under WP-L8-02) is left to WP-L8-02 and the architect.
-3. **Audit-write failure policy (owner / architect):** If the production audit store introduced by WP-L8-02 can fail when recording a credential resolution, should `Resolve` fail closed with code `internal` and return no secret value, or return the value and report the audit failure? `REQ-CRED-020` and `CRED-020-01` have been removed pending that policy decision.
-4. **Package home of the shared tenant context accessor (architect):** `platform/sql` (WP-L1-01), `platform/secrets` (WP-L1-04), `platform/credentials` (WP-L1-06), and `stream/eventlog` (WP-L6-01) all read the calling tenant from `context.Context` and reject missing-tenant calls with `invalid_argument`. Should the shared `Tenant` context key and accessor live in `core` or in `platform`?
