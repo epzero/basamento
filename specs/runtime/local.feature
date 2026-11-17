@@ -28,10 +28,11 @@ Feature: The local runtime
 
   @REQ-RT-007 @id:RT-007-01
   Scenario: A step runs once per step name in a run and its recorded result is reused
-    Given a flow calls step "fetch" twice with the same name and returns both results
+    Given step "fetch" returns {"call": 1}
+    And a flow calls step "fetch" twice with the same name and returns both results
     When a run of "twice" completes
     Then step "fetch" was executed 1 time
-    And both results are {"lines": 3}
+    And both results are {"call": 1}
 
   @REQ-RT-007 @id:RT-007-02
   Scenario: Step results are recorded per run, not shared across runs
@@ -60,30 +61,31 @@ Feature: The local runtime
   Scenario: A resolved gate completes the run's gate wait
     Given a run waiting at gate "approve" that accepts payloads where "input.approved || size(input.notes) > 0"
     When the gate is resolved with payload {"approved": true}
-    Then the run returns {"gate": {"approved": true}}
+    Then the run returns {"approved": true}
     And the run is "completed"
 
   @REQ-RT-010 @id:RT-010-01
   Scenario: Resolving a gate the run already received fails with conflict
-    Given a run that resolved gate "approve" and received {"approved": true}
-    When the gate is resolved again with payload {"notes": "second"}
+    Given a flow waits at gate "approve" and then waits at gate "publish"
+    And a run of "publish" resolved gate "approve" and received {"approved": true}
+    When the gate "approve" is resolved again with payload {"notes": "second"}
     Then the resolution fails with code "conflict"
-    And the run is "completed"
+    And the run is "running" at gate "publish"
 
   @REQ-RT-011 @id:RT-011-01
-  Scenario: Waiting on the first of a timer and an already resolved gate returns the gate's index
+  Scenario: Of a timer and an already resolved gate, the only ready operation is returned
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow waits on the first of a "1h" timer and gate "approve", in that order
+    And a flow is waiting on the first of a "1h" timer and gate "approve", in that order
     And the gate is resolved with payload {"approved": true}
-    When the flow waits on the first ready operation
+    When the run answers its pending wait on the first ready operation
     Then the wait returns index 1
     And the result at index 1 is {"approved": true}
 
   @REQ-RT-011 @id:RT-011-02
   Scenario: Waiting on the first of two ready operations returns the lower index
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And a flow waits on the first of a "1h" timer and a "2h" timer, in that order
-    When 2 hours pass and the flow waits on the first ready operation
+    And a flow is waiting on the first of a "2h" timer and a "1h" timer, in that order
+    When 2 hours pass and the run answers its pending wait on the first ready operation
     Then the wait returns index 0
 
   @REQ-RT-011 @id:RT-011-03
@@ -116,9 +118,10 @@ Feature: The local runtime
 
   @REQ-RT-014 @id:RT-014-01
   Scenario: A child flow runs as its own run under the child run id the parent chose
-    Given parent flow "parent" starts child flow "child" with child run id "child-1"
-    When a run of "parent" completes
-    Then run "child-1" is "completed"
+    Given tenant "acme" has parent flow "parent" that starts child flow "child" with child run id "child-1"
+    When a run of "parent" for tenant "acme" completes
+    Then tenant "acme" describes run "child-1" as "completed"
+    And tenant "globex" describing run "child-1" fails with code "not_found"
 
   @REQ-RT-014 @id:RT-014-02
   Scenario: A child run returns its output to the parent run
@@ -167,12 +170,23 @@ Feature: The local runtime
 
   @REQ-RT-017 @id:RT-017-01
   Scenario: A retryable step that never succeeds fails after its configured attempt limit
-    Given step "charge" fails with code "vendor_error" marked retryable true
+    Given the clock is frozen at "2026-11-17T09:00:00Z"
+    And step "charge" fails with code "rate_limited" on execution 1 and with code "vendor_error" on execution 2, each marked retryable true
+    And the step allows 2 attempts
+    When a run of "pay" runs
+    Then step "charge" was executed 2 times
+    And the step fails with the error of its last attempt with code "vendor_error"
+    And no retry waited for the clock to advance
+    And the run is "failed"
+
+  @REQ-RT-027 @id:RT-027-01
+  Scenario: A retryable step that succeeds before its attempt limit stops retrying
+    Given step "charge" fails with code "vendor_error" marked retryable true on execution 1 and returns {"charged": true} on execution 2
     And the step allows 3 attempts
     When a run of "pay" runs
-    Then step "charge" was executed 3 times
-    And the step fails with code "vendor_error"
-    And the run is "failed"
+    Then step "charge" was executed 2 times
+    And the run returns {"charged": true}
+    And the run is "completed"
 
   @REQ-RT-018 @id:RT-018-01
   Scenario: A step with attempt limit 0 is tried 3 times by default
@@ -191,14 +205,15 @@ Feature: The local runtime
     Then 3 steps executed concurrently
     And the run is "completed"
 
-  @REQ-RT-021 @id:RT-021-01
-  Scenario: Two tenants' runs do not share step results
+  @REQ-RT-021 @security @id:RT-021-01
+  Scenario: Two tenants' runs of the same run id do not share state or step results
     Given step "fetch" returns {"tenant": "acme"} for tenant "acme" and {"tenant": "globex"} for tenant "globex"
-    And tenant "acme" runs flow "work" that calls step "fetch"
-    And tenant "globex" runs flow "work" that calls step "fetch"
+    And tenant "acme" runs flow "work" as run "shared-1" that calls step "fetch"
+    And tenant "globex" runs flow "work" as run "shared-1" that calls step "fetch"
     When both runs complete on one local runtime
     Then step "fetch" was executed 2 times
-    And the "acme" run returns {"tenant": "acme"} and the "globex" run returns {"tenant": "globex"}
+    And run "shared-1" of tenant "acme" returns {"tenant": "acme"}
+    And run "shared-1" of tenant "globex" returns {"tenant": "globex"}
 
   @REQ-RT-022 @id:RT-022-01
   Scenario: Shutting down the local runtime leaves in-flight runs in state running
@@ -221,15 +236,29 @@ Feature: The local runtime
     When a run of "linear" is started on that runtime
     Then starting the run fails with code "unavailable"
 
-  @REQ-RT-025 @id:RT-025-01
+  @REQ-RT-025 @security @id:RT-025-01
   Scenario: Describing another tenant's run fails with not_found
     Given tenant "acme" has run "shared-1" waiting at gate "approve"
     When tenant "globex" describes run "shared-1"
     Then describing run "shared-1" fails with code "not_found"
 
-  @REQ-RT-025 @id:RT-025-02
+  @REQ-RT-025 @security @id:RT-025-02
   Scenario: Cancelling another tenant's run fails with not_found
     Given tenant "acme" has run "shared-1" waiting at gate "approve"
     When tenant "globex" cancels run "shared-1"
     Then cancelling run "shared-1" fails with code "not_found"
     And tenant "acme" describes run "shared-1" as "running"
+
+  @REQ-RT-025 @security @id:RT-025-03
+  Scenario: Resolving a gate of another tenant's run fails with not_found
+    Given tenant "acme" has run "shared-1" waiting at gate "approve"
+    When tenant "globex" resolves gate "approve" of run "shared-1" with payload {"approved": true}
+    Then resolving the gate fails with code "not_found"
+    And tenant "acme" describes run "shared-1" as "running"
+
+  @REQ-RT-026 @security @id:RT-026-01
+  Scenario: Listing runs returns only the caller's tenant's runs
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    And tenant "globex" has run "shared-1" of flow "review" waiting at gate "approve"
+    When tenant "globex" lists runs of flow "review"
+    Then tenant "globex" lists 1 run for tenant "globex" with run id "shared-1"
