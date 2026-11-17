@@ -58,3 +58,8 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Setting** | One configuration key of a `kit` process, written with dots (`listen.addr`). Each process reads settings from flags, environment variables, a configuration file and defaults. |
+| **Effective configuration** | The settings a `kit` process ends with, after precedence, with the source each one came from: `flag`, `env`, `file` or `default`. |
+| **Port URL** | The setting that selects a port's implementation by its scheme (`sql.url`, `blob.url`, `bus.url`, `secrets.url`). Which schemes a profile accepts, and which implementation each selects, is `specs/config`; how the implementation behaves is the port's own capability. |
+| **Ready** | Said of `kit serve` once its runtime started, every port is open and its listener is bound; it reports it with one `ready` line on stdout. |
+| **Smoke check** | The gate G6 run: the built binary, started with `kit serve --profile embedded` in an empty directory, must pass every `@smoke` scenario. |
