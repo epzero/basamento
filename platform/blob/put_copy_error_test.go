@@ -1,108 +1,135 @@
 package blob
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"os"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
-	"gocloud.dev/blob"
 	"gocloud.dev/gcerrors"
 
 	"github.com/epzero/basamento/core"
-	"github.com/epzero/basamento/internal/bdd/s3sim"
 )
 
-func TestPutBackendWriteFailureUnknownUnavailable(t *testing.T) {
-	t.Parallel()
-	srv := s3sim.Start()
-	_ = os.Setenv("AWS_ACCESS_KEY_ID", "TEST")
-	_ = os.Setenv("AWS_SECRET_ACCESS_KEY", "TEST")
-	st, _, err := Open(context.Background(), srv.URL, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := core.WithTenant(context.Background(), "acme")
-	body := make([]byte, 2*1024*1024)
-	for i := range body {
-		body[i] = byte(i % 251)
-	}
-	key := ContentKeyOf(body)
-	done := make(chan error, 1)
-	go func() {
-		done <- st.Put(ctx, key, bytes.NewReader(body), "application/octet-stream")
-	}()
-	srv.Close()
-	err = <-done
-	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
-		t.Fatalf("want unavailable, got %v", err)
-	}
-	ok, _ := st.Exists(ctx, key)
-	if ok {
-		t.Fatal("object leaked")
-	}
+type chunkReader struct {
+	b     []byte
+	off   int
+	chunk int
 }
 
-func TestPutBackendWriteFailureResourceExhaustedUnavailable(t *testing.T) {
-	t.Parallel()
-	st, inner, _ := openFileStore(t)
-	st.bucket = &failNewWriterBucket{inner: inner, err: errors.New("resource exhausted")}
-	ctx := core.WithTenant(context.Background(), "acme")
-	key := ContentKeyOf([]byte("x"))
-	putErr := st.Put(ctx, key, strings.NewReader("x"), "text/plain")
-	if putErr == nil || core.CodeOf(putErr) != core.CodeUnavailable {
-		t.Fatalf("want unavailable, got %v", putErr)
+func (c *chunkReader) Read(p []byte) (int, error) {
+	if c.off >= len(c.b) {
+		return 0, io.EOF
 	}
-	if gcerrors.Code(putErr) != gcerrors.Unknown {
-		t.Fatalf("store open/write error code %v", gcerrors.Code(putErr))
+	n := c.chunk
+	if n <= 0 {
+		n = 1
+	}
+	if n > len(p) {
+		n = len(p)
+	}
+	if rem := len(c.b) - c.off; n > rem {
+		n = rem
+	}
+	copy(p, c.b[c.off:c.off+n])
+	c.off += n
+	return n, nil
+}
+
+func TestPutWriterFailMidStreamUnavailable(t *testing.T) {
+	t.Parallel()
+	codes := []gcerrors.ErrorCode{gcerrors.Unknown, gcerrors.Internal, gcerrors.ResourceExhausted}
+	body := make([]byte, 256)
+	for i := range body {
+		body[i] = byte(i)
+	}
+	key := ContentKeyOf(body)
+	for _, code := range codes {
+		t.Run(fmt.Sprintf("code-%d", code), func(t *testing.T) {
+			t.Parallel()
+			st := openStoreFailWriteAt(t, 2, code)
+			ctx := core.WithTenant(context.Background(), "acme")
+			err := st.Put(ctx, key, &chunkReader{b: body, chunk: 64}, "text/plain")
+			if err == nil || core.CodeOf(err) != core.CodeUnavailable {
+				t.Fatalf("want unavailable, got %v (gc %v)", err, gcerrors.Code(err))
+			}
+			if strings.Contains(err.Error(), "content does not match content key") {
+				t.Fatalf("writer failure misclassified as hash mismatch: %v", err)
+			}
+			ok, _ := st.Exists(ctx, key)
+			if ok {
+				t.Fatal("object leaked")
+			}
+			mp, _ := metaPath("acme", key)
+			if metaOK, _ := st.bucket.Exists(ctx, mp); metaOK {
+				t.Fatal("meta leaked")
+			}
+		})
 	}
 }
 
 func TestPutReaderFailureStillInvalidArgument(t *testing.T) {
 	t.Parallel()
-	st, _, _ := openFileStore(t)
+	st := openStoreFailWriteAt(t, 999, gcerrors.Unknown)
 	ctx := core.WithTenant(context.Background(), "acme")
 	key := ContentKeyOf([]byte("hello"))
 	err := st.Put(ctx, key, &failAfterReader{b: []byte("hello"), limit: 2}, "text/plain")
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("want invalid_argument, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "write source failed") {
+		t.Fatalf("message %q", err.Error())
+	}
 }
 
-type failNewWriterBucket struct {
-	inner bucketBackend
-	err   error
+func TestPutHashMismatchInvalidArgument(t *testing.T) {
+	t.Parallel()
+	st := openStoreFailWriteAt(t, 999, gcerrors.Unknown)
+	ctx := core.WithTenant(context.Background(), "acme")
+	key := ContentKeyOf([]byte("hello"))
+	err := st.Put(ctx, key, &chunkReader{b: []byte("not-hello-content-bytes"), chunk: 8}, "text/plain")
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("want invalid_argument, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "content does not match content key") {
+		t.Fatalf("message %q", err.Error())
+	}
 }
 
-func (f *failNewWriterBucket) Exists(ctx context.Context, key string) (bool, error) {
-	return f.inner.Exists(ctx, key)
+type signalChunkReader struct {
+	chunkReader
+	signal chan<- struct{}
+	fired  bool
 }
 
-func (f *failNewWriterBucket) Delete(ctx context.Context, key string) error {
-	return f.inner.Delete(ctx, key)
+func (s *signalChunkReader) Read(p []byte) (int, error) {
+	if !s.fired && s.signal != nil {
+		s.fired = true
+		s.signal <- struct{}{}
+	}
+	return s.chunkReader.Read(p)
 }
 
-func (f *failNewWriterBucket) WriteAll(ctx context.Context, key string, p []byte, opts *blob.WriterOptions) error {
-	return f.inner.WriteAll(ctx, key, p, opts)
+func TestPutCancelledDuringBackendWrite(t *testing.T) {
+	st := openStoreBlockWriteUntilCancel(t, 2)
+	ctx, cancel := context.WithCancel(core.WithTenant(context.Background(), "acme"))
+	body := make([]byte, 64*1024)
+	for i := range body {
+		body[i] = byte(i)
+	}
+	key := ContentKeyOf(body)
+	ch := make(chan struct{}, 1)
+	go func() {
+		<-ch
+		cancel()
+	}()
+	err := st.Put(ctx, key, &signalChunkReader{chunkReader: chunkReader{b: body, chunk: 32}, signal: ch}, "text/plain")
+	if err == nil || core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("want cancelled, got %v", err)
+	}
+	ok, _ := st.Exists(ctx, key)
+	if ok {
+		t.Fatal("object after cancel")
+	}
 }
-
-func (f *failNewWriterBucket) NewReader(ctx context.Context, key string, opts *blob.ReaderOptions) (*blob.Reader, error) {
-	return f.inner.NewReader(ctx, key, opts)
-}
-
-func (f *failNewWriterBucket) NewWriter(ctx context.Context, key string, opts *blob.WriterOptions) (*blob.Writer, error) {
-	return nil, f.err
-}
-
-func (f *failNewWriterBucket) Attributes(ctx context.Context, key string) (*blob.Attributes, error) {
-	return f.inner.Attributes(ctx, key)
-}
-
-func (f *failNewWriterBucket) SignedURL(ctx context.Context, key string, opts *blob.SignedURLOptions) (string, error) {
-	return f.inner.SignedURL(ctx, key, opts)
-}
-
-func (f *failNewWriterBucket) Close() error { return f.inner.Close() }

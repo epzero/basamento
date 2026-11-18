@@ -23,11 +23,13 @@ func TestS3Matrix(t *testing.T) {
 	}
 	cmd := exec.Command("go", "test", "-race", "-v", "-count=1", "-run", "TestFeatures", "./internal/bdd/")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
+	cmdEnv := append(os.Environ(), "BDD_TAGS=") // clear tags leaked by parallel bdd unit tests
+	cmdEnv = append(cmdEnv,
 		"BLOB_CONFORMANCE_BACKEND=s3",
 		"BDD_PATHS=specs/blob",
 		"BDD_TAGS_AND=~@profile:embedded",
 	)
+	cmd.Env = cmdEnv
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {
