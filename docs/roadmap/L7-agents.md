@@ -18,4 +18,4 @@ Coordinator run per conversation with a child run per turn; queue, steer and can
 ### WP-L7-04 — Conversations on a durable runtime
 Depends: WP-L7-03, WP-L5-03, WP-L6-03, WP-L3-04.
 Owns: none.
-Proves at `@level:system` that a conversation on the `temporal` runtime, served by `kit serve --profile embedded`, resumes its turn and queued messages after the process is killed and restarted on the same data directory, with every user and model message recorded and streamed once. Specs: `specs/conversations/crash-resume.feature`.
+Proves at `@level:system` that a conversation on the `temporal` runtime, served by `kit serve --profile embedded`, resumes its turn and queued messages after the process is killed and restarted on the same data directory, with every user and model message recorded and streamed once. Specs: `specs/conversations/crash-resume.feature`, `specs/conversations/recording.feature`.

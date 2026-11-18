@@ -152,7 +152,7 @@ restate it. A conversation crash-resume scenario on Temporal (queued and
 steering messages surviving a restart) is a tracked follow-up for a later work
 package that depends on both WP-L7-03 and the Temporal runtime.
 
-That work package is WP-L7-04 (`crash-resume.feature`,
+That work package is WP-L7-04 (`crash-resume.feature`, `recording.feature`,
 `REQ-CONV-022`, `REQ-CONV-023`). It adds no package. The coordinator and the
 turn are already written against `runtime.Runtime`, and the runtime replays a
 restarted run from the Temporal history (`REQ-RT-002`, `REQ-FLOW-037`): a
@@ -175,9 +175,14 @@ turn record must then not append the message a second time:
   place.
 
 A replay of the turn that calls the model call's step again therefore cannot
-append a second model message (REQ-CONV-023). A client reattaching after the
-restart sees the `reset` that precedes the deltas of the new attempt
-(REQ-STRM-004) and the completed message once (REQ-STRM-002).
+append a second model message (REQ-CONV-023). In `CONV-022-01`, the client
+reattaches with her last cursor after `kit` reports `ready` and before the
+resumed attempt finishes streaming; the streaming model step emits
+`reset{attempt}` immediately before forwarding the retried attempt's first delta
+from the simulator (so `reset` is strictly ordered after the client reattaches
+and before attempt 2's deltas regardless of when the heartbeat timeout fires),
+and the client sees the `reset` (REQ-STRM-004) followed by the completed
+message once (REQ-STRM-002).
 
 ### Harness (WP-L7-04)
 
@@ -210,8 +215,6 @@ restart sees the `reset` that precedes the deltas of the new attempt
   for the same model message and reads the history back.
 - **Steps.** The steps go in `internal/bdd/steps/conversation.go` next to
   WP-L7-03's steps.
-
-steps go in `internal/bdd/steps/conversation.go` next to WP-L7-03's steps.
 
 ## Open questions
 
