@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-02 @level:component
+@wp:WP-L2-02 @level:component
 Feature: Generating schemas from Go types
   Model parameters, structured outputs and gate payloads are often declared as
   Go types. The schema generated from a type is what flows store and hash, so
