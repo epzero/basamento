@@ -14,7 +14,7 @@ func TestMappingEvalNormalizesVars(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != float64(42) {
+	if out != 42 {
 		t.Fatalf("got %v (%T)", out, out)
 	}
 }
