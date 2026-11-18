@@ -121,7 +121,7 @@ Feature: JSON mappings
     And the error names the mapping and the position of the error
 
   @REQ-EXPR-020 @id:EXPR-020-01
-  Scenario Outline: A mapping whose output exceeds its output limit stops before it builds that much
+  Scenario Outline: A mapping whose output exceeds its output limit fails
     Given the mapping "<mapping>" with an output limit of 1024 bytes
     When the mapping is evaluated on null
     Then evaluation fails with code "invalid_argument"

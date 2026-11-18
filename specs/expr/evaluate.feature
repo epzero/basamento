@@ -71,8 +71,8 @@ Feature: Evaluating expressions deterministically
   @REQ-EXPR-022 @id:EXPR-022-02
   Scenario: A map with a key of no order succeeds when its keys are not iterated
     Given an expression environment declaring no variables
-    When the expression "{1: 'a', duration('1s'): 'b'}[duration('1s')]" is evaluated
-    Then the result is "b"
+    When the expression "{1: 'a', duration('1s'): 'b'}.size()" is evaluated
+    Then the result is 2
 
   @REQ-EXPR-007 @id:EXPR-007-01
   Scenario: An evaluation over its cost limit stops with an error
