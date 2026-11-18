@@ -92,3 +92,8 @@ When prompt lint reports only warnings for a template, the prompt registry shall
 
 ### REQ-PROMPT-021 — Assembled prompts carry only their own delimiters
 When an assembled prompt is linted, prompt lint shall report the error `unpaired_delimiter` for every untrusted-content delimiter that is not one of the pairs the assembler wrapped a value in.
+
+## History
+
+### REQ-PROMPT-024 — History roles are validated
+If a history entry's role does not match `^[A-Za-z][A-Za-z0-9_-]{0,31}$`, then the assembler shall fail with code `invalid_argument` and an error message that does not contain the rejected role.
