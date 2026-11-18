@@ -67,6 +67,15 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Telemetry setup** | The wiring of `slog` log records and OpenTelemetry traces and metrics (`platform/telemetry`), built with a profile, a clock, the credential values to redact and, in the cloud profile, a collector URL. |
+| **Span** | One timed unit of work in a trace, with a trace id, a span id, an optional parent span id, a name, start and end times, a status (`ok`, `error`, `unset`), a run id, a tenant and attributes. |
+| **Trace context** | A trace id and a span id carried in a `context.Context` and serialized across process or lease boundaries so child spans join the parent trace. |
+| **Log record** | One `slog` record with structured attributes, including `trace_id`, `span_id`, `run_id` and `tenant`. |
+| **Metric label** | A key/value attribute attached to a metric point. |
+| **Redaction** | Replacing a credential value or the value of a field named `password`, `secret`, `token` or `authorization` at any depth with the literal `[REDACTED]` before a log record, span attribute or metric label is kept or exported. |
+| **Span store** | The SQLite table of kept spans in the embedded profile, read back per run ordered by start time then span id, and purged past the configured retention period. |
+| **Simulated collector** | A deterministic in-process OTLP receiver used by the gate in place of an external collector. |
+| **Export batch** | The spans, log records or metric points sent in one OTLP export attempt; dropped if it cannot be delivered. |
 | **Schema set** | The closed collection of JSON Schemas, each under its id, that a schema may refer to. Nothing outside it is ever fetched. |
 | **Instance location** | Where a value sits inside a JSON document, as a JSON Pointer (`/reviewers/1`); the whole document is the empty pointer `""`. |
 | **Violation** | One way an instance fails a schema: its instance location and the schema keyword that failed. |
