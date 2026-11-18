@@ -1,94 +1,131 @@
 package secrets
 
 import (
-	"encoding/binary"
 	"fmt"
 	"sort"
+
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
-const innerVersion = 1
-
-// marshalInner serializes payload metadata and data for encryption inside the
-// ciphertext (design §3: protobuf Payload shape, length-prefixed keys).
+// marshalInner serializes p as the protobuf wire encoding of Temporal's Payload
+// message (map<string,bytes> metadata = 1; bytes data = 2) without importing
+// go.temporal.io (design §3).
 func marshalInner(p Payload) ([]byte, error) {
 	keys := make([]string, 0, len(p.Metadata))
 	for k := range p.Metadata {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	n := 1 + 4 // version + metadata count
+	var out []byte
 	for _, k := range keys {
-		n += 4 + len(k) + 4 + len(p.Metadata[k])
+		var entry []byte
+		entry = protowire.AppendTag(entry, 1, protowire.BytesType)
+		entry = protowire.AppendBytes(entry, []byte(k))
+		entry = protowire.AppendTag(entry, 2, protowire.BytesType)
+		entry = protowire.AppendBytes(entry, p.Metadata[k])
+		out = protowire.AppendTag(out, 1, protowire.BytesType)
+		out = protowire.AppendBytes(out, entry)
 	}
-	n += 4 + len(p.Data)
-	buf := make([]byte, n)
-	off := 0
-	buf[off] = innerVersion
-	off++
-	binary.BigEndian.PutUint32(buf[off:], uint32(len(keys)))
-	off += 4
-	for _, k := range keys {
-		off = putPrefixed(buf, off, []byte(k))
-		off = putPrefixed(buf, off, p.Metadata[k])
+	if len(p.Data) > 0 {
+		out = protowire.AppendTag(out, 2, protowire.BytesType)
+		out = protowire.AppendBytes(out, p.Data)
 	}
-	putPrefixed(buf, off, p.Data)
-	return buf, nil
+	return out, nil
 }
 
 func unmarshalInner(b []byte) (Payload, error) {
-	if len(b) < 1 {
-		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+	if len(b) == 0 {
+		return Payload{}, nil
 	}
-	if b[0] != innerVersion {
-		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
-	}
-	off := 1
-	if len(b) < off+4 {
-		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
-	}
-	n := binary.BigEndian.Uint32(b[off:])
-	off += 4
-	meta := make(map[string][]byte, n)
-	for i := uint32(0); i < n; i++ {
-		var key []byte
-		var err error
-		key, off, err = readPrefixed(b, off)
-		if err != nil {
-			return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
-		}
-		var val []byte
-		val, off, err = readPrefixed(b, off)
-		if err != nil {
-			return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
-		}
-		meta[string(key)] = val
-	}
+	meta := make(map[string][]byte)
 	var data []byte
-	var err error
-	data, off, err = readPrefixed(b, off)
-	if err != nil || off != len(b) {
-		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+	for len(b) > 0 {
+		num, typ, n := protowire.ConsumeTag(b)
+		if n < 0 {
+			return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+		}
+		b = b[n:]
+		switch num {
+		case 1:
+			if typ != protowire.BytesType {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			entry, n := protowire.ConsumeBytes(b)
+			if n < 0 {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			b = b[n:]
+			k, v, err := parseMapEntry(entry)
+			if err != nil {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			meta[k] = v
+		case 2:
+			if typ != protowire.BytesType {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			v, n := protowire.ConsumeBytes(b)
+			if n < 0 {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			b = b[n:]
+			data = append([]byte(nil), v...)
+		default:
+			n := protowire.ConsumeFieldValue(num, typ, b)
+			if n < 0 {
+				return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
+			}
+			b = b[n:]
+		}
 	}
 	return Payload{Metadata: meta, Data: data}, nil
 }
 
-func putPrefixed(buf []byte, off int, v []byte) int {
-	binary.BigEndian.PutUint32(buf[off:], uint32(len(v)))
-	off += 4
-	copy(buf[off:], v)
-	return off + len(v)
-}
-
-func readPrefixed(b []byte, off int) ([]byte, int, error) {
-	if len(b) < off+4 {
-		return nil, off, fmt.Errorf("truncated")
+func parseMapEntry(entry []byte) (string, []byte, error) {
+	var key string
+	var val []byte
+	var haveKey, haveVal bool
+	for len(entry) > 0 {
+		num, typ, n := protowire.ConsumeTag(entry)
+		if n < 0 {
+			return "", nil, fmt.Errorf("bad entry")
+		}
+		entry = entry[n:]
+		switch num {
+		case 1:
+			if typ != protowire.BytesType {
+				return "", nil, fmt.Errorf("bad key")
+			}
+			k, n := protowire.ConsumeBytes(entry)
+			if n < 0 {
+				return "", nil, fmt.Errorf("bad key")
+			}
+			entry = entry[n:]
+			key = string(k)
+			haveKey = true
+		case 2:
+			if typ != protowire.BytesType {
+				return "", nil, fmt.Errorf("bad val")
+			}
+			v, n := protowire.ConsumeBytes(entry)
+			if n < 0 {
+				return "", nil, fmt.Errorf("bad val")
+			}
+			entry = entry[n:]
+			val = append([]byte(nil), v...)
+			haveVal = true
+		default:
+			n := protowire.ConsumeFieldValue(num, typ, entry)
+			if n < 0 {
+				return "", nil, fmt.Errorf("bad entry field")
+			}
+			entry = entry[n:]
+		}
 	}
-	n := int(binary.BigEndian.Uint32(b[off:]))
-	off += 4
-	if len(b) < off+n {
-		return nil, off, fmt.Errorf("truncated")
+	if !haveKey || !haveVal {
+		return "", nil, fmt.Errorf("incomplete map entry")
 	}
-	return append([]byte(nil), b[off:off+n]...), off + n, nil
+	return key, val, nil
 }
 
 // MarshalInnerForTest exports inner serialization for unit tests.
