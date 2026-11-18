@@ -428,6 +428,11 @@ The designer writes specs; the reviewer approves them (`spec-review.md`). A
 spec pull request holds specs only, so an implementation starts from specs
 that are already on `main`.
 
+An implementation pull request does not edit `specs/<capability>/design.md`.
+A design that turns out wrong or incomplete while implementing is a spec
+change: describe it in the pull request, hand the designer a ticket
+(`specs-needed`), and implement against the design as it stands.
+
 | Step | Who | What |
 | --- | --- | --- |
 | 1. Draft | designer | A spec author session writes `specs/<capability>/` and records `spec-review-requested`. The designer opens the pull request and hands the ticket to the reviewer. |

@@ -20,11 +20,20 @@ import (
 
 // bannedTestTimeFuncs lists wall-clock and sleep functions forbidden in tests,
 // test-only packages and BDD step code (AGENTS.md: use coretest.FakeClock).
+// Timers and ticks wait on the real clock, so they are sleeps too.
+// context.WithTimeout and context.WithDeadline stay allowed: they read the
+// wall clock, but a test uses them only as a hang guard, never as a source of
+// time (qa-gate.md G1).
 var bannedTestTimeFuncs = map[string]bool{
-	"Now":   true,
-	"Since": true,
-	"Until": true,
-	"Sleep": true,
+	"Now":       true,
+	"Since":     true,
+	"Until":     true,
+	"Sleep":     true,
+	"After":     true,
+	"AfterFunc": true,
+	"NewTimer":  true,
+	"NewTicker": true,
+	"Tick":      true,
 }
 
 // bannedTestRandFuncs lists top-level functions on math/rand and math/rand/v2
@@ -61,13 +70,14 @@ var bannedTestRandFuncs = map[string]bool{
 
 // Hygiene runs deterministic repository hygiene checks that catch mechanical
 // AGENTS.md and workflow rule violations before human or agent code review:
-//   - test determinism: no wall clock, sleeps, crypto/rand, or global math/rand
-//     in *_test.go or test-only packages (layering.yaml's test_only and
-//     test_only_allowed_from);
+//   - test determinism: no wall clock, sleeps or timers, crypto/rand, or
+//     global math/rand in *_test.go or test-only packages (layering.yaml's
+//     test_only and test_only_allowed_from);
 //   - production isolation: no "testing" / "testing/*" import or exported
-//     *ForTest* hooks in production Go files;
-//   - when base is non-empty, spec/code separation: changes that modify *.go
-//     files must not edit specs/*/design.md (agent-workflow.md §7.3).
+//     *ForTest* hooks in production Go files (matched by name);
+//   - when base is non-empty, spec/code separation: a change to any file
+//     outside specs/ and docs/ must not edit specs/*/design.md
+//     (agent-workflow.md §7.3).
 func Hygiene(root, base string) ([]string, error) {
 	errs, err := CheckCodeHygiene(root)
 	if err != nil {
@@ -253,22 +263,19 @@ func checkProdFile(fset *token.FileSet, f *ast.File, rel string) []string {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			if isForTestExport(d.Name.Name) {
-				line := fset.Position(d.Name.Pos()).Line
-				errs = append(errs, fmt.Sprintf("%s:%d: exported identifier %q is test-only (AGENTS.md); move test hooks to *_test.go (e.g. export_test.go) or a test-only package", rel, line, d.Name.Name))
+				errs = append(errs, forTestExportError(fset, rel, d.Name.Pos(), d.Name.Name))
 			}
 		case *ast.GenDecl:
 			for _, spec := range d.Specs {
 				switch s := spec.(type) {
 				case *ast.TypeSpec:
 					if isForTestExport(s.Name.Name) {
-						line := fset.Position(s.Name.Pos()).Line
-						errs = append(errs, fmt.Sprintf("%s:%d: exported identifier %q is test-only (AGENTS.md); move test hooks to *_test.go (e.g. export_test.go) or a test-only package", rel, line, s.Name.Name))
+						errs = append(errs, forTestExportError(fset, rel, s.Name.Pos(), s.Name.Name))
 					}
 				case *ast.ValueSpec:
 					for _, name := range s.Names {
 						if isForTestExport(name.Name) {
-							line := fset.Position(name.Pos()).Line
-							errs = append(errs, fmt.Sprintf("%s:%d: exported identifier %q is test-only (AGENTS.md); move test hooks to *_test.go (e.g. export_test.go) or a test-only package", rel, line, name.Name))
+							errs = append(errs, forTestExportError(fset, rel, name.Pos(), name.Name))
 						}
 					}
 				}
@@ -278,36 +285,52 @@ func checkProdFile(fset *token.FileSet, f *ast.File, rel string) []string {
 	return errs
 }
 
-func isForTestExport(name string) bool {
-	return ast.IsExported(name) && strings.Contains(name, "ForTest")
+func forTestExportError(fset *token.FileSet, rel string, pos token.Pos, name string) string {
+	return fmt.Sprintf("%s:%d: exported identifier %q is test-only (AGENTS.md); move it to a test-only package (core/coretest, internal/bdd); export_test.go only lifts it for its own package's tests", rel, fset.Position(pos).Line, name)
 }
 
-// CheckSpecSeparation enforces agent-workflow.md §7.3: implementation changes
-// (which modify *.go files) must not edit specs/<capability>/design.md.
-// Design text belongs to spec pull requests owned by the designer.
+// forTestExportPattern matches the test-hook naming convention at a word
+// boundary, so ForTestament and ParseForTestimony pass.
+var forTestExportPattern = regexp.MustCompile(`ForTest(s|ing)?($|[A-Z0-9_])`)
+
+func isForTestExport(name string) bool {
+	return ast.IsExported(name) && forTestExportPattern.MatchString(name)
+}
+
+// CheckSpecSeparation enforces agent-workflow.md §7.3: an implementation
+// change, any file outside specs/ and docs/, must not edit
+// specs/<capability>/design.md. Design text belongs to spec pull requests
+// owned by the designer.
 func CheckSpecSeparation(changed []string) []string {
-	hasGo := false
+	hasImplementation := false
 	seen := map[string]bool{}
 	var designs []string
 	for _, f := range changed {
 		f = filepath.ToSlash(strings.TrimSpace(f))
-		if strings.HasSuffix(f, ".go") {
-			hasGo = true
+		if f != "" && outsideSpecsAndDocs(f) {
+			hasImplementation = true
 		}
 		if isSpecDesignFile(f) && !seen[f] {
 			seen[f] = true
 			designs = append(designs, f)
 		}
 	}
-	if !hasGo || len(designs) == 0 {
+	if !hasImplementation || len(designs) == 0 {
 		return nil
 	}
 	sort.Strings(designs)
 	var errs []string
 	for _, d := range designs {
-		errs = append(errs, fmt.Sprintf("%s: implementation changes (*.go) must not edit specs/*/design.md (agent-workflow.md §7.3); revert %s and open a separate spec PR or hand off to the designer", d, d))
+		errs = append(errs, fmt.Sprintf("%s: an implementation change (a file outside specs/ and docs/) must not edit specs/*/design.md (agent-workflow.md §7.3); revert this file, describe the correction in the pull request and hand it to the designer (specs-needed)", d))
 	}
 	return errs
+}
+
+// outsideSpecsAndDocs reports whether p lies outside the two trees a spec pull
+// request may touch.
+func outsideSpecsAndDocs(p string) bool {
+	parts := strings.Split(p, "/")
+	return len(parts) < 2 || (parts[0] != "specs" && parts[0] != "docs")
 }
 
 func isSpecDesignFile(p string) bool {
@@ -319,8 +342,8 @@ var specsReadmeRow = regexp.MustCompile(`^\|\s*\[` + "`([^`]+)`" + `\]\(([a-z0-9
 
 // CheckSpecsReadme verifies that specs/README.md lists every capability under
 // specs/<capability>/requirements.md (with no duplicates or orphan rows) and
-// that its Status column agrees with whether all scenarios are active or still
-// @planned.
+// that its Status column agrees with its scenarios: all active means
+// Implemented, and any @planned scenario means Planned or In progress.
 func CheckSpecsReadme(root string) ([]string, error) {
 	specsDir := filepath.Join(root, "specs")
 	if _, err := os.Stat(specsDir); os.IsNotExist(err) {
@@ -404,8 +427,8 @@ func CheckSpecsReadme(root string) ([]string, error) {
 		switch {
 		case c.active > 0 && c.planned == 0 && strings.HasPrefix(lower, "planned"):
 			errs = append(errs, fmt.Sprintf("specs/README.md: capability %q has all %d scenario(s) active, but its status still says %q; update it to Implemented", capName, c.active, status))
-		case c.active == 0 && c.planned > 0 && strings.HasPrefix(lower, "implemented"):
-			errs = append(errs, fmt.Sprintf("specs/README.md: capability %q has no active scenarios (%d planned), but its status says %q; update it to Planned", capName, c.planned, status))
+		case c.planned > 0 && strings.HasPrefix(lower, "implemented"):
+			errs = append(errs, fmt.Sprintf("specs/README.md: capability %q has %d @planned scenario(s), but its status says %q; use Planned (or In progress) until every scenario is active", capName, c.planned, status))
 		}
 	}
 	for _, capName := range sortedKeys(rows) {

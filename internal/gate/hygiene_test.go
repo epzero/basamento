@@ -21,6 +21,11 @@ func f() {
 	_ = t2.Since(t2.Date(2026, 1, 1, 0, 0, 0, 0, t2.UTC))
 	_ = t2.Until(t2.Date(2026, 1, 1, 0, 0, 0, 0, t2.UTC))
 	t2.Sleep(0)
+	_ = t2.After(0)
+	_ = t2.AfterFunc(0, func() {})
+	_ = t2.NewTimer(0)
+	_ = t2.NewTicker(0)
+	_ = t2.Tick(0)
 	_ = rand.IntN(10)
 }
 `,
@@ -99,7 +104,12 @@ func ok() {
 		"pkg/bad_time_randv2_test.go:10: test uses t2.Since",
 		"pkg/bad_time_randv2_test.go:11: test uses t2.Until",
 		"pkg/bad_time_randv2_test.go:12: test uses t2.Sleep",
-		"pkg/bad_time_randv2_test.go:13: test uses global rand.IntN",
+		"pkg/bad_time_randv2_test.go:13: test uses t2.After",
+		"pkg/bad_time_randv2_test.go:14: test uses t2.AfterFunc",
+		"pkg/bad_time_randv2_test.go:15: test uses t2.NewTimer",
+		"pkg/bad_time_randv2_test.go:16: test uses t2.NewTicker",
+		"pkg/bad_time_randv2_test.go:17: test uses t2.Tick",
+		"pkg/bad_time_randv2_test.go:18: test uses global rand.IntN",
 		`pkg/bad_randv1_crypto_test.go:4: test imports "crypto/rand"`,
 		"pkg/bad_randv1_crypto_test.go:9: test uses global rand.Intn",
 		`pkg/bad_dot_test.go:4: test must not dot-import "math/rand/v2"`,
@@ -114,6 +124,52 @@ func ok() {
 	}
 	if hasErr(errs, "pkg/good_test.go") {
 		t.Errorf("good_test.go with time.Date, seeded rand.New and shadowed locals must pass:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestCheckCodeHygieneBansEachTimeFunc(t *testing.T) {
+	for _, name := range []string{
+		"Now", "Since", "Until", "Sleep",
+		"After", "AfterFunc", "NewTimer", "NewTicker", "Tick",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := writeTree(t, map[string]string{
+				"pkg/bad_test.go": "package pkg\n\nimport \"time\"\n\nfunc f() { _ = time." + name + " }\n",
+			})
+			errs, err := CheckCodeHygiene(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasErr(errs, "pkg/bad_test.go:5: test uses time."+name) {
+				t.Errorf("time.%s must be banned, got:\n%s", name, strings.Join(errs, "\n"))
+			}
+		})
+	}
+}
+
+func TestCheckCodeHygieneAllowsContextDeadlines(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"pkg/good_test.go": `package pkg
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func f(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = ctx
+}
+`,
+	})
+	errs, err := CheckCodeHygiene(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Errorf("context deadlines are a hang guard, not a clock: %v", errs)
 	}
 }
 
@@ -141,6 +197,8 @@ func ok() {
 	_, _ = rand.Read(b[:])
 }
 func helperForTest() {}
+func ForTestament() {}
+func ParseForTestimony() {}
 `,
 		"pkg/testkit/helpers.go": `package testkit
 
@@ -168,6 +226,8 @@ func NewForTest(t *testing.T) {}
 		"time.Now",
 		"crypto/rand",
 		"helperForTest",
+		"ForTestament",
+		"ParseForTestimony",
 		"pkg/testkit",
 	} {
 		if hasErr(errs, forbidden) {
@@ -177,15 +237,29 @@ func NewForTest(t *testing.T) {}
 }
 
 func TestCheckSpecSeparation(t *testing.T) {
-	if errs := CheckSpecSeparation([]string{"specs/sql/design.md", "specs/sql/requirements.md"}); len(errs) != 0 {
-		t.Errorf("spec-only change must pass: %v", errs)
+	for _, changed := range [][]string{
+		{"specs/sql/design.md", "specs/sql/requirements.md"},
+		{"platform/sql/store.go", "specs/sql/store.feature", "specs/README.md"},
+		{"docs/engineering/qa-gate.md", "specs/sql/design.md"},
+	} {
+		if errs := CheckSpecSeparation(changed); len(errs) != 0 {
+			t.Errorf("change %v must pass: %v", changed, errs)
+		}
 	}
-	if errs := CheckSpecSeparation([]string{"platform/sql/store.go", "specs/sql/store.feature", "specs/README.md"}); len(errs) != 0 {
-		t.Errorf("implementation activating scenarios must pass: %v", errs)
-	}
-	errs := CheckSpecSeparation([]string{"platform/sql/store.go", "specs/sql/design.md"})
-	if !hasErr(errs, "specs/sql/design.md: implementation changes (*.go) must not edit specs/*/design.md") {
-		t.Errorf("implementation editing design.md must fail: %v", errs)
+	for _, impl := range []string{
+		"platform/sql/store.go",
+		"api/sql/store.proto",
+		"migrations/001.sql",
+		"Makefile",
+		".github/workflows/gate.yml",
+	} {
+		errs := CheckSpecSeparation([]string{impl, "specs/sql/design.md"})
+		if !hasErr(errs, "specs/sql/design.md: an implementation change (a file outside specs/ and docs/) must not edit specs/*/design.md") {
+			t.Errorf("implementation change %q editing design.md must fail: %v", impl, errs)
+		}
+		if !hasErr(errs, "hand it to the designer (specs-needed)") {
+			t.Errorf("spec/code error for %q must say what to do next: %v", impl, errs)
+		}
 	}
 }
 
@@ -214,13 +288,32 @@ func TestHygieneEndToEndSpecSeparation(t *testing.T) {
 		t.Fatalf("spec-only edit must pass Hygiene: %v %v", errs, err)
 	}
 
-	// Adding an untracked Go file triggers spec/code separation locally before git add.
-	write("pkg/new.go", "package pkg\n")
+	// A docs change next to a design.md edit stays a spec change.
+	write("docs/engineering/qa-gate.md", "gate\n")
+	if errs, err := Hygiene(root, "main"); err != nil || len(errs) != 0 {
+		t.Fatalf("docs + design.md edit must pass Hygiene: %v %v", errs, err)
+	}
+
+	// An untracked non-Go implementation file (a .proto) also triggers the check.
+	write("api/x.proto", "syntax = \"proto3\";\n")
 	errs, err := Hygiene(root, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasErr(errs, "specs/x/design.md: implementation changes (*.go) must not edit specs/*/design.md") {
+	if !hasErr(errs, "specs/x/design.md: an implementation change (a file outside specs/ and docs/) must not edit specs/*/design.md") {
+		t.Fatalf("untracked .proto + design.md edit must fail Hygiene: %v", errs)
+	}
+	if err := os.Remove(filepath.Join(root, "api/x.proto")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Adding an untracked Go file triggers spec/code separation locally before git add.
+	write("pkg/new.go", "package pkg\n")
+	errs, err = Hygiene(root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasErr(errs, "specs/x/design.md: an implementation change (a file outside specs/ and docs/) must not edit specs/*/design.md") {
 		t.Fatalf("untracked .go + design.md edit must fail Hygiene: %v", errs)
 	}
 
@@ -246,6 +339,7 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 | [` + "`done`" + `](done/requirements.md) | Planned (WP-L1-01). |
 | [` + "`todo`" + `](todo/requirements.md) | Implemented (WP-L1-02). |
 | [` + "`partial`" + `](partial/requirements.md) | Planned (WP-L1-03, WP-L1-04). |
+| [` + "`mixed`" + `](mixed/requirements.md) | Implemented (WP-L1-07). |
 | [` + "`dup`" + `](dup/requirements.md) | Planned (WP-L1-06). |
 | [` + "`dup`" + `](dup/requirements.md) | Implemented (WP-L1-06). |
 | [` + "`orphan`" + `](orphan/requirements.md) | Planned (WP-L9-99). |
@@ -257,6 +351,10 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 		"specs/partial/requirements.md": "### REQ-PART-001 — p\nThe system shall.\n",
 		"specs/partial/a.feature": feature("  @REQ-PART-001 @id:PART-001-01\n  Scenario: a\n    Given a\n\n" +
 			"  @REQ-PART-001 @id:PART-001-02 @planned @wp:WP-L1-04\n  Scenario: b\n    Given b\n"),
+		"specs/mixed/requirements.md": "### REQ-MIX-001 — x\nThe system shall.\n",
+		"specs/mixed/a.feature": feature("  @REQ-MIX-001 @id:MIX-001-01\n  Scenario: a\n    Given a\n\n" +
+			"  @REQ-MIX-001 @id:MIX-001-02 @planned @wp:WP-L1-07\n  Scenario: b\n    Given b\n\n" +
+			"  @REQ-MIX-001 @id:MIX-001-03 @planned @wp:WP-L1-08\n  Scenario: c\n    Given c\n"),
 		"specs/dup/requirements.md":     "### REQ-DUP-001 — u\nThe system shall.\n",
 		"specs/dup/a.feature":           feature("  @REQ-DUP-001 @id:DUP-001-01 @planned @wp:WP-L1-06\n  Scenario: a\n    Given a\n"),
 		"specs/missing/requirements.md": "### REQ-MISS-001 — m\nThe system shall.\n",
@@ -268,7 +366,8 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 	}
 	for _, want := range []string{
 		`capability "done" has all 1 scenario(s) active, but its status still says "Planned (WP-L1-01)."`,
-		`capability "todo" has no active scenarios (1 planned), but its status says "Implemented (WP-L1-02)."`,
+		`capability "todo" has 1 @planned scenario(s), but its status says "Implemented (WP-L1-02)."`,
+		`capability "mixed" has 2 @planned scenario(s), but its status says "Implemented (WP-L1-07)."`,
 		`missing capability row for "missing"`,
 		`duplicate capability row for "dup"`,
 		`orphan capability row "orphan"`,
