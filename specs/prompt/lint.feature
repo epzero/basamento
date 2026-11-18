@@ -65,7 +65,7 @@ Feature: Prompt lint
 
   @REQ-PROMPT-025 @id:PROMPT-025-01
   Scenario Outline: Prompt lint names the structure rule a template breaks
-    Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>"
+    Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>" each with a budget of 100
     When the template is linted
     Then prompt lint reports exactly the findings
       | rule                   | severity | segment |
@@ -84,7 +84,7 @@ Feature: Prompt lint
 
   @REQ-PROMPT-025 @REQ-PROMPT-020 @id:PROMPT-025-02
   Scenario Outline: A template that breaks a structure rule is not registered
-    Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>"
+    Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>" each with a budget of 100
     When the template is registered
     Then the registration fails with code "invalid_argument" listing the lint error "<rule>"
     And "<id>@<version>" does not resolve
@@ -168,3 +168,16 @@ Feature: Prompt lint
     And "docs@1" was assembled with inputs {"doc": "Quarterly report.", "question": "Summarize it."}
     When the assembled prompt is linted
     Then prompt lint reports no findings
+
+  @REQ-PROMPT-021 @security @id:PROMPT-021-06
+  Scenario: A delimiter removed from an assembled prompt is an error
+    Given a template "docs@1" that declares input "doc" and the segments
+      | segment | kind    | budget | text    |
+      | context | dynamic | 100    | {{doc}} |
+    And the template is registered
+    And "docs@1" was assembled with inputs {"doc": "Quarterly report."}
+    When the assembled segment "context" is changed afterwards by removing "</untrusted>"
+    And the assembled prompt is linted
+    Then prompt lint reports exactly the findings
+      | rule               | severity | segment |
+      | unpaired_delimiter | error    | context |
