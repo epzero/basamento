@@ -320,15 +320,6 @@ func historyOverBudget(t *Template, sizes []int) bool {
 	return false
 }
 
-func historySegName(t *Template) string {
-	for _, seg := range t.Segments {
-		if seg.Kind == KindHistory {
-			return seg.Name
-		}
-	}
-	return ""
-}
-
 func historySegIndex(t *Template) int {
 	for i, seg := range t.Segments {
 		if seg.Kind == KindHistory {

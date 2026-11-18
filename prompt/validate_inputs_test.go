@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -29,9 +30,12 @@ func TestValidateInputsDeterministicDetail(t *testing.T) {
 		if core.CodeOf(err) != core.CodeInvalidArgument {
 			t.Fatal(err)
 		}
-		details := err.(*core.Error).Details
-		if details["input"] != "alpha" {
-			t.Fatalf("missing: iter %d got input %q", i, details["input"])
+		var perr *core.Error
+		if !errors.As(err, &perr) {
+			t.Fatal(err)
+		}
+		if perr.Details["input"] != "alpha" {
+			t.Fatalf("missing: iter %d got input %q", i, perr.Details["input"])
 		}
 	}
 	for i := 0; i < 50; i++ {
@@ -44,9 +48,12 @@ func TestValidateInputsDeterministicDetail(t *testing.T) {
 		if core.CodeOf(err) != core.CodeInvalidArgument {
 			t.Fatal(err)
 		}
-		details := err.(*core.Error).Details
-		if details["input"] != "extra" {
-			t.Fatalf("undeclared: iter %d got input %q", i, details["input"])
+		var perr *core.Error
+		if !errors.As(err, &perr) {
+			t.Fatal(err)
+		}
+		if perr.Details["input"] != "extra" {
+			t.Fatalf("undeclared: iter %d got input %q", i, perr.Details["input"])
 		}
 	}
 }
