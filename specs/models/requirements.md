@@ -253,10 +253,10 @@ The price table shall never apply a tenant's override to a call outside that ten
 If no layer of the price table has an entry for a model, or the chosen layer's price has no rate rule that holds for a call, then the price table shall fail pricing the call with code `unsupported`.
 
 ### REQ-MODEL-074 — The default token formula
-Where a model declares no price formula of its own, the model layer shall price its call with the formula the chosen rates' per-million-token rates give, where a million input tokens cost as many milli-points as the input rate and a million output tokens as the output rate.
+Where a model declares no price formula of its own, the model layer shall price its call with the chosen rates' per-million-token rates, where a million tokens cost as many milli-points as that rate.
 
-### REQ-MODEL-075 — The default formula ignores cached and reasoning tokens
-The default token formula shall count neither cached tokens nor reasoning tokens.
+### REQ-MODEL-075 — The default formula prices cache reads at the cached rate
+Where the chosen rate rule defines a cached rate, the default token formula shall price the call's non-cached input tokens at the input rate, its cached tokens at the cached rate, and its output tokens at the output rate; the cached tokens are neither left at the input rate nor counted in addition to the input tokens.
 
 ### REQ-MODEL-076 — Whole milli-points, rounded half up
 The price table and the price formulas shall return a whole number of milli-points, rounding half up when the exact amount falls between two whole milli-points.
@@ -266,3 +266,15 @@ When the price table estimates the cost of a call before it starts, the estimate
 
 ### REQ-MODEL-078 — Prices do not change what a started call is charged
 When a price changes after a call has started, the price table shall price that call's settled usage using the price entry and start time that applied when the call started.
+
+### REQ-MODEL-079 — Without a cached rate, cached tokens cost the input rate
+Where the chosen rate rule does not define a cached rate, the default token formula shall price every input token of the call, cached ones included, at the input rate.
+
+### REQ-MODEL-080 — A cached rate of zero is a rate, not a missing one
+While the chosen rate rule defines a cached rate of zero, the default token formula shall price the call's cached tokens at zero milli-points.
+
+### REQ-MODEL-081 — Reasoning tokens are never counted a second time
+The default token formula shall count every reasoning token of the call exactly once, at the output rate.
+
+### REQ-MODEL-082 — Usage with more cached than input tokens fails pricing
+If a call's usage reports more cached tokens than input tokens, then the price table shall fail pricing the call with code `invalid_argument`.

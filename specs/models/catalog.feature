@@ -101,11 +101,35 @@ Feature: Model catalog and price table
     When a call of "sim-chat" spends 4000 input tokens and 300 output tokens
     Then 4 milli-points are charged for the call
 
-  @REQ-MODEL-075 @cost @id:MODEL-075-01
-  Scenario: Cached and reasoning tokens are not counted a second time by the default formula
-    Given the model "sim-chat" has the rate rules "input 2500 and output 10000" per million tokens
-    When a call of "sim-chat" spends 4000 input tokens, of which 1000 cached, and 300 output tokens, of which 100 reasoning
+  @REQ-MODEL-075 @REQ-MODEL-081 @cost @id:MODEL-075-01
+  Scenario: The default formula prices cached tokens at the cached rate, once
+    Given the model "sim-chat" has the rate rules "input 2500, output 10000 and cached 1250" per million tokens
+    When a call of "sim-chat" spends 4000 input tokens and 1000 output tokens, of which 1000 tokens are cached and 100 are reasoning
+    Then 19 milli-points are charged for the call
+
+  @REQ-MODEL-075 @REQ-MODEL-079 @REQ-MODEL-081 @cost @wp:WP-L3-06 @id:MODEL-075-02
+  Scenario: Without a cached rate the default formula prices cached tokens at the input rate
+    Given the model "sim-chat" has the rate rules "input 2000 and output 10000" per million tokens
+    When a call of "sim-chat" spends 6000 input tokens and 1200 output tokens, of which 4000 tokens are cached and 300 are reasoning
+    Then 24 milli-points are charged for the call
+
+  @REQ-MODEL-080 @cost @wp:WP-L3-06 @id:MODEL-080-01
+  Scenario: A rule with a cached rate of zero prices cache reads at nothing
+    Given the model "sim-chat" has the rate rules "input 3000, output 10000 and cached 0" per million tokens
+    When a call of "sim-chat" spends 5000 input tokens and 400 output tokens, of which 2000 tokens are cached
     Then 13 milli-points are charged for the call
+
+  @REQ-MODEL-082 @cost @wp:WP-L3-06 @id:MODEL-082-01
+  Scenario: Usage with more cached than input tokens fails pricing
+    Given the model "sim-chat" has the rate rules "input 4000 and output 10000" per million tokens
+    When a call of "sim-chat" spends 3000 input tokens and 400 output tokens, of which 3500 tokens are cached
+    Then pricing fails with code "invalid_argument"
+
+  @REQ-MODEL-081 @cost @wp:WP-L3-06 @id:MODEL-081-01
+  Scenario: Reasoning tokens are counted once as output
+    Given the model "sim-chat" has the rate rules "input 4000 and output 10000" per million tokens
+    When a call of "sim-chat" spends 3000 input tokens and 600 output tokens, of which 300 are reasoning
+    Then 18 milli-points are charged for the call
 
   @REQ-MODEL-076 @cost @id:MODEL-076-01
   Scenario: An exact half rounds up to a whole milli-point

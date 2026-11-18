@@ -147,7 +147,7 @@ scripted model and the fake clock only.
 # Models: catalog and price table (WP-L3-06)
 
 Decisions the implementer must follow in `model/catalog`. The requirements
-are REQ-MODEL-067 to REQ-MODEL-078 (`requirements.md`, section "Catalog and
+are REQ-MODEL-067 to REQ-MODEL-082 (`requirements.md`, section "Catalog and
 price table"); where this section is silent, the requirements win.
 `docs/architecture/model-layer.md` §2 and §7 and ADR-0006 set the rules; every
 number or default below that the docs leave open is a choice for the reviewer
@@ -182,9 +182,12 @@ rule's `when` does not hold: MODEL-073-03).
   layer; `is priced by the shipped snapshot at "<CEL>" milli-points` sets
   only the shipped snapshot layer; `has the rate rules "input <a> and
   output <b>" per million tokens` sets one unconditional rule in the shipped
-  snapshot; and `the model "X" has the rate rules:` / `tenant "T" overrides
-  the rate rules of "X" with:` followed by a table with a `when` column and
-  an `input` and an `output` column (milli-points per million tokens) set
+  snapshot, the variant `"input <a>, output <b> and cached <c>"` sets the
+  same rule with a cached rate, and `the model "X" has the rate rules:` /
+  `tenant "T" overrides the rate rules of "X" with:` followed by a table with
+  a `when` column and
+  an `input`, an `output` and optionally a `cached` column (milli-points per
+  million tokens; an empty cell omits that rate) set
   those rules, in table order, in the shipped snapshot or in the tenant's
   layer. A price rule table may also set the deployment's layer the same way
   (an empty layer holds no entry).
@@ -213,15 +216,57 @@ rule's `when` does not hold: MODEL-073-03).
 
 ## C3. The formula and the token default
 
-- A model whose price is a set of rules and that declares no formula in its
-  descriptor uses the **default token formula** on the chosen rule's rates:
-  `input_tokens × rates.input / 1e6 + output_tokens × rates.output / 1e6`
-  (REQ-MODEL-074). Cached and reasoning tokens are not in it (REQ-MODEL-075):
-  `input_tokens` is the total input usage, cached tokens included, and is
-  counted at the input rate; reasoning tokens, already part of
-  `output_tokens`, are not added again. A model that declares its own formula
-  (image, video, `params.duration_s`, …) uses it with `rates` bound to the
-  chosen rule's rates.
+- **Usage convention (A):** `usage.cached_tokens` is a part of
+  `usage.input_tokens`, and `usage.reasoning_tokens` is a part of
+  `usage.output_tokens`; neither is added to its total. `model.Usage`
+  (`model/model.go`) has exactly `InputTokens`, `OutputTokens`,
+  `CachedTokens` and `ReasoningTokens`. Providers differ — OpenAI's prompt
+  tokens include the cached ones, Anthropic reports cache reads apart from
+  its input tokens — so the provider adapter (WP-L3-04) normalizes what the
+  vendor reports into this convention before the usage reaches the price
+  table.
+- **The default token formula:** a model whose price is a set of rules and
+  that declares no formula in its descriptor is priced by the chosen rule's
+  rates on the call's usage (REQ-MODEL-074). Rates are per million tokens;
+  all amounts below are divided by 1e6 before rounding (REQ-MODEL-076), and
+  `I`, `O`, `C`, `R` are the usage's input, output, cached and reasoning
+  tokens.
+  - **Rule defines `rates.cached`** (REQ-MODEL-075):
+    `(I − C) × rates.input + C × rates.cached + O × rates.output`. The
+    cached tokens are subtracted from the input tokens and added back at the
+    cached rate; they are neither left at the input rate nor counted on top
+    of the input tokens.
+  - **Rule omits `rates.cached`** (REQ-MODEL-079):
+    `I × rates.input + O × rates.output`. Every input token, cached ones
+    included, costs the input rate; the cached tokens are neither subtracted
+    nor double-counted.
+  - **Cached rate zero (B)** (REQ-MODEL-080): a rule that sets
+    `cached: 0` defines the rate, so cache reads are free; only an absent
+    `cached` rate falls back to the input rate (MODEL-080-01).
+  - **Reasoning** (REQ-MODEL-081): `reasoning_tokens` are already inside
+    `O` and are never added again; there is no reasoning rate in the default
+    formula (a rule's `rates.reasoning`, if a table sets one, is not used by
+    it). MODEL-081-01 prices a call with reasoning but no cached tokens:
+    with `I = 3000`, `O = 600`, `R = 300` and the rule `input 4000 and
+    output 10000`, `3000 × 4000 + 600 × 10000 = 12,000,000 + 6,000,000 =
+    18,000,000` → **18**; counting the reasoning twice (`O + R = 900` output
+    tokens) gives `12,000,000 + 9,000,000 = 21,000,000` → 21.
+- **Malformed usage (C)** (REQ-MODEL-082): if `C > I`, no formula is
+  evaluated — the uncached part `I − C` would be negative — and pricing fails
+  with `core.CodeInvalidArgument`. The check runs before any formula, the
+  default one or a model's own, since a model's formula may read `usage` too;
+  it is what keeps bad provider data from turning into a credit. The
+  reservation estimate sets `C = 0` (C4), so it passes the check every time.
+- **Cache writes are not priced.** `model.Usage` has no cache-write or
+  cache-creation field, so cache-write tokens, a `rates.cache_write`, TTL or
+  storage are not priced by the default formula and no rule rate for them
+  applies. Pricing them needs a separate additive `feat(model)` contract
+  change (new `Usage` fields, new rates) with its own spec and review;
+  this WP does not change `model/model.go`, and MODEL-075-02 prices a usage in
+  which the vendor's cache reads, and nothing more, are reported.
+- A model that declares its own formula (image, video, `params.duration_s`,
+  …) uses it with `rates` bound to the chosen rule's rates, whatever usage
+  it reads.
 - **Rounding (REQ-MODEL-076):** the formula and the rule rates are evaluated
   over exact decimal values and the result is rounded to the nearest whole
   milli-point, halves away from zero (up, since prices are not negative:
@@ -258,6 +303,41 @@ rule's `when` does not hold: MODEL-073-03).
   but `at` is the recorded start time, so the charge is `250000 × 280 / 1e6 +
   20000 × 1100 / 1e6 = 70 + 22 = 92` milli-points; a settlement that read the
   clock again would charge the first rule's `35 + 11 = 46`.
+- **Cached-rate worked examples (C4, D).** Each number below was checked
+  after rounding (half up, in milli-points, the total divided by 1e6) for
+  the correct formula and for each wrong one: *ignore the cached rate*,
+  *subtract the cached tokens but do not add them back*, *add the cached
+  tokens on top of the input tokens*, and *count the reasoning tokens twice*.
+  - MODEL-075-01: a rule with `cached`, `I = 4000`, `C = 1000`, `O = 1000`,
+    `R = 100`, rates input 2500, output 10000, cached 1250. Correct:
+    `(4000 − 1000) × 2500 + 1000 × 1250 + 1000 × 10000 = 7,500,000 + 1,250,000
+    + 10,000,000 = 18,750,000` → **19**. Ignore cached: `4000 × 2500 + 1000 ×
+    10000 = 10,000,000 + 10,000,000 = 20,000,000` → 20. Subtract only:
+    `3000 × 2500 + 1000 × 10000 = 7,500,000 + 10,000,000 = 17,500,000` → 18.
+    Add on top: `5000 × 2500 + 1000 × 10000 = 12,500,000 + 10,000,000 =
+    22,500,000` → 23. Reasoning twice: `(3000 × 2500 + 1000 × 1250) + 1100 ×
+    10000 = 8,750,000 + 11,000,000 = 19,750,000` → 20.
+  - MODEL-075-02: no `cached` rate, `I = 6000`, `C = 4000`, `O = 1200`,
+    `R = 300`, rates input 2000, output 10000. Correct: `6000 × 2000 + 1200 ×
+    10000 = 12,000,000 + 12,000,000 = 24,000,000` → **24**. Subtract only, as
+    if a cached rate of zero applied: `2000 × 2000 + 12,000,000 =
+    16,000,000` → 16. Add on top: `10000 × 2000 + 12,000,000 = 32,000,000` →
+    32. Reasoning twice: `12,000,000 + 1500 × 10000 = 27,000,000` → 27.
+  - MODEL-080-01: `cached: 0` with `I = 5000`, `C = 2000`, `O = 400`, rates
+    input 3000, output 10000. Correct: `3000 × 3000 + 2000 × 0 + 400 × 10000
+    = 9,000,000 + 4,000,000 = 13,000,000` → **13**. Reading `0` as *absent*
+    (fall back to the input rate, MODEL-075-02's rule): `5000 × 3000 +
+    4,000,000 = 19,000,000` → 19. Add on top: `7000 × 3000 + 4,000,000 =
+    25,000,000` → 25.
+  - MODEL-081-01: no `cached` rate, `I = 3000`, `O = 600`, `R = 300`, rates
+    input 4000, output 10000. Correct: `3000 × 4000 + 600 × 10000 =
+    12,000,000 + 6,000,000 = 18,000,000` → **18**. Reasoning twice:
+    `12,000,000 + 900 × 10000 = 21,000,000` → 21.
+  - MODEL-082-01: `I = 3000`, `C = 3500`, `O = 400`, rates input 4000,
+    output 10000. The correct answer is the failure `invalid_argument`; any
+    formula that ran would give a negative uncached part (`−500 × 4000`)
+    and a charge below the zero-cached charge `3000 × 4000 + 400 × 10000 =
+    16,000,000` → 16.
 
 ## C5. Pricing is fixed when the invocation starts
 
@@ -284,12 +364,13 @@ rule's `when` does not hold: MODEL-073-03).
   `layering.yaml`), which may import `core`, `platform` and `expr` (the CEL
   environment of WP-L2-01); it cannot import `model`'s children that import
   it. If the catalog must live inside `model` itself to avoid a cycle, the
-  implementer lands that move in a pull request of its own before this WP.
+  implementer lands that move in a pull request of its own before this WP
+  starts, so the package graph is settled before any catalog code lands.
 
 ## Open questions
 
 1. **Cost requirement: REQ-MODEL-006 re-locking (`requirements.md`, approved text).** REQ-MODEL-077 says the reservation uses the estimate of C4 for **every** paid call, while REQ-MODEL-006 says "estimated by the model's price formula". They agree for a model with rate rules; for a model that declares its own formula (a video model priced on `params.duration_s`), REQ-MODEL-006 read literally leaves the estimate to that formula, which the docs define no usage for; under C4 it gets the same usage (counted input tokens, output limit). Should REQ-MODEL-006 be re-locked to cite REQ-MODEL-077, or does this WP leave it (cost, P1 re-review either way)?
-2. **Default token formula and cached/reasoning tokens (REQ-MODEL-074, REQ-MODEL-075).** `model-layer.md` §7 leaves the exact default token formula open; the spec prices `input_tokens` and `output_tokens` at the chosen rule's per-million rates and ignores `cached_tokens` and `reasoning_tokens` unless a model provides its own formula or rule; `cached_tokens` and `reasoning_tokens` are parts of `input_tokens` and `output_tokens`, not added to them (MODEL-074-01, MODEL-075-01).
+2. **Default token formula: settling cached and reasoning tokens.** The owner's direction during P0 acceptance settled the round-3 text (which priced cache reads at the input rate): the default formula uses `rates.cached` when the rule defines it and the input rate when it omits it, a `cached: 0` is free rather than absent, reasoning tokens are counted once inside `output_tokens`, and `C > I` fails pricing with `invalid_argument` (REQ-MODEL-075, REQ-MODEL-079 to REQ-MODEL-082, C3, C4). The usage convention (`cached_tokens` ⊂ `input_tokens`, `reasoning_tokens` ⊂ `output_tokens`) is the adapter's normalization (C3, A). Cache-write and creation tokens stay unpriced until an additive `feat(model)` change to `model.Usage`; confirm that separate change is the intended route rather than pricing cache writes from the existing fields.
 3. **Default formula and the WP-L3-02 fixture (`design.md` §5, MODEL-060-01, MODEL-061-01).** `middleware.feature` and the earlier section's §5 price `sim-chat` with `(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000` milli-points, which at the per-million rates of C2 would be 1,000× the default formula of REQ-MODEL-074 (`input × 1e-6 + output × 8e-6`: `1000 × 1e-6 + 1000 × 8e-6 = 0.009` against `1 + 8 = 9`). The scenarios are approved text; the implementer of WP-L3-02 must state that price as a model formula in the manner of C2 (a fixture), not as rules fed to the default formula. If the owner wants the two reconciled, it is a WP-L3-02 spec change (P1).
 4. **Where overrides are configured (Open Question 4).** The roadmap and docs name the layers but not who writes deployment and tenant overrides (a config file for the deployment, which API or command for a tenant). WP-L3-06 specifies only reading and applying the three layers in `model/catalog`; should the write side be a task of WP-L3-06, or another work package?
 5. **Rounding of an exact half (REQ-MODEL-076, MODEL-076-01..02).** The docs give no rule; half up was chosen (MODEL-076-01) because it never under-charges a fraction of cost. Confirm, or choose half to even.

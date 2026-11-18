@@ -66,8 +66,8 @@ the same change that first uses it.
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Model id** | The name a model is looked up by in the catalog and passed in a request, such as `sim-chat`. |
 | **Rate rule** | One row of a model's price: rates per million tokens (input, output, …) and an optional condition, the `when`, under which they apply. |
-| **Price formula** | The CEL expression that turns call parameters, usage and rates into milli-points. A model may declare its own; otherwise the default token formula applies. |
-| **Default token formula** | The price formula of a model priced by rate rules: a million input tokens cost the input rate and a million output tokens the output rate, cached and reasoning tokens not counted. |
+| **Price formula** | The CEL expression that turns call parameters, usage and rates into milli-points, where cached tokens are part of the input and reasoning tokens part of the output. A model may declare its own; otherwise the default token formula applies. |
+| **Default token formula** | The price formula of a model priced by rate rules: a million input tokens cost the input rate and a million output tokens the output rate. Cached tokens are part of the input and cost the rule's cached rate when it has one, otherwise the input rate; reasoning tokens are part of the output and are counted once. |
 | **Price override** | A price set for one model in one layer above the shipped snapshot: the deployment's, or a tenant's, which applies only to that tenant's calls and wins over the deployment's. |
 | **Counted input tokens** | The tokens a model's tokenizer gives the messages, tool definitions and repair input of a call; an estimate counts them before the call. |
 | **Estimate** | What the price table computes for a call before it starts, from its counted input tokens and its output limit, to reserve against a budget. |
