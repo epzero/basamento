@@ -223,7 +223,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 		if err == nil {
 			return fmt.Errorf("no error")
 		}
-		if psql.ErrorContainsSecret(err, secret) {
+		if sqltest.ErrorContainsSecret(err, secret) {
 			return fmt.Errorf("password in message or details")
 		}
 		return nil
@@ -401,9 +401,13 @@ func registerSQL(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		got := at.Format(time.RFC3339Nano)
-		wantAt, _ := time.Parse(time.RFC3339, want)
-		if !at.Equal(wantAt) {
+		got := at.UTC().Format(time.RFC3339Nano)
+		wantAt, err := time.Parse(time.RFC3339, want)
+		if err != nil {
+			return fmt.Errorf("parse want time: %w", err)
+		}
+		wantAt = wantAt.UTC()
+		if !at.UTC().Equal(wantAt) {
 			return fmt.Errorf("got %s, want %s", got, want)
 		}
 		return nil
