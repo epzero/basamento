@@ -3,9 +3,6 @@ package steps
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"math/rand"
@@ -29,6 +26,7 @@ import (
 
 type blobWorld struct {
 	store      *blob.Store
+	altStore   *blob.Store
 	blob       platform.Blob
 	handler    http.Handler
 	handlerSrv *httptest.Server
@@ -58,8 +56,8 @@ type fetchResp struct {
 func newBlobWorld() *blobWorld {
 	return &blobWorld{
 		content:    map[string][]byte{},
-		signKey:    []byte("bdd-blob-signing-key-32-bytes!!"),
-		altSignKey: []byte("other-blob-signing-key-32bytes"),
+		signKey:    []byte("bdd-blob-signing-key-32-bytes!!!!"),
+		altSignKey: []byte("other-blob-signing-key-32bytes!!"),
 		maxTTL:     blob.DefaultMaxURLTTL,
 		backend:    os.Getenv("BLOB_CONFORMANCE_BACKEND"),
 	}
@@ -93,6 +91,10 @@ func (w *blobWorld) openEmpty(ctx context.Context, clock core.Clock) error {
 }
 
 func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) error {
+	if w.altStore != nil {
+		_ = w.altStore.Close()
+		w.altStore = nil
+	}
 	opts := blob.Options{
 		Clock:     clock,
 		MaxURLTTL: w.maxTTL,
@@ -122,6 +124,13 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 	w.handler = h
 	if h != nil {
 		w.handlerSrv = httptest.NewServer(h)
+		altOpts := opts
+		altOpts.SignKey = w.altSignKey
+		altSt, _, err := blob.Open(ctx, raw, altOpts)
+		if err != nil {
+			return err
+		}
+		w.altStore = altSt
 	}
 	return nil
 }
@@ -132,6 +141,10 @@ func registerBlob(sc *godog.ScenarioContext) {
 		if w.s3 != nil {
 			w.s3.Close()
 			w.s3 = nil
+		}
+		if w.altStore != nil {
+			_ = w.altStore.Close()
+			w.altStore = nil
 		}
 		if w.handlerSrv != nil {
 			w.handlerSrv.Close()
@@ -311,7 +324,7 @@ func registerBlob(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the blob of tenant "([^"]*)" under the content key of "([^"]*)" has content type "([^"]*)"$`, func(ctx context.Context, tenant, name, want string) error {
-		ct, err := world(ctx).Blob.store.ContentType(world(ctx).Blob.tenantCtx(ctx, tenant), core.TenantID(tenant), world(ctx).Blob.keyOf(name))
+		ct, err := world(ctx).Blob.store.ContentType(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name))
 		if err != nil {
 			return err
 		}
@@ -340,10 +353,10 @@ func registerBlob(sc *godog.ScenarioContext) {
 		if strings.HasPrefix(alt, "its tenant replaced by ") {
 			tenant := strings.TrimPrefix(alt, "its tenant replaced by ")
 			tenant = strings.Trim(tenant, `"`)
-			raw, err = alterProxiedBlobURL(raw, alt, "", tenant, world(ctx).Blob.altSignKey)
+			raw, err = alterProxiedBlobURL(ctx, raw, alt, "", tenant)
 		} else {
 			other := world(ctx).Blob.keyOf("world")
-			raw, err = alterProxiedBlobURL(raw, alt, other, "", world(ctx).Blob.altSignKey)
+			raw, err = alterProxiedBlobURL(ctx, raw, alt, other, "")
 		}
 		if err != nil {
 			return err
@@ -558,7 +571,10 @@ func (c *cancelAfterReader) Read(p []byte) (int, error) {
 }
 
 func requestBlobURL(ctx context.Context, tenant, name, lifetime string) error {
-	d, _ := parseElapsed(lifetime)
+	d, err := parseElapsed(lifetime)
+	if err != nil {
+		return err
+	}
 	u, err := world(ctx).Blob.blob.SignedURL(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name), d)
 	if err != nil {
 		world(ctx).Blob.lastErr = err
@@ -719,7 +735,7 @@ func tryOpenPath(ctx context.Context, raw string) error {
 	return nil
 }
 
-func alterProxiedBlobURL(raw, alteration, otherKey, otherTenant string, altSignKey []byte) (string, error) {
+func alterProxiedBlobURL(ctx context.Context, raw, alteration, otherKey, otherTenant string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err
@@ -729,7 +745,11 @@ func alterProxiedBlobURL(raw, alteration, otherKey, otherTenant string, altSignK
 		return "", fmt.Errorf("bad proxied path")
 	}
 	sig := u.Query().Get("sig")
-	exp, _ := strconv.ParseInt(u.Query().Get("exp"), 10, 64)
+	expStr := u.Query().Get("exp")
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil {
+		return "", err
+	}
 	basePath := strings.TrimSuffix(u.Path, "/"+tenant+"/"+hexd)
 	switch alteration {
 	case `its key replaced by the content key of "world"`:
@@ -739,7 +759,24 @@ func alterProxiedBlobURL(raw, alteration, otherKey, otherTenant string, altSignK
 	case "its signature removed":
 		sig = ""
 	case "its signature replaced by one from another signing key":
-		sig = bddSignRead(altSignKey, tenant, hexd, exp)
+		w := world(ctx).Blob
+		if w.altStore == nil {
+			return "", fmt.Errorf("alternate signing store not configured")
+		}
+		key := "sha256:" + hexd
+		ttl := time.Unix(exp, 0).Sub(world(ctx).Core.clock.Now())
+		if ttl < time.Second {
+			ttl = time.Second
+		}
+		altURL, err := w.altStore.SignedURL(w.tenantCtx(ctx, tenant), key, ttl)
+		if err != nil {
+			return "", err
+		}
+		altU, err := url.Parse(altURL)
+		if err != nil {
+			return "", err
+		}
+		sig = altU.Query().Get("sig")
 	case `its tenant replaced by "globex"`:
 		tenant = otherTenant
 	default:
@@ -757,16 +794,6 @@ func proxiedPathParts(p string) (tenant, hexd string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
-}
-
-func bddSignRead(key []byte, tenant, hexdigest string, exp int64) string {
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(tenant))
-	mac.Write([]byte{0})
-	mac.Write([]byte(hexdigest))
-	mac.Write([]byte{0})
-	mac.Write([]byte(strconv.FormatInt(exp, 10)))
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func assertContentPlace(ctx context.Context, body, place string) error {
