@@ -239,6 +239,21 @@ func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
 	}
 }
 
+func TestBranchNameValidation(t *testing.T) {
+	repo := gitRepo(t)
+	bad := []string{"main:refs/heads/x", "../../../tmp/x", "-evil", "a b", "ends.lock"}
+	for _, b := range bad {
+		if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L5-03", Branch: b}); err == nil {
+			t.Fatalf("branch %q must be refused", b)
+		} else if !strings.Contains(err.Error(), "not an accepted") {
+			t.Fatalf("branch %q: want validation error, got %v", b, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(repo), "repo-worktrees", "main:refs/heads/x")); err == nil {
+		t.Fatal("invalid branch must not create a worktree path")
+	}
+}
+
 func TestCodeReviewerInsideIssueWorktreeGetsSnapshot(t *testing.T) {
 	repo := gitRepo(t)
 	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L5-02"})

@@ -119,6 +119,16 @@ func inLinkedWorktree(dir string) (bool, error) {
 	return filepath.Clean(gitDir) != filepath.Clean(common), nil
 }
 
+func validateBranchName(dir, branch string) error {
+	if strings.HasPrefix(branch, "-") || strings.Contains(branch, ":") || strings.Contains(branch, "..") || strings.Contains(branch, " ") || strings.HasSuffix(branch, ".lock") {
+		return fmt.Errorf("branch %q is not an accepted name: use letters, digits, /, - and _; no spaces, .., leading -, :, or .lock", branch)
+	}
+	if _, err := git(dir, "check-ref-format", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("branch %q is not an accepted name: use letters, digits, /, - and _; no spaces, .., leading -, :, or .lock", branch)
+	}
+	return nil
+}
+
 // originHasBranch reports whether refs/heads/<branch> exists on origin.
 // Exit code 2 from ls-remote means no such ref; other failures are reachability errors.
 func originHasBranch(dir, branch string) (bool, error) {
@@ -225,6 +235,11 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	if r.Branch != "" {
+		if err := validateBranchName(top, r.Branch); err != nil {
+			return Session{}, err
+		}
+	}
 	s := Session{Identity: id.String(), Parent: r.Parent, Issue: r.Issue, Worktree: top, Created: time.Now().UTC().Format(time.RFC3339)}
 	linked, err := inLinkedWorktree(top)
 	if err != nil {
@@ -286,7 +301,15 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 // itself, in the harness's own clean worktree or a new one.
 func continueBranch(top string, linked bool, s Session, id Identity, branch string) (Session, error) {
 	if _, err := git(top, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
-		if _, err := git(top, "fetch", "origin", branch); err != nil {
+		onOrigin, err := originHasBranch(top, branch)
+		if err != nil {
+			return Session{}, err
+		}
+		if !onOrigin {
+			return Session{}, fmt.Errorf("branch %q is not on origin yet; push it from the clone that started it, then run gate agent new -branch %s again", branch, branch)
+		}
+		refspec := "refs/heads/" + branch + ":refs/remotes/origin/" + branch
+		if _, err := git(top, "fetch", "origin", refspec); err != nil {
 			return Session{}, err
 		}
 		if _, err := git(top, "branch", "--track", branch, "origin/"+branch); err != nil {
