@@ -61,8 +61,10 @@ type Message struct {
 // contract (ADR-0004); the streaming layer replays and purges through it
 // (ADR-0005).
 type Bus interface {
-	// Publish stores data on subject and returns its bus sequence, greater than
-	// every earlier sequence on that subject. An oversize payload or a malformed
+	// Publish stores data on subject and returns a positive (>= 1) bus sequence,
+	// greater than every earlier sequence on that subject (LastSeq reserves zero
+	// for none, and Subscribe reserves zero for from the start). An oversize
+	// payload or a malformed
 	// subject fails with code invalid_argument and nothing is stored. When the
 	// server cannot be reached, it fails at once with code unavailable and does
 	// not buffer the publish while disconnected.
@@ -98,36 +100,45 @@ type Bus interface {
 }
 
 // KV is a small key-value store with revisions and optional TTLs (locks,
-// cursors, presence). Expiry is decided against the clock the implementation
-// was constructed with, not the host wall clock alone.
+// cursors, presence). Whether an entry has expired is decided solely by the
+// injected core.Clock: once clock.Now() is at or past its deadline (the time
+// of the put, swap or create plus the ttl), the entry is absent. Any
+// server-side TTL is cleanup only and never expires an entry early.
 type KV interface {
 	// Get returns the latest value and revision for key. A missing or expired
 	// entry is reported with code not_found. A malformed key fails with code
 	// invalid_argument. When the server cannot be reached, it fails at once with
 	// code unavailable.
 	Get(ctx context.Context, key string) ([]byte, uint64, error)
-	// Put stores value under key with an optional lease. A ttl of zero means no
-	// expiry. It returns a revision greater than every earlier revision of that
-	// key. A malformed key or a negative ttl fails with code invalid_argument.
-	// When the server cannot be reached, it fails at once with code unavailable.
+	// Put stores value under key with an optional lease, ignoring any current
+	// revision, so it must not be used to overwrite or release a contested lease;
+	// CompareAndSwap is the call that checks the revision. A ttl of zero means no
+	// expiry; a non-zero ttl sets a deadline from the time of the put. It returns
+	// a positive (>= 1) revision strictly greater than every earlier revision of
+	// that key, including revisions of deleted and expired entries. A malformed
+	// key or a negative ttl fails with code invalid_argument. When the server
+	// cannot be reached, it fails at once with code unavailable.
 	Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error)
 	// CompareAndSwap replaces value when revision is the current revision of an
-	// unexpired entry and returns a greater revision. Revision zero means create:
-	// it stores only when the key has no unexpired entry (missing, deleted, or
-	// expired counts as absent); an unexpired entry makes it fail with code
+	// unexpired entry and returns a positive (>= 1) revision strictly greater
+	// than every earlier revision of that key, including revisions of deleted
+	// and expired entries. Revision zero means create: it stores only when the
+	// key has no unexpired entry (missing, deleted, or expired counts as absent)
+	// and returns such a revision; an unexpired entry makes it fail with code
 	// conflict without changing the entry. A non-zero revision when the key has no
 	// unexpired entry fails with code conflict and leaves the key absent. A
 	// non-zero revision that is not the current revision of an unexpired entry
 	// fails with code conflict and leaves the entry unchanged. Swapping at the
 	// revision of an expired entry fails with code conflict. A ttl of zero means
-	// no expiry; a non-zero ttl sets a new deadline from the time of the swap. A
-	// malformed key or a negative ttl fails with code invalid_argument. When the
+	// no expiry; a non-zero ttl sets a new deadline from the time of the swap.
+	// A malformed key or a negative ttl fails with code invalid_argument. When the
 	// server cannot be reached, it fails at once with code unavailable.
 	CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error)
-	// Delete removes key. Deleting a missing, expired, or already absent key
-	// succeeds and leaves the key absent. A malformed key fails with code
-	// invalid_argument. When the server cannot be reached, it fails at once with
-	// code unavailable.
+	// Delete removes key, ignoring any current revision, so it must not be used to
+	// release a contested lease; CompareAndSwap is the call that checks the
+	// revision. Deleting a missing, expired, or already absent key succeeds and
+	// leaves the key absent. A malformed key fails with code invalid_argument.
+	// When the server cannot be reached, it fails at once with code unavailable.
 	Delete(ctx context.Context, key string) error
 }
 
