@@ -30,6 +30,9 @@ check every change against this page. Tools enforce what they can
 - **No history in comments or docs.** No "changed from …", "previously …",
   "new:", dates or author names. History lives in git. Comments and docs
   describe the code as it is.
+- **No decision provenance.** Documents state the system as it is and why,
+  never who decided or asked for it, when, or in which ticket. That belongs in
+  commits, pull requests and the tracker.
 - **No commented-out code.** Delete it; git remembers.
 - **TODOs carry a work package id or an issue key**: `// TODO(WP-L3-04): …`.
   A TODO without one fails review.

@@ -68,7 +68,7 @@ If a flow declares a state schema that is not a valid JSON Schema, then the flow
 ## Reserved edge endpoints (WP-L4-01)
 
 `START` and `FAIL` are reserved names for the entry and the failure exit of a flow
-(owner decision D2, 2026-11-17; `docs/architecture/flow-engine.md` §1). They are
+(`docs/architecture/flow-engine.md` §1). They are
 edge endpoints only: neither is declared as a node. Every rejection below fails
 with code `invalid_argument`, naming the node or edge at fault (REQ-FLOW-040 to
 REQ-FLOW-042) or stating that the flow needs exactly one edge from `START`

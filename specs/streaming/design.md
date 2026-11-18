@@ -15,7 +15,7 @@ not as a separate service.
 ### Dependencies
 
 WP-L6-01 depends on WP-L1-01 (SQL store), WP-L1-03 (Bus and KV) and WP-L5-01
-(runtime); owner decision, 2026-11-17. The relay publishes through the
+(runtime). The relay publishes through the
 `platform.Bus` port from WP-L1-03.
 
 ### Two pieces
@@ -26,7 +26,7 @@ WP-L6-01 depends on WP-L1-01 (SQL store), WP-L1-03 (Bus and KV) and WP-L5-01
   (REQ-STRM-010 … 012).
 - **Relay.** Reads unrelayed outbox entries per run in `seq` order, publishes
   each with `platform.Bus.Publish` (WP-L6-01 depends on WP-L1-03 for the
-  `platform.Bus` port; owner decision, 2026-11-17), and marks it relayed only
+  `platform.Bus` port), and marks it relayed only
   after the bus has accepted it (REQ-STRM-013, REQ-STRM-014). A failure leaves
   the entry unrelayed (REQ-STRM-015 … 019). It is a loop driven by the
   `core.Clock` and a fixed retry step; tests inject bus failures through a
@@ -64,7 +64,7 @@ of their own before the log itself:
    the tenant or name another tenant (REQ-STRM-022, REQ-STRM-025). `core`
    provides `core.TenantID`, `core.WithTenant(ctx, id)` and
    `core.TenantFrom(ctx) (core.TenantID, bool)`;
-   an empty id counts as no tenant (owner decision, 2026-11-17). The helper
+   an empty id counts as no tenant. The helper
    lands first, in its own contract pull request (`feat(core)`), before this
    work package.
 

@@ -4,8 +4,8 @@ Decisions the implementer of WP-L1-06 follows. Package:
 `platform/credentials`. It sits in the `platform` layer of `layering.yaml`, so
 it may import `core`, `platform` and the packages under `platform/` (including
 the SQL store); it imports no runtime, model or vendor package. Decisions:
-ADR-0004 and the owner decisions of 2026-11-17 on the audit port and the
-tenant context. Key wrapping and payload encryption are WP-L1-04's
+ADR-0004; the audit port and the tenant context are shared `platform` and
+`core` contracts (§5, §6). Key wrapping and payload encryption are WP-L1-04's
 ([`../secrets/design.md`](../secrets/design.md)); their terms (master key,
 data key, keyset) apply here but are not respecified.
 
@@ -16,7 +16,7 @@ data key, keyset) apply here but are not respecified.
 | Store | Implements `platform.Credentials` over a backing store, the Secrets port, `platform.Audit` and the clock. |
 | Backing store | `Backend`: where encrypted credential rows live. One SQL backend ships here; an external secret manager implements the same interface. It never sees a plaintext value. |
 | Secrets port | `platform.Secrets`: `Encrypt` on put, `Decrypt` on resolve. The master key, data keys and keysets belong to WP-L1-04 and never to this package. |
-| Audit port | `platform.Audit`: the audit sink the store is given, `Record(ctx, platform.AuditEvent) error`, called once per resolution of a well-formed reference with a tenant in context (owner decision, 2026-11-17). |
+| Audit port | `platform.Audit`: the audit sink the store is given, `Record(ctx, platform.AuditEvent) error`, called once per resolution of a well-formed reference with a tenant in context. |
 | Audit store | `AuditStore`: this package's SQL implementation of `platform.Audit`, an append-only table holding tenant events and deployment-level events, with tenant-scoped reads (REQ-CRED-029 to REQ-CRED-035). |
 | Use context | `Use`: principal, run and step, carried by the context of a resolution. |
 
@@ -77,8 +77,8 @@ caches nothing.
 - Listing order is the byte order of the UTF-8 names; the store sorts, and
   does not rely on the backend's order.
 - `platform.Credentials` keeps `Names(ctx) ([]string, error)` only: there is no
-  listing metadata (`CreatedAt`, `UpdatedAt`) on the port. That is the owner
-  decision of 2026-11-17; metadata may be added additively later, when needed.
+  listing metadata (`CreatedAt`, `UpdatedAt`) on the port. Metadata may be
+  added additively later, when needed.
 
 ## 4. Operations
 
@@ -105,8 +105,8 @@ store itself writes the plaintext nowhere.
 
 The tenant comes from the context through `core.TenantFrom(ctx)`:
 `core.TenantID`, set with `core.WithTenant`, and an empty id counts as no
-tenant. Every layer reads the tenant through that helper (owner decision,
-2026-11-17). The credential store requires it at the start of every public
+tenant. Every layer reads the tenant through that helper. The credential store
+requires it at the start of every public
 method, so no backend, Secrets call or audit event happens without one
 (REQ-CRED-005). The helper lands first, in its own `feat(core)` contract pull
 request, before this work package.
@@ -131,7 +131,7 @@ func UseFrom(ctx context.Context) Use
 ```
 
 The audit sink is the `platform.Audit` port; `platform.AuditEvent` is declared
-in `platform/platform.go` (owner decision, 2026-11-17), and lands first in its
+in `platform/platform.go`, and lands first in its
 own `feat(platform)` contract pull request before this work package:
 
 ```go
@@ -169,7 +169,7 @@ For every resolution of a well-formed reference with a tenant in context,
 successful or not, the store calls `Audit.Record` exactly once (REQ-CRED-017,
 REQ-CRED-018). If `Record` returns an error, the store returns no value and
 fails the resolution with code `unavailable` (REQ-CRED-028); that failure is
-logged, because the audit store is what failed (owner decision, 2026-11-17).
+logged, because the audit store is what failed.
 When the context carries no `Use` (or omits any of principal, run or step),
 `UseFrom(ctx)` yields empty strings for those fields and the resolution still
 proceeds and audits those empty fields (REQ-CRED-017).
@@ -186,7 +186,7 @@ fields above (REQ-CRED-019).
 `AuditStore` is this package's implementation of `platform.Audit`, constructed
 with `NewSQLAudit(store)` over the SQL store. It keeps one table for every
 producer, this package and WP-L8-02's denials among them; there is no second
-audit store (owner decision, 2026-11-17).
+audit store.
 
 ```sql
 CREATE TABLE audit_events (
@@ -207,7 +207,7 @@ CREATE INDEX audit_events_tenant_at ON audit_events (tenant_id, at, id);
 `Record` derives the effective tenant from `core.TenantFrom(ctx)` and appends
 one row (REQ-CRED-029); optional fields are stored as empty strings, never
 `NULL`, so a read returns the event as recorded. Following `platform.Audit`
-(PR #25, `platform/platform.go`):
+(`platform/platform.go`):
 
 - With a tenant `t` in `ctx`, `e.Tenant` must be empty or equal to `t`; `Record`
   rejects a different `e.Tenant` with code `invalid_argument` (REQ-CRED-034)

@@ -144,8 +144,8 @@ test-only packages; no test double is imported by `agent/conversation`.
 
 ## 8. Crash-resume
 
-WP-L7-03 takes no dependency on the Temporal runtime (owner decision,
-2026-11-17). Surviving a crash is the runtime's guarantee, proved by the
+WP-L7-03 takes no dependency on the Temporal runtime. Surviving a crash is
+the runtime's guarantee, proved by the
 conformance suite (WP-L5-04, `specs/runtime/conformance.feature`); the
 conversation logic here is specified on `@runtime:any` / local and does not
 restate it. A conversation crash-resume scenario on Temporal (queued and
