@@ -37,9 +37,13 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   branch yet, the checkout is left as-is.
 - **Starting inside the issue worktree.** A harness may run `gate agent new`
   from the worktree path instead of the main checkout; the previous session's
-  hand-off is kept and printed like any other turn on the branch.
+  hand-off is kept and printed like any other turn on the branch, including
+  across an intermediate session that never called `gate agent status`.
 - **Code reviewers get a detached snapshot** of that branch, so several can
-  run in parallel and none commits.
+  run in parallel and none commits, even when the command is started from
+  inside the working issue worktree.
+- **`-branch`** names are validated before any `git` call; only ordinary branch
+  names are accepted (no refspecs or path components).
 - **Leads stay in the main checkout**, as do sessions started with
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
