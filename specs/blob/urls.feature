@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-02 @level:component
+@wp:WP-L1-02 @level:component
 Feature: Blob URLs
   A blob URL lets a client without credentials, such as a browser or a
   worker, fetch one blob for a limited time. The cloud profile hands out the

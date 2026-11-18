@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-02 @level:component
+@wp:WP-L1-02 @level:component
 Feature: Opening a blob store from its location URL
   Configuration names the blob store by a location URL. The scheme selects the
   implementation, so the embedded and cloud profiles differ only in that URL.

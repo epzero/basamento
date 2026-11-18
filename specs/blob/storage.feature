@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-02 @level:component
+@wp:WP-L1-02 @level:component
 Feature: Storing, reading and deleting blobs
   Blobs are immutable and named by their content key, so the same content is
   stored once per tenant and a reader can verify what it got. Every scenario
