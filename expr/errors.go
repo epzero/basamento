@@ -2,7 +2,6 @@ package expr
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/epzero/basamento/core"
 )
@@ -29,13 +28,4 @@ func mappingCompileErr(src, detail string) error {
 
 func mappingEvalErr(detail string) error {
 	return exprErr("mapping: "+detail, nil)
-}
-
-func containsAll(msg string, parts ...string) bool {
-	for _, p := range parts {
-		if p != "" && !strings.Contains(msg, p) {
-			return false
-		}
-	}
-	return true
 }
