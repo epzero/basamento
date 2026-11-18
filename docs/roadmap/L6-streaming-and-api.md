@@ -3,7 +3,7 @@
 Runs outlive connections (ADR-0005, `specs/streaming`).
 
 ### WP-L6-01 — Durable event log
-Depends: WP-L1-01, WP-L5-01.
+Depends: WP-L1-01, WP-L1-03, WP-L5-01.
 Owns: `stream/eventlog`.
 Per-run sequence, outbox written with state changes, relay to the bus.
 
