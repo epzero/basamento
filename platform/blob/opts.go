@@ -19,7 +19,8 @@ type Options struct {
 	// of proxied read URLs (scheme + host + HandlerRoute prefix). Wiring sets it.
 	BaseURL string
 	// SignKey is required on a file-backed store for SignedURL and the proxied
-	// read handler. Wiring sets it.
+	// read handler. When non-empty it must be at least 32 bytes. An empty key
+	// means proxied URLs are disabled. Wiring sets it.
 	SignKey []byte
 }
 

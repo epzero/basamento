@@ -13,7 +13,7 @@ func TestPutHelloFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	raw := (&url.URL{Scheme: "file", Path: dir}).String()
-	st, _, err := Open(context.Background(), raw, Options{SignKey: []byte("test-signing-key-32-bytes-long")})
+	st, _, err := Open(context.Background(), raw, Options{SignKey: []byte("test-signing-key-32-bytes-long!!")})
 	if err != nil {
 		t.Fatal(err)
 	}

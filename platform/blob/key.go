@@ -4,9 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"regexp"
-	"strings"
 
 	"github.com/epzero/basamento/core"
 )
@@ -21,24 +19,9 @@ func ContentKeyOf(data []byte) string {
 	return keyPrefix + hex.EncodeToString(sum[:])
 }
 
-// ContentKeyOfReader hashes all of r and returns its content key.
-func ContentKeyOfReader(r io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, r); err != nil {
-		return "", err
-	}
-	return keyPrefix + hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // ValidateContentKey reports whether k is a well-formed content key.
 func ValidateContentKey(k string) bool {
-	if !contentKeyRE.MatchString(k) {
-		return false
-	}
-	if strings.ContainsAny(k, "/\\") {
-		return false
-	}
-	return true
+	return contentKeyRE.MatchString(k)
 }
 
 // HexOf returns the 64 lowercase hex digits of k, or an error.

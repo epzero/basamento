@@ -5,7 +5,21 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/epzero/basamento/core"
 )
+
+func TestOpenRejectsShortSignKey(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_, _, err := Open(context.Background(), "file://"+dir, Options{SignKey: []byte("short")})
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "short") {
+		t.Fatalf("error mentions key material: %s", err.Error())
+	}
+}
 
 func TestOpenErrorRedactsSecrets(t *testing.T) {
 	t.Parallel()
