@@ -77,6 +77,13 @@ the same change that first uses it.
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Model id** | The name a model is looked up by in the catalog and passed in a request, such as `sim-chat`. |
+| **Rate rule** | One row of a model's price: rates per million tokens (input, output, …) and an optional condition, the `when`, under which they apply. |
+| **Price formula** | The CEL expression that turns call parameters, usage and rates into milli-points, where cached tokens are part of the input and reasoning tokens part of the output. A model may declare its own; otherwise the default token formula applies. |
+| **Default token formula** | The price formula of a model priced by rate rules: a million input tokens cost the input rate and a million output tokens the output rate. Cached tokens are part of the input and cost the rule's cached rate when it has one, otherwise the input rate; reasoning tokens are part of the output and are counted once. |
+| **Price override** | A price set for one model in one layer above the shipped snapshot: the deployment's, or a tenant's, which applies only to that tenant's calls and wins over the deployment's. |
+| **Counted input tokens** | The tokens a model's tokenizer gives the messages, tool definitions and repair input of a call; an estimate counts them before the call. |
+| **Estimate** | What the price table computes for a call before it starts, from its counted input tokens and its output limit, to reserve against a budget. |
 | **Temporal runtime** | The `temporal` runtime: runs the flow host as a Temporal workflow and each step as an activity, with a payload codec that stores large run history payloads as blobs and encrypts every run history payload. Durable; continues a run as new at a checkpoint event threshold (`REQ-RT-039` … `REQ-RT-041`, `REQ-RT-028` … `REQ-RT-038`). |
 | **Run history** | The ordered record a durable runtime keeps of a run's durable calls and their results (on the temporal runtime, Temporal's event history); replay reads it, and ciphertexts and blobs in it differ between records of the same payload. |
 | **Claim-check threshold** | The most bytes of a run history payload the temporal runtime keeps in the run history; a larger payload is stored as a blob (`REQ-RT-028`). |
