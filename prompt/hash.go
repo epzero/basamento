@@ -27,6 +27,9 @@ type canonAssembled struct {
 
 // ContentHash returns SHA-256 hex of the assembled prompt canonical encoding.
 func ContentHash(a *Assembled) string {
+	if a == nil {
+		return ""
+	}
 	return hashCanon(canonAssembled{Ref: a.Ref, Parts: canonParts(a.Parts)})
 }
 
@@ -71,6 +74,9 @@ func hashCanon(c canonAssembled) string {
 
 // TemplateContentHash identifies template content for idempotent registration.
 func TemplateContentHash(t *Template) string {
+	if t == nil {
+		return ""
+	}
 	type canonIn struct {
 		Name  string `json:"name"`
 		Trust string `json:"trust"`
@@ -88,11 +94,20 @@ func TemplateContentHash(t *Template) string {
 		Inputs      []canonIn  `json:"inputs"`
 		Segments    []canonSeg `json:"segments"`
 	}
-	ins := make([]canonIn, len(t.Inputs))
-	for i, in := range t.Inputs {
-		ins[i] = canonIn{Name: in.Name, Trust: string(CanonicalTrust(in.Trust))}
+	byName := map[string]canonIn{}
+	for _, in := range t.Inputs {
+		byName[in.Name] = canonIn{Name: in.Name, Trust: string(CanonicalTrust(in.Trust))}
 	}
-	sort.Slice(ins, func(i, j int) bool { return ins[i].Name < ins[j].Name })
+	ins := make([]canonIn, 0, len(byName))
+	for _, in := range byName {
+		ins = append(ins, in)
+	}
+	sort.Slice(ins, func(i, j int) bool {
+		if ins[i].Name != ins[j].Name {
+			return ins[i].Name < ins[j].Name
+		}
+		return ins[i].Trust < ins[j].Trust
+	})
 	segs := make([]canonSeg, len(t.Segments))
 	for i, s := range t.Segments {
 		segs[i] = canonSeg{Name: s.Name, Kind: string(s.Kind), Text: s.Text, Budget: s.Budget}
