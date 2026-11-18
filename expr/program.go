@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -148,7 +149,8 @@ func mapCELCause(msg string) string {
 func (e *Env) bindVars(vars map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(vars))
 	w := newJSONWalk()
-	for name, val := range vars {
+	for _, name := range sortedVarNames(vars) {
+		val := vars[name]
 		st, ok := e.schemas[name]
 		if !ok {
 			return nil, bindErr(name, "undeclared variable")
@@ -167,7 +169,13 @@ func (e *Env) bindVars(vars map[string]any) (map[string]any, error) {
 
 func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 	if val == nil {
-		return nil, nil
+		if st.celType == cel.NullType {
+			return nil, nil
+		}
+		if st.celType.Kind() == cel.DynKind {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("wrong type")
 	}
 	if st.celType == cel.TimestampType {
 		s, ok := val.(string)
@@ -181,6 +189,12 @@ func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 		return ts, nil
 	}
 	switch st.celType.Kind() {
+	case cel.DoubleKind:
+		return bindDouble(val)
+	case cel.NullTypeKind:
+		return nil, fmt.Errorf("wrong type")
+	case cel.DynKind:
+		return bindDynValue(val, e, w)
 	case cel.IntKind:
 		return bindInt(val)
 	case cel.BoolKind:
@@ -208,7 +222,7 @@ func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 		elem := st.celType.Parameters()[0]
 		out := make([]any, len(arr))
 		for i, item := range arr {
-			sub := &schemaType{celType: elem}
+			sub := &schemaType{celType: elem, typeName: elem.TypeName()}
 			v, err := bindJSONValue(sub, item, e, w)
 			if err != nil {
 				return nil, err
@@ -228,8 +242,9 @@ func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 		defer w.up(ptr)
 		valType := st.celType.Parameters()[1]
 		out := make(map[string]any, len(m))
-		for k, v := range m {
-			sub := &schemaType{celType: valType}
+		for _, k := range sortedStringKeys(m) {
+			v := m[k]
+			sub := &schemaType{celType: valType, typeName: valType.TypeName()}
 			bv, err := bindJSONValue(sub, v, e, w)
 			if err != nil {
 				return nil, err
@@ -249,7 +264,21 @@ func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 					return nil, err
 				}
 				defer w.up(ptr)
-				return obj.Adapt(e.adapter, m), nil
+				bound := make(map[string]any, len(m))
+				for _, fk := range sortedStringKeys(m) {
+					fmeta, ok := obj.fields[fk]
+					if !ok {
+						bound[fk] = m[fk]
+						continue
+					}
+					sub := &schemaType{celType: fmeta.celType, typeName: fmeta.celType.TypeName()}
+					bv, err := bindJSONValue(sub, m[fk], e, w)
+					if err != nil {
+						return nil, err
+					}
+					bound[fk] = bv
+				}
+				return obj.Adapt(e.adapter, bound), nil
 			}
 		}
 		return val, nil
@@ -258,14 +287,97 @@ func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 	}
 }
 
+func bindDouble(val any) (float64, error) {
+	switch v := val.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Errorf("wrong type")
+		}
+		return v, nil
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0, fmt.Errorf("wrong type")
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("wrong type")
+		}
+		return f, nil
+	case int:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	default:
+		return 0, fmt.Errorf("wrong type")
+	}
+}
+
+func bindDynValue(val any, e *Env, w *jsonWalk) (any, error) {
+	switch t := val.(type) {
+	case map[string]any:
+		ptr := addrOf(t)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
+		out := make(map[string]any, len(t))
+		for _, k := range sortedStringKeys(t) {
+			nv, err := bindDynValue(t[k], e, w)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = nv
+		}
+		return out, nil
+	case []any:
+		ptr := addrOf(t)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
+		out := make([]any, len(t))
+		for i, item := range t {
+			nv, err := bindDynValue(item, e, w)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = nv
+		}
+		return out, nil
+	case json.Number:
+		if i, err := bindInt(t); err == nil {
+			return i, nil
+		}
+		f, err := t.Float64()
+		if err != nil {
+			return t, nil
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, fmt.Errorf("wrong type")
+		}
+		return f, nil
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return nil, fmt.Errorf("wrong type")
+		}
+		return t, nil
+	default:
+		return val, nil
+	}
+}
+
 func bindInt(val any) (int64, error) {
 	switch v := val.(type) {
 	case json.Number:
-		if _, err := v.Int64(); err != nil {
+		if i, err := v.Int64(); err == nil {
+			return i, nil
+		}
+		f, err := v.Float64()
+		if err != nil {
 			return 0, fmt.Errorf("wrong type")
 		}
-		i, err := v.Int64()
-		if err != nil {
+		i, ok := float64IntegralInt64(f)
+		if !ok {
 			return 0, fmt.Errorf("wrong type")
 		}
 		return i, nil

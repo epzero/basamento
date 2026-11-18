@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -125,7 +124,7 @@ func mapperToJSON(m traits.Mapper, w *jsonWalk) (map[string]any, error) {
 		}
 		out[string(ks)] = jv
 	}
-	return sortObjectMap(out), nil
+	return out, nil
 }
 
 func normalizeNativeJSON(v any, w *jsonWalk) (any, error) {
@@ -150,14 +149,14 @@ func stringMapDataToJSON(data map[string]any, w *jsonWalk) (map[string]any, erro
 	}
 	defer w.up(ptr)
 	out := make(map[string]any, len(data))
-	for k, v := range data {
-		jv, err := bindingValueToJSON(v, w)
+	for _, k := range sortedStringKeys(data) {
+		jv, err := bindingValueToJSON(data[k], w)
 		if err != nil {
 			return nil, err
 		}
 		out[k] = jv
 	}
-	return sortObjectMap(out), nil
+	return out, nil
 }
 
 func jsonObjectValToJSON(o *jsonObjectVal, w *jsonWalk) (map[string]any, error) {
@@ -170,14 +169,14 @@ func jsonObjectValToJSON(o *jsonObjectVal, w *jsonWalk) (map[string]any, error) 
 	}
 	defer w.up(ptr)
 	out := make(map[string]any, len(o.data))
-	for k, v := range o.data {
-		jv, err := bindingValueToJSON(v, w)
+	for _, k := range sortedStringKeys(o.data) {
+		jv, err := bindingValueToJSON(o.data[k], w)
 		if err != nil {
 			return nil, err
 		}
 		out[k] = jv
 	}
-	return sortObjectMap(out), nil
+	return out, nil
 }
 
 func bindingValueToJSON(v any, w *jsonWalk) (any, error) {
@@ -201,14 +200,14 @@ func bindingValueToJSON(v any, w *jsonWalk) (any, error) {
 		}
 		defer w.up(ptr)
 		out := make(map[string]any, len(t))
-		for k, val := range t {
-			jv, err := bindingValueToJSON(val, w)
+		for _, k := range sortedStringKeys(t) {
+			jv, err := bindingValueToJSON(t[k], w)
 			if err != nil {
 				return nil, err
 			}
 			out[k] = jv
 		}
-		return sortObjectMap(out), nil
+		return out, nil
 	case []any:
 		ptr := addrOf(t)
 		if err := w.down(ptr); err != nil {
@@ -227,24 +226,25 @@ func bindingValueToJSON(v any, w *jsonWalk) (any, error) {
 	case ref.Val:
 		return celValToJSONWalk(t, w)
 	default:
-		return t, nil
+		return bindScalarToJSON(v)
 	}
 }
 
-func sortObjectMap(m map[string]any) map[string]any {
-	if m == nil {
-		return m
+func bindScalarToJSON(v any) (any, error) {
+	if v == nil {
+		return nil, nil
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	switch t := v.(type) {
+	case bool, string, int, int64, uint64, float64, json.Number:
+		return t, nil
+	case time.Time:
+		return formatTimestampUTC(t), nil
+	default:
+		if rv, ok := v.(ref.Val); ok {
+			return celValToJSONWalk(rv, newJSONWalk())
+		}
+		return t, nil
 	}
-	sort.Strings(keys)
-	out := make(map[string]any, len(m))
-	for _, k := range keys {
-		out[k] = m[k]
-	}
-	return out
 }
 
 func formatTimestampUTC(t time.Time) string {
