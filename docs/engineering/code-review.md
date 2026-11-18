@@ -13,8 +13,9 @@ Most review happens before anyone else looks, on the author's machine.
   commands it ran and their output, not a claim that it is done.
 - The author's lead then runs this review (§2 to §4) with its own code
   reviewer sessions, at the depth of the change's tier, and sends the
-  surviving findings back to the implementer. From the second round on only
-  the new diff is read.
+  surviving findings back to the implementer. From the second round on the
+  review is incremental (§6): each open finding, and the whole diff since the
+  last reviewed commit.
 - After **three rounds** the lead stops spawning: it reads what is still
   open itself and settles each finding, fixed or dropped with a reason.
 - Only then is the pull request opened. Its description says what the
@@ -62,6 +63,10 @@ ordinary package, a new dependency), never lower it.
 | **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep: five finders, three verifiers per finding, a separate security pass | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
 | **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard: four finders, one verifier per finding | No |
 | **low** | Other docs | Quick: one finder, no verifier | No |
+
+Each session's effort follows `agent-workflow.md` §2.3: finders are heavy at
+high and medium risk and standard at low risk; verifiers are standard at high
+risk and light at low and medium risk; a round-2+ re-review stays standard.
 
 An agent's approval never counts as a person's. Medium changes need no
 person because people here are scarce; the revert rate (§7) is the guardrail,
@@ -121,14 +126,17 @@ Every finding is answered: fixed, or resolved with a reason (wrong,
 intentional, not worth it). A fix in a later commit resolves it.
 
 **An approval covers one commit.** New commits after approval are reviewed
-again (only their diff). The merge queue's rebuild on the latest `main` is
-not a new commit.
+again (the diff since the approved commit). The merge queue's rebuild on the
+latest `main` is not a new commit.
 
 ## 6. Iterate
 
 - The author fixes or answers every important finding, then asks again. From
-  the second round on, only the new diff is reviewed, and a finding already
-  posted or resolved is never repeated.
+  the second round on, the review covers each finding still open and the
+  whole diff since the last reviewed commit. Fixes introduce new defects, so
+  it is not limited to the lines a finding named, and it does not re-run the
+  round-1 fan-out of lenses on unchanged text. A finding already posted or
+  resolved is never repeated.
 - After **three rounds** on the pull request without approval the loop
   stops with `needs-architect`: the architect approves the change or
   proposes another direction for the owner to decide on

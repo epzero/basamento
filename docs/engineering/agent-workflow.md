@@ -28,8 +28,9 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
 | `-parent` | The lead that spawned the session. |
 
 - **One branch per change.** The first session gets a new worktree and
-  branch from `main`. Later sessions on the same work item are placed in that
-  worktree and take turns on its branch.
+  branch from `main`. Every later session and review round runs `gate agent
+  new` with the same `-issue`, which places it in that worktree to take its
+  turn on the branch.
 - **Code reviewers get a detached snapshot** of that branch, so several can
   run in parallel and none commits.
 - **Leads stay in the main checkout**, as do sessions started with
@@ -87,6 +88,13 @@ rest of its work moves on.
 4. **Idle** when every ticket assigned to it is handed on and its subagents
    have stopped. It then waits for the next trigger.
 
+**A lead keeps its context small.** It reads summaries, not bodies: `git
+diff --stat` or `--name-only`, a diff filtered to the paths it needs, a `gate
+spec queue` filtered to what the ticket or pull request needs, and the tail
+of a gate run. A full diff, a full gate or queue output is read by a
+subagent, never pasted into the lead's context. A tick with nothing to act on
+ends at once, with "nothing to do" as its whole report.
+
 A lead writes no specs and no code. It keeps no state of its own: tickets,
 pull requests and session records hold everything, so a fresh session can
 take over at any tick.
@@ -95,7 +103,13 @@ take over at any tick.
 
 A subagent ends with a status and a note; the note is the hand-off (scenario
 ids, the gate summary, requested changes, the question) and `gate agent new`
-prints it to the next session on that branch.
+prints it to the next session on that branch. Its report has fixed fields:
+the verdict or status; the commit and worktree; findings, each with
+`file:line`, the problem, a failure scenario and a fix, or the scenario ids
+and tiers it approved; deviations; and gate results, one line per command. It
+stays short, is not a narrative and does not restate the brief. Findings are
+never dropped or truncated for length: long detail goes into the review, the
+ticket or a file, and the report links to it.
 
 ```bash
 go tool gate agent status spec-review-requested -note "Review EXPR-001-01 to EXPR-004-02."
@@ -113,6 +127,21 @@ The same words are among the `ask` labels of hand-offs between maintainers (§3)
 | `ready-to-integrate` | a lead, on approval | the author merges |
 | `needs-architect` | the reviewer, after three review rounds without approval | the architect decides (§5) |
 | `needs-human` | anyone, one question with options as the note | the lead hands the ticket to the owner (§5) and resumes when it comes back |
+
+### 2.3 Effort tiers
+
+Task difficulty is expressed in three tiers. Which model or effort setting
+fills a tier is the harness's configuration (for example an agent
+definition's frontmatter), not a rule of this document.
+
+| Tier | Tasks |
+| --- | --- |
+| **heavy** | Round-1 spec review; code-review lenses at high and medium risk; the arbiter |
+| **standard** | Spec authoring and implementation; round-2+ re-reviews of specs and code; code-review lenses at low risk; finding verifiers at high risk |
+| **light** | Finding verifiers at low and medium risk; mechanical steps (a rebase without conflicts, a lock or doc regeneration); lead ticks with nothing to do |
+
+A re-review stays at standard, not light: its narrower scope is what makes it
+cheaper (`code-review.md` §6, `spec-review.md` §2).
 
 ## 3. The tracker
 
@@ -261,7 +290,9 @@ lead does is in its playbook, the skill `lead-<maintainer>`; what a subagent
 of a role does is in the skill `role-<role>`. Both are Agent Skills under
 `.agents/skills/<name>/SKILL.md`: a tool that discovers skills loads them by
 name, and any other is told to read the file. Nothing in them depends on
-the tool.
+the tool, and no document under `docs/engineering/` names a model, a model
+setting or a slash command except as an example of a mechanism a tool
+provides.
 
 | Tool | Finds the rules through | Starts a subagent of a role by |
 | --- | --- | --- |
@@ -327,15 +358,19 @@ Do this one step, record your status and stop. Never ask a person directly:
 end with needs-human.
 ```
 
+The prompt is that template plus a short header: the issue, pull request,
+branch, head commit, round and the path of any prior findings. It names the
+skill and doc paths it relies on instead of copying their rules.
+
 To have a different model review than the one that writes, run the reviewer
 on another tool or model.
 
 **Waking a lead.** A subagent finishing wakes it. For everything else give
 it a trigger: the tracker's notifications for its account where the tool can
-receive them, otherwise a timer (`/loop` in Claude Code, a scheduled task on
-the web, the tool's own automation). An hour is a good timer while there is
-work; with nothing assigned, twelve hours or the owner's request is enough.
-A fresh lead session per wake works too.
+receive them, otherwise a timer the tool provides (for example `/loop` in
+Claude Code, a scheduled task on the web, the tool's own automation). An
+hour is a good timer while there is work; with nothing assigned, twelve hours
+or the owner's request is enough. A fresh lead session per wake works too.
 
 **No permission prompts.** An unattended run cannot stop for one. Each
 maintainer allows, in their own tool settings (not committed), what the
@@ -380,10 +415,10 @@ its author approved.
 | --- | --- | --- |
 | 1. Take | developer | Takes a ticket assigned to it. With none left, runs `go tool gate wp -state ready`, opens a ticket for a ready work package that has none and assigns it to itself. A work package whose scenarios are missing or not approved goes to the designer first (§7.3). |
 | 2. Implement | developer | An implementer session in a new worktree, until `make gate BASE=main` passes and it records `code-review-requested`. |
-| 3. Self-review | developer | The code review of `code-review.md`, by code reviewer sessions at the depth of the change's tier, before anyone else sees it. Findings go back to the implementer; later rounds read only the new diff. After three rounds the lead reads what is still open itself and settles each finding: fixed, or dropped with a reason. |
+| 3. Self-review | developer | The code review of `code-review.md`, by code reviewer sessions at the depth of the change's tier, before anyone else sees it. Findings go back to the implementer; later rounds check each open finding and the whole diff since the last reviewed commit (`code-review.md` §6). After three rounds the lead reads what is still open itself and settles each finding: fixed, or dropped with a reason. |
 | 4. Open | developer | Pushes the branch and opens the pull request (§7.1), with what the self-review found and how it was settled. Hands the ticket to the reviewer. |
 | 5. Review | reviewer | Reads the change on GitHub; checks the branch out in a worktree only when it needs the code around it. Sets the risk (§5). Posts one review for the round: each important finding as a thread on its line and **Request changes**, or **Approve**. Hands the ticket back. |
-| 6. Answer | developer | Fixes or answers every thread and hands the ticket back; the reviewer resolves what is settled and reviews only the new diff. After a third round without approval the reviewer hands it to the architect (§5). |
+| 6. Answer | developer | Fixes or answers every thread and hands the ticket back; the reviewer resolves what is settled and checks each open finding and the whole diff since the last reviewed commit. After a third round without approval the reviewer hands it to the architect (§5). |
 | 7. High risk only | reviewer, owner | With no findings open, the reviewer does not approve yet: it hands the ticket to the owner, and approves once the owner has (§5). |
 | 8. Merge | developer | §7.1. |
 
@@ -399,7 +434,10 @@ that are already on `main`.
 | 2. Review | reviewer | A spec reviewer session checks the rubric. Changes: **Request changes** with the exact replacement text, ticket back to the designer. Approval: `gate spec approve` with a tier, the ledger commit pushed to the branch, **Approve**, ticket back. For P0 and P1 it also opens the acceptance ticket for the owner (§5). |
 | 3. Merge | designer | Merges, then hands the ticket to the developer (`ready-to-implement`), or closes it when nothing is left to build. |
 
-Three rounds without approval go to the architect (§5). A change to
+From the second round on a review checks the open findings and the whole diff
+since the last reviewed commit, and before approving the reviewer reads the
+complete text of the changed files once (`spec-review.md` §2). Three rounds
+without approval go to the architect (§5). A change to
 `specs/constitution.md` is high-risk and needs the owner (§5).
 
 ### 7.4 Technical design
