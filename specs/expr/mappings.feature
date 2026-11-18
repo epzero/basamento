@@ -158,7 +158,7 @@ Feature: JSON mappings
     Then evaluation fails with code "invalid_argument"
     And the error names the output limit 1048576
 
-  @REQ-EXPR-025 @id:EXPR-025-01 @security
+  @REQ-EXPR-023 @id:EXPR-023-01 @security
   Scenario Outline: A mapping that calls, defines or takes a reserved name as a parameter is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -185,7 +185,7 @@ Feature: JSON mappings
       | def f: modulemeta; f                     | modulemeta      |
       | get_search_list                          | get_search_list |
 
-  @REQ-EXPR-026 @id:EXPR-026-01 @security
+  @REQ-EXPR-024 @id:EXPR-024-01 @security
   Scenario Outline: A mapping that uses a reserved variable is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -201,7 +201,7 @@ Feature: JSON mappings
       | def f: $__loc__; f  | $__loc__       |
       | [.a, $ENV]          | $ENV           |
 
-  @REQ-EXPR-027 @id:EXPR-027-01
+  @REQ-EXPR-025 @id:EXPR-025-01
   Scenario Outline: Reserved names used as data are allowed
     Given the mapping "<mapping>"
     When the mapping is evaluated on <input>
@@ -218,7 +218,7 @@ Feature: JSON mappings
       | getpath(["env"]) | {"env": true}               | true                        |
       | has("halt")      | {"halt": 1}                 | true                        |
 
-  @REQ-EXPR-028 @id:EXPR-028-01 @security
+  @REQ-EXPR-026 @id:EXPR-026-01 @security
   Scenario Outline: A mapping that imports or includes a module is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"

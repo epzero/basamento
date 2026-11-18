@@ -39,8 +39,6 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
   - `unordered key` (a map key whose kind has no place in the order of §4)
   - `output over the output limit` (a mapping output over its output limit,
     §5)
-  - `mapping construction` (a mapping that builds a list or an object with
-    more entries than its output limit allows, §5)
 - A compiled `Program` or `Mapping` is immutable and safe for concurrent use.
 - `expr` imports only `core` (`layering.yaml`). It reads schemas as JSON, so
   it does not need `core/schema` (§2).
@@ -115,21 +113,15 @@ nothing is coerced from strings.
   Go map order, including which error an evaluation reports first. A custom
   type adapter that returns a sorted map for every native map, and an AST
   or evaluation decorator for map literals, is one way to do it.
-- **Keys of no order** (REQ-EXPR-022, REQ-EXPR-023): a map key with any
+- **Keys of no order** (REQ-EXPR-022): a map key with any
   other CEL type, such as a timestamp, a duration or a list, has no place in
   that order. An evaluation that iterates over such a map fails with the
   cause `unordered key`; it never falls back to Go map order and never drops
-  the entry. The same cause fails an evaluation that passes such a map on,
-  because a map with non-string keys has no JSON form (§3). The error does
+  the entry. An evaluation that returns such a map without iterating over it
+  fails with the cause `no JSON form`, as every map with non-string keys does
+  (REQ-EXPR-012). The error does
   not name the key or its value, which may be a credential a mapping has
   resolved.
-- **Keys that are not values** (REQ-EXPR-024): CEL builds a map literal
-  before anything can iterate it, and an entry such as `{[1, 2]: 'a'}` goes
-  in without error, while the map is not equal to itself. The adapter keeps
-  every entry it cannot order instead of dropping it, and building or
-  reading such a map fails with the cause `no such key`. An evaluation that
-  reads one key of the map and never needs the entry, as with `exists`,
-  succeeds.
 - **Cost**: cel-go's runtime cost tracking, with a limit per environment,
   default **1 000 000**. Cost is counted in cel-go's units, which do not
   depend on time or machine, so the same evaluation fails at the same point
@@ -137,7 +129,7 @@ nothing is coerced from strings.
   expressions: it is unbounded for any comprehension over a list of unknown
   size.
 
-## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-028)
+## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-026)
 
 - **Variables**: named variables (`$params`, `$inputs`…) declared at compile
   time. `$ENV`, `$__loc__` and `$__prog_args` are never one of them.
@@ -156,7 +148,7 @@ nothing is coerced from strings.
   `strptime`, `todate`, `fromdate`) are allowed, and so are step functions
   such as `range`, `limit`, `first`, `last` and `nth`. `input_line_number` and `get_search_list` are rejected as well, and so are
   the variables `$ENV`, `$__loc__` and `$__prog_args`, the shorthand `{$ENV}`
-  included (REQ-EXPR-026). The walk inspects every function call, every
+  included (REQ-EXPR-024). The walk inspects every function call, every
   definition name and parameter, every variable reference outside pattern
   bindings (including ObjectKeyVal shorthand), and queries inside index/slice
   expressions and pattern computed keys (PatternObject.KeyQuery,
@@ -169,7 +161,7 @@ nothing is coerced from strings.
 
   A second layer registers these builtins as functions that return an
   error, in case the walk misses a call.
-- **Reserved names** (REQ-EXPR-025): the rejected names are reserved even
+- **Reserved names** (REQ-EXPR-023): the rejected names are reserved even
   when a mapping defines its own function or parameter with them, as in
   `def now: 1; now` or `def f(env): 1; f(2) | env`. Without its own scope
   resolution, the mapping compiler cannot tell a call of the definition from
@@ -182,7 +174,7 @@ nothing is coerced from strings.
   the case is rare, because a mapping that wants its own function called
   `now` can rename it. The error names the function and says the name is
   reserved.
-- **Imports** (REQ-EXPR-028): `import` and `include` are rejected from
+- **Imports** (REQ-EXPR-026): `import` and `include` are rejected from
   Query.Imports of the parsed query before any module loader is asked for
   the file, with or without metadata or a body query. A data import
   (`import "path" as $name`) is in the same list. gojq keeps its own
