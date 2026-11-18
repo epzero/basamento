@@ -327,7 +327,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation of run state, lookup, cancel, gate resolution and listing on the local runtime.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/12
     RT-022-01:
         hash: sha256:4d4c7652359ed7a98be3fd7b3c02a3b013cdf44bbe5011f9bcfbecc632401416
         reqs:
@@ -371,7 +374,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation of run state, lookup, cancel, gate resolution and listing on the local runtime.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/12
     RT-025-02:
         hash: sha256:57f4a9953b014b0c40415e9689803e63554302e72f581e8389a19766f9fa4b59
         reqs:
@@ -382,7 +388,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation of run state, lookup, cancel, gate resolution and listing on the local runtime.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/12
     RT-025-03:
         hash: sha256:1cce2b690078f25d4305a32a5603ebce3f01bbed9790c023f4c8794a433f8ee4
         reqs:
@@ -393,7 +402,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation of run state, lookup, cancel, gate resolution and listing on the local runtime.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/12
     RT-026-01:
         hash: sha256:e5b354a865329aae791a9f99cd8819796e4c7c50f3f713e5a5f7cdc3942ff0b7
         reqs:
@@ -404,7 +416,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation of run state, lookup, cancel, gate resolution and listing on the local runtime.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/12
     RT-027-01:
         hash: sha256:fd925adfa7595e36efa51caf66a2d69d454047dc575740e41d9411738aea042c
         reqs:
