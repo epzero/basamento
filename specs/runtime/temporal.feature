@@ -160,3 +160,16 @@ Feature: The Temporal runtime
     And step "b" completed before the continue-as-new
     And the run was continued as new 1 time
     And the run returns "done"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-07
+  Scenario: Starting a run for another tenant than the context's is rejected before any history is recorded
+    Given a flow calls step "fetch" that returns {"ok": true}
+    When a run of "fetch" is started on the temporal runtime with context tenant "acme" and request tenant "globex"
+    Then starting the run fails with code "invalid_argument"
+    And step "fetch" was executed 0 times
+    And the Temporal test server holds no run history for that start
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-01
+  Scenario: Listing runs without a tenant in the context is rejected with invalid_argument
+    When runs of flow "review" are listed on the temporal runtime without a context tenant
+    Then listing runs fails with code "invalid_argument"

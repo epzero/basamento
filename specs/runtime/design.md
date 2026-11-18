@@ -1,5 +1,34 @@
 # Runtime: design notes
 
+## The request tenant follows the context (EP0-42)
+
+The rule binds every runtime on `Runtime.Start` (`StartRequest`), on the run
+references of `Describe`, `Cancel` and `Resolve`, and on the `RunQuery` of
+`List` (`REQ-RT-042`, owner decision, 2026-11-17). The tenant of a call is
+the context's (`core.TenantFrom(ctx)`); a tenant field the call carries
+(`StartRequest.TenantID`, `RunRef.TenantID`, `RunQuery.TenantID`) may be empty
+or equal to it, and nothing else. A field that names a different tenant is a
+mismatch, not a request on that tenant: the call fails with
+`invalid_argument` and nothing is started, changed or returned. The runtime
+never falls back to the field, so a start that names `globex` on an `acme`
+context starts no run in either tenant (`RT-042-01`), and an `acme` caller
+cannot read, cancel or resolve through a reference that says `globex`
+(`RT-042-02` … `RT-042-05`). This check comes before the same-tenant lookup,
+so the `not_found` of `REQ-RT-025` keeps answering for a reference that agrees
+with the context.
+
+Enforcing the context against the field also fails closed when the context has
+no tenant (and an empty context id is no tenant, not a tenant that matches an
+empty field): on the local runtime
+every call without a context tenant is rejected with `invalid_argument`
+(`REQ-RT-044`), and on the temporal runtime the calls other than start
+(`REQ-RT-045`; start is `REQ-RT-040`).
+
+The tenant a call is served under is the context's, so a returned `RunRef`
+carries that tenant (`REQ-RT-043`): the start's and the description's
+reference name the run's tenant, never an empty string or a field the caller
+passed.
+
 ## Local runtime (WP-L5-01)
 
 Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019` and
