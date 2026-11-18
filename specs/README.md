@@ -36,7 +36,7 @@ Capabilities:
 | [`credentials`](credentials/requirements.md) | Planned (WP-L1-06). |
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
-| [`prompt`](prompt/requirements.md) | Planned (WP-L3-05). |
+| [`prompt`](prompt/requirements.md) | Implemented (WP-L3-05). |
 | [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
 | [`config`](config/requirements.md) | Planned (WP-L1-05). |
 | [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |
