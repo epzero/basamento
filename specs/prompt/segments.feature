@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-05 @level:component
+@wp:WP-L3-05 @level:component
 Feature: Segments, budgets and cache hints
   The assembler orders a template's segments so the stable text comes first,
   keeps each segment within its budget, trims history from the oldest entry
