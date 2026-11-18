@@ -91,3 +91,251 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    STRM-008-01:
+        hash: sha256:f627fce47f7171dc75616fd377b57250dd43c3a54176f55a7bcf466baa481e2f
+        reqs:
+            - REQ-STRM-008
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-009-01:
+        hash: sha256:9d4c47ead45ddd5c2f9c4c5b8a002fb8d2c2ae900de9179ea283fbe0451e6938
+        reqs:
+            - REQ-STRM-008
+            - REQ-STRM-009
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-010-01:
+        hash: sha256:cdb66cb432ee17ae970259266c783081d4e68ef45c7ae2e952eba2c16fdd133a
+        reqs:
+            - REQ-STRM-010
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-011-01:
+        hash: sha256:44f9d52a544de7dbfa4efd3a204b1fdf056fe9a8e345e3163256e0ecf93a78d9
+        reqs:
+            - REQ-STRM-010
+            - REQ-STRM-011
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-012-01:
+        hash: sha256:9d65340f27c4d2e8cf2e5bec728f7885a6c50aa7e803eee15f26812a1803535c
+        reqs:
+            - REQ-STRM-012
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-013-01:
+        hash: sha256:3d860255cfee70910027436c63ab1666ee553e99949230c160999077917f2a9a
+        reqs:
+            - REQ-STRM-013
+        tier: P2
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    STRM-014-01:
+        hash: sha256:67fb8c35d337fdd89f69e4f59ae321099b91f26711d6a97de6018215a59b8893
+        reqs:
+            - REQ-STRM-014
+        tier: P2
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    STRM-015-01:
+        hash: sha256:41a7b557ffae3c12df53d9825128f9ab91a5fdd626cfa012dbff0fcb8558f1ad
+        reqs:
+            - REQ-STRM-015
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-016-01:
+        hash: sha256:b1d7590e9d519f599fe645fc3236b490bb5003ca5e0b9b7b7ebe803a577f4aaf
+        reqs:
+            - REQ-STRM-016
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-017-01:
+        hash: sha256:a52c85752b2cebabd403b7fb44034088d6022a7ca27cfacd7c2e5121d4dae3d3
+        reqs:
+            - REQ-STRM-017
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-018-01:
+        hash: sha256:71856e9bb2d5e2b8aad9d3381d3a7f68f9fdc37e5375de9abb2476bebac41377
+        reqs:
+            - REQ-STRM-018
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-019-01:
+        hash: sha256:6edaaf8505e89e47edc5f4fb8eb55cfbedd84cfb51aeadc6b970dbfeafcf1015
+        reqs:
+            - REQ-STRM-019
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-020-01:
+        hash: sha256:97dd4a2703ff44eb13c9cbac8835fbb14b7d2dca95303fdc6c671e53888c43ce
+        reqs:
+            - REQ-STRM-020
+        tier: P2
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    STRM-020-02:
+        hash: sha256:2fc61d1230a9d1638a8bac64a20e754479ce251dec3e30accc21fb819354e15d
+        reqs:
+            - REQ-STRM-020
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: gapless per-run sequencing, atomic state-plus-outbox writes/crashes/rollbacks, and contiguous concurrent cursor reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-021-01:
+        hash: sha256:2b0467ab44f7ff1f69de9139d5d6d3ba4ab410d780d95b078d1b86ec23fb32bc
+        reqs:
+            - REQ-STRM-021
+        tier: P2
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    STRM-021-02:
+        hash: sha256:402cd51f3e6df8a069f9e51b7eb96562503abe42e18736ce9fe1adf49dceb76c
+        reqs:
+            - REQ-STRM-021
+        tier: P2
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    STRM-022-01:
+        hash: sha256:763e7f35d996ad4f7e57a2f3eb398039fb012f8fcaab0026ede7bef5742b634a
+        reqs:
+            - REQ-STRM-022
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Security: structural tenant requirement and cross-tenant isolation on event log reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-024-01:
+        hash: sha256:96f2f399fe5fe94322c8a55ae5a8d7451448506346fa9d842fbb1a27b9463f64
+        reqs:
+            - REQ-STRM-024
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Durability and contract: at-least-once relay crash/outage recovery, head-of-line preservation, duplicate identity, and event envelope.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9
+    STRM-025-01:
+        hash: sha256:f6998f4ddeb676b58214dfb904fb0bcfac00207e170c60f7086a4c209f019365
+        reqs:
+            - REQ-STRM-025
+        tier: P0
+        author: claude-code:spec-author:1cb4a7
+        reviewer: antigravity:spec-reviewer:7750a0
+        approved_at: "2026-11-17"
+        note: 'Security: structural tenant requirement and cross-tenant isolation on event log reads.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/9

@@ -32,3 +32,10 @@ Capabilities:
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
+| [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
+| [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |
+| [`bus`](bus/requirements.md) | Planned (WP-L1-03). |
+| [`expr`](expr/requirements.md) | Planned (WP-L2-01). |
+| [`blob`](blob/requirements.md) | Planned (WP-L1-02). |
+| [`secrets`](secrets/requirements.md) | Planned (WP-L1-04). |
+| [`sql`](sql/requirements.md) | Planned (WP-L1-01). |

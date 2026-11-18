@@ -2,7 +2,9 @@
 
 Basamento is a foundation for agent and flow orchestration in Go. Products
 built on it include AI media production pipelines, business-app code
-generation and interactive narrative. Status words: **Implemented**,
+generation and interactive narrative. Products and presets ship as their own
+binaries, each from its own Go module, importing Basamento; they are not part
+of `kit`. Status words: **Implemented**,
 **Planned** (see `docs/roadmap/`).
 
 ## 1. Shape

@@ -1,0 +1,374 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    TOOL-001-01:
+        hash: sha256:255b25ccaf49003b7dbf151cf823df082d77cf294f19850305d430ea71f0bdfa
+        reqs:
+            - REQ-TOOL-001
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-002-01:
+        hash: sha256:bc922735f98e2cea46a13cd107f3cdbd7c67b5526b070cfb4189cf41f7c9ea29
+        reqs:
+            - REQ-TOOL-002
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-002-02:
+        hash: sha256:e69bcf791caca6963cc4de1c518fba34095e63fbdbd5d9f0836c109685ad8690
+        reqs:
+            - REQ-TOOL-002
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-003-01:
+        hash: sha256:a53b2849d4953b4ed16f1f95ae7b026f6ffd3876428e28f9e750f5475a45a585
+        reqs:
+            - REQ-TOOL-003
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-003-02:
+        hash: sha256:ef86dfa3c77c850245c33a59099ad34d7ebcb9f5ce4252d72af569165b30b2ea
+        reqs:
+            - REQ-TOOL-003
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-003-03:
+        hash: sha256:c64eadd6a9f6b76af129fa15f3fb28d5a3156cf6589c0b218bf33eb3e6fcc55a
+        reqs:
+            - REQ-TOOL-003
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-004-01:
+        hash: sha256:e14770c11d6cb1c8952c5dc3de84ff71ff8ec0fa1ab5e7384ed56f1f9000eccc
+        reqs:
+            - REQ-TOOL-004
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-005-01:
+        hash: sha256:6eaae69cd93efdeb2198b4acef074e1c810ee832c2cf379f387fa7803fcc80c1
+        reqs:
+            - REQ-TOOL-005
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-006-01:
+        hash: sha256:e8ae6b09b0edf373d939a3d650c9c3a05f76ca4666ee14b2551c930bf9458ab9
+        reqs:
+            - REQ-TOOL-006
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-007-01:
+        hash: sha256:a45d8891f786ee482c694f4f1eda90083f4a403bbebf973befa7514261589a3d
+        reqs:
+            - REQ-TOOL-007
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-008-01:
+        hash: sha256:68f2959868a89cb5d4f1a4bd40e6086e03a58c54a5ee2d70bb1230712575388d
+        reqs:
+            - REQ-TOOL-008
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-008-02:
+        hash: sha256:5d274d047e6acabcd8018a34da4033f90421d827495706dea51686ead66ec7c9
+        reqs:
+            - REQ-TOOL-008
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-009-01:
+        hash: sha256:decf0f526d201f1e6c073b0cf9890694c6c390d7d993cf666b52cb3a4ec9f311
+        reqs:
+            - REQ-TOOL-009
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-011-01:
+        hash: sha256:3289a9f57f5cbc89ce11918337eb4253c95c494f3639de0529ea03c4e416d016
+        reqs:
+            - REQ-TOOL-011
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-011-02:
+        hash: sha256:902a89fe60b7841e35f03a0864b01b8d90fb5be1ebe0ddb99f3b57b9d77653b9
+        reqs:
+            - REQ-TOOL-011
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-012-01:
+        hash: sha256:963916250154b8ff61c6b158835eab2215e4fa304a1dafb8ddba31a736b54df3
+        reqs:
+            - REQ-TOOL-002
+            - REQ-TOOL-012
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-012-02:
+        hash: sha256:dec3ec104afcb822c8322c4fe0c89812c7b5621c5d64f3e81c5e8b8cca5efbe3
+        reqs:
+            - REQ-TOOL-012
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-013-01:
+        hash: sha256:70b09431467bdd449ad123bfa00ad05f38d988430f716e79e957a4fe6a3368b5
+        reqs:
+            - REQ-TOOL-012
+            - REQ-TOOL-013
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-014-01:
+        hash: sha256:d0368fe06db2e8bfc63ede7b8d37f6a23e5facffeecf81c6111da01749b79689
+        reqs:
+            - REQ-TOOL-014
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-015-01:
+        hash: sha256:f92d8824aa88f63d32f5d518f5853fa6b3719306e0132c1ea5822b2be093dc7b
+        reqs:
+            - REQ-TOOL-015
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-016-01:
+        hash: sha256:fe672f265bc98824ceb2e913049142719ae2ada08ce3430947e4807ea38448da
+        reqs:
+            - REQ-TOOL-016
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-017-01:
+        hash: sha256:3fa7b905197c843dd2853a5315c37fe287b169c47514d4623035f9a66c81a63a
+        reqs:
+            - REQ-TOOL-017
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: MCP credential resolved at call, secret never in events, history, errors or logs.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-018-01:
+        hash: sha256:9255224c8d81df427cc864f885ed95366fe7f5d822be20390e02476e7dd56058
+        reqs:
+            - REQ-TOOL-018
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: sandbox isolates host files, env, metadata service and network.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-018-02:
+        hash: sha256:ebbfb3437363d84555a0c23d441148d909c021c772ebfe2ba3872fcc7a7bb63c
+        reqs:
+            - REQ-TOOL-018
+        tier: P0
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'Security: sandbox isolates host files, env, metadata service and network.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
+    TOOL-019-01:
+        hash: sha256:cd522b4b12b885b15adbce499930065187ba6da85d25604075670c8408945483
+        reqs:
+            - REQ-TOOL-019
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-020-01:
+        hash: sha256:0197170fa63b7a059ed5efc98064eed7c7a49fab8135c4e2cde6a2f6fb560ec8
+        reqs:
+            - REQ-TOOL-020
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-021-01:
+        hash: sha256:7f0139eb7eeae39622afe3c7aaf942fde651002ac958d49cd8a7264d20aeafb2
+        reqs:
+            - REQ-TOOL-021
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-022-01:
+        hash: sha256:10a7f19745071c08be11b703bf83e638b14a9e4cb1511e29aa19b119ec8159ed
+        reqs:
+            - REQ-TOOL-022
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-023-01:
+        hash: sha256:b10346cd30e8682160156294a2fce7a1a3e0b5723556ed16e9dc31a3c53339bd
+        reqs:
+            - REQ-TOOL-023
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-024-01:
+        hash: sha256:3acc70adcabbc2576eba9f6af19449f91071c6801c36508503468576854372bb
+        reqs:
+            - REQ-TOOL-024
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
+    TOOL-025-01:
+        hash: sha256:fbb9ce6b3f7a97a6b5f452549ed33030a9ac15a873fa27140d3254ea4f639603
+        reqs:
+            - REQ-TOOL-025
+        tier: P2
+        author: claude-code:spec-author:970164
+        reviewer: antigravity:spec-reviewer:2b3c60
+        approved_at: "2026-11-17"
+        note: 'New behavior: tool port, MCP client and sandbox port.'
+        human:
+            status: pending
