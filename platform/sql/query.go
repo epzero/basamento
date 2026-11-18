@@ -16,7 +16,9 @@ import (
 // block comments, and dollar-quoted bodies becomes $n in order. Authored $n
 // markers are rejected with invalid_argument. Any ? outside those regions is a
 // bind marker, so Postgres jsonb operators ?, ?|, and ?& cannot appear in SQL;
-// use jsonb_exists, jsonb_exists_any, and jsonb_exists_all instead.
+// use jsonb_exists, jsonb_exists_any, and jsonb_exists_all instead. A
+// driver.Valuer bind argument is converted once for this check and once by
+// database/sql, so Valuers must be side-effect free.
 type Execer struct {
 	db      *sql.DB
 	tx      *sql.Tx
