@@ -76,3 +76,402 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    FLOW-010-01:
+        hash: sha256:03632a4d00fe414dad042dd0d0e0b832c2390baddc148cf709fc13b13a7ff92c
+        reqs:
+            - REQ-FLOW-010
+        tier: P0
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
+    FLOW-011-01:
+        hash: sha256:6f8c868bd393ddc5080c9c5e9306b0a1f577408ace7eb521efc25a02cfaee56f
+        reqs:
+            - REQ-FLOW-011
+        tier: P0
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
+    FLOW-011-02:
+        hash: sha256:8d7cab5be25b7c8f27503f9fae1943f9c5c81ee1783e91922b32c20bccac2d4e
+        reqs:
+            - REQ-FLOW-011
+        tier: P0
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        note: 'Determinism and content-hash identity: Go-built flows produce canonical, byte-identical IR and matching content hashes regardless of node/reducer order or repeated builds.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/17
+    FLOW-012-01:
+        hash: sha256:2ee05668151ee2eb9e60bf35e6009a9e062fb1265ad1e77b1ebc4dffaaa68ae6
+        reqs:
+            - REQ-FLOW-012
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-013-01:
+        hash: sha256:3bd0005e6f7945405d527f6bf4c83f6f99709d166254296e1813130a83c2e131
+        reqs:
+            - REQ-FLOW-013
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-014-01:
+        hash: sha256:466a0a20f0738539c7c9fa230db7eac70c789e3ada5427fd467239f623af3f62
+        reqs:
+            - REQ-FLOW-014
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-014-02:
+        hash: sha256:83ca16913035f66730c98e6c6a141bff464c9bf7df3722f41a94ce93ff808994
+        reqs:
+            - REQ-FLOW-014
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-015-01:
+        hash: sha256:51f6468a5e069ae9b9cce2cbd317149f440c84e7f03d3a399369851f09e6e7f7
+        reqs:
+            - REQ-FLOW-015
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-016-01:
+        hash: sha256:345f46972bfcd220d60c1ef96c491dd2fa29e8d9b333b9ba9273e7289ec5aa0d
+        reqs:
+            - REQ-FLOW-016
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-017-01:
+        hash: sha256:c283f39bd48df1518fbdf7ef3392244e8d175e0e16013f308d2d64f8fd2f08b7
+        reqs:
+            - REQ-FLOW-017
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-018-01:
+        hash: sha256:aff518e136807f9346570a3eba1105c6d92c2ce1d35cfb5308f0af0d8eefabb9
+        reqs:
+            - REQ-FLOW-018
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-019-01:
+        hash: sha256:86261b102dd97cccba33d903217852431f4c865256b54a2145ca06c0e7654b14
+        reqs:
+            - REQ-FLOW-019
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-021-01:
+        hash: sha256:899cefed9124683f6133a53a39dc7c348a832c7286f4c832f9b2ba4d77aee558
+        reqs:
+            - REQ-FLOW-021
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-024-01:
+        hash: sha256:81bcbbd6014242048d9a333880c546a4b4c5d4ade527bdc008af5fa7048cf3a6
+        reqs:
+            - REQ-FLOW-024
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-026-01:
+        hash: sha256:6b2e18c873da920d65bab76f6031d59e652ec20a4d1074a3b7d53d1e02afb425
+        reqs:
+            - REQ-FLOW-026
+        tier: P2
+        author: claude-code:spec-author:6a2021
+        reviewer: antigravity:spec-reviewer:360f54
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    FLOW-027-01:
+        hash: sha256:7999127d4e68b386fa5c3a7f13bfc4014f005cfa5d63b848df43d26292c16cee
+        reqs:
+            - REQ-FLOW-027
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Run durability and determinism: an in-progress run stays pinned to the flow definition hash it started with when newer versions are registered.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21
+    FLOW-028-01:
+        hash: sha256:f12b6481baec4368806d0f5d7963e83fcef24970605bab6b2c50ddad40f6e74e
+        reqs:
+            - REQ-FLOW-028
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-029-01:
+        hash: sha256:8a6e660eee096d5d4c33aaa3ee36705e08afc7bfe279d11da79eec3be5202871
+        reqs:
+            - REQ-FLOW-029
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-030-01:
+        hash: sha256:1f520c00cc264de93ed9101ce15473b47a83ec0d293a24916e03dd160f231188
+        reqs:
+            - REQ-FLOW-030
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-031-01:
+        hash: sha256:ef8e6cad2ac750ccf59c6f47ef2548f780f6f184cc14878c63e588bd3b8aee93
+        reqs:
+            - REQ-FLOW-031
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-031-02:
+        hash: sha256:d106416cbcc8ffe896d45d53397f1c1a58d85624ba08e0b027c7056f8e0f85bd
+        reqs:
+            - REQ-FLOW-031
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-032-01:
+        hash: sha256:384772752dad549714e5d9eb6927c5856008755ee4916ddf36895efbbc20c832
+        reqs:
+            - REQ-FLOW-032
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-033-01:
+        hash: sha256:8e2d62cde3eab4e998fcb81dd9e9b7826ce82c6b15c1979f47bfa20b1fdc3461
+        reqs:
+            - REQ-FLOW-033
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-01:
+        hash: sha256:0759a861438e7a36be5310cf68d52e89fcd1151091358ef54d66efb85f12416f
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-02:
+        hash: sha256:d615268f9b84318335d39e9a0ec9316f49f023f2c821c4271ea2fdcb52f0de82
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-03:
+        hash: sha256:87f9a20b500eb85f9a495edce941dbf1ac46dfaee48d435f2e920ba54571478d
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-04:
+        hash: sha256:a74e047b34cf3649d84ae372ea523f7447cb7a5642cf6250dcb559ae073d0605
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-05:
+        hash: sha256:6ba76a7e26904aa8845f79eee06200fb53277e52a20480a91d0240201ab358b5
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-036-01:
+        hash: sha256:2070d2e3db08ffb4ce8550e0aed6e540b5368507adb7cad46382cc0b3e764cf5
+        reqs:
+            - REQ-FLOW-036
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-037-01:
+        hash: sha256:78a05859f74b769032b979742bc51e26b952558b961cb188c1cc691851742443
+        reqs:
+            - REQ-FLOW-037
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Replay durability and determinism: replaying a recorded history reproduces the exact durable calls in order without re-executing completed steps.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21
+    FLOW-038-01:
+        hash: sha256:e4d9cf880b62268db1e088be95056eab8cf03c0d6b8b160bd5b1dca707b734a3
+        reqs:
+            - REQ-FLOW-038
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-039-01:
+        hash: sha256:845d02044c064bb7db63cd7a0eb41a52f58b309cba62e81e87e3924af5190ddf
+        reqs:
+            - REQ-FLOW-039
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-040-01:
+        hash: sha256:a198e01083f932ce1be6ffd757583998b763db25022ccddfa09c07c0c0afb98f
+        reqs:
+            - REQ-FLOW-040
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-041-01:
+        hash: sha256:391a4b9ba3ae9fbf9510a5f9d580cadea3e421fdc43f8b8cdd94c21c81c83734
+        reqs:
+            - REQ-FLOW-041
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-042-01:
+        hash: sha256:03892bb51efd72c4bcccc6f529a4b8e184c2b54a70b377b52ab1d06e1ce8fb1f
+        reqs:
+            - REQ-FLOW-042
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-043-01:
+        hash: sha256:fffe7267456600bb927a2e7dbbc4f5ab24b2ec273f4e75d156a35982c2cbca96
+        reqs:
+            - REQ-FLOW-043
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-044-01:
+        hash: sha256:eef986ed27018c2f648508004acea388b497c96a75d649c41198093462022bcc
+        reqs:
+            - REQ-FLOW-044
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Superstep scheduling determinism: starting all durable calls in a superstep in command order before waiting prevents blocking or reordering parallel operations.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21

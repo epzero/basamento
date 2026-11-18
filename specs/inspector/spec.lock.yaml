@@ -1,0 +1,222 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    INSP-001-01:
+        hash: sha256:908dc6a596149f48090453b13a3e5926abcc16b5bc801f891360dc0b492a0cbf
+        reqs:
+            - REQ-INSP-001
+            - REQ-INSP-002
+        tier: P0
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
+    INSP-001-02:
+        hash: sha256:299fb31b1cf7b1c7682646e5e850015cdcee137967357f4177d61604cf9c4b6b
+        reqs:
+            - REQ-INSP-001
+        tier: P0
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
+    INSP-002-01:
+        hash: sha256:ea293f5b8f8e00c4bb3ca5d320d3e1ef978adbbc073e29110e47f20b86577785
+        reqs:
+            - REQ-INSP-002
+        tier: P0
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8
+    INSP-003-01:
+        hash: sha256:8d9527fc031bab16f5a1a3f72713c1cc1dbbc9ed8b13220e4784342be507ede3
+        reqs:
+            - REQ-INSP-003
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-003-02:
+        hash: sha256:2eac72f120b9e9dcd9d4edf54a790ba547461a8560722f020580f73ae947feb4
+        reqs:
+            - REQ-INSP-003
+            - REQ-INSP-004
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-004-01:
+        hash: sha256:2c72dc2e309ed9fb4436eca083c5b764274b947af3d3a287330fc0fbe6c802fa
+        reqs:
+            - REQ-INSP-004
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-005-01:
+        hash: sha256:1039134455cb8feec42a8bebddaf84e92ddbceb9dbdeb5195a421803b6d8638f
+        reqs:
+            - REQ-INSP-005
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-005-02:
+        hash: sha256:466919988f1b37f24a45398956716cb603bb5613193e51c94563b40eae5032e8
+        reqs:
+            - REQ-INSP-005
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-005-03:
+        hash: sha256:98b5d25ca5c34c560c8898a3f11dda26ecd840a043e04cda3569f3cfaf1b14af
+        reqs:
+            - REQ-INSP-005
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-005-04:
+        hash: sha256:88449dc177cd323bcc4b77694e3442348c7310330436308fd6acbcf9ef8fe97a
+        reqs:
+            - REQ-INSP-005
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-006-01:
+        hash: sha256:dc8f9b0ca721cdac514e32e1ef47c69bc22c909ab4acdca0e0ffba033d471db3
+        reqs:
+            - REQ-INSP-006
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-007-01:
+        hash: sha256:89c12c5398ab5f5ead8f1a312c9aeb7acacf130858a5b9533e3189012afa86ee
+        reqs:
+            - REQ-INSP-007
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-007-02:
+        hash: sha256:95a56037e6f265547f415942199df3cccfd7ba5dc8d177795db69c232fd19344
+        reqs:
+            - REQ-INSP-007
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-008-01:
+        hash: sha256:a85e197b29c131669357ec51a9fd14dbe3796f35e7f9933ba519c0f8f3bc2a2a
+        reqs:
+            - REQ-INSP-008
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-008-02:
+        hash: sha256:d43af8368983d4eb79ec2c8dcc0ecaf702647f5143ceda5d255ee3f384f1ff17
+        reqs:
+            - REQ-INSP-008
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-009-01:
+        hash: sha256:d36afb38fa27312fed1ad6300b454896c95bbf83d64191d9c6d6c4b69291777b
+        reqs:
+            - REQ-INSP-009
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-010-01:
+        hash: sha256:9146f9a9a3a90eeeea5e3bf327f8206074b3395debcf77d795ff5ae332751c99
+        reqs:
+            - REQ-INSP-010
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-011-01:
+        hash: sha256:c55906687404d600fc3c35e9972ae83329e71764f8e64cc6487fe7b6119a964c
+        reqs:
+            - REQ-INSP-011
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-012-01:
+        hash: sha256:a166c095e5b4c80ea9c2d1fd88305bacea65a8c39862a5a9f709bccb90677e7d
+        reqs:
+            - REQ-INSP-012
+        tier: P2
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    INSP-013-01:
+        hash: sha256:3c47ec98b288b35c4ca6128d7e6966872916c885c49207dc30341d3395beba62
+        reqs:
+            - REQ-INSP-013
+        tier: P0
+        author: claude-code:spec-author:7a7410
+        reviewer: antigravity:spec-reviewer:c40b92
+        approved_at: "2026-11-17"
+        note: 'Security: tenant isolation, project scope and run read permission enforcement in the inspector.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/8

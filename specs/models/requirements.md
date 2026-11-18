@@ -1,6 +1,6 @@
 # Models: one invocation contract
 
-Status: **Planned** (WP-L3-01, WP-L3-03, WP-L3-04; workers in WP-L3-07 and
+Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04, WP-L3-06; workers in WP-L3-07 and
 WP-L3-08). Design: ADR-0006, ADR-0012,
 `docs/architecture/model-layer.md`.
 
@@ -143,3 +143,138 @@ If three launches of a worker template in a row do not join by their cold-start 
 
 ### REQ-MODEL-042 — Idle workers leave
 When a worker started with an idle-exit time has held no lease for that time, the worker shall leave its pool and exit.
+
+## Structured output and middleware
+
+Chat calls go through middleware in one fixed order (call log ∘ recording ∘
+fallback ∘ metering ∘ retry ∘ timeouts) and structured output climbs one
+ladder, native schema → JSON mode → forced tool call → local JSON repair, on
+one attempt budget (`docs/architecture/model-layer.md` §5, ADR-0006).
+
+### REQ-MODEL-043 — One attempt budget for a chat call
+The model layer shall count every attempt of one chat call, across retries and structured-output ladder rungs, against one attempt budget of 3 attempts unless the call sets another.
+
+### REQ-MODEL-044 — Which rung is tried
+When a structured-output call runs, the model layer shall try the supported rungs of the ladder in order, and shall advance to the next supported rung only after an attempt whose output does not satisfy the output schema.
+
+### REQ-MODEL-045 — One rung per attempt
+The model layer shall ask one model call of a structured-output call to produce its output on at most one rung of the ladder.
+
+### REQ-MODEL-046 — A model that supports no rung is not called
+If a structured-output call targets a model that supports no rung of the structured-output ladder, then the model layer shall fail the call with code `unsupported` and shall start no invocation.
+
+### REQ-MODEL-047 — Budget or ladder spent
+If a structured-output attempt does not satisfy the output schema and either the attempt budget is spent or no further supported rung and no local JSON repair remains, then the model layer shall fail the call with code `invalid_argument` and report that no attempt satisfied the output schema.
+
+### REQ-MODEL-048 — Which failures are retried
+When an attempt fails with a retryable error and the attempt budget remains, the retry middleware shall make the next attempt of the call on the same rung as the failed attempt.
+
+### REQ-MODEL-049 — Which failures are not retried
+When an attempt fails with an error that is not retryable, the retry middleware shall fail the call with that error and make no further attempt.
+
+### REQ-MODEL-050 — No retry after output has started
+If an attempt has produced an event before it fails, then the retry middleware shall fail the call with that attempt's error and make no further attempt.
+
+### REQ-MODEL-051 — Backoff with seeded jitter
+When the retry middleware waits before a retry of a call, it shall wait a base wait that starts at 1 second and doubles on each subsequent retry of the call, plus up to 50% of that base wait drawn from the call's seeded randomness.
+
+### REQ-MODEL-052 — Retry-After wins
+When a provider answers a failed attempt with a Retry-After time longer than the computed wait, the retry middleware shall wait for the Retry-After time instead.
+
+### REQ-MODEL-053 — A call total timeout ends retrying
+If the elapsed time of a call from the start of its first attempt reaches, or the required wait before a next attempt would reach or exceed, the call's call total timeout before the call succeeds, then the model layer shall fail the call with code `timeout` without starting another attempt.
+
+### REQ-MODEL-054 — A client ref per attempt
+The model layer shall derive a deterministic client ref for each attempt of one logical call from the call's client ref and the attempt number, and shall start an attempt with that client ref, except that it shall reuse the client ref of an attempt whose start was not acknowledged when it retries that start.
+
+### REQ-MODEL-055 — A retried attempt resets partial output
+When the model layer makes a retry attempt, it shall emit a `reset` event carrying the attempt number before the events of that attempt.
+
+### REQ-MODEL-056 — First-chunk timeout
+If a streaming attempt produces no event within its first-chunk timeout, then the timeout middleware shall cancel the attempt with code `timeout` and a retryable error.
+
+### REQ-MODEL-057 — Idle timeout
+If a streaming attempt in progress produces no event for its idle timeout, then the timeout middleware shall cancel the attempt with code `timeout` and a retryable error.
+
+### REQ-MODEL-058 — Attempt total timeout for streaming
+If a streaming attempt runs for its attempt total timeout, then the timeout middleware shall cancel the attempt with code `timeout` and a retryable error.
+
+### REQ-MODEL-059 — Default timeouts
+The model layer shall time out a streaming attempt after 30 seconds without a first event, 60 seconds without one in progress, and 10 minutes in total, and shall apply no call total timeout, unless the call sets another first-chunk timeout, idle timeout, attempt total timeout or call total timeout.
+
+### REQ-MODEL-060 — Metering per attempt
+The metering middleware shall record the usage and the cost of every attempt of a call that reaches the provider, including each failed attempt, in milli-points.
+
+### REQ-MODEL-061 — An attempt the provider does not bill costs nothing
+If a provider reports no usage for an attempt, then the metering middleware shall record that attempt with zero tokens and zero milli-points.
+
+### REQ-MODEL-062 — One entry per attempt in the call log
+The call log middleware shall record one entry per attempt of a call, carrying the attempt's client ref, the credential reference if the attempt used a credential, the attempt number, the model, the rung of the ladder it used or `none` when it was not structured, its start time and its outcome.
+
+### REQ-MODEL-063 — The call log carries no secrets or content
+The call log shall record no credential, no message text and no model output.
+
+### REQ-MODEL-064 — Middleware order
+The model layer shall apply the middleware to a chat call in one order, outermost first: call log, recording, fallback, metering, retry, timeouts.
+
+### REQ-MODEL-065 — Local JSON repair after the last supported rung
+If the attempt on the last rung the model supports does not satisfy the output schema and attempt budget remains, then the model layer shall run local JSON repair on that attempt's output as the next attempt without starting a model invocation. Local JSON repair shall strip the surrounding prose or code fences around a JSON value and repair malformed JSON syntax so that the value parses, and shall not add, remove or change any field.
+
+### REQ-MODEL-066 — A spent budget ends the retries
+If an attempt fails with a retryable error and the attempt budget is spent, then the retry middleware shall fail the call with that error and make no further attempt.
+
+## Catalog and price table
+
+The catalog answers which descriptor a model id stands for and at which price
+a call of it is charged. Prices are the price table's: rate rules per model,
+overridden per deployment and per tenant (`docs/architecture/model-layer.md`
+§7). Reservations, their budget check and settlement consume what this section
+supplies and are specified in `cost.feature`.
+
+### REQ-MODEL-067 — A descriptor by model id
+When the catalog looks up a model id it holds, the catalog shall return that model's descriptor.
+
+### REQ-MODEL-068 — An unknown model id
+If the catalog looks up a model id it does not hold, then the catalog shall fail with code `not_found`.
+
+### REQ-MODEL-069 — A rate rule applies by its condition
+While a model's rate rule holds for an invocation, the price table shall price that invocation at the rule's rates.
+
+### REQ-MODEL-070 — The first holding rate rule wins
+When several of a model's rate rules hold for an invocation, the price table shall price it at the first of them in the table's order.
+
+### REQ-MODEL-071 — Prices come from the most specific layer
+When a call of a model is priced in a tenant that has a price for that model, the price table shall take the price from the tenant's override; otherwise, when the deployment has one, from the deployment's override; and otherwise from the snapshot shipped with the binary.
+
+### REQ-MODEL-072 — Tenant prices stay in their tenant
+The price table shall never apply a tenant's override to a call outside that tenant.
+
+### REQ-MODEL-073 — A model without a holding price fails pricing
+If no layer of the price table has an entry for a model, or the chosen layer's price has no rate rule that holds for a call, then the price table shall fail pricing the call with code `unsupported`.
+
+### REQ-MODEL-074 — The default token formula
+Where a model declares no price formula of its own, the model layer shall price its call with the chosen rates' per-million-token rates, where a million tokens cost as many milli-points as that rate.
+
+### REQ-MODEL-075 — The default formula prices cache reads at the cached rate
+Where the chosen rate rule defines a cached rate, the default token formula shall price the call's non-cached input tokens at the input rate, its cached tokens at the cached rate, and its output tokens at the output rate; the cached tokens are neither left at the input rate nor counted in addition to the input tokens.
+
+### REQ-MODEL-076 — Whole milli-points, rounded half up
+The price table and the price formulas shall return a whole number of milli-points, rounding half up when the exact amount falls between two whole milli-points.
+
+### REQ-MODEL-077 — The reservation estimate
+When the price table estimates the cost of a call before it starts, the estimate shall be the model's price formula on the call's parameters, its counted input tokens and its output limit as usage.
+
+### REQ-MODEL-078 — Prices do not change what a started call is charged
+When a price changes after a call has started, the price table shall price that call's settled usage using the price entry and start time that applied when the call started.
+
+### REQ-MODEL-079 — Without a cached rate, cached tokens cost the input rate
+Where the chosen rate rule does not define a cached rate, the default token formula shall price every input token of the call, cached ones included, at the input rate.
+
+### REQ-MODEL-080 — A cached rate of zero is a rate, not a missing one
+While the chosen rate rule defines a cached rate of zero, the default token formula shall price the call's cached tokens at zero milli-points.
+
+### REQ-MODEL-081 — Reasoning tokens are never counted a second time
+The default token formula shall count every reasoning token of the call exactly once, at the output rate.
+
+### REQ-MODEL-082 — Usage with more cached than input tokens fails pricing
+If a call's usage reports more cached tokens than input tokens, then the price table shall fail pricing the call with code `invalid_argument`.

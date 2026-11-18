@@ -675,3 +675,796 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    MODEL-043-01:
+        hash: sha256:fc92202793873b62531e0c2e33448ec21607c0fbb66743e6cf43501604d79500
+        reqs:
+            - REQ-MODEL-043
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-043-02:
+        hash: sha256:16d4fa0590937fd4401f771312528d2e90ae65e5f6943185714804a754a17873
+        reqs:
+            - REQ-MODEL-043
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-044-01:
+        hash: sha256:5056b08dfdddbcb8110aef191500f08d9e864534b3de3f51d9f007c98ebb40ca
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-044-02:
+        hash: sha256:c6afe28d8785b2de78f9580f0eaca0e8a47f824879608117ac23e2aea795c71f
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-044-03:
+        hash: sha256:600fa02bbb8bd672704de93ce47e0cabb04472d219c8fd0d743f9d2845c070d3
+        reqs:
+            - REQ-MODEL-044
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-045-01:
+        hash: sha256:d356b170c9d353b416a7454628b206cb714ea7576d38efde7fb906368009348a
+        reqs:
+            - REQ-MODEL-045
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-046-01:
+        hash: sha256:249ab0eacb5330fd9b9e91e498f777a958d6b968a5be7389a3e0040c96052e59
+        reqs:
+            - REQ-MODEL-046
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-047-01:
+        hash: sha256:c0a80135e9cc3863e633d741c5a57d02a9bda779072f9c1e0506d23d3e4519b9
+        reqs:
+            - REQ-MODEL-047
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-047-02:
+        hash: sha256:295c9af2b468807b5bc0693b003c37da309d82f1905503e1bab0df9fd294ed99
+        reqs:
+            - REQ-MODEL-047
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-048-01:
+        hash: sha256:07ad684ca8594099158fcf578594967f8d6509b790ec1d82a379d2cc0d199c85
+        reqs:
+            - REQ-MODEL-048
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-049-01:
+        hash: sha256:59f5c0e0d120eb3396f160552f5f872a5a9a707f3790bef2383c85794937d051
+        reqs:
+            - REQ-MODEL-049
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-050-01:
+        hash: sha256:4ce83edb955858f6a9741c9dbb8f5beeb53bc4d9574381098f40ef3d60e61e2b
+        reqs:
+            - REQ-MODEL-050
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-051-01:
+        hash: sha256:105de38a08c77371bef28a9eb42ad7193c2d78e2d99abe2642f3df6a2c999b41
+        reqs:
+            - REQ-MODEL-051
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-051-02:
+        hash: sha256:51acd71a3f88e1ed91e564285ce24ec9ce778004d5e2717d922d574e96fb12a1
+        reqs:
+            - REQ-MODEL-051
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-052-01:
+        hash: sha256:fb65951ec3a52ee56aad4979c622a21a42cbe76801acb79bfcec67c80763efef
+        reqs:
+            - REQ-MODEL-052
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-052-02:
+        hash: sha256:a38137cf481c113f5334cd961300732f0b697dd2e29edfde182a94df06bd03e9
+        reqs:
+            - REQ-MODEL-052
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-053-01:
+        hash: sha256:ca1ed59dedea19638fd11e8c905502b70e39f6e191c74f224ee1bbd850de1063
+        reqs:
+            - REQ-MODEL-053
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-053-02:
+        hash: sha256:0c1563fe0c2d86c34edf67c4a78bc3ef2955cb9e5d72d6caded80b3f71e99b4d
+        reqs:
+            - REQ-MODEL-053
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-054-01:
+        hash: sha256:49f5507e4afeaa10e07d73ff867748b354074236fed2ea8227919525dd432dd9
+        reqs:
+            - REQ-MODEL-054
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-054-02:
+        hash: sha256:79edd7bdd3776bb7c9098b67246909301ad4bac6bb9dfa57a3cc554284378736
+        reqs:
+            - REQ-MODEL-054
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-055-01:
+        hash: sha256:e3b8b52714f2a70a4c967eb3c7c830ae7c1f3b0457e23cff40f7d4e19e897143
+        reqs:
+            - REQ-MODEL-055
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-056-01:
+        hash: sha256:b75c0dedf160ce7905e786437b7a5638d65cdc0578945ceb0864e601ba04aaca
+        reqs:
+            - REQ-MODEL-056
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-057-01:
+        hash: sha256:c336fad73e0c78aaf55cbac4787ea8fca11598c697644db72cb0f412712fdbeb
+        reqs:
+            - REQ-MODEL-057
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-058-01:
+        hash: sha256:8acf9d9fbb108c050f43317595fc3e29ec9305eb54acda9f3a12cf6633b86678
+        reqs:
+            - REQ-MODEL-058
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-01:
+        hash: sha256:5e1bff9bd1574509a1f237bbd40a7b000eb09a5ee4279c910922c6bfa1e0e320
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-02:
+        hash: sha256:409d3f9d78426029973f6baf1fc8907d990d62568577bcdffcdcc821fb81396e
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-059-03:
+        hash: sha256:c0e855a60f49be9e7fc9dee70c0d0c08033089ce3a22a41ae1431a7855c12aab
+        reqs:
+            - REQ-MODEL-059
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-060-01:
+        hash: sha256:20d752373d7bc42aaab9ec571c002bdd58e20987a133224406bc179f9133a044
+        reqs:
+            - REQ-MODEL-060
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-061-01:
+        hash: sha256:b511f42f332c269503cee8f15d1369da70d150639ff77bf8adfd60e2343eeaae
+        reqs:
+            - REQ-MODEL-061
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-062-01:
+        hash: sha256:c5138c5377619d5148b123b195656f4b6340041b7a4884cd6189c5f44212c4f0
+        reqs:
+            - REQ-MODEL-062
+        tier: P2
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'New behavior: unsupported-model refusal, non-retried errors, reset event, timeouts and call log entries.'
+        human:
+            status: pending
+    MODEL-063-01:
+        hash: sha256:bfa07c03c7ab33252c51a2baabaaa673123e807370d26687a1cac83d31ce9bb8
+        reqs:
+            - REQ-MODEL-063
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-064-01:
+        hash: sha256:53842f03cff11fde7980f5246ef29fad0e6c23881cd713c302d547ff6c5ee0aa
+        reqs:
+            - REQ-MODEL-064
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-064-02:
+        hash: sha256:b205eae1336ca86c376804c777a3eecc92ac1890c1fc91e4fa97495277b44f47
+        reqs:
+            - REQ-MODEL-064
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-065-01:
+        hash: sha256:12dcb1b47abf3a27f3607aeb80a9644bc9cf981fd0d955f2956a257cedf66bce
+        reqs:
+            - REQ-MODEL-065
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-065-02:
+        hash: sha256:9ed9b693f4f1d2287882a3ed827df15404a7e2135084cb8561b353f4e2eca865
+        reqs:
+            - REQ-MODEL-065
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-066-01:
+        hash: sha256:3dd24dc747c9a5c47883e755af754f9c7a1bdd78d4fe3eb4c4ab7a114158608f
+        reqs:
+            - REQ-MODEL-066
+        tier: P0
+        author: claude-code:spec-author:c5ea10
+        reviewer: antigravity:spec-reviewer:039bb8
+        approved_at: "2026-11-17"
+        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
+    MODEL-067-01:
+        hash: sha256:85c22a92dcaf5d4a3a21282a83b0556e69f932e81ab2a964af3f0840b150ecd9
+        reqs:
+            - REQ-MODEL-067
+        tier: P2
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'New behavior: catalog descriptor lookup by model id and not_found error on unknown id.'
+        human:
+            status: pending
+    MODEL-068-01:
+        hash: sha256:4f0cd49fc3c8b02472d5e28a8d2bb833e59e35aa2d68f3e13fcf917e35d48a3f
+        reqs:
+            - REQ-MODEL-068
+        tier: P2
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'New behavior: catalog descriptor lookup by model id and not_found error on unknown id.'
+        human:
+            status: pending
+    MODEL-069-01:
+        hash: sha256:6c0001cf30eecb6380e03e8e12e4202ba865a5c7684536cf98f3138d15b2f7a3
+        reqs:
+            - REQ-MODEL-069
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-070-01:
+        hash: sha256:1e1d59e06d6ea28b5cca762630299b92bc8cd07d52939af85fd9ef1b8a820560
+        reqs:
+            - REQ-MODEL-070
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-071-01:
+        hash: sha256:35127adfe5a1b72cf51489779c23aad5e9afa018d3bec62ba4448eb44c005b07
+        reqs:
+            - REQ-MODEL-071
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-071-02:
+        hash: sha256:0678aa93ea7deeb12892805bafbc45cd88f2db264d00a53e99ddd8c4d00e3a20
+        reqs:
+            - REQ-MODEL-071
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-071-03:
+        hash: sha256:4a53f44419e334e517b15980a6425af84555ce1cb47852a0260b56fe310266f7
+        reqs:
+            - REQ-MODEL-071
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-072-01:
+        hash: sha256:59aded521c98d38d31883ec1fbcc4fa904a0c5de8fd17870e8b4c8fb4b2f055e
+        reqs:
+            - REQ-MODEL-072
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-072-02:
+        hash: sha256:2b7a43e89baed71ceee18df07a6a5e2cc8e7e6457037b601bfbca19ba0aabab2
+        reqs:
+            - REQ-MODEL-072
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-073-01:
+        hash: sha256:4b00e6db8abd80dc422c6923885c69915477d5a59270c09e3f254df2edd1b787
+        reqs:
+            - REQ-MODEL-073
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-073-02:
+        hash: sha256:fa062c2b4d67915433c3e72c34a449ce81bce57468b735dcc5a2b103720517ce
+        reqs:
+            - REQ-MODEL-073
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-073-03:
+        hash: sha256:b732b46698143c61ee4b15fd0204670668c5789fe1150526e3ba78ded5a9f8ab
+        reqs:
+            - REQ-MODEL-073
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-074-01:
+        hash: sha256:7a18075d5cd5021f93edb32125d88a6fef8896751c901f2690eacd405e6bd493
+        reqs:
+            - REQ-MODEL-074
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-075-01:
+        hash: sha256:092c743e7afef969693551c6876a1be3babeabd4801c8cd0cb9bc4f3b549cdb7
+        reqs:
+            - REQ-MODEL-075
+            - REQ-MODEL-081
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-075-02:
+        hash: sha256:856662c048fd997e92dd227a301aa6d78063bc39b3c62b125ea75bd44783614e
+        reqs:
+            - REQ-MODEL-075
+            - REQ-MODEL-079
+            - REQ-MODEL-081
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-076-01:
+        hash: sha256:aea698cc8adef6317f19607afce4c561b4c3a15949db64d899149a796fad2b88
+        reqs:
+            - REQ-MODEL-076
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-076-02:
+        hash: sha256:61539c1103ec59aeab93169db7690437c7c625a438afbeec6f334da4323b678b
+        reqs:
+            - REQ-MODEL-076
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-077-01:
+        hash: sha256:22d48708a87e27b8af26de510576d6a353c8c8504d43946cfd0bae17cd42c88a
+        reqs:
+            - REQ-MODEL-077
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: pre-start reservation estimate from counted input tokens, output limit, and call parameters.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-078-01:
+        hash: sha256:5bb7c51abf40a77ff2894fdc4a9082c0bf3e743b418c3a0e67b74cea953f0c1b
+        reqs:
+            - REQ-MODEL-078
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-078-02:
+        hash: sha256:efbcfaea5c0436cc4e884c9fec4fff1aa5be7269e6fd69dae2e916eb5b0c8bd3
+        reqs:
+            - REQ-MODEL-078
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-080-01:
+        hash: sha256:192f83c608aa73bae7fb1e55acf7c02e1089ec922e89af0d5bd56fc61c6c90ea
+        reqs:
+            - REQ-MODEL-080
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-081-01:
+        hash: sha256:f8168fba16af546f8b797c21c9da180281121e65dc25b690d4ae58d02c5ba8ee
+        reqs:
+            - REQ-MODEL-081
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
+    MODEL-082-01:
+        hash: sha256:0187f183d2385ffe9810c3b48aafd1610ac7705aebea26757e39aeed1a5017af
+        reqs:
+            - REQ-MODEL-082
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
