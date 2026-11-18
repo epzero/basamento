@@ -4,18 +4,14 @@
 
 ## Context
 
-WP-L1-05 (`specs/config`) introduces `internal/config`: load, validate and
-report kit configuration with no port implementations. `go tool gate layering`
-assigns every module package to the longest `layers` key that prefix-matches its
-path; a package with no key fails the gate. The graph has no row for
-`internal/config` today, so the implementer cannot add the directory until the
-graph changes. AGENTS.md requires an ADR for that (`layering.yaml`).
+WP-L1-05 (`specs/config`) owns `internal/config` (load, validate, report; no ports).
+`go tool gate layering` assigns every package to the longest matching `layers` key;
+with no key the gate fails, and graph changes need an ADR (AGENTS.md). This ADR
+adds the row and grants for WP-L1-05.
 
 `cmd/kit` and the BDD harness (`internal/bdd`, including `steps`) must import
 `internal/config`. Nothing else in the product graph should gain that access
-without an explicit grant. Configuration must stay free of durable-execution
-vendors (ADR-0002) and of port implementations (ADR-0004):
-`specs/config/design.md`.
+without a grant. No durable-execution vendors (ADR-0002) or ports (ADR-0004).
 
 ## Decision
 
@@ -33,9 +29,8 @@ vendors (ADR-0002) and of port implementations (ADR-0004):
 
 ### Grants to other layers
 
-List values are path-segment prefixes (`matchLayer` on the importer's list), not
-only names of other layer keys. Grant the narrow prefix on the two importers that
-need configuration:
+List values are path-segment prefixes, not only layer names. Grant the narrow
+prefix on the two importers that need configuration:
 
 | Layer | Added list entry | Effect |
 | --- | --- | --- |
@@ -44,42 +39,43 @@ need configuration:
 
 No other layer list changes.
 
-### Module map and policy
+Gate scope for these grants:
 
-`internal/config` is product code; the generated map shows it with edges from
-`cmd/kit` (and `core`). Tooling layers stay hidden (`devLayers`). A future
-`internal/<pkg>` needs its own `layers` row before code lands; an import grant
-needs an ADR. Untrusted or generated code does not live under `internal/`.
+- Production imports only (`go list`); `_test.go`, external tests, and build-tagged
+  files are out of scope (as for `test_only` in `layering.yaml`).
+- `deny_external` here is `go.temporal.io/` only; port vendor libraries are not
+  denied (the allow-list keeps `platform` and `runtime` out).
+- By policy: untrusted or generated code does not live under `internal/` (not
+  gate-checked). Each new `internal/<pkg>` still needs a `layers` row and grants
+  need an ADR.
+
+The generated module map is product-facing: `cmd/kit` → `internal/config` → `core`
+(`internal/bdd` has a grant but is tooling and is not drawn).
 
 ## Alternatives considered
 
-- **Broad `internal` on `cmd/kit` and `internal/bdd`** (`specs/config/design.md` §1).
-  Rejected: least privilege, misleading module-map node, and it still leaves
-  `internal/gate` / `tools/gate` unable to import config (gate experiment).
-- **List grants only, no `internal/config` layer key.** Rejected: `deny_external`
-  and the package allow-list need the layer row (ADR-0002).
+- **Broad `internal` on `cmd/kit` and `internal/bdd`** (`specs/config/design.md` §1):
+  least privilege, bad module-map node; does not open `internal/gate` / `tools/gate`.
+- **List grants without a layer row:** no `deny_external` hook (ADR-0002).
 
 ## Consequences
 
-- WP-L1-05 can add `internal/config` after this change merges; it still depends
-  on platform constructors only from `cmd/kit`.
-- `internal/gate` and `tools/gate` cannot import configuration (narrow graph).
-- The module map shows `cmd/kit` → `internal/config` → `core`.
-- A later package such as `internal/foo` remains blocked from `cmd/kit` until an
-  ADR adds either a layer row and a deliberate grant, or a broader prefix (not
-  chosen here).
+- WP-L1-05 owns `internal/config`; `cmd/kit` wires port constructors, not the
+  config package.
+- `internal/gate` and `tools/gate` do not import configuration under this graph.
 
 ## Revert
 
 Revert the merge commit. Remove the `internal/config` layer and list entries from
-`layering.yaml`, the ADR, and the regenerated module map block in
-`docs/architecture/overview.md` §3. WP-L1-05 must not ship `internal/config`
-until a replacement graph lands.
+`layering.yaml`, this ADR, its row in `docs/adr/README.md`, and the regenerated
+module map block in `docs/architecture/overview.md` §3. WP-L1-05 does not ship
+`internal/config` until a replacement graph lands.
 
 ## Implementation changes these files
 
-- `layering.yaml` — `internal/config` layer, grants on `cmd/kit` and
-  `internal/bdd`, `deny_external` line.
-- `docs/architecture/overview.md` — regenerated module map; §3 wording and package
-  table row for `internal/config`.
-- `docs/adr/README.md` — row for ADR-0016.
+| Path | Change |
+| --- | --- |
+| `layering.yaml` | `internal/config` layer, grants on `cmd/kit` and `internal/bdd`, `deny_external` line. |
+| `docs/architecture/overview.md` | Regenerated module map; §3 wording and package table row for `internal/config`. |
+| `docs/adr/README.md` | Row for ADR-0016. |
+| `specs/config/design.md` §1 | Designer: replace prerequisite §1 with this ADR (layer row, narrow grants, path-prefix list values, who may import); spec PR before WP-L1-05 implements. |

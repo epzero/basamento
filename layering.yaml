@@ -45,4 +45,4 @@ deny_external:
   model:      [go.temporal.io/]
   model/node: [go.temporal.io/]
   runtime:    [go.temporal.io/]
-  internal/config: [go.temporal.io/]
+  internal/config:    [go.temporal.io/]
