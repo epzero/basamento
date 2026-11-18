@@ -138,16 +138,18 @@ step.
 **Node kinds (REQ-FLOW-028 … 033, 036).** The host checks the whole IR before
 `flow.Machine.Start`: if any node's kind is `model` or `agent` and
 `RegisterHandler` was not called for it, the host returns a `*core.Error` with
-`CodeUnsupported` naming the node, and starts nothing (REQ-FLOW-028). The host
-then drives the machine, and turns its commands into calls:
+`CodeUnsupported` naming the node, and starts nothing (REQ-FLOW-028). Nodes are
+scanned in sorted node-id order, so two missing handlers always report the same
+(`IR.Nodes` is a map, and Go map order is not deterministic). The host then
+drives the machine, and turns its commands into calls:
 
 | Command, node kind | Durable call | Node event fed back |
 | --- | --- | --- |
 | `run_node`, kind `tool` or `task` | `dc.Step(stepName, cmd.Input, runtime.StepOptions{IdempotencyKey: ...})` where `stepName` is `spec["tool"]` / `spec["task"]` | `node_completed` with the step result |
 | `run_node`, kind with a registered handler (`model`, `agent`) | `handler(dc, node, cmd.Input)` called directly as deterministic flow code; its own side effects are `dc.Step` calls | `node_completed` with the handler's output |
 | `run_node`, kind `map` or `parallel` | the fan-out commands the machine returns for the node (WP-L4-02) | as the machine defines |
-| `start_timer`, kind `wait` | `dc.Sleep(duration of the node spec)` | `timer_fired`, then `node_completed` with no result |
-| `await_gate`, kind `gate` | `dc.Await(GateSpec{Name: cmd.Node, Schema, AcceptIf, Timeout from the node spec})` | `gate_resolved` with the accepted payload, then `node_completed` with it |
+| `start_timer`, kind `wait` | `dc.Sleep(duration of the node spec)` | `timer_fired` with no payload |
+| `await_gate`, kind `gate` | `dc.Await(GateSpec{Name: cmd.Node, Schema, AcceptIf, Timeout from the node spec})` | `gate_resolved` with the accepted payload |
 | `run_node`, kind `subflow` | `dc.Child(FlowRef of the flow named in the node spec, cmd.Input, ChildOptions{...})` | `node_completed` with the child result |
 | `emit` | `dc.Emit(ProgressEvent{Type, Data})` | none |
 | `checkpoint` | `dc.Checkpoint(SnapshotRef)` | none |
@@ -155,11 +157,19 @@ then drives the machine, and turns its commands into calls:
 Pure `set` nodes and edge routing are evaluated by `flow/machine` itself without
 host durable calls (REQ-FLOW-036, `docs/architecture/flow-engine.md` §4).
 
+A command for a kind the machine returns without a follow-up event is answered
+with the one event in its row, so the machine advances: for `wait` and `gate`
+the host feeds `timer_fired` or `gate_resolved` alone, and adds no
+`node_completed` after it.
+
 **Superstep concurrency (REQ-FLOW-044).** When `Machine.Start` or
-`Machine.Apply` returns multiple commands in one superstep, the host starts
-every durable command's `Future` (and any `NodeHandler` calls) in command order
-before waiting for completions with `dc.Select`, rather than blocking on each
-command sequentially.
+`Machine.Apply` returns multiple commands in one superstep, the host starts all
+of their Future-returning durable calls (`dc.Step`, `dc.Sleep`, `dc.Await` and
+`dc.Child`) in command order and then waits for completions with `dc.Select`,
+rather than blocking on each command sequentially. `NodeHandler` is synchronous
+and returns no `Future`: the host calls it directly, one command at a time, as
+the table above says; it occupies the host while it runs, so the host has no
+other concurrent work to wait on around it.
 
 **Node failure (REQ-FLOW-035).** Any error from a `NodeHandler`, `dc.Step`,
 `dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a `node_failed`

@@ -160,7 +160,7 @@ Feature: The flow host
 
   @REQ-FLOW-044 @id:FLOW-044-01
   Scenario: Multiple commands in one superstep start before waiting for any to complete
-    Given a flow with edges from START to node "fan" of kind "set" setting "spread" to true, from node "fan" to node "a" of kind "wait" with node spec {"duration": "10s"} and to node "b" of kind "wait" with node spec {"duration": "30s"}
+    Given a flow that runs node "a" of kind "wait" for "10s" and node "b" of kind "wait" for "30s" in parallel
     When a run of the flow starts with input {}
     Then the run made a timer for 10s and a timer for 30s
     And the run is waiting
