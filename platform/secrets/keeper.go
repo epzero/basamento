@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/epzero/basamento/core"
 	"gocloud.dev/secrets"
 	"gocloud.dev/secrets/localsecrets"
-
-	"github.com/epzero/basamento/core"
 )
 
 // keeperKeyService wraps tenant keysets with a gocloud Keeper (design §2).
@@ -18,24 +17,27 @@ type keeperKeyService struct {
 	keeper *secrets.Keeper
 	scheme string
 	id     string
-	opts   options
 }
 
 // OpenKeyService opens a production master key from url (current or previous).
 func OpenKeyService(ctx context.Context, raw string, opts ...Option) (KeyService, error) {
-	o := applyOptions(opts)
-	return newKeeperService(ctx, raw, o)
+	_ = applyOptions(opts)
+	return newKeeperService(ctx, raw)
 }
 
-func newKeeperService(ctx context.Context, raw string, o options) (*keeperKeyService, error) {
+func newKeeperService(ctx context.Context, raw string) (*keeperKeyService, error) {
 	keeper, scheme, id, err := openKeeper(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
-	return &keeperKeyService{keeper: keeper, scheme: scheme, id: id, opts: o}, nil
+	return &keeperKeyService{keeper: keeper, scheme: scheme, id: id}, nil
 }
 
 func (k *keeperKeyService) MasterKeyID() string { return k.id }
+
+func (k *keeperKeyService) Close() error {
+	return k.keeper.Close()
+}
 
 func (k *keeperKeyService) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
 	inner, err := FrameBoundPlaintext(tenant, plaintext)
@@ -44,7 +46,7 @@ func (k *keeperKeyService) Wrap(ctx context.Context, tenant string, plaintext []
 	}
 	ct, err := k.keeper.Encrypt(ctx, inner)
 	if err != nil {
-		return nil, keeperFail(err, k.scheme)
+		return nil, classifyKeeperErr(ctx, err, k.scheme, opWrapKeyset)
 	}
 	return ct, nil
 }
@@ -52,46 +54,26 @@ func (k *keeperKeyService) Wrap(ctx context.Context, tenant string, plaintext []
 func (k *keeperKeyService) Unwrap(ctx context.Context, tenant string, ciphertext []byte) ([]byte, error) {
 	inner, err := k.keeper.Decrypt(ctx, ciphertext)
 	if err != nil {
-		if unreachable(err) {
-			return nil, errUnavailable(k.scheme)
-		}
-		return nil, core.NewError(core.CodeInvalidArgument, "unwrap failed", nil)
+		return nil, classifyKeeperErr(ctx, err, k.scheme, opUnwrapKeyset)
 	}
 	return ParseBoundPlaintext(tenant, inner)
 }
 
 func (k *keeperKeyService) encryptValue(ctx context.Context, plaintext []byte) ([]byte, error) {
-	ct, err := k.keeper.Encrypt(ctx, plaintext)
+	inner := FrameValuePlaintext(plaintext)
+	ct, err := k.keeper.Encrypt(ctx, inner)
 	if err != nil {
-		return nil, keeperFail(err, k.scheme)
+		return nil, classifyKeeperErr(ctx, err, k.scheme, opEncryptValue)
 	}
 	return ct, nil
 }
 
 func (k *keeperKeyService) decryptValue(ctx context.Context, ciphertext []byte) ([]byte, error) {
-	pt, err := k.keeper.Decrypt(ctx, ciphertext)
+	inner, err := k.keeper.Decrypt(ctx, ciphertext)
 	if err != nil {
-		return nil, errInvalidArgument(msgValueCannotDecrypt)
+		return nil, classifyKeeperErr(ctx, err, k.scheme, opDecryptValue)
 	}
-	return pt, nil
-}
-
-func keeperFail(err error, scheme string) error {
-	return errUnavailable(scheme)
-}
-
-func unreachable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if core.CodeOf(err) == core.CodeUnavailable {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "no such host") ||
-		strings.Contains(msg, "context canceled") ||
-		strings.Contains(msg, "context deadline exceeded")
+	return ParseValuePlaintext(inner)
 }
 
 func masterKeyID(raw, scheme string, localKey []byte) (string, error) {
@@ -112,6 +94,9 @@ func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, strin
 	if !ok || scheme == "" {
 		return nil, "", "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
 	}
+	if !schemeSupported(scheme) {
+		return nil, "", "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
+	}
 	switch scheme {
 	case "localsecrets":
 		keyB64 := rest
@@ -129,36 +114,23 @@ func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, strin
 		var sk [32]byte
 		copy(sk[:], key)
 		return localsecrets.NewKeeper(sk), scheme, id, nil
-	case "awskms", "gcpkms", "hashivault":
+	default:
 		id, err := publicURLID(raw)
 		if err != nil {
 			return nil, "", "", err
 		}
 		keeper, err := secrets.OpenKeeper(ctx, raw)
 		if err != nil {
-			return nil, "", "", errUnavailable(scheme)
+			return nil, "", "", classifyOpenKeeperErr(ctx, err, scheme)
 		}
 		return keeper, scheme, id, nil
-	default:
-		return nil, "", "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
 	}
 }
 
-// OpenCodec opens a payload codec with the current master key url and optional
-// previous master key urls (design §2).
-func OpenCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, opts ...Option) (*Codec, error) {
-	o := applyOptions(opts)
-	cur, err := OpenKeyService(ctx, currentURL, WithLogger(o.logger))
-	if err != nil {
-		return nil, err
+func classifyOpenKeeperErr(ctx context.Context, err error, scheme string) error {
+	c := classifyKeeperErr(ctx, err, scheme, opWrapKeyset)
+	if core.CodeOf(c) == core.CodeUnavailable {
+		return c
 	}
-	keys := []KeyService{cur}
-	for _, u := range prevURLs {
-		ks, err := OpenKeyService(ctx, u, WithLogger(o.logger))
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, ks)
-	}
-	return NewCodec(store, keys, opts...)
+	return errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
 }
