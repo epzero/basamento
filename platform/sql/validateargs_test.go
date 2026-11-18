@@ -58,6 +58,9 @@ func TestValidateArgsTextKinds(t *testing.T) {
 		{"bytes_nul", []byte{0, 1}, ""},
 		{"sql_named_nul", sql.Named("k", nul), core.CodeInvalidArgument},
 		{"string_slice_nul", []string{"ok", nul}, core.CodeInvalidArgument},
+		{"any_slice_nul", []any{"ok", nul}, core.CodeInvalidArgument},
+		{"nested_string_slices_nul", [][]string{{"ok"}, {nul}}, core.CodeInvalidArgument},
+		{"deep_nested_slice", []any{[]any{[]any{nul}}}, core.CodeInvalidArgument},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,6 +96,20 @@ func TestExecTypedNilValueValuerDoesNotPanic(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestExecRejectsNULInAnySlice(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	store, err := Open(ctx, "sqlite:///"+dir+"/kit.db", emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	_, err = store.Execer().Exec(ctx, `SELECT ?`, []any{"a\x00b"})
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("Exec []any NUL: %v", err)
+	}
+}
 
 func TestExecRejectsNULViaNullString(t *testing.T) {
 	dir := t.TempDir()

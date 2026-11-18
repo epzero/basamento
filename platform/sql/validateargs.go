@@ -24,19 +24,19 @@ func validateOneArg(a any) error {
 	}
 	val, err := driver.DefaultParameterConverter.ConvertValue(a)
 	if err != nil {
-		return walkArgForNUL(a, 0)
+		return walkArgForNUL(a, 0, nil)
 	}
 	return validateBoundValue(val)
 }
 
 const maxValidateDepth = 8
 
-func walkArgForNUL(a any, depth int) error {
+func walkArgForNUL(a any, depth int, seen map[uintptr]bool) error {
 	if a == nil || depth > maxValidateDepth {
 		return nil
 	}
 	if named, ok := a.(sql.NamedArg); ok {
-		return walkArgForNUL(named.Value, depth+1)
+		return walkArgForNUL(named.Value, depth+1, seen)
 	}
 	switch v := a.(type) {
 	case string:
@@ -52,11 +52,46 @@ func walkArgForNUL(a any, depth int) error {
 		return nil
 	}
 	rv := reflect.ValueOf(a)
+	if !rv.IsValid() {
+		return nil
+	}
 	switch rv.Kind() {
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return nil
+		}
+		ptr := rv.Pointer()
+		if seen == nil {
+			seen = make(map[uintptr]bool)
+		}
+		if seen[ptr] {
+			return nil
+		}
+		seen[ptr] = true
+		return walkArgForNUL(rv.Elem().Interface(), depth+1, seen)
+	case reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+		return walkArgForNUL(rv.Elem().Interface(), depth+1, seen)
 	case reflect.Slice, reflect.Array:
-		if rv.Type().Elem().Kind() == reflect.String {
+		elem := rv.Type().Elem()
+		switch elem.Kind() {
+		case reflect.String:
 			for i := 0; i < rv.Len(); i++ {
 				if err := ValidateText(rv.Index(i).String()); err != nil {
+					return err
+				}
+			}
+		case reflect.Interface, reflect.Slice, reflect.Array:
+			for i := 0; i < rv.Len(); i++ {
+				if err := walkArgForNUL(rv.Index(i).Interface(), depth+1, seen); err != nil {
+					return err
+				}
+			}
+		default:
+			for i := 0; i < rv.Len(); i++ {
+				if err := walkArgForNUL(rv.Index(i).Interface(), depth+1, seen); err != nil {
 					return err
 				}
 			}
