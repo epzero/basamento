@@ -29,6 +29,17 @@ control. That mapping is not part of this package.
 | `history` | Earlier turns of a conversation: ordered entries, each a role and a text. | the history list | no |
 | `user` | The current turn. | any | no |
 
+Each history entry's **role** is a short ASCII token matching
+`^[A-Za-z][A-Za-z0-9_-]{0,31}$`. The rule exists because the role is written
+to model-facing output outside the untrusted wrapper that carries the entry's
+text, so any character a history entry can supply reaches the model as
+prompt structure rather than as wrapped content. The grammar keeps a role to
+one word of letters, digits, `_` and `-`. The assembler applies it to every
+entry of an assembly before any part is rendered, and fails the assembly with
+`invalid_argument` and an error that does not contain the rejected role
+(REQ-PROMPT-024). Entry text follows REQ-PROMPT-014 / REQ-PROMPT-015 whatever
+its role.
+
 A template has at most one `history` segment. Segments of other kinds may
 repeat; each has a name unique within the template.
 

@@ -438,3 +438,39 @@ scenarios:
         note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
         human:
             status: pending
+    PROMPT-024-01:
+        hash: sha256:b8651072329e7d396b975316868aecceb5af849ecb2843b182c6791b721069a1
+        reqs:
+            - REQ-PROMPT-024
+        tier: P0
+        author: claude-code:spec-author:4a0ecb
+        reviewer: antigravity:spec-reviewer:b2e0de
+        approved_at: "2026-11-18"
+        note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
+        ref: https://github.com/epzero/basamento/pull/42
+        human:
+            status: pending
+    PROMPT-024-02:
+        hash: sha256:82284fa1b309526837bb0c547999c56fb0d9abb883cc998d1acaca7bfb2fa78f
+        reqs:
+            - REQ-PROMPT-024
+        tier: P0
+        author: claude-code:spec-author:4a0ecb
+        reviewer: antigravity:spec-reviewer:b2e0de
+        approved_at: "2026-11-18"
+        note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
+        ref: https://github.com/epzero/basamento/pull/42
+        human:
+            status: pending
+    PROMPT-024-03:
+        hash: sha256:779afc3cca9463823f692c4b5a1c23578de1fb00b937fccb058e68718faf173f
+        reqs:
+            - REQ-PROMPT-024
+        tier: P0
+        author: claude-code:spec-author:4a0ecb
+        reviewer: antigravity:spec-reviewer:b2e0de
+        approved_at: "2026-11-18"
+        note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
+        ref: https://github.com/epzero/basamento/pull/42
+        human:
+            status: pending
