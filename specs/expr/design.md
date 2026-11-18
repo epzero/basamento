@@ -233,12 +233,11 @@ nothing is coerced from strings.
   gojq that exposes its internal `+` and array construction to the library
   or limits construction itself.
 
-  **gojq dependency.** gojq's unexported operator function behind `+`,
-  `-` and `*` (with its exact `*big.Int` arithmetic and its refusal of a
-  repetition of 2³¹ bytes or more) is reached through a `//go:linkname`
-  declaration into gojq v0.12.20, the version `go.mod` pins. A gojq upgrade
-  that moves or renames it fails the build, not silently the bound;
-  `go.sum` and the version pin move together with it.
+  **gojq dependency.** gojq's unexported operator function behind `+` and
+  `-` (with its exact `*big.Int` arithmetic) is reached through a
+  `//go:linkname` declaration into gojq v0.12.20, the version `go.mod`
+  pins. A gojq upgrade that moves or renames it fails the build, not
+  silently the bound; `go.sum` and the version pin move together with it.
 
   Stopping is deterministic: the same mapping fails at the same operation
   or value every time, without allocating an over-limit value.
