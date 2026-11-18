@@ -75,6 +75,9 @@ func (p *Program) Eval(vars map[string]any) (any, error) {
 	}
 	j, jerr := celValToJSON(out)
 	if jerr != nil {
+		if isJSONDepthErr(jerr) {
+			return nil, evalErr(p.src, "evaluation failed")
+		}
 		cause := jerr.Error()
 		if c := mapCELCause(cause); c != "" {
 			cause = c
@@ -144,13 +147,17 @@ func mapCELCause(msg string) string {
 
 func (e *Env) bindVars(vars map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(vars))
+	w := newJSONWalk()
 	for name, val := range vars {
 		st, ok := e.schemas[name]
 		if !ok {
 			return nil, bindErr(name, "undeclared variable")
 		}
-		bound, err := bindJSONValue(st, val, e)
+		bound, err := bindJSONValue(st, val, e, w)
 		if err != nil {
+			if isJSONDepthErr(err) {
+				return nil, bindErr(name, "value too deep")
+			}
 			return nil, bindErr(name, err.Error())
 		}
 		out[name] = bound
@@ -158,7 +165,7 @@ func (e *Env) bindVars(vars map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-func bindJSONValue(st *schemaType, val any, e *Env) (any, error) {
+func bindJSONValue(st *schemaType, val any, e *Env, w *jsonWalk) (any, error) {
 	if val == nil {
 		return nil, nil
 	}
@@ -193,11 +200,16 @@ func bindJSONValue(st *schemaType, val any, e *Env) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("wrong type")
 		}
+		ptr := addrOf(arr)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
 		elem := st.celType.Parameters()[0]
 		out := make([]any, len(arr))
 		for i, item := range arr {
 			sub := &schemaType{celType: elem}
-			v, err := bindJSONValue(sub, item, e)
+			v, err := bindJSONValue(sub, item, e, w)
 			if err != nil {
 				return nil, err
 			}
@@ -209,11 +221,16 @@ func bindJSONValue(st *schemaType, val any, e *Env) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("wrong type")
 		}
+		ptr := addrOf(m)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
 		valType := st.celType.Parameters()[1]
 		out := make(map[string]any, len(m))
 		for k, v := range m {
 			sub := &schemaType{celType: valType}
-			bv, err := bindJSONValue(sub, v, e)
+			bv, err := bindJSONValue(sub, v, e, w)
 			if err != nil {
 				return nil, err
 			}
@@ -227,6 +244,11 @@ func bindJSONValue(st *schemaType, val any, e *Env) (any, error) {
 				if !ok {
 					return nil, fmt.Errorf("wrong type")
 				}
+				ptr := addrOf(m)
+				if err := w.down(ptr); err != nil {
+					return nil, err
+				}
+				defer w.up(ptr)
 				return obj.Adapt(e.adapter, m), nil
 			}
 		}

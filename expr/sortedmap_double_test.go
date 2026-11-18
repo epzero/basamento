@@ -146,6 +146,7 @@ func TestMapKeyOrderStable200Evaluations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := []any{true, int64(42), 2.5, "a", "b"}
 	var first []any
 	for i := 0; i < 200; i++ {
 		res, err := p.Eval(nil)
@@ -155,6 +156,16 @@ func TestMapKeyOrderStable200Evaluations(t *testing.T) {
 		got, ok := res.([]any)
 		if !ok {
 			t.Fatalf("got %T", res)
+		}
+		if i == 0 {
+			if len(got) != len(want) {
+				t.Fatalf("got %v", got)
+			}
+			for j := range want {
+				if got[j] != want[j] {
+					t.Fatalf("index %d got %v want %v", j, got[j], want[j])
+				}
+			}
 		}
 		if first == nil {
 			first = got

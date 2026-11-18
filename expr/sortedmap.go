@@ -274,7 +274,11 @@ func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntr
 		}
 		entries = append(entries, sortedEntry{key: mk, val: v})
 	}
-	n := int(m.Size().(types.Int))
+	sz, ok := m.Size().(types.Int)
+	if !ok {
+		return nil, fmt.Errorf("unsupported map key type")
+	}
+	n := int(sz)
 	if len(entries) != n {
 		return nil, fmt.Errorf("unsupported map key type")
 	}
@@ -282,6 +286,9 @@ func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntr
 }
 
 func (m *sortedAnyMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	if len(m.entries) == 0 {
+		return map[string]any{}, nil
+	}
 	return nil, fmt.Errorf("type conversion error")
 }
 

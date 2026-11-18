@@ -17,7 +17,10 @@ func TestNormalizeMappingInputLargeInts(t *testing.T) {
 		{"18446744073709551615", new(big.Int).SetUint64(18446744073709551615)},
 	}
 	for _, tc := range cases {
-		got := normalizeMappingInputValue(tc.in)
+		got, err := normalizeMappingInputValue(tc.in, newJSONWalk())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.in, err)
+		}
 		if fmt.Sprint(got) != fmt.Sprint(tc.want) {
 			t.Fatalf("%s: got %v (%T) want %v (%T)", tc.in, got, got, tc.want, tc.want)
 		}

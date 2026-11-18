@@ -67,7 +67,11 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 	for i, name := range m.vars {
 		values[i] = vars[name]
 	}
-	input = normalizeMappingInput(input)
+	normIn, err := normalizeMappingInput(input)
+	if err != nil {
+		return nil, mappingEvalErr(mappingDepthCause(err))
+	}
+	input = normIn
 	ctx := newStepContext(m.stepLimit)
 	iter := m.code.RunWithContext(ctx, input, values...)
 	var first any
@@ -89,7 +93,10 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 		}
 		count++
 		if count == 1 {
-			first = normalizeMappingOutput(v)
+			first, err = normalizeMappingOutput(v)
+			if err != nil {
+				return nil, mappingEvalErr(mappingDepthCause(err))
+			}
 			continue
 		}
 		return nil, mappingEvalErr("mapping produced more than one value")
@@ -111,23 +118,44 @@ func formatMappingParseErr(src string, err error) error {
 	return mappingCompileErr(src, err.Error())
 }
 
-func normalizeMappingInput(v any) any {
+func mappingDepthCause(err error) string {
+	if isJSONDepthErr(err) {
+		return "mapping evaluation failed"
+	}
+	return "mapping evaluation failed"
+}
+
+func normalizeMappingInput(v any) (any, error) {
+	w := newJSONWalk()
+	return normalizeMappingInputWalk(v, w)
+}
+
+func normalizeMappingInputWalk(v any, w *jsonWalk) (any, error) {
 	switch t := v.(type) {
 	case map[string]any:
-		return normalizeMappingInputMap(t)
+		return normalizeMappingInputMap(t, w)
 	case nil:
-		return nil
+		return nil, nil
 	default:
-		return normalizeMappingInputValue(v)
+		return normalizeMappingInputValue(v, w)
 	}
 }
 
-func normalizeMappingInputMap(m map[string]any) map[string]any {
+func normalizeMappingInputMap(m map[string]any, w *jsonWalk) (map[string]any, error) {
+	ptr := addrOf(m)
+	if err := w.down(ptr); err != nil {
+		return nil, err
+	}
+	defer w.up(ptr)
 	out := make(map[string]any, len(m))
 	for k, val := range m {
-		out[k] = normalizeMappingInputValue(val)
+		nv, err := normalizeMappingInputValue(val, w)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = nv
 	}
-	return out
+	return out, nil
 }
 
 func mapGoJQCause(msg string) string {
@@ -147,66 +175,98 @@ func mapGoJQCause(msg string) string {
 	}
 }
 
-func normalizeMappingInputValue(v any) any {
+func normalizeMappingInputValue(v any, w *jsonWalk) (any, error) {
 	switch t := v.(type) {
 	case int64:
-		return int(t)
+		return int(t), nil
 	case int:
-		return t
+		return t, nil
 	case json.Number:
 		bi := new(big.Int)
 		if _, ok := bi.SetString(string(t), 10); ok {
 			if bi.IsInt64() {
-				return int(bi.Int64())
+				return int(bi.Int64()), nil
 			}
-			return bi
+			return bi, nil
 		}
 		if f, err := t.Float64(); err == nil {
-			return f
+			return f, nil
 		}
-		return t
+		return t, nil
 	case map[string]any:
-		return normalizeMappingInputMap(t)
+		return normalizeMappingInputMap(t, w)
 	case []any:
+		ptr := addrOf(t)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
 		out := make([]any, len(t))
 		for i, e := range t {
-			out[i] = normalizeMappingInputValue(e)
+			nv, err := normalizeMappingInputValue(e, w)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = nv
 		}
-		return out
+		return out, nil
 	default:
-		return v
+		return v, nil
 	}
 }
 
-func normalizeMappingOutput(v any) any {
+func normalizeMappingOutput(v any) (any, error) {
+	w := newJSONWalk()
+	return normalizeMappingOutputWalk(v, w)
+}
+
+func normalizeMappingOutputWalk(v any, w *jsonWalk) (any, error) {
 	switch t := v.(type) {
 	case *big.Int:
 		if t.IsInt64() {
-			return t.Int64()
+			return t.Int64(), nil
 		}
-		return json.Number(t.String())
+		return json.Number(t.String()), nil
 	case json.Number:
 		if i, err := t.Int64(); err == nil {
-			return i
+			return i, nil
 		}
 		if f, err := t.Float64(); err == nil {
-			return f
+			return f, nil
 		}
-		return t
+		return t, nil
 	case map[string]any:
-		sorted := sortObjectMap(t)
-		for k, v := range sorted {
-			sorted[k] = normalizeMappingOutput(v)
+		ptr := addrOf(t)
+		if err := w.down(ptr); err != nil {
+			return nil, err
 		}
-		return sorted
+		defer w.up(ptr)
+		sorted := sortObjectMap(t)
+		for k, val := range sorted {
+			nv, err := normalizeMappingOutputWalk(val, w)
+			if err != nil {
+				return nil, err
+			}
+			sorted[k] = nv
+		}
+		return sorted, nil
 	case []any:
+		ptr := addrOf(t)
+		if err := w.down(ptr); err != nil {
+			return nil, err
+		}
+		defer w.up(ptr)
 		out := make([]any, len(t))
 		for i, e := range t {
-			out[i] = normalizeMappingOutput(e)
+			nv, err := normalizeMappingOutputWalk(e, w)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = nv
 		}
-		return out
+		return out, nil
 	default:
-		return v
+		return v, nil
 	}
 }
 

@@ -17,16 +17,44 @@ func assertErrorOmitsSecret(t *testing.T, err error, secret string) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("Error() leaked %q: %s", secret, err.Error())
-	}
-	var pe *core.Error
-	if errors.As(err, &pe) && pe.Details != nil {
-		d, _ := json.Marshal(pe.Details)
-		if strings.Contains(string(d), secret) {
-			t.Fatalf("Details leaked %q: %s", secret, d)
+	forEachErrorInChain(err, func(e error) {
+		if strings.Contains(e.Error(), secret) {
+			t.Fatalf("error chain leaked %q: %s", secret, e.Error())
 		}
+		var pe *core.Error
+		if errors.As(e, &pe) && pe.Details != nil {
+			d, _ := json.Marshal(pe.Details)
+			if strings.Contains(string(d), secret) {
+				t.Fatalf("Details leaked %q: %s", secret, d)
+			}
+		}
+	})
+}
+
+func forEachErrorInChain(err error, fn func(error)) {
+	type multiUnwrap interface {
+		Unwrap() []error
 	}
+	seen := map[error]struct{}{}
+	var walk func(error)
+	walk = func(e error) {
+		if e == nil {
+			return
+		}
+		if _, ok := seen[e]; ok {
+			return
+		}
+		seen[e] = struct{}{}
+		fn(e)
+		if mu, ok := e.(multiUnwrap); ok {
+			for _, sub := range mu.Unwrap() {
+				walk(sub)
+			}
+			return
+		}
+		walk(errors.Unwrap(e))
+	}
+	walk(err)
 }
 
 func TestMapCauseStripsOperandText(t *testing.T) {
