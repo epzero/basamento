@@ -2,6 +2,10 @@ package bus
 
 import (
 	"errors"
+	"strings"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/epzero/basamento/core"
 )
@@ -18,12 +22,20 @@ func invalidTTL() error {
 	return core.NewError(core.CodeInvalidArgument, "negative ttl", nil)
 }
 
+func invalidURL() error {
+	return core.NewError(core.CodeInvalidArgument, "malformed nats url", nil)
+}
+
 func messageTooLarge() error {
 	return core.NewError(core.CodeInvalidArgument, "message too large", nil)
 }
 
 func unavailable() error {
 	return core.NewError(core.CodeUnavailable, "bus unavailable", nil)
+}
+
+func embeddedNotReady() error {
+	return core.NewError(core.CodeUnavailable, "embedded nats not ready", nil)
 }
 
 func notFoundKV() error {
@@ -46,5 +58,27 @@ func mapConnErr(err error) error {
 	if errors.As(err, &ce) {
 		return err
 	}
-	return core.NewError(core.CodeUnavailable, "bus unavailable", map[string]any{"cause": err.Error()})
+	if errors.Is(err, nats.ErrMaxPayload) || isMessageTooLarge(err) {
+		return messageTooLarge()
+	}
+	return unavailable()
+}
+
+func errorsIsNotFound(err error) bool {
+	return errors.Is(err, jetstream.ErrKeyNotFound)
+}
+
+func errorsIsConflict(err error) bool {
+	return errors.Is(err, jetstream.ErrKeyExists) || errors.Is(err, jetstream.ErrKeyDeleted)
+}
+
+func isMessageTooLarge(err error) bool {
+	var api *jetstream.APIError
+	if errors.As(err, &api) {
+		desc := strings.ToLower(api.Description)
+		return strings.Contains(desc, "max message") ||
+			strings.Contains(desc, "message size") ||
+			strings.Contains(desc, "maximum payload")
+	}
+	return false
 }
