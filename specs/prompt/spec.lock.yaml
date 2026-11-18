@@ -1,0 +1,440 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    PROMPT-001-01:
+        hash: sha256:6cadf0192efc7a13109dfe4fca4b8cd130dac6c3418393847ce34cbda1a0511f
+        reqs:
+            - REQ-PROMPT-001
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-002-01:
+        hash: sha256:e0837712e549cf019daa51d2ed764579b96523cdd09022b64aedcee6bb9dc8ef
+        reqs:
+            - REQ-PROMPT-002
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Determinism: registered template versions are immutable so pinned id@version references replay identically.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-002-02:
+        hash: sha256:b8d364b601f0a2539a78cb7a7025cffac622a9da1e21f872912af5a7a2aab680
+        reqs:
+            - REQ-PROMPT-002
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-003-01:
+        hash: sha256:8d139195ce56eb8e13a542a472f7fd86a4cce75269219e5218b2ec37121e358d
+        reqs:
+            - REQ-PROMPT-003
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-004-01:
+        hash: sha256:192f61e76eeb225a335db73fcd8ffc42398bb58708cf8f48fe414567786e7867
+        reqs:
+            - REQ-PROMPT-004
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-005-01:
+        hash: sha256:b5500c51579d7c23e2f543a440937c2c7a1de647ea720c560ca0df066a233b87
+        reqs:
+            - REQ-PROMPT-005
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-006-01:
+        hash: sha256:20a4e268c78202a64ba7b1f3aa204e1c8e5dd7ea50d22a1e0d65e0946cacc220
+        reqs:
+            - REQ-PROMPT-006
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: literal value insertion prevents template syntax expansion.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-007-01:
+        hash: sha256:e0c8deb3addc9128f40c3cdf7a09c5e1c4cc89ca0187af14b87af1f56d6f9b1a
+        reqs:
+            - REQ-PROMPT-007
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Determinism: prompt assembly and canonical content hash are independent of input order.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-008-01:
+        hash: sha256:b8065e604a3ec9ca91847e2edf8fc42b97eabd72d734f49842db4aae56fbc2b3
+        reqs:
+            - REQ-PROMPT-008
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-009-01:
+        hash: sha256:d9fd379a174548646d644da7de4e91be9cccc92db3e8c16e6ff46bf5c15a2afe
+        reqs:
+            - REQ-PROMPT-009
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-009-02:
+        hash: sha256:5564f2fe049e3d7f688bfa6da8f9b4fda8211f3e5cb9416ff5e1e4ee8cdfed01
+        reqs:
+            - REQ-PROMPT-009
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-010-01:
+        hash: sha256:cbddfed3e3611119a29cb815b053d852c455867811e5e9424566646bc48cebcf
+        reqs:
+            - REQ-PROMPT-010
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-010-02:
+        hash: sha256:6184283e878713cd52a75d8bb9866b60cbe837917c0bdf9cd2e1759bac7101ba
+        reqs:
+            - REQ-PROMPT-010
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-010-03:
+        hash: sha256:68061bfd9cf0477b9bf19cf3248fdda435bfb1ed264b1020fb2e6bc64a3e2435
+        reqs:
+            - REQ-PROMPT-010
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-011-01:
+        hash: sha256:0f2d7d809ce6618d693cbe35cb8ccc587edb93514d8e0f512139e4214494bd40
+        reqs:
+            - REQ-PROMPT-011
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-012-01:
+        hash: sha256:a95f8169a1f0676707191118473ff919b789376da7ae699dc87356794dbba811
+        reqs:
+            - REQ-PROMPT-012
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-012-02:
+        hash: sha256:000b8ef3c588c568a66ba754f0eba2d0f313befd732f1e4ed40d76553a4f30f5
+        reqs:
+            - REQ-PROMPT-012
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-013-01:
+        hash: sha256:8475ecafb1dc27cb0564c45c87b696e1c4c1a12b8b37efadd8567ff7867773cf
+        reqs:
+            - REQ-PROMPT-013
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-013-02:
+        hash: sha256:5d9b06ee8846d8b8b6c009d664670089e4f67aefa6cc9281c12e84dd0e73578f
+        reqs:
+            - REQ-PROMPT-013
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-014-01:
+        hash: sha256:ca55d18843af1981823c1701a57cc10ed736234b8aa0c046aa7fef86ba5a5856
+        reqs:
+            - REQ-PROMPT-014
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-014-02:
+        hash: sha256:fe0e2541d3b80253a1e53dfd10cc0db1ff8536d0db979e2f8f5ff84e4b2a12d6
+        reqs:
+            - REQ-PROMPT-014
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-014-03:
+        hash: sha256:16c41afc649ac6a66b33ccdef57683eb463f2da6a9add4860f18d36bf6e06f5d
+        reqs:
+            - REQ-PROMPT-014
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-014-04:
+        hash: sha256:54155384bbc0c6817bcecf9f1ca182191fab755152e2edf3f563410d0f88a949
+        reqs:
+            - REQ-PROMPT-014
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-015-01:
+        hash: sha256:f23a0ce9a650e0278c19f98245a9afe419a870de7958383db342ad20c2d6f21a
+        reqs:
+            - REQ-PROMPT-015
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-015-02:
+        hash: sha256:b3d26b39188b1642b4282dc441427c5debcf8edfd18415727d9c57bbe9c0d201
+        reqs:
+            - REQ-PROMPT-015
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-015-03:
+        hash: sha256:be73c8c2407d9683a06c3d63d44e65af1fb32ecfe0f5956e4c481a5c58704e58
+        reqs:
+            - REQ-PROMPT-015
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted values and history are wrapped and delimiter break-out attempts neutralized.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-016-01:
+        hash: sha256:eff956764dcf160474cc4d85b1b908fb4987bc7657b790a5074486da73066e8b
+        reqs:
+            - REQ-PROMPT-016
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-017-01:
+        hash: sha256:51632ee6274b66d462a2b1ecdbe6375276f8da3da6855be69f01e0e5fb58e8c9
+        reqs:
+            - REQ-PROMPT-017
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: untrusted inputs are rejected in cacheable static and semi-static segments.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-017-02:
+        hash: sha256:cd3f6e2ef77c62a14e4882c83f88b960565ea120719dedb4c1cdc030e98f3409
+        reqs:
+            - REQ-PROMPT-016
+            - REQ-PROMPT-017
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-018-01:
+        hash: sha256:0e944f74aa6d44fb303f4fbc384688cbe892b08a16dd095e258a39f69052d35d
+        reqs:
+            - REQ-PROMPT-018
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-019-01:
+        hash: sha256:8a640618f60e47ab8e040d07992a870cd8ce94d61ee99f8a9361ea96fffebf0e
+        reqs:
+            - REQ-PROMPT-019
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-020-01:
+        hash: sha256:6baf537d46be173bb37e2b600ae00376a8520d2742f5a0e8bc1200e28153c6fe
+        reqs:
+            - REQ-PROMPT-020
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-021-01:
+        hash: sha256:63d306e0eb24af8f8da6b297c66bd41739eb68bc9f2beb9448072770045c085e
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: assembled-prompt lint detects unpaired untrusted delimiters and accepts neutralized values.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-021-02:
+        hash: sha256:ce88c0aee4de39b5f86bfdcab57bbef7ca85067ad923d4ceae93e2f0e51c9478
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: 'Security: assembled-prompt lint detects unpaired untrusted delimiters and accepts neutralized values.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/1
+    PROMPT-022-01:
+        hash: sha256:14b912469ec828c5b8820136af641c7300a3e828b308197f73125d69aca119c2
+        reqs:
+            - REQ-PROMPT-022
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
+    PROMPT-023-01:
+        hash: sha256:3bbe1fa49fc609add0cbee358d24e261d4dc458e5d7897a23cbe81d9290ea3ed
+        reqs:
+            - REQ-PROMPT-023
+        tier: P2
+        author: claude-code:spec-author:135851
+        reviewer: antigravity:spec-reviewer:2e64ed
+        approved_at: "2026-11-17"
+        note: New prompt template, segment, budget, cache-hint and template-lint behavior for WP-L3-05.
+        human:
+            status: pending
