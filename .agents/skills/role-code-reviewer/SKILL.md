@@ -38,6 +38,5 @@ base branch.
 
 Do not edit code. Do not run the gate or the whole test suite: the
 implementer and CI have. A verifier may run the one command that proves its
-finding. Your final answer is your report to your lead; your note and your
-final answer use the fields of `agent-workflow.md` §2.2. You record no status
-and post nothing yourself.
+finding. Your final answer is your report to your lead and uses the fields
+of `agent-workflow.md` §2.2. You record no status and post nothing yourself.

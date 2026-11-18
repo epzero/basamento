@@ -78,7 +78,8 @@ hand-off with `needs-human`, one question, with options.
    you read instead of the diff. Give sessions a worktree only when the code
    around the diff is needed. From the second round, `code-review.md` §6:
    check every open finding by id, whether or not its file is in the latest
-   diff, and never raise one again. An open finding that stands goes back.
+   diff, and never raise a settled one again. An open finding that stands
+   goes back.
 4. **Post one review**: each important finding as a thread on its line and
    **Request changes**; or, with none, **Approve**. Resolve the threads that
    are settled.

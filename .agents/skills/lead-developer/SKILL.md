@@ -71,13 +71,15 @@ hand-off with `needs-human`, one question, with options.
 
 1. `go tool gate review plan -base origin/main -head <branch>` gives the
    tier, which sets the finders of `code-review.md` §2 to §4, at the tiers
-   of `agent-workflow.md` §2.3. Each finding gets one verifier in the
-   self-review (`code-review.md` §1). Spawn them as code reviewer sessions.
+   of `agent-workflow.md` §2.3. Each finding gets at most one verifier in
+   the self-review (`code-review.md` §1). Spawn them as code reviewer
+   sessions.
 2. Surviving important findings go to the implementer as
    `code-changes-requested` (`go tool gate agent status … -issue <id>`).
-3. Later-round finders follow `code-review.md` §6. Give them, as separate
-   lists: the commit the new diff starts from, the findings still open (to
-   check) and the findings settled (not to repeat).
+3. A later round is one code reviewer session at standard effort, not a
+   fan-out of finders (`code-review.md` §6, `agent-workflow.md` §2.3). Give
+   it, as separate lists: the commit the new diff starts from, the findings
+   still open (to check) and the findings settled (not to repeat).
 4. After three rounds, stop spawning. Read what is still open yourself and
    settle each finding: have it fixed, or drop it with a reason that goes in
    the pull request description.
