@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -119,10 +120,10 @@ func (p *Program) mapEvalError(err error) error {
 		return evalErr(p.src, fmt.Sprintf("cost limit %d exceeded", p.env.costLimit))
 	}
 	cause := mapCELCause(err.Error())
-	if cause != "" {
-		return evalErr(p.src, cause)
+	if cause == "" {
+		cause = "evaluation failed"
 	}
-	return evalErr(p.src, err.Error())
+	return evalErr(p.src, cause)
 }
 
 func mapCELCause(msg string) string {
@@ -248,10 +249,12 @@ func bindInt(val any) (int64, error) {
 		}
 		return i, nil
 	case float64:
-		if v != float64(int64(v)) {
+		if v != math.Trunc(v) {
 			return 0, fmt.Errorf("wrong type")
 		}
-		if v > 9.223372036854776e+18 || v < -9.223372036854776e+18 {
+		const maxInt64Exclusive = 9223372036854775808.0
+		const minInt64Inclusive = -9223372036854775808.0
+		if v >= maxInt64Exclusive || v < minInt64Inclusive {
 			return 0, fmt.Errorf("wrong type")
 		}
 		return int64(v), nil

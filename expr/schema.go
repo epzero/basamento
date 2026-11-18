@@ -3,6 +3,7 @@ package expr
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"cel.dev/cel-go/cel"
@@ -150,11 +151,11 @@ func (st *schemaType) primitiveOrCompositeVisit(t string, s map[string]any, path
 			if !ok {
 				return cel.ListType(cel.DynType), "", nil
 			}
-			elem, _, err := st.mapSchemaVisit(itemSchema, path+"[]", visiting)
+			elem, objName, err := st.mapSchemaVisit(itemSchema, path+"[]", visiting)
 			if err != nil {
 				return nil, "", err
 			}
-			return cel.ListType(elem), "", nil
+			return cel.ListType(elem), objName, nil
 		}
 		return cel.ListType(cel.DynType), "", nil
 	case "object":
@@ -234,13 +235,22 @@ func (st *schemaType) constType(c any) (*cel.Type, string, error) {
 }
 
 func jsonTypeOf(v any) string {
-	switch v.(type) {
+	switch f := v.(type) {
 	case bool:
 		return "boolean"
 	case float64:
-		// encoding/json numbers are float64
-		f := v.(float64)
-		if f == float64(int64(f)) {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return "number"
+		}
+		const maxInt64Exclusive = 9223372036854775808.0
+		const minInt64Inclusive = -9223372036854775808.0
+		if f >= maxInt64Exclusive || f < minInt64Inclusive {
+			if f == math.Trunc(f) {
+				return "integer"
+			}
+			return "number"
+		}
+		if f == math.Trunc(f) {
 			return "integer"
 		}
 		return "number"
