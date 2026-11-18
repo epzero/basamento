@@ -22,7 +22,7 @@ func gitRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
 		cmd.Dir = dir
 		cmd.Env = testGitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -36,16 +36,25 @@ func gitRepo(t *testing.T) string {
 
 func commitFile(t *testing.T, dir, name string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+	commitBytes(t, dir, name, []byte("x"))
+}
+
+// commitBytes writes body to name under dir and commits it (tests only).
+func commitBytes(t *testing.T, dir, name string, body []byte) {
+	t.Helper()
+	commitBytesMsg(t, dir, name, body, name)
+}
+
+func commitBytesMsg(t *testing.T, dir, name string, body []byte, msg string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", name}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", name}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
+		t.Fatal(err)
 	}
+	mustGit(t, dir, "add", name)
+	mustGit(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", msg)
 }
 
 func TestIssueSessionsTakeTurns(t *testing.T) {
@@ -133,13 +142,8 @@ func TestSessionLifecycle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nested.Worktree, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", "f.txt"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "work"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = nested.Worktree
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-	}
+	mustGit(t, nested.Worktree, "add", "f.txt")
+	mustGit(t, nested.Worktree, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "work")
 	sessions, err := ListSessions(repo, "main")
 	if err != nil || len(sessions) != 2 {
 		t.Fatalf("list: %+v, %v", sessions, err)

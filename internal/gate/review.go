@@ -185,12 +185,17 @@ func PlanReview(root, base, head string, changed []string) (ReviewPlan, error) {
 	if tip == "" {
 		tip = "HEAD"
 	}
+	bumpBase, err := git(root, "merge-base", base, tip)
+	if err != nil {
+		return ReviewPlan{}, err
+	}
 	plan := ReviewPlan{Tier: riskTiers[len(riskTiers)-1], Files: map[string]string{}}
 	docs := map[string]bool{}
 	for _, f := range changed {
-		t := rules.TierOf(f)
-		if t == "high" && rules.goModPatchBumpApplies(f) {
-			baseBody, baseOK, err := modContentAtRef(root, base, f)
+		var t string
+		if rules.goModPatchBumpApplies(f) {
+			t = "high"
+			baseBody, baseOK, err := modContentAtRef(root, bumpBase, f)
 			if err != nil {
 				return ReviewPlan{}, err
 			}
@@ -201,6 +206,8 @@ func PlanReview(root, base, head string, changed []string) (ReviewPlan, error) {
 			if baseOK && headOK && PatchOnlyGoModBump(baseBody, headBody) {
 				t = "medium"
 			}
+		} else {
+			t = rules.TierOf(f)
 		}
 		plan.Files[f] = t
 		if rank(t) < rank(plan.Tier) {

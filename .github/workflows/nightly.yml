@@ -19,6 +19,10 @@ jobs:
         id: gover
         run: |
           line=$(sed -n 's/^go \([0-9]*\.[0-9]*\)\.[0-9]*$/\1/p' go.mod)
+          if [ -z "$line" ]; then
+            echo "no go release line in go.mod" >&2
+            exit 1
+          fi
           echo "line=$line" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:

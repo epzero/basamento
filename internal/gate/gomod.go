@@ -14,7 +14,8 @@ import (
 // goDirectiveLine matches a go directive only in the form "go 1.M.P" with no trailing text.
 var goDirectiveLine = regexp.MustCompile(`^go ([0-9]+)\.([0-9]+)\.([0-9]+)$`)
 
-var toolchainLine = regexp.MustCompile(`(?m)^toolchain `)
+// toolchainDirective matches a toolchain line with optional leading indentation (ADR-0014).
+var toolchainDirective = regexp.MustCompile(`^[ \t]*toolchain[ \t]`)
 
 // GoModVersion is a parsed "go 1.M.P" directive.
 type GoModVersion struct {
@@ -26,76 +27,12 @@ func (v GoModVersion) String() string {
 	return fmt.Sprintf("go %d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
-// ReleaseLine is "1.M" from the version.
-func (v GoModVersion) ReleaseLine() string {
-	return fmt.Sprintf("%d.%d", v.Major, v.Minor)
+type parsedGoMod struct {
+	ver           GoModVersion
+	withoutGoLine []byte
 }
 
-// ParseGoModDirective finds the single "go 1.M.P" line in content and rejects
-// toolchain lines and any other go directive form (ADR-0014).
-func ParseGoModDirective(content []byte) (GoModVersion, error) {
-	if toolchainLine.Match(content) {
-		return GoModVersion{}, fmt.Errorf("go.mod: toolchain directive present")
-	}
-	var (
-		ver   GoModVersion
-		found bool
-	)
-	for _, line := range bytes.Split(content, []byte("\n")) {
-		line = bytes.TrimSuffix(line, []byte("\r"))
-		m := goDirectiveLine.FindSubmatch(line)
-		if m == nil {
-			continue
-		}
-		if found {
-			return GoModVersion{}, fmt.Errorf("go.mod: multiple go directives")
-		}
-		found = true
-		var err error
-		ver.Major, err = strconv.Atoi(string(m[1]))
-		if err != nil {
-			return GoModVersion{}, fmt.Errorf("go.mod: %w", err)
-		}
-		ver.Minor, err = strconv.Atoi(string(m[2]))
-		if err != nil {
-			return GoModVersion{}, fmt.Errorf("go.mod: %w", err)
-		}
-		ver.Patch, err = strconv.Atoi(string(m[3]))
-		if err != nil {
-			return GoModVersion{}, fmt.Errorf("go.mod: %w", err)
-		}
-	}
-	if !found {
-		return GoModVersion{}, fmt.Errorf("go.mod: no go 1.M.P directive")
-	}
-	return ver, nil
-}
-
-// PatchOnlyGoModBump reports whether head is a medium-tier patch-only bump of
-// base: both parse, share the same 1.M release line, head patch is greater,
-// and the files are byte-identical apart from that go line.
-func PatchOnlyGoModBump(base, head []byte) bool {
-	baseRest, baseVer, err := goModWithoutDirective(base)
-	if err != nil {
-		return false
-	}
-	headRest, headVer, err := goModWithoutDirective(head)
-	if err != nil {
-		return false
-	}
-	if !bytes.Equal(baseRest, headRest) {
-		return false
-	}
-	if baseVer.Major != headVer.Major || baseVer.Minor != headVer.Minor {
-		return false
-	}
-	return headVer.Patch > baseVer.Patch
-}
-
-func goModWithoutDirective(content []byte) ([]byte, GoModVersion, error) {
-	if toolchainLine.Match(content) {
-		return nil, GoModVersion{}, fmt.Errorf("toolchain")
-	}
+func parseGoModFile(content []byte) (parsedGoMod, error) {
 	var (
 		ver   GoModVersion
 		found bool
@@ -104,23 +41,26 @@ func goModWithoutDirective(content []byte) ([]byte, GoModVersion, error) {
 	lines := bytes.Split(content, []byte("\n"))
 	for i, line := range lines {
 		raw := bytes.TrimSuffix(line, []byte("\r"))
+		if toolchainDirective.Match(raw) {
+			return parsedGoMod{}, fmt.Errorf("go.mod: toolchain directive present")
+		}
 		if m := goDirectiveLine.FindSubmatch(raw); m != nil {
 			if found {
-				return nil, GoModVersion{}, fmt.Errorf("multiple go directives")
+				return parsedGoMod{}, fmt.Errorf("go.mod: multiple go directives")
 			}
 			found = true
 			var err error
 			ver.Major, err = strconv.Atoi(string(m[1]))
 			if err != nil {
-				return nil, GoModVersion{}, err
+				return parsedGoMod{}, fmt.Errorf("go.mod: %w", err)
 			}
 			ver.Minor, err = strconv.Atoi(string(m[2]))
 			if err != nil {
-				return nil, GoModVersion{}, err
+				return parsedGoMod{}, fmt.Errorf("go.mod: %w", err)
 			}
 			ver.Patch, err = strconv.Atoi(string(m[3]))
 			if err != nil {
-				return nil, GoModVersion{}, err
+				return parsedGoMod{}, fmt.Errorf("go.mod: %w", err)
 			}
 			continue
 		}
@@ -130,9 +70,40 @@ func goModWithoutDirective(content []byte) ([]byte, GoModVersion, error) {
 		out.Write(line)
 	}
 	if !found {
-		return nil, GoModVersion{}, fmt.Errorf("no go directive")
+		return parsedGoMod{}, fmt.Errorf("go.mod: no go 1.M.P directive")
 	}
-	return out.Bytes(), ver, nil
+	return parsedGoMod{ver: ver, withoutGoLine: out.Bytes()}, nil
+}
+
+// ParseGoModDirective finds the single "go 1.M.P" line in content and rejects
+// toolchain lines and any other go directive form (ADR-0014).
+func ParseGoModDirective(content []byte) (GoModVersion, error) {
+	p, err := parseGoModFile(content)
+	if err != nil {
+		return GoModVersion{}, err
+	}
+	return p.ver, nil
+}
+
+// PatchOnlyGoModBump reports whether head is a medium-tier patch-only bump of
+// base: both parse, share the same 1.M release line, head patch is greater,
+// and the files are byte-identical apart from that go line.
+func PatchOnlyGoModBump(base, head []byte) bool {
+	baseParsed, err := parseGoModFile(base)
+	if err != nil {
+		return false
+	}
+	headParsed, err := parseGoModFile(head)
+	if err != nil {
+		return false
+	}
+	if !bytes.Equal(baseParsed.withoutGoLine, headParsed.withoutGoLine) {
+		return false
+	}
+	if baseParsed.ver.Major != headParsed.ver.Major || baseParsed.ver.Minor != headParsed.ver.Minor {
+		return false
+	}
+	return headParsed.ver.Patch > baseParsed.ver.Patch
 }
 
 // CheckSameGoModLine returns errors when tracked go.mod files disagree on the
@@ -164,6 +135,10 @@ func CheckSameGoModLine(root string) ([]string, error) {
 	for _, f := range mods {
 		b, err := os.ReadFile(filepath.Join(root, f))
 		if err != nil {
+			if os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("%s: tracked but missing", f))
+				continue
+			}
 			return nil, err
 		}
 		ver, err := ParseGoModDirective(b)
@@ -192,11 +167,11 @@ func modContentAtRef(root, ref, file string) ([]byte, bool, error) {
 		}
 		return b, true, err
 	}
+	if _, err := git(root, "cat-file", "-e", ref+":"+file); err != nil {
+		return nil, false, nil
+	}
 	b, err := gitBytes(root, "show", ref+":"+file)
 	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "exists on disk, but not in") {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	return b, true, nil
