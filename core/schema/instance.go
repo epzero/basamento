@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"unicode/utf16"
-	"unicode/utf8"
 )
 
 // decodeInstance parses JSON with UseNumber and rejects duplicate object keys.
@@ -149,8 +148,4 @@ func hasUnpairedSurrogate(s string) bool {
 		}
 	}
 	return false
-}
-
-func utf8Valid(s string) bool {
-	return utf8.ValidString(s)
 }

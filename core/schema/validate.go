@@ -45,14 +45,12 @@ func flattenInstanceErrors(err *js.ValidationError) []Violation {
 			}
 			return
 		case *kind.Required:
-			base := instancePtr(e.InstanceLocation)
 			for _, missing := range k.Missing {
 				out = append(out, Violation{
 					Location: ptrJoinTokens(append(e.InstanceLocation, missing)),
 					Keyword:  "required",
 					Message:  fmt.Sprintf("missing property %q", missing),
 				})
-				_ = base
 			}
 			return
 		case *kind.AdditionalProperties:
@@ -84,7 +82,7 @@ func flattenInstanceErrors(err *js.ValidationError) []Violation {
 			out = append(out, Violation{
 				Location: instancePtr(e.InstanceLocation),
 				Keyword:  kw,
-				Message:  e.Error(),
+				Message:  instanceViolationMessage(kw),
 			})
 		}
 	}
@@ -149,15 +147,33 @@ func collectSchemaViolations(docURL string, err *js.ValidationError) []SchemaVio
 		if loc == "" {
 			loc = keywordPathToSchemaLoc(path)
 		}
+		kw := path[len(path)-1]
 		out = append(out, SchemaViolation{
 			SchemaLocation: loc,
-			Keyword:        path[len(path)-1],
-			Message:        e.Error(),
+			Keyword:        kw,
+			Message:        schemaViolationMessage(kw),
 		})
 		_ = docURL
 	}
 	walk(err)
+	slices.SortFunc(out, func(a, b SchemaViolation) int {
+		if c := cmp.Compare(a.SchemaLocation, b.SchemaLocation); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Keyword, b.Keyword); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Message, b.Message)
+	})
 	return out
+}
+
+func instanceViolationMessage(keyword string) string {
+	return fmt.Sprintf("instance does not satisfy %q", keyword)
+}
+
+func schemaViolationMessage(keyword string) string {
+	return fmt.Sprintf("schema does not satisfy %q", keyword)
 }
 
 func keywordPathToSchemaLoc(path []string) string {
