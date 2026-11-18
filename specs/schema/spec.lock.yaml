@@ -90,7 +90,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism: generating a schema from the same Go type always yields identical canonical bytes for flow IR content hashing.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-008-01:
         hash: sha256:3bc5219d1af489f61120458e1f213b34efd35ab9b46b1718e391f270109d2f59
         reqs:
@@ -134,7 +137,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-012-02:
         hash: sha256:366b93e7f26e508e8d1d02cc4b2d1f7cd8078a0809418fbfcee73f7a66278030
         reqs:
@@ -145,7 +151,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-012-03:
         hash: sha256:4448dcdacd5d4a93c766075c72d9e17c72f27791fe64febb2b61fe65b425cbb9
         reqs:
@@ -156,7 +165,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-013-01:
         hash: sha256:10d091d42df9272d04d1c3fe5e0c45bb4690b361fca1cb8925745ac8616c8f16
         reqs:
@@ -244,7 +256,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: duplicate JSON member names in instances are rejected before validation so downstream evaluators never observe divergent values.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-026-01:
         hash: sha256:e4a9616229abeb9dd1fb4eed536bc687af4897c5d0824531dbe50f9bcaf539c1
         reqs:
@@ -266,7 +281,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-030-02:
         hash: sha256:45b9409ef7a653d5128f6dd36918a747604bf5425a3339f5870eaf941224b6aa
         reqs:
@@ -277,7 +295,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-031-01:
         hash: sha256:a05071b8cf5897405d3e7b7fa8ebd344a6355933d2cf79df472308a81e882482
         reqs:
@@ -288,7 +309,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-032-01:
         hash: sha256:2650810b8d028c0020bb9c4f9d1ce5ec38c214304a2ad407c7816be470d1f919
         reqs:
@@ -299,7 +323,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-033-01:
         hash: sha256:e4eb4df194ecf879952d48a9c27d02e12ee6d0c728b991a01b99af88c5396e4f
         reqs:
@@ -310,7 +337,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-034-01:
         hash: sha256:02a86d6827d9aa6e2d93f76005c414ab1bb9c1cb54ad55c7c9a605990b394682
         reqs:
@@ -321,7 +351,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-035-01:
         hash: sha256:dfa8fa57c2b00b5ecde41498aee2b4b705d51e90c8937b9a1f5f76b6df1d58ba
         reqs:
@@ -332,7 +365,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-036-01:
         hash: sha256:90f3120561265ac9d10b984543ebe630a01fb1083af83cd0d370c49e2d942f7d
         reqs:
@@ -343,7 +379,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
     SCHEMA-037-01:
         hash: sha256:0609c16160cd57885046b74e6a4fa14c1484ddad22dbaff90029c676412c94d1
         reqs:
@@ -354,4 +393,7 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
