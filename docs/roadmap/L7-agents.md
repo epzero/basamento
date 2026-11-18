@@ -16,6 +16,6 @@ Owns: `agent/conversation`.
 Coordinator run per conversation with a child run per turn; queue, steer and cancel (ADR-0007).
 
 ### WP-L7-04 — Conversations on a durable runtime
-Depends: WP-L7-03, WP-L5-03.
-Owns: no new package; only scenarios in `specs/conversations` and their steps.
-Proves that a conversation on the `temporal` runtime, served by the embedded Temporal server, resumes the turn it was in when the process stops, with every user and model message delivered exactly once and no duplicate.
+Depends: WP-L7-03, WP-L5-03, WP-L6-03, WP-L3-04.
+Owns: none.
+Proves at `@level:system` that a conversation on the `temporal` runtime, served by `kit serve --profile embedded`, resumes its turn and queued messages after the process is killed and restarted on the same data directory, with every user and model message recorded and streamed once. Specs: `specs/conversations/crash-resume.feature`.

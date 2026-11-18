@@ -1,6 +1,6 @@
 # Conversations: a coordinator run with one child run per turn
 
-Status: **Planned** (WP-L7-03). Design: ADR-0007, `docs/architecture/streaming.md` §6.
+Status: **Planned** (WP-L7-03, WP-L7-04). Design: ADR-0007, `docs/architecture/streaming.md` §6.
 The agent loop of one turn is specified in the `agent` capability (WP-L7-01);
 the messages a conversation exchanges and their text are `Message` values
 (`specs/glossary.md`). Streaming, detach and reattach are specified in
@@ -66,5 +66,8 @@ While no turn is running, if a user message arrives marked `steer`, then the con
 ### REQ-CONV-021 — Cancelling a turn with no turn running is refused
 While no turn is running, if a user message arrives marked `cancel`, then the conversation coordinator shall refuse it with code `conflict`.
 
-### REQ-CONV-022 — A conversation on a durable runtime resumes its turn after a crash
-Where a conversation runs on the `temporal` runtime, when the process running it stops mid-turn and restarts, the conversation coordinator shall resume that turn, and the conversation's history and every client attached to it shall hold every user message and model message exactly once, with no lost and no duplicated message.
+### REQ-CONV-022 — A conversation on a durable runtime resumes its turn and queue after a crash
+Where a conversation runs on the `temporal` runtime, when the process running it is stopped mid-turn and restarted against the same storage, the conversation coordinator shall resume the running turn and run any queued messages in arrival order without losing any user or model message.
+
+### REQ-CONV-023 — Turn messages are recorded at most once across replay or retry
+When a turn's model call or its message-recording step executes again for the same turn, the conversation coordinator shall record each user message and each model message of that turn in the conversation's history at most once.
