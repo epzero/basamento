@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -25,5 +26,22 @@ func TestKVDeadlineArithmetic(t *testing.T) {
 	clk.Advance(1 * time.Second)
 	if !expired(clk, b) {
 		t.Fatal("expected expired at deadline")
+	}
+}
+
+func TestDeadlineFromTTLSaturatesHugeTTL(t *testing.T) {
+	clk := coretest.NewFakeClock(time.Unix(0, 0))
+	d := deadlineFromTTL(clk.Now(), time.Duration(math.MaxInt64))
+	if !d.IsZero() {
+		t.Fatalf("expected no expiry, got %v", d)
+	}
+	rec := kvRecord{Value: []byte("x"), Deadline: d}
+	b := encodeKV(rec)
+	got, err := decodeKV(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired(clk, got) {
+		t.Fatal("saturated ttl should not expire immediately")
 	}
 }
