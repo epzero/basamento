@@ -70,8 +70,7 @@ func TestHandlerNosniffAndContentLength(t *testing.T) {
 	}
 }
 
-// testProxiedURLExp is a fixed unix expiry for handler/sign tests (no wall clock).
-const testProxiedURLExp = int64(1794842100) // 2026-11-16T10:15:00Z
+var testProxiedURLExp = time.Date(2026, time.November, 16, 15, 15, 0, 0, time.UTC).Unix()
 
 func TestHandlerRejectsRequestWithoutSignKey(t *testing.T) {
 	t.Parallel()
