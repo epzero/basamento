@@ -118,7 +118,10 @@ func (r *Registry) Assemble(ref string, inputs map[string]string, history []Hist
 
 func cloneTemplate(t *Template) *Template {
 	cp := *t
-	cp.Inputs = append([]Input(nil), t.Inputs...)
+	cp.Inputs = make([]Input, len(t.Inputs))
+	for i, in := range t.Inputs {
+		cp.Inputs[i] = Input{Name: in.Name, Trust: CanonicalTrust(in.Trust)}
+	}
 	cp.Segments = append([]Segment(nil), t.Segments...)
 	return &cp
 }
@@ -126,11 +129,7 @@ func cloneTemplate(t *Template) *Template {
 func inputIndex(t *Template) map[string]Input {
 	m := map[string]Input{}
 	for _, in := range t.Inputs {
-		trust := in.Trust
-		if trust == "" {
-			trust = TrustUntrusted
-		}
-		m[in.Name] = Input{Name: in.Name, Trust: trust}
+		m[in.Name] = Input{Name: in.Name, Trust: CanonicalTrust(in.Trust)}
 	}
 	return m
 }

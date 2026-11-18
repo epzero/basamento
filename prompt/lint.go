@@ -10,11 +10,7 @@ func LintTemplate(t *Template) []Finding {
 	var out []Finding
 	inputTrust := map[string]Trust{}
 	for _, in := range t.Inputs {
-		if in.Trust == "" {
-			inputTrust[in.Name] = TrustUntrusted
-		} else {
-			inputTrust[in.Name] = in.Trust
-		}
+		inputTrust[in.Name] = CanonicalTrust(in.Trust)
 	}
 	for _, seg := range t.Segments {
 		if seg.Kind == KindStatic && len(VariablesInText(seg.Text)) > 0 {

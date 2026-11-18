@@ -90,7 +90,7 @@ func TemplateContentHash(t *Template) string {
 	}
 	ins := make([]canonIn, len(t.Inputs))
 	for i, in := range t.Inputs {
-		ins[i] = canonIn{Name: in.Name, Trust: string(in.Trust)}
+		ins[i] = canonIn{Name: in.Name, Trust: string(CanonicalTrust(in.Trust))}
 	}
 	sort.Slice(ins, func(i, j int) bool { return ins[i].Name < ins[j].Name })
 	segs := make([]canonSeg, len(t.Segments))
