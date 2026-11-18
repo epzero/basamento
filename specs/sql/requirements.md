@@ -25,13 +25,13 @@ If the database a SQL store URL names cannot be reached, then the SQL store shal
 If opening a SQL store fails, then the SQL store shall return an error whose message and details do not contain the password of the URL.
 
 ### REQ-SQL-019 — SQLite database file named by URL
-When a SQL store is opened with a `sqlite` URL, the SQL store shall open the database file at the path the URL names, resolving a relative path against the working directory.
+When a SQL store is opened with a `sqlite` URL naming a file path, the SQL store shall open the database file at that path, resolving a relative path against the working directory.
 
-### REQ-SQL-020 — Unsupported SQLite and legacy URLs
-If the URL of a SQL store is a `sqlite` URL with a query or a fragment, or has the scheme `postgresql`, then the SQL store shall fail to open with code `invalid_argument` without creating any file.
+### REQ-SQL-020 — Unsupported SQLite URL query and fragment
+If the URL of a SQL store is a `sqlite` URL with a query or a fragment, then the SQL store shall fail to open with code `invalid_argument` without creating any file.
 
 ### REQ-SQL-021 — In-memory SQLite stays in memory
-If the database of a SQLite URL is `:memory:`, then the SQL store shall keep it in memory and shall not open or create a file.
+When a SQL store is opened with a `sqlite` URL whose database is `:memory:`, the SQL store shall keep the database in memory without opening or creating any file.
 
 ## Migrations
 
@@ -92,7 +92,7 @@ If a text value to be stored contains a NUL character, then the SQL store shall 
 ## Secrets in URLs
 
 ### REQ-SQL-024 — No credentials in errors of the store
-If an error of the SQL store carries the URL of the store, then the SQL store shall replace in it the password of the URL's user information and the values of its credential query parameters with `***`.
+If an error of the SQL store carries the URL of the store, then the SQL store shall replace in it the password of the URL's user information and the values of its credential query parameters (`password`, `sslpassword`, `passfile`, `sslcert`, `sslkey`, `sslrootcert`) with `***`.
 
 ### REQ-SQL-025 — Driver text withheld for URLs with a secret
 If the URL of a SQL store carried a password or a credential query parameter, then the SQL store shall not forward driver error text in the errors of the store.

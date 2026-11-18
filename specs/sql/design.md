@@ -16,9 +16,10 @@ both implementations).
   `data/kit.db` relative to the working directory, made absolute before the
   driver sees it (REQ-SQL-019). `sqlite:///:memory:` and `sqlite://:memory:`
   keep the literal `:memory:` and are never passed through `filepath.Abs`
-  (REQ-SQL-021). A SQLite URL with a query or a fragment, and the legacy
-  `postgresql` scheme, are `invalid_argument` (REQ-SQL-020): the store's own
-  parameters are set through the DSN, not through a user-supplied query.
+  (REQ-SQL-021). A SQLite URL with a query or a fragment is `invalid_argument` (REQ-SQL-020),
+  and the legacy `postgresql` scheme is `invalid_argument` (REQ-SQL-002): the
+  store's own parameters are set through the DSN, not through a user-supplied
+  query.
 - Opening takes the **migration set** as an `fs.FS` (in production an
   `embed.FS`), so the conformance suite can open stores with its own sample
   migrations. Migrations are goose migrations written once for both dialects.
@@ -34,12 +35,13 @@ both implementations).
     (`08xxx`, `53xxx`, `57P01`–`57P03`), connection refused, DNS failure or
     timeout, and SQLite `SQLITE_BUSY` and `SQLITE_LOCKED`.
   - `not_found`: no row.
-- A URL is redacted (password removed) before it reaches any message, detail or
-  cause (REQ-SQL-004): the userinfo password and the values of the credential
-  query parameters (`password`, `sslpassword`, `passfile`, `sslcert`,
-  `sslkey`, `sslrootcert`) become `***` (REQ-SQL-024). When the URL carried
-  any of them, driver text is replaced by a fixed cause (REQ-SQL-025): a
-  driver may quote its connection parameters.
+- Open errors carry the redacted URL, and a URL is redacted before it reaches
+  any message, detail or cause (REQ-SQL-004): the userinfo password and the
+  values of the credential query parameters (`password`, `sslpassword`,
+  `passfile`, `sslcert`, `sslkey`, `sslrootcert`) become literal `***`
+  (REQ-SQL-024). When the URL carried any of them, driver text is replaced by
+  the fixed cause `"driver error withheld"` (REQ-SQL-025): a driver may quote
+  its connection parameters.
 
 ## 2. Migrations
 
@@ -86,16 +88,15 @@ test-only **sample repository** over **sample migrations**, kept under
 
 A **broken migration 4** stores the item `seeded-by-4` for tenant `acme`
 and then fails. The schema also carries a not-null column and a check column
-that the sample repository leaves unset for some keys, so a write can break
-them: the key `k-null` leaves the not-null column unset and the key `k-tag`
-breaks the check.
+that the sample repository sets to violate the named constraint (`not-null` or
+`check`) when requested by a scenario.
 
-Steps about a database failure name the **refusal** the scenario needs rather
-than a driver error: the component driver injects the SQLSTATE or SQLite
-result code it names (the SQLite `SQLITE_BUSY` and `SQLITE_LOCKED` refusals
-take the embedded SQLite database's own busy and lock errors). Steps about
-a session setting run the statement in a transaction that sets it first, which
-only the Postgres pass can do.
+Steps about a database failure trigger real dialect failures from `internal/bdd`
+with no test hooks in production code (for example WAL snapshot or lock
+contention on SQLite for `busy` and `locked`; conflicting transactions,
+test-schema SQLSTATE triggers, or closing a local proxy to the database on
+Postgres for `serialization failure`, `deadlock`, `out of resources`, and
+`unreachable`).
 
 Scenarios tagged with both `@profile:embedded` and `@profile:cloud` run once
 per dialect. The component driver always runs the SQLite pass, on a fresh file
