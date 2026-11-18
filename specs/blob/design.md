@@ -1,7 +1,8 @@
 # Blob: design
 
 Decisions the implementer of WP-L1-02 (`platform/blob`) follows. The port is
-`platform.Blob` in `platform/platform.go`; its method set stays as it is.
+`platform.Blob` in `platform/platform.go`; its method set stays as it is for
+this work package. Uploads are added by WP-L1-08 (ADR-0013).
 
 ## Content keys
 

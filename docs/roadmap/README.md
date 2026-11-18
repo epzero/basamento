@@ -74,6 +74,7 @@ flowchart LR
     WP_L1_05["WP-L1-05<br/>Configuration, profiles and kit serve"]
     WP_L1_06["WP-L1-06<br/>Credential store"]
     WP_L1_07["WP-L1-07<br/>Telemetry"]
+    WP_L1_08["WP-L1-08<br/>Blob upload URLs"]
   end
   subgraph L2_epic["L2 Expressions and schemas"]
     WP_L2_01["WP-L2-01<br/>CEL environment"]
@@ -134,6 +135,7 @@ flowchart LR
   WP_L1_01 --> WP_L1_07
   WP_L1_01 --> WP_L6_01
   WP_L1_02 --> WP_L1_05
+  WP_L1_02 --> WP_L1_08
   WP_L1_02 --> WP_L3_03
   WP_L1_02 --> WP_L5_02
   WP_L1_03 --> WP_L1_05
@@ -145,6 +147,8 @@ flowchart LR
   WP_L1_05 --> WP_L5_03
   WP_L1_05 --> WP_L8_01
   WP_L1_06 --> WP_L3_01
+  WP_L1_08 --> WP_L3_07
+  WP_L1_08 --> WP_L9_01
   WP_L2_01 --> WP_L4_01
   WP_L2_02 --> WP_L3_01
   WP_L2_02 --> WP_L4_01
