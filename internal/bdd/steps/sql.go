@@ -212,8 +212,12 @@ func registerSQL(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^the error is marked retryable$`, func(ctx context.Context) error {
-		if !core.IsRetryable(world(ctx).SQL.openErr) {
-			return fmt.Errorf("error is not retryable")
+		err := sqlCallError(ctx)
+		if err == nil {
+			return fmt.Errorf("no error")
+		}
+		if !core.IsRetryable(err) {
+			return fmt.Errorf("error %v is not retryable", err)
 		}
 		return nil
 	})
@@ -532,6 +536,8 @@ func registerSQL(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+
+	registerSQLFailureSteps(sc)
 
 	sc.Step(`^no tenant has an item with key "([^"]*)"$`, func(ctx context.Context, key string) error {
 		w := world(ctx).SQL

@@ -63,12 +63,36 @@ func (r *SampleRepo) StoreItem(ctx context.Context, key string, opts StoreOption
 		if err != nil {
 			return err
 		}
-		_, err = e.Exec(ctx, `INSERT INTO items (id, tenant_id, key, list_id, at, note) VALUES (?, ?, ?, ?, ?, ?)`,
-			id, string(tenant), key, listID, at, nullString(opts.Note))
+		_, err = e.Exec(ctx, `INSERT INTO items (id, tenant_id, key, list_id, at, note, required, tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, string(tenant), key, listID, at, nullString(opts.Note), "ok", "ok")
 		return err
 	}
-	_, err = e.Exec(ctx, `INSERT INTO items (id, tenant_id, key, at, note) VALUES (?, ?, ?, ?, ?)`,
-		id, string(tenant), key, at, nullString(opts.Note))
+	_, err = e.Exec(ctx, `INSERT INTO items (id, tenant_id, key, at, note, required, tag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, string(tenant), key, at, nullString(opts.Note), "ok", "ok")
+	return err
+}
+
+// StoreItemViolatingConstraint inserts an item that breaks the named sample
+// constraint: "not-null" stores NULL in the required column, and "check"
+// stores a tag the check rule rejects. Anything else is invalid_argument.
+func (r *SampleRepo) StoreItemViolatingConstraint(ctx context.Context, key, rule string) error {
+	tenant, err := r.requireTenant(ctx)
+	if err != nil {
+		return err
+	}
+	var required, tag any = "ok", "ok"
+	switch rule {
+	case "not-null":
+		required = nil
+	case "check":
+		tag = "bad"
+	default:
+		return core.NewError(core.CodeInvalidArgument, "sql: unknown constraint rule", nil)
+	}
+	id := fmt.Sprintf("item-%s-%s", tenant, key)
+	_, err = r.store.Execer().Exec(ctx,
+		`INSERT INTO items (id, tenant_id, key, at, required, tag) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, string(tenant), key, conformanceFixedTime, required, tag)
 	return err
 }
 
@@ -107,8 +131,8 @@ func (r *SampleRepo) StoreItemInMissingList(ctx context.Context, key string) err
 		return err
 	}
 	id := fmt.Sprintf("item-%s-%s", tenant, key)
-	_, err = r.store.Execer().Exec(ctx, `INSERT INTO items (id, tenant_id, key, list_id, at) VALUES (?, ?, ?, ?, ?)`,
-		id, string(tenant), key, "list-missing", conformanceFixedTime)
+	_, err = r.store.Execer().Exec(ctx, `INSERT INTO items (id, tenant_id, key, list_id, at, required, tag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, string(tenant), key, "list-missing", conformanceFixedTime, "ok", "ok")
 	return err
 }
 
@@ -286,8 +310,8 @@ func (r *SampleRepo) TxStoreItems(ctx context.Context, keys []string, failAfterS
 	return r.store.InTx(ctx, func(ctx context.Context, exec *psql.Execer) error {
 		for i, key := range keys {
 			id := fmt.Sprintf("item-%s-%s-tx", tenant, key)
-			if _, err := exec.Exec(ctx, `INSERT INTO items (id, tenant_id, key, at) VALUES (?, ?, ?, ?)`,
-				id, string(tenant), key, conformanceFixedTime); err != nil {
+			if _, err := exec.Exec(ctx, `INSERT INTO items (id, tenant_id, key, at, required, tag) VALUES (?, ?, ?, ?, ?, ?)`,
+				id, string(tenant), key, conformanceFixedTime, "ok", "ok"); err != nil {
 				return err
 			}
 			if failAfterSecond && i == 1 {

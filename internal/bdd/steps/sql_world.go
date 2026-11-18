@@ -25,6 +25,7 @@ type sqlWorld struct {
 	openErr     error
 	lastTxErr   error
 	closedPort  string
+	prevDir     string
 	keyOrder    []string
 	extraStores []*psql.Store
 }
@@ -65,6 +66,10 @@ func (w *sqlWorld) teardown() {
 	if w.pgCleanup != nil {
 		w.pgCleanup()
 		w.pgCleanup = nil
+	}
+	if w.prevDir != "" {
+		_ = os.Chdir(w.prevDir)
+		w.prevDir = ""
 	}
 	if w.dataDir != "" {
 		_ = os.RemoveAll(w.dataDir)

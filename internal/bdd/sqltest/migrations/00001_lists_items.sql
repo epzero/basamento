@@ -11,6 +11,8 @@ CREATE TABLE items (
     key       TEXT NOT NULL,
     list_id   TEXT REFERENCES lists(id),
     at        TIMESTAMP NOT NULL,
+    required  TEXT NOT NULL,
+    tag       TEXT NOT NULL CHECK (tag = 'ok'),
     UNIQUE (tenant_id, key)
 );
 
