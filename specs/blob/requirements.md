@@ -1,6 +1,6 @@
 # Blob: content-addressed blob storage
 
-Status: **Planned** (WP-L1-02). Design: ADR-0004, [`design.md`](design.md).
+Status: **Planned** (WP-L1-02, WP-L1-08). Design: ADR-0004, ADR-0013, [`design.md`](design.md).
 
 The blob store keeps immutable content (assets, large run payloads, browser
 recordings) under its content key, separately for each tenant. The embedded
@@ -67,3 +67,52 @@ If a location URL has no scheme or a scheme the blob store does not support, the
 
 ### REQ-BLOB-020 — Empty data directory
 When a blob store is opened on a local directory that does not exist yet, the blob store shall create the directory and start with no blobs.
+
+## Uploads
+
+A client uploads a body to a **staging key** through a single-use **upload
+URL** of its tenant, then commits the staging key: the blob store hashes the
+staged object and stores it under its content key. A client never names a
+content key (ADR-0013).
+
+### REQ-BLOB-021 — Commit stores the body under its content key
+When a tenant commits a staging key whose staged object is present, then the blob store shall store the staged object under the content key of its content with the content type bound at `StartUpload` and return that content key.
+
+### REQ-BLOB-022 — A fresh staging slot for every upload
+When a tenant starts an upload, then the blob store shall reserve a new staging key and an upload URL that are random, distinct from every earlier one and derived from no content.
+
+### REQ-BLOB-023 — Upload options are bounds
+If an upload is started with a maximum size that is not positive, a content type that is not a single `type/subtype`, a non-positive lifetime or a lifetime above the maximum blob URL lifetime, then the blob store shall reject the start with code `invalid_argument`.
+
+### REQ-BLOB-024 — Upload URLs are signed, single use and scoped to their bounds
+When an upload URL is used, then the blob store shall accept the body only if it carries a valid signature over the tenant, the staging key, the expiry, the maximum size and the content type, has not been used before, starts no later than its expiry and fits within the bound's maximum size and content type, and shall otherwise refuse it with status 403 for a bad signature or expiry, 413 over the maximum size and 415 for the wrong content type without storing any of the body.
+
+### REQ-BLOB-025 — Upload URLs and staging keys expire
+If an upload URL is used after the lifetime requested at `StartUpload` has ended, then the blob store shall refuse it with status 403 and store no body; and if a staging key is committed after that lifetime has ended, then the blob store shall fail the commit with code `not_found`.
+
+### REQ-BLOB-026 — Uncommitted objects expire
+When a staging key's lifetime has ended and the blob store sweeps expired staged objects, then the blob store shall delete the staging object and keep the staging key from being committed.
+
+### REQ-BLOB-027 — The size bound is enforced at the URL
+If the body sent to an upload URL exceeds the maximum size of the request, then the blob store shall refuse it with status 413 and store no staged object.
+
+### REQ-BLOB-028 — The content type bound is enforced at the URL
+If the body sent to an upload URL does not have the content type bound at `StartUpload`, then the blob store shall refuse it with status 415 and store no staged object.
+
+### REQ-BLOB-029 — Staged objects are scoped to their tenant
+The blob store shall refuse a commit by a tenant other than the one that started the upload with code `not_found` and store nothing under that tenant's content keys, and shall name each staging key to one tenant only.
+
+### REQ-BLOB-030 — Unknown staging keys
+If a commit names a staging key the calling tenant holds no uncommitted staging object for, because the key was never issued, its staged object was never uploaded, was removed by a sweep or deleted by a failed commit, then the blob store shall fail the commit with code `not_found`.
+
+### REQ-BLOB-031 — A staging key is committed once
+If a commit names a staging key that was committed before, then the blob store shall fail it with code `not_found` and leave the blob the earlier commit stored unchanged.
+
+### REQ-BLOB-032 — A failed commit stores nothing
+If a commit finds its staged object over the maximum size or of another content type than the one bound at `StartUpload`, then the blob store shall fail it with code `invalid_argument`, store nothing under any content key and leave the staging key committed: a later commit of it fails with code `not_found`.
+
+### REQ-BLOB-033 — Malformed staging keys
+If a commit names a key that is not a well-formed staging key, then the blob store shall reject it with code `invalid_argument` and touch no stored data.
+
+### REQ-BLOB-034 — Uploads need a tenant
+If an upload is started, or a staging key is committed, without a tenant in its context, then the blob store shall reject the call with code `invalid_argument`.
