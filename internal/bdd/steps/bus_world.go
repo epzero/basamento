@@ -37,14 +37,12 @@ type subState struct {
 	ch      <-chan platform.Message
 	cancel  context.CancelFunc
 	got     []platform.Message
-	grow    chan struct{}
-	done    chan struct{}
+	paced   bool
 }
 
 type busWorld struct {
 	mu      sync.Mutex
 	backend string
-	profile string
 
 	bus     busKV
 	fake    *bustest.Fake
@@ -85,7 +83,6 @@ func newBusWorld() *busWorld {
 	}
 	return &busWorld{
 		backend:   backend,
-		profile:   backend, // embedded/cloud profile alignment
 		msgs:      map[string]published{},
 		revisions: map[string]uint64{},
 		lastRev:   map[string]uint64{},
@@ -127,12 +124,6 @@ func (w *busWorld) opts(clk core.Clock) bus.Options {
 }
 
 func (w *busWorld) ensureOpen(ctx context.Context) error {
-	if w.serverDown && w.bus != nil {
-		return nil
-	}
-	if w.serverDown {
-		return core.NewError(core.CodeUnavailable, "bus unavailable", nil)
-	}
 	if w.bus != nil {
 		return nil
 	}
@@ -225,12 +216,14 @@ func msgBytes(label string) []byte { return []byte(label) }
 func (w *busWorld) publish(ctx context.Context, subject, label string, data []byte) error {
 	if err := w.ensureOpen(ctx); err != nil {
 		w.lastErr = err
-		return nil
+		return err
 	}
 	if data == nil {
 		data = msgBytes(label)
 	}
-	seq, err := w.bus.Publish(ctx, subject, data)
+	pubCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	seq, err := w.bus.Publish(pubCtx, subject, data)
 	w.mu.Lock()
 	w.lastErr = err
 	if err == nil {
@@ -238,6 +231,21 @@ func (w *busWorld) publish(ctx context.Context, subject, label string, data []by
 		w.publishOK = append(w.publishOK, seq)
 	}
 	w.mu.Unlock()
+	if err != nil {
+		return nil
+	}
+	return nil
+}
+
+func (w *busWorld) paceReaders(ctx context.Context, n int) error {
+	for _, sub := range w.subs {
+		if !sub.paced {
+			continue
+		}
+		if err := w.waitSubMsgs(ctx, sub, n); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -271,40 +279,21 @@ func (w *busWorld) startSub(ctx context.Context, name, subject string, after uin
 	subCtx, cancel := context.WithCancel(ctx)
 	var ch <-chan platform.Message
 	var err error
-	if w.fake != nil && w.subBuf > 0 && w.subBuf < bus.DefaultSubBuffer && name != "slow" {
-		ch, err = w.fake.SubscribeWithBuffer(subCtx, subject, after, bus.DefaultSubBuffer, bus.DefaultSubBuffer)
-	} else {
-		ch, err = w.bus.Subscribe(subCtx, subject, after)
-	}
+	ch, err = w.bus.Subscribe(subCtx, subject, after)
 	w.subErr = err
 	if err != nil {
 		cancel()
 		return nil
 	}
+	paced := name == "fast" || name == "s1" || name == "s2"
 	st := &subState{
 		name:    name,
 		subject: subject,
 		ch:      ch,
 		cancel:  cancel,
-		grow:    make(chan struct{}, 512),
-		done:    make(chan struct{}),
+		paced:   paced,
 	}
 	w.subs[name] = st
-	if name == "fast" || name == "s1" || name == "s2" {
-		go func(sn string, inbox <-chan platform.Message, grow chan struct{}, done chan struct{}) {
-			defer close(done)
-			for {
-				m, ok := <-inbox
-				if !ok {
-					return
-				}
-				w.mu.Lock()
-				w.subs[sn].got = append(w.subs[sn].got, m)
-				w.mu.Unlock()
-				grow <- struct{}{}
-			}
-		}(name, ch, st.grow, st.done)
-	}
 	return nil
 }
 
@@ -315,20 +304,29 @@ func (w *busWorld) requireSubOK() error {
 	return nil
 }
 
-func waitSubMsgs(ctx context.Context, sub *subState, n int) error {
+func (w *busWorld) waitSubMsgs(ctx context.Context, sub *subState, n int) error {
 	if n == 0 {
 		return nil
 	}
-	for i := 0; i < n; i++ {
+	for {
+		w.mu.Lock()
+		cur := len(sub.got)
+		w.mu.Unlock()
+		if cur >= n {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-sub.grow:
-		case <-sub.done:
-			return fmt.Errorf("subscription %s ended after %d/%d messages", sub.name, len(sub.got), n)
+		case m, ok := <-sub.ch:
+			if !ok {
+				return fmt.Errorf("subscription %s ended at %d/%d messages", sub.name, cur, n)
+			}
+			w.mu.Lock()
+			sub.got = append(sub.got, m)
+			w.mu.Unlock()
 		}
 	}
-	return nil
 }
 
 func recvWithSentinel(ctx context.Context, b busKV, sub *subState, want []string) error {
@@ -435,6 +433,12 @@ func (w *busWorld) stopServer() {
 	w.serverDown = true
 	if w.fake != nil {
 		w.fake.Stop()
+		return
+	}
+	if w.nats != nil {
+		if st, ok := w.bus.(*bus.Store); ok {
+			st.ForceDisconnect()
+		}
 		return
 	}
 	if st, ok := w.bus.(*bus.Store); ok {
