@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -99,9 +100,30 @@ func rank(tier string) int {
 	return len(riskTiers)
 }
 
+// checkBaseRef rejects a value git would read as an option and requires the
+// ref to name a commit. Branches, tags, remote-tracking refs such as
+// origin/main and commit SHAs all pass: the gate compares against a commit,
+// not against a branch name, so it does not apply the branch-name rule of a
+// session's -branch.
+func checkBaseRef(root, base string) error {
+	if base == "" {
+		return errors.New("no base ref: pass a branch, tag or commit such as origin/main")
+	}
+	if strings.HasPrefix(base, "-") {
+		return fmt.Errorf("base ref %q begins with '-': pass a branch, tag or commit such as origin/main, not a git option", base)
+	}
+	if _, err := git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", base+"^{commit}"); err != nil {
+		return fmt.Errorf("base ref %q does not name a commit in this clone: fetch it (`git fetch origin`) or pass a branch, tag or commit SHA", base)
+	}
+	return nil
+}
+
 // PlanReview reads review.yaml and the REVIEW.md files from the base ref, so a
 // change cannot lower the bar it is reviewed against.
 func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
+	if err := checkBaseRef(root, base); err != nil {
+		return ReviewPlan{}, err
+	}
 	raw, err := git(root, "show", base+":review.yaml")
 	if err != nil {
 		b, ferr := os.ReadFile(filepath.Join(root, "review.yaml")) // first introduction
@@ -145,6 +167,9 @@ func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
 // the working tree, so uncommitted edits count. Comparing from the merge base
 // keeps commits that landed on base in the meantime out of the change.
 func ChangedFiles(root, base, head string) ([]string, error) {
+	if err := checkBaseRef(root, base); err != nil {
+		return nil, err
+	}
 	tip := head
 	if tip == "" {
 		tip = "HEAD"

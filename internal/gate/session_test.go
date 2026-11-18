@@ -1,11 +1,13 @@
 package gate
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func gitRepo(t *testing.T) string {
@@ -214,6 +216,117 @@ func TestReleaseAfterASquashMerge(t *testing.T) {
 	mustGit(t, repo, "fetch", "-q", "--prune")
 	if _, err := ReleaseSession(repo, id.Instance, "main", false); err != nil {
 		t.Fatalf("a branch whose remote is gone after a merge is released: %v", err)
+	}
+}
+
+func TestSessionFileIsReplacedNotTruncated(t *testing.T) {
+	repo := gitRepo(t)
+	s := Session{Identity: "opencode:implementer:abc123", Branch: "EP0-51-abc123", Worktree: repo, Created: "2026-01-01T00:00:00Z"}
+	if err := writeSession(s); err != nil {
+		t.Fatal(err)
+	}
+	p, err := sessionPath(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A crash in the middle of a rewrite must leave the previous hand-off in
+	// place; replacing the file by rename is what guarantees it.
+	s.Status, s.Note = "code-review-requested", strings.Repeat("n", 1<<20)
+	if err := writeSession(s); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("the session file was written in place; it must be replaced atomically")
+	}
+	got, err := readSession(repo)
+	if err != nil || got.Status != s.Status || got.Note != s.Note {
+		t.Fatalf("the replacement holds the new hand-off: %+v, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Fatalf("a temporary file was left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestIssueLockSerialisesWriters(t *testing.T) {
+	repo := gitRepo(t)
+	path, err := issueLockPath(repo, "WP-L1-04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := acquireFileLock(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	// A second writer must wait for the first, not enter beside it.
+	acquired := make(chan *fileLock, 1)
+	failed := make(chan error, 1)
+	attempting := make(chan struct{})
+	go func() {
+		close(attempting)
+		l, err := acquireFileLock(ctx, path)
+		if err != nil {
+			failed <- err
+			return
+		}
+		acquired <- l
+	}()
+	<-attempting
+	select {
+	case l := <-acquired:
+		l.release()
+		t.Fatal("a second writer acquired the per-issue lock while the first held it")
+	default:
+	}
+
+	first.release()
+	select {
+	case l := <-acquired:
+		l.release()
+	case err := <-failed:
+		t.Fatal(err)
+	}
+}
+
+func TestNewSessionsForOneIssueShareOneWorktree(t *testing.T) {
+	repo := gitRepo(t)
+	type result struct {
+		session Session
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			s, err := NewSession(repo, NewSessionRequest{Harness: "opencode", Role: RoleImplementer, Issue: "WP-L1-04"})
+			results <- result{s, err}
+		}()
+	}
+	close(start)
+	a, b := <-results, <-results
+	if a.err != nil || b.err != nil {
+		t.Fatalf("both sessions must start: %v, %v", a.err, b.err)
+	}
+	if a.session.Worktree != b.session.Worktree || a.session.Branch != b.session.Branch {
+		t.Fatalf("one issue has one worktree and branch: %+v, %+v", a.session, b.session)
 	}
 }
 

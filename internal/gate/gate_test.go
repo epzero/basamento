@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,6 +399,58 @@ func TestReapprovalKeepsDecisions(t *testing.T) {
 	e.Human = Human{Status: "accepted"}
 	if errs := CheckLock(s, l); !hasErr(errs, "needs `by: human:<login>`") {
 		t.Errorf("an acceptance without a person must fail the lock: %v", errs)
+	}
+}
+
+func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
+	root := gitRepo(t)
+	for _, base := range []string{"-x", "--all", "-"} {
+		if _, err := ChangedFiles(root, base, ""); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("ChangedFiles must refuse %q before git reads it as an option: %v", base, err)
+		}
+		if _, err := PlanReview(root, base, nil); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("PlanReview must refuse %q before git reads it as an option: %v", base, err)
+		}
+		if _, _, err := RedGreen(root, base); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("RedGreen must refuse %q before git reads it as an option: %v", base, err)
+		}
+	}
+	for _, fn := range []func(string) error{
+		func(base string) error { _, err := ChangedFiles(root, base, ""); return err },
+		func(base string) error { _, err := PlanReview(root, base, nil); return err },
+		func(base string) error { _, _, err := RedGreen(root, base); return err },
+	} {
+		if err := fn("origin/nope"); err == nil || !strings.Contains(err.Error(), "does not name a commit") {
+			t.Errorf("an unresolvable base must say so: %v", err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "review.yaml"), []byte("default: medium\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := git(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{"main", sha} {
+		if _, err := PlanReview(root, base, []string{"a.go"}); err != nil {
+			t.Errorf("review plan still accepts %q: %v", base, err)
+		}
+	}
+}
+
+func TestRemoteGitTimeoutSaysWhatToCheck(t *testing.T) {
+	repo := gitRepo(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	_, err := gitRemoteContext(ctx, repo, "fetch", "origin")
+	if err == nil {
+		t.Fatal("an unreachable remote must fail instead of hanging")
+	}
+	for _, want := range []string{"timed out after", "git remote -v", "network", "credentials"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the timeout error must say what to check (%q): %v", want, err)
+		}
 	}
 }
 

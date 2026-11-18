@@ -170,6 +170,15 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	if r.Issue != "" {
+		// Two calls for one issue would otherwise both see no worktree and
+		// create one, or overwrite each other's hand-off.
+		unlock, err := acquireIssueLock(top, r.Issue)
+		if err != nil {
+			return Session{}, err
+		}
+		defer unlock()
+	}
 	s := Session{Identity: id.String(), Parent: r.Parent, Issue: r.Issue, Worktree: top, Created: time.Now().UTC().Format(time.RFC3339)}
 	linked, err := inLinkedWorktree(top)
 	if err != nil {
@@ -216,7 +225,7 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 // itself, in the harness's own clean worktree or a new one.
 func continueBranch(top string, linked bool, s Session, id Identity, branch string) (Session, error) {
 	if _, err := git(top, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
-		if _, err := git(top, "fetch", "origin", branch); err != nil {
+		if _, err := gitRemote(top, "fetch", "origin", branch); err != nil {
 			return Session{}, err
 		}
 		if _, err := git(top, "branch", "--track", branch, "origin/"+branch); err != nil {
@@ -285,7 +294,35 @@ func writeSession(s Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, append(b, '\n'), 0o644)
+	return writeFileAtomic(p, append(b, '\n'), 0o644)
+}
+
+// writeFileAtomic replaces path with data through a file in the same
+// directory, so a crash leaves either the old contents or the new ones, never
+// a truncated file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }() // a no-op once the rename succeeded
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func readSession(dir string) (Session, error) {

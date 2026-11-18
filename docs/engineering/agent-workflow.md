@@ -37,6 +37,13 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
   committed file. The command prints the hand-off the previous session left.
+  The file is replaced atomically, so a crash never leaves half a hand-off.
+- **Calls for one work item are serialised** by a lock in the repository's
+  common git directory: two sessions for the same issue cannot both create its
+  worktree. A second call waits at most 30 seconds, then reports the lock.
+- **Remote git calls are bounded.** A `fetch` gives up after 30 seconds and
+  says what to check (the remote, the network, the credentials), so an
+  unreachable origin does not hang the command.
 
 A person is `human:<github-login>`; when no personal login is given, the
 default owner identity is `human:epzero` (§5). An identity is a convention,
