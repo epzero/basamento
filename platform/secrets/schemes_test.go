@@ -10,7 +10,7 @@ import (
 func TestRegisteredKeeperSchemes(t *testing.T) {
 	t.Parallel()
 	mux := secrets.DefaultURLMux()
-	for _, scheme := range CloudKeeperSchemes {
+	for _, scheme := range cloudKeeperSchemes() {
 		found := false
 		for _, s := range mux.KeeperSchemes() {
 			if s == scheme {

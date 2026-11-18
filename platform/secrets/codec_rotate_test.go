@@ -3,6 +3,8 @@ package secrets
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -10,7 +12,7 @@ import (
 
 type failAfterWrapKey struct {
 	id        string
-	wraps     int
+	wraps     atomic.Int32
 	failAfter int
 }
 
@@ -26,8 +28,8 @@ func (f *failAfterWrapKey) Wrap(ctx context.Context, tenant string, plaintext []
 		}
 		return append([]byte("wrap:"), inner...), nil
 	}
-	f.wraps++
-	if f.wraps > f.failAfter {
+	n := f.wraps.Add(1)
+	if int(n) > f.failAfter {
 		return nil, errUnavailableRetry("test")
 	}
 	inner, err := FrameBoundPlaintext(tenant, plaintext)
@@ -45,15 +47,20 @@ func (f *failAfterWrapKey) Unwrap(ctx context.Context, tenant string, ct []byte)
 }
 
 type memKeysetStore struct {
+	mu   sync.Mutex
 	data map[string]StoredKeyset
 }
 
 func (m *memKeysetStore) Get(_ context.Context, tenant string) (StoredKeyset, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	r, ok := m.data[tenant]
 	return r, ok, nil
 }
 
 func (m *memKeysetStore) CreateIfAbsent(_ context.Context, tenant string, record StoredKeyset) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.data[tenant]; ok {
 		return false, nil
 	}
@@ -62,6 +69,8 @@ func (m *memKeysetStore) CreateIfAbsent(_ context.Context, tenant string, record
 }
 
 func (m *memKeysetStore) CompareAndSwap(_ context.Context, tenant string, expect uint64, record StoredKeyset) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	old, ok := m.data[tenant]
 	if !ok || old.Revision != expect {
 		return errConflict(msgKeysetRevisionConflict)
@@ -70,9 +79,15 @@ func (m *memKeysetStore) CompareAndSwap(_ context.Context, tenant string, expect
 	return nil
 }
 
-func (m *memKeysetStore) Count(context.Context) (int, error) { return len(m.data), nil }
+func (m *memKeysetStore) Count(context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.data), nil
+}
 
 func (m *memKeysetStore) Tenants(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	out := make([]string, 0, len(m.data))
 	for k := range m.data {
 		out = append(out, k)
@@ -106,15 +121,15 @@ func TestRotateMasterKeyFailsBeforeAnyRecordWrapped(t *testing.T) {
 	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("rotate err=%v", err)
 	}
-	if mid.wraps != 1 {
-		t.Fatalf("expected one failed rewrap attempt, wraps=%d", mid.wraps)
+	if mid.wraps.Load() != 1 {
+		t.Fatalf("expected one failed rewrap attempt, wraps=%d", mid.wraps.Load())
 	}
 	for _, tenant := range []string{"acme", "globex"} {
 		if store.data[tenant].MasterKeyID != "mk-1" {
 			t.Fatalf("%s record changed", tenant)
 		}
 	}
-	if c.snapshotKeys()[0].MasterKeyID() != "mk-1" {
-		t.Fatal("master list not restored")
+	if c.snapshotKeys()[0].MasterKeyID() != "mk-2" {
+		t.Fatal("new master must stay configured after partial failure")
 	}
 }

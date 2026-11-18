@@ -11,6 +11,7 @@ import (
 
 const (
 	msgUnsupportedScheme = `unsupported key service scheme %q`
+	msgInvalidKeyURL     = `invalid key service URL for scheme %q`
 	msgLocalKeyMissing   = "local key is missing"
 	msgLocalKeySize      = "local key must be 32 bytes, base64 encoded"
 )
