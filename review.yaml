@@ -6,6 +6,10 @@ default: medium
 # of them who did not open the pull request, given once the owner has
 # approved in the tracker (.github/CODEOWNERS is generated from this file).
 high_owner: "@rider-undefined @archer-undefined"
+# Patch-only bump of the go directive in these paths may rate medium (ADR-0014).
+go_mod_patch_bump:
+  - go.mod
+  - "**/go.mod"
 tiers:
   high:
     - .github/**

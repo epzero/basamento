@@ -50,7 +50,7 @@ func main() {
 		must(fs.Parse(os.Args[3:]))
 		files, err := gate.ChangedFiles(root, *base, *head)
 		must(err)
-		plan, err := gate.PlanReview(root, *base, files)
+		plan, err := gate.PlanReview(root, *base, *head, files)
 		must(err)
 		if *asJSON {
 			enc := json.NewEncoder(os.Stdout)

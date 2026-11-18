@@ -25,6 +25,9 @@ type ReviewRules struct {
 	// approval of one of them on high-tier paths
 	// (docs/engineering/agent-workflow.md §7.1).
 	HighOwner string `yaml:"high_owner"`
+	// GoModPatchBump lists paths where a patch-only go directive bump may rate
+	// medium instead of high (ADR-0014).
+	GoModPatchBump []string `yaml:"go_mod_patch_bump"`
 }
 
 // CodeOwners renders .github/CODEOWNERS from the high tier, so the host
@@ -145,11 +148,26 @@ func isObjectID(s string) bool {
 	return true
 }
 
+func (r ReviewRules) goModPatchBumpApplies(file string) bool {
+	for _, g := range r.GoModPatchBump {
+		if globRegexp(g).MatchString(file) {
+			return true
+		}
+	}
+	return false
+}
+
 // PlanReview reads review.yaml and the REVIEW.md files from the base ref, so a
-// change cannot lower the bar it is reviewed against.
-func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
+// change cannot lower the bar it is reviewed against. An empty head means the
+// working tree (uncommitted edits count).
+func PlanReview(root, base, head string, changed []string) (ReviewPlan, error) {
 	if err := checkBaseRef(root, base); err != nil {
 		return ReviewPlan{}, err
+	}
+	if head != "" {
+		if err := checkRefNotOption("head", head); err != nil {
+			return ReviewPlan{}, err
+		}
 	}
 	raw, err := git(root, "show", base+":review.yaml")
 	if err != nil {
@@ -163,10 +181,27 @@ func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
 	if err := yaml.Unmarshal([]byte(raw), &rules); err != nil {
 		return ReviewPlan{}, fmt.Errorf("review.yaml: %w", err)
 	}
+	tip := head
+	if tip == "" {
+		tip = "HEAD"
+	}
 	plan := ReviewPlan{Tier: riskTiers[len(riskTiers)-1], Files: map[string]string{}}
 	docs := map[string]bool{}
 	for _, f := range changed {
 		t := rules.TierOf(f)
+		if t == "high" && rules.goModPatchBumpApplies(f) {
+			baseBody, baseOK, err := modContentAtRef(root, base, f)
+			if err != nil {
+				return ReviewPlan{}, err
+			}
+			headBody, headOK, err := modContentAtRef(root, head, f)
+			if err != nil {
+				return ReviewPlan{}, err
+			}
+			if baseOK && headOK && PatchOnlyGoModBump(baseBody, headBody) {
+				t = "medium"
+			}
+		}
 		plan.Files[f] = t
 		if rank(t) < rank(plan.Tier) {
 			plan.Tier = t
