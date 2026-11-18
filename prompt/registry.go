@@ -137,7 +137,7 @@ func inputIndex(t *Template) map[string]Input {
 // Assemble builds a prompt from a template (caller must have resolved it).
 func Assemble(t *Template, ref string, inputs map[string]string, history []HistoryEntry) (*Assembled, error) {
 	idx := inputIndex(t)
-	if err := validateInputs(idx, inputs); err != nil {
+	if err := validateInputs(t, inputs); err != nil {
 		return nil, err
 	}
 	if err := validateHistory(history); err != nil {
@@ -164,7 +164,8 @@ func Assemble(t *Template, ref string, inputs map[string]string, history []Histo
 				return nil, totalBudgetError(t.TotalBudget, totalSize(sizes))
 			}
 			if histOver {
-				return nil, segmentBudgetError(historySegName(t), sizes[historySegName(t)], historyBudget(t))
+				name, bud := historySegBudget(t)
+				return nil, segmentBudgetError(name, sizes[historySegIndex(t)], bud)
 			}
 		}
 		hist = hist[1:]
@@ -172,13 +173,19 @@ func Assemble(t *Template, ref string, inputs map[string]string, history []Histo
 	}
 }
 
-func validateInputs(decl map[string]Input, inputs map[string]string) error {
-	for name := range decl {
-		if _, ok := inputs[name]; !ok {
-			return core.NewError(core.CodeInvalidArgument, "missing input", map[string]any{"input": name})
+func validateInputs(t *Template, inputs map[string]string) error {
+	decl := inputIndex(t)
+	for _, in := range t.Inputs {
+		if _, ok := inputs[in.Name]; !ok {
+			return core.NewError(core.CodeInvalidArgument, "missing input", map[string]any{"input": in.Name})
 		}
 	}
+	names := make([]string, 0, len(inputs))
 	for name := range inputs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		if _, ok := decl[name]; !ok {
 			return core.NewError(core.CodeInvalidArgument, "undeclared input", map[string]any{"input": name})
 		}
@@ -194,32 +201,40 @@ var kindOrder = map[Kind]int{
 	KindUser:       4,
 }
 
-func orderSegments(segs []Segment) []Segment {
+type orderedSegment struct {
+	segment Segment
+	tmplIdx int
+}
+
+func orderSegments(segs []Segment) []orderedSegment {
 	type keyed struct {
-		seg Segment
-		idx int
+		seg orderedSegment
 		ord int
 	}
 	keyedSegs := make([]keyed, len(segs))
 	for i, s := range segs {
-		keyedSegs[i] = keyed{seg: s, idx: i, ord: kindOrder[s.Kind]}
+		ord := kindOrder[s.Kind]
+		keyedSegs[i] = keyed{
+			seg: orderedSegment{segment: s, tmplIdx: i},
+			ord: ord,
+		}
 	}
 	sort.SliceStable(keyedSegs, func(i, j int) bool {
 		if keyedSegs[i].ord != keyedSegs[j].ord {
 			return keyedSegs[i].ord < keyedSegs[j].ord
 		}
-		return keyedSegs[i].idx < keyedSegs[j].idx
+		return keyedSegs[i].seg.tmplIdx < keyedSegs[j].seg.tmplIdx
 	})
-	out := make([]Segment, len(segs))
+	out := make([]orderedSegment, len(segs))
 	for i, k := range keyedSegs {
 		out[i] = k.seg
 	}
 	return out
 }
 
-func renderAll(t *Template, ordered []Segment, idx map[string]Input, inputs map[string]string, history []HistoryEntry) ([]AssembledPart, map[string]int, error) {
+func renderAll(t *Template, ordered []orderedSegment, idx map[string]Input, inputs map[string]string, history []HistoryEntry) ([]AssembledPart, []int, error) {
 	parts := make([]AssembledPart, 0, len(ordered))
-	sizes := map[string]int{}
+	sizes := make([]int, len(t.Segments))
 	trustedVals := map[string]string{}
 	rawSizes := map[string]int{}
 	for name, in := range idx {
@@ -229,7 +244,8 @@ func renderAll(t *Template, ordered []Segment, idx map[string]Input, inputs map[
 			trustedVals[name] = v
 		}
 	}
-	for _, seg := range ordered {
+	for _, oseg := range ordered {
+		seg := oseg.segment
 		switch seg.Kind {
 		case KindHistory:
 			p, sz, err := renderHistory(seg, history)
@@ -237,14 +253,14 @@ func renderAll(t *Template, ordered []Segment, idx map[string]Input, inputs map[
 				return nil, nil, err
 			}
 			parts = append(parts, p)
-			sizes[seg.Name] = sz
+			sizes[oseg.tmplIdx] = sz
 		default:
 			p, sz, err := renderSegment(seg, idx, inputs, trustedVals, rawSizes)
 			if err != nil {
 				return nil, nil, err
 			}
 			parts = append(parts, p)
-			sizes[seg.Name] = sz
+			sizes[oseg.tmplIdx] = sz
 		}
 	}
 	return parts, sizes, nil
@@ -282,24 +298,24 @@ func renderHistory(seg Segment, history []HistoryEntry) (AssembledPart, int, err
 	return AssembledPart{Name: seg.Name, Kind: KindHistory, History: entries, Text: "", ContentSize: size}, size, nil
 }
 
-func firstSegmentOverBudget(t *Template, sizes map[string]int) (name string, size, budget int) {
-	for _, seg := range t.Segments {
+func firstSegmentOverBudget(t *Template, sizes []int) (name string, size, budget int) {
+	for i, seg := range t.Segments {
 		if seg.Kind == KindHistory {
 			continue
 		}
-		if seg.Budget > 0 && sizes[seg.Name] > seg.Budget {
-			return seg.Name, sizes[seg.Name], seg.Budget
+		if seg.Budget > 0 && sizes[i] > seg.Budget {
+			return seg.Name, sizes[i], seg.Budget
 		}
 	}
 	return "", 0, 0
 }
 
-func historyOverBudget(t *Template, sizes map[string]int) bool {
-	for _, seg := range t.Segments {
-		if seg.Kind != KindHistory || seg.Budget == 0 {
+func historyOverBudget(t *Template, sizes []int) bool {
+	for i, seg := range t.Segments {
+		if seg.Kind != KindHistory || seg.Budget <= 0 {
 			continue
 		}
-		return sizes[seg.Name] > seg.Budget
+		return sizes[i] > seg.Budget
 	}
 	return false
 }
@@ -313,24 +329,28 @@ func historySegName(t *Template) string {
 	return ""
 }
 
-func historyBudget(t *Template) int {
-	for _, seg := range t.Segments {
+func historySegIndex(t *Template) int {
+	for i, seg := range t.Segments {
 		if seg.Kind == KindHistory {
-			return seg.Budget
+			return i
 		}
 	}
-	return 0
+	return -1
 }
 
-func totalSize(sizes map[string]int) int {
-	names := make([]string, 0, len(sizes))
-	for k := range sizes {
-		names = append(names, k)
+func historySegBudget(t *Template) (name string, budget int) {
+	for _, seg := range t.Segments {
+		if seg.Kind == KindHistory {
+			return seg.Name, seg.Budget
+		}
 	}
-	sort.Strings(names)
+	return "", 0
+}
+
+func totalSize(sizes []int) int {
 	total := 0
-	for _, k := range names {
-		total += sizes[k]
+	for _, s := range sizes {
+		total += s
 	}
 	return total
 }

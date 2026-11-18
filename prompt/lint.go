@@ -7,7 +7,11 @@ import (
 
 // LintTemplate checks a template before registration.
 func LintTemplate(t *Template) []Finding {
+	if t == nil {
+		return []Finding{{Rule: "template_required", Severity: "error"}}
+	}
 	var out []Finding
+	out = append(out, lintTemplateStructure(t)...)
 	inputTrust := map[string]Trust{}
 	for _, in := range t.Inputs {
 		inputTrust[in.Name] = CanonicalTrust(in.Trust)
