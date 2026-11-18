@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -47,12 +48,14 @@ func isUnavailable(err error) bool {
 		strings.Contains(s, "dial tcp") && strings.Contains(s, "connect")
 }
 
+// scrubCause keeps driver text out of an error. When the URL carried a secret,
+// the cause is the fixed text of REQ-SQL-025; a connect failure without one
+// still gets a fixed cause, and any other text is stripped of URL secrets.
 func scrubCause(err error, rawURL string) error {
-	if urlHadSecret(rawURL) || errorsAsConnectError(err) {
-		return errors.New("connection failed")
+	if urlHadSecret(rawURL) {
+		return errors.New(withheldDriverText)
 	}
-	pass := urlPassword(rawURL)
-	if pass == "" {
+	if errorsAsConnectError(err) {
 		return errors.New("connection failed")
 	}
 	return errors.New(redactSecretsInMsg(safeErrString(err), urlSecrets(rawURL)))
@@ -61,6 +64,26 @@ func scrubCause(err error, rawURL string) error {
 func errorsAsConnectError(err error) bool {
 	var conn *pgconn.ConnectError
 	return errors.As(err, &conn)
+}
+
+// isConnectionFailure reports whether a query failed because its connection
+// went away (a database that became unreachable, REQ-SQL-023).
+func isConnectionFailure(err error) bool {
+	if err == nil || errorsAsConnectError(err) {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return true
+	}
+	s := strings.ToLower(safeErrString(err))
+	return strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "unexpected eof") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection closed") ||
+		strings.Contains(s, "bad connection") ||
+		strings.Contains(s, "eof")
 }
 
 func safeErrString(err error) string {
@@ -92,13 +115,6 @@ func urlSecrets(raw string) []string {
 		}
 	}
 	return out
-}
-
-func urlPassword(raw string) string {
-	for _, s := range urlSecrets(raw) {
-		return s
-	}
-	return ""
 }
 
 func redactSecretsInMsg(msg string, secrets []string) string {
@@ -135,7 +151,7 @@ func mapExecErr(err error) error {
 	if errors.As(err, &pgErr) {
 		return mapPgErr(pgErr)
 	}
-	if errorsAsConnectError(err) {
+	if errorsAsConnectError(err) || isConnectionFailure(err) {
 		return &core.Error{
 			Code:      core.CodeUnavailable,
 			Message:   "sql: connection failed",
@@ -147,11 +163,11 @@ func mapExecErr(err error) error {
 			Code:      core.CodeUnavailable,
 			Message:   "sql: database busy",
 			Retryable: true,
-			Details:   map[string]any{"sqlite": "busy"},
+			Details:   sqliteDetails(err),
 		}
 	}
-	if ce := sqliteConstraintCode(err); ce != 0 {
-		return core.NewError(core.CodeConflict, "sql: constraint violation", map[string]any{"sqlite_code": ce})
+	if code, ok := sqliteConstraintClass(err); ok {
+		return core.NewError(code, "sql: constraint violation", sqliteDetails(err))
 	}
 	return core.NewError(core.CodeInternal, "sql: execution failed", nil)
 }
@@ -192,9 +208,9 @@ func mapPgErr(pgErr *pgconn.PgError) error {
 
 func pgSQLStateMapping(sqlstate string) (core.Code, bool) {
 	switch sqlstate {
-	case "23505", "23503", "23502", "23514":
+	case "23505", "23503":
 		return core.CodeConflict, false
-	case "42601", "22P02", "22023":
+	case "23502", "23514", "42601", "22P02", "22023":
 		return core.CodeInvalidArgument, false
 	case "40001", "40P01":
 		return core.CodeUnavailable, true
@@ -207,16 +223,17 @@ func pgSQLStateMapping(sqlstate string) (core.Code, bool) {
 		if len(sqlstate) >= 2 && sqlstate[:2] == "08" {
 			return core.CodeUnavailable, true
 		}
-		return core.CodeInvalidArgument, false
+		return core.CodeInternal, false
 	}
 }
 
-func sqliteRetryable(err error) bool {
-	if err == nil || errorsAsConnectError(err) {
-		return false
+// withheldDriverText replaces driver error text when the store URL carried a
+// secret (REQ-SQL-025).
+const withheldDriverText = "driver error withheld"
+
+func sqliteDetails(err error) map[string]any {
+	if code := sqliteResultCode(err); code != 0 {
+		return map[string]any{"sqlite_code": code}
 	}
-	s := strings.ToUpper(safeErrString(err))
-	return strings.Contains(s, "SQLITE_BUSY") ||
-		strings.Contains(s, "SQLITE_LOCKED") ||
-		strings.Contains(s, "DATABASE IS LOCKED")
+	return nil
 }

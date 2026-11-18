@@ -84,19 +84,95 @@ func TestSQLiteDSNEscapesPath(t *testing.T) {
 	}
 }
 
-func TestRedactURLStripsPassword(t *testing.T) {
-	raw := "postgres://kit:s3cret-pw@127.0.0.1:9/kit"
-	got := redactURL(raw)
-	if stringsContains(got, "s3cret-pw") {
-		t.Fatalf("redactURL leaked password: %s", got)
+func TestRedactURLReplacesSecretsLiterally(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "userinfo password",
+			raw:  "postgres://kit:s3cret-pw@127.0.0.1:9/kit?connect_timeout=1",
+			want: "postgres://kit:***@127.0.0.1:9/kit?connect_timeout=1",
+		},
+		{
+			name: "password query",
+			raw:  "postgres://127.0.0.1:9/kit?password=s3cret-pw",
+			want: "postgres://127.0.0.1:9/kit?password=***",
+		},
+		{
+			name: "sslpassword query",
+			raw:  "postgres://127.0.0.1:9/kit?sslpassword=ssl-secret",
+			want: "postgres://127.0.0.1:9/kit?sslpassword=***",
+		},
+		{
+			name: "passfile query keeps the path unescaped",
+			raw:  "postgres://127.0.0.1:9/kit?passfile=/tmp/pgpass",
+			want: "postgres://127.0.0.1:9/kit?passfile=***",
+		},
+		{
+			name: "sslcert query",
+			raw:  "postgres://127.0.0.1:9/kit?sslcert=/tmp/client.crt",
+			want: "postgres://127.0.0.1:9/kit?sslcert=***",
+		},
+		{
+			name: "sslkey query",
+			raw:  "postgres://127.0.0.1:9/kit?sslkey=/tmp/client.key",
+			want: "postgres://127.0.0.1:9/kit?sslkey=***",
+		},
+		{
+			name: "sslrootcert query",
+			raw:  "postgres://127.0.0.1:9/kit?sslrootcert=/tmp/root.crt",
+			want: "postgres://127.0.0.1:9/kit?sslrootcert=***",
+		},
+		{
+			name: "other parameters keep their order and value",
+			raw:  "postgres://u@h/db?sslmode=verify-full&sslrootcert=/tmp/root.crt&connect_timeout=1",
+			want: "postgres://u@h/db?sslmode=verify-full&sslrootcert=***&connect_timeout=1",
+		},
+		{
+			name: "userinfo and query together",
+			raw:  "postgres://kit:pw@h/db?sslpassword=sslpw&password=qpw",
+			want: "postgres://kit:***@h/db?sslpassword=***&password=***",
+		},
+		{
+			name: "repeated credential parameter",
+			raw:  "postgres://h/db?password=a&password=b",
+			want: "postgres://h/db?password=***&password=***",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := redactURL(tc.raw)
+			if got != tc.want {
+				t.Fatalf("redactURL(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			if strings.Contains(got, "%2A") || strings.Contains(got, "%2a") {
+				t.Fatalf("redaction escaped the marker: %q", got)
+			}
+			if strings.Contains(got, "xxxxx") {
+				t.Fatalf("url.Redacted-style marker: %q", got)
+			}
+			if strings.Contains(got, "s3cret-pw") || strings.Contains(got, "ssl-secret") ||
+				strings.Contains(got, "/tmp/") || strings.Contains(got, "qpw") || strings.Contains(got, "sslpw") {
+				t.Fatalf("redactURL leaked a secret: %q", got)
+			}
+		})
 	}
 }
 
-func TestRedactURLStripsQuerySecrets(t *testing.T) {
-	raw := "postgres://u@h/db?sslpassword=sslpw&password=qpw"
-	got := redactURL(raw)
-	if stringsContains(got, "sslpw") || stringsContains(got, "qpw") {
-		t.Fatalf("leaked query secret: %s", got)
+func TestRedactURLWithoutCredentialsIsUnchanged(t *testing.T) {
+	for _, raw := range []string{
+		"postgres://u@h/db?sslmode=require",
+		"sqlite:///tmp/kit.db",
+		"mysql://kit@db.example.test/kit",
+	} {
+		if got := redactURL(raw); got != raw {
+			t.Fatalf("redactURL(%q) = %q", raw, got)
+		}
 	}
 }
 

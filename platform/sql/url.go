@@ -132,23 +132,89 @@ func escapeSQLiteFilePath(path string) string {
 	return strings.Join(parts, sep)
 }
 
-// redactURL removes credentials from raw for safe inclusion in errors.
+// redactURL replaces the password of the user information and the values of
+// the credential query parameters with the literal *** (REQ-SQL-024). It edits
+// the raw URL text: other parameters keep their order and escaping, and the
+// marker itself is never percent-encoded.
 func redactURL(raw string) string {
+	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
-	if err != nil {
-		return "postgres://***"
+	if err != nil || u.Scheme == "" {
+		return redactedURLMarker
 	}
-	if u.User != nil {
-		u.User = url.UserPassword(u.User.Username(), "***")
+	prefix := u.Scheme + "://"
+	if !strings.HasPrefix(raw, prefix) {
+		return redactedURLMarker
 	}
-	q := u.Query()
-	for _, k := range libpqCredentialQueryKeys {
-		if q.Get(k) != "" {
-			q.Set(k, "***")
+	rest := raw[len(prefix):]
+	authorityEnd := strings.IndexAny(rest, "/?#")
+	authority, tail := rest, ""
+	if authorityEnd >= 0 {
+		authority, tail = rest[:authorityEnd], rest[authorityEnd:]
+	}
+	path, query, fragment := splitURLTail(tail)
+	return prefix + redactAuthority(authority) + path + redactQuery(query) + fragment
+}
+
+const redactedURLMarker = "***"
+
+// redactAuthority replaces the password of a userinfo segment, keeping the
+// user name and the host as written.
+func redactAuthority(authority string) string {
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return authority
+	}
+	userinfo, host := authority[:at], authority[at+1:]
+	colon := strings.Index(userinfo, ":")
+	if colon < 0 {
+		return authority
+	}
+	return userinfo[:colon] + ":" + redactedURLMarker + "@" + host
+}
+
+// splitURLTail splits a URL tail into path, raw query (without ?) and fragment
+// (with #).
+func splitURLTail(tail string) (path, query, fragment string) {
+	if i := strings.Index(tail, "#"); i >= 0 {
+		tail, fragment = tail[:i], tail[i:]
+	}
+	if i := strings.Index(tail, "?"); i >= 0 {
+		return tail[:i], tail[i+1:], fragment
+	}
+	return tail, "", fragment
+}
+
+// redactQuery rewrites the credential parameters of a raw query without
+// re-encoding the other parameters.
+func redactQuery(query string) string {
+	if query == "" {
+		return ""
+	}
+	parts := strings.Split(query, "&")
+	for i, part := range parts {
+		key, _, hasValue := strings.Cut(part, "=")
+		if !hasValue {
+			continue
+		}
+		decoded, err := url.QueryUnescape(key)
+		if err != nil {
+			decoded = key
+		}
+		if isCredentialQueryKey(decoded) {
+			parts[i] = key + "=" + redactedURLMarker
 		}
 	}
-	u.RawQuery = q.Encode()
-	return u.String()
+	return "?" + strings.Join(parts, "&")
+}
+
+func isCredentialQueryKey(key string) bool {
+	for _, k := range libpqCredentialQueryKeys {
+		if key == k {
+			return true
+		}
+	}
+	return false
 }
 
 // libpqCredentialQueryKeys are query parameters that may carry secrets (libpq/pgx).

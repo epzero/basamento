@@ -42,8 +42,8 @@ func TestMapExecErrPostgresSQLStates(t *testing.T) {
 	}{
 		{"23505", core.CodeConflict, false},
 		{"23503", core.CodeConflict, false},
-		{"23502", core.CodeConflict, false},
-		{"23514", core.CodeConflict, false},
+		{"23502", core.CodeInvalidArgument, false},
+		{"23514", core.CodeInvalidArgument, false},
 		{"40001", core.CodeUnavailable, true},
 		{"40P01", core.CodeUnavailable, true},
 		{"57P01", core.CodeUnavailable, true},
@@ -120,6 +120,65 @@ func TestScrubCauseHidesDriverTextWhenURLHasSecret(t *testing.T) {
 	err := scrubCause(errors.New("auth failed for user u at complex@p"), raw)
 	if strings.Contains(err.Error(), "complex") {
 		t.Fatalf("leaked password in cause: %v", err)
+	}
+	if err.Error() != withheldDriverText {
+		t.Fatalf("cause %q, want %q", err, withheldDriverText)
+	}
+}
+
+func TestScrubCauseWithholdsDriverTextForQuerySecret(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		"postgres://h/db?password=s3cret-pw",
+		"postgres://h/db?sslpassword=ssl-secret",
+		"postgres://h/db?sslkey=/tmp/client.key",
+	} {
+		err := scrubCause(errors.New("dial tcp 127.0.0.1:9: connect: connection refused"), raw)
+		if err.Error() != withheldDriverText {
+			t.Fatalf("%s: cause %q, want %q", raw, err, withheldDriverText)
+		}
+	}
+}
+
+func TestWrapOpenErrWithheldTextAndRedactedURL(t *testing.T) {
+	p := parsedURL{dialect: dialectPostgres, raw: "postgres://kit:s3cret-pw@127.0.0.1:9/kit?connect_timeout=1"}
+	wrapped := wrapOpenErr(p, errors.New("dial tcp 127.0.0.1:9: connect: connection refused"))
+	if core.CodeOf(wrapped) != core.CodeUnavailable || !core.IsRetryable(wrapped) {
+		t.Fatalf("got %v", wrapped)
+	}
+	text := wrapped.Error()
+	if !strings.Contains(text, withheldDriverText) {
+		t.Fatalf("missing withheld text: %s", text)
+	}
+	if strings.Contains(text, "dial") || strings.Contains(text, "connection refused") {
+		t.Fatalf("forwarded driver text: %s", text)
+	}
+	if strings.Contains(text, "s3cret-pw") {
+		t.Fatalf("leaked password: %s", text)
+	}
+	if !strings.Contains(text, "postgres://kit:***@") {
+		t.Fatalf("url not redacted literally: %s", text)
+	}
+}
+
+func TestMapExecErrBrokenConnectionIsRetryableUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{
+		errors.New("read tcp: connection reset by peer"),
+		errors.New("unexpected EOF"),
+		errors.New("write tcp: broken pipe"),
+	} {
+		mapped := mapExecErr(err)
+		if core.CodeOf(mapped) != core.CodeUnavailable || !core.IsRetryable(mapped) {
+			t.Fatalf("%v: got %v", err, mapped)
+		}
+	}
+}
+
+func TestMapExecErrUnknownPgSQLStateIsInternal(t *testing.T) {
+	mapped := mapExecErr(&pgconn.PgError{Code: "22001", Message: "driver detail"})
+	if core.CodeOf(mapped) != core.CodeInternal {
+		t.Fatalf("got %s, want internal", core.CodeOf(mapped))
 	}
 }
 

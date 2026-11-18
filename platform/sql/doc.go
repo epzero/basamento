@@ -9,7 +9,8 @@
 // [Open] accepts sqlite://… and postgres://… URLs. The legacy postgresql scheme and
 // any other scheme are invalid_argument. SQLite forms include sqlite:///absolute/path,
 // sqlite://relative/path, sqlite://host/path (RFC 3986 host plus path, for example
-// sqlite://data/kit.db), and sqlite://:memory:. Query and fragment on SQLite URLs are
+// sqlite://data/kit.db), and sqlite://:memory: or sqlite:///:memory:. A relative path
+// is resolved against the working directory. Query and fragment on SQLite URLs are
 // rejected. The path :memory: is never passed through filepath.Abs. Postgres URLs must
 // include a database path; otherwise nothing is created.
 //
@@ -36,10 +37,12 @@
 // codes may appear in details. Connection refused, DNS failure, or timeout while
 // opening map to unavailable with Retryable true. Postgres serialization failure and
 // deadlock (40001, 40P01), connection and resource classes (08xxx, 53xxx, 57P01), and
-// SQLite SQLITE_BUSY / SQLITE_LOCKED map to unavailable with Retryable true. Unique,
-// foreign-key, not-null, and check violations map to conflict. [Store.ParsedURLRedacted]
-// and error details redact userinfo and credential query parameters such as password
-// and sslpassword; driver text is not forwarded when the URL carried a secret.
+// SQLite SQLITE_BUSY / SQLITE_LOCKED map to unavailable with Retryable true. Unique
+// and foreign-key violations map to conflict; not-null and check violations map to
+// invalid_argument. [Store.ParsedURLRedacted] and error details replace the userinfo
+// password and the values of the credential query parameters (password, sslpassword,
+// passfile, sslcert, sslkey, sslrootcert) with the literal ***. When the URL carried
+// any of them, driver text is replaced by the fixed cause "driver error withheld".
 //
 // # Transactions and SQL
 //
