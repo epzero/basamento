@@ -1,6 +1,6 @@
 # Bus and KV: messages with replay, entries with a TTL
 
-Status: **Planned** (WP-L1-03). Design: ADR-0004, ADR-0005, [`design.md`](design.md).
+Status: **Implemented** (WP-L1-03, `platform/bus` and `internal/bdd/bustest`). Design: ADR-0004, ADR-0005, [`design.md`](design.md).
 
 The `Bus` and `KV` ports of `platform`, their embedded implementation
 (`nats-server` in-process with JetStream), their cloud implementation (a NATS

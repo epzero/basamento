@@ -9,7 +9,7 @@ with embedded and cloud implementations), ADR-0005 (the bus under streaming).
 | --- | --- |
 | `platform` (`platform.go`) | The `Bus` and `KV` ports and `Message`. The changes in §2 are made there. |
 | `platform/bus` | The embedded implementation (`nats-server` in-process, JetStream file storage under the data directory) and the cloud implementation (`nats.go` against a NATS cluster). One JetStream code path serves both; they differ in how the connection is made. |
-| `platform/bus/bustest` | The in-process fake. Test-only (constitution 11): imported from `_test.go` files and `internal/bdd` only. |
+| `internal/bdd/bustest` | The in-process fake. Test-only (constitution 11): imported from `internal/bdd` only; production layers cannot import `internal/bdd` (see layering). |
 
 Selecting an implementation by URL (`nats-embedded://…` or `nats://…`) is
 wiring, specified with `kit serve` (WP-L1-05), not here.
