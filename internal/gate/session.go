@@ -202,6 +202,26 @@ func headOnBranch(dir, branch string) (bool, error) {
 	return ref == headBranchRef(branch), nil
 }
 
+// checkedOutWorktree returns the worktree that has branch checked out, or "".
+func checkedOutWorktree(dir, branch string) (string, error) {
+	out, err := git(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	want := "branch " + headBranchRef(branch)
+	path := ""
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = p
+			continue
+		}
+		if line == want {
+			return path, nil
+		}
+	}
+	return "", nil
+}
+
 func ensureCheckedOutBranch(dir, branch string) error {
 	on, err := headOnBranch(dir, branch)
 	if err != nil {
@@ -495,10 +515,20 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 	} else if !os.IsNotExist(err) {
 		return Session{}, err
 	}
+	// worktree add below detaches, and checkout -B then refuses on Git 2.44+ a
+	// branch checked out elsewhere, leaving an orphaned worktree behind.
+	if elsewhere, err := checkedOutWorktree(top, branch); err != nil {
+		return Session{}, err
+	} else if elsewhere != "" {
+		return Session{}, fmt.Errorf("branch %s is already checked out in worktree %s; work there, or release that worktree first", branch, elsewhere)
+	}
 	if _, err := git(top, "worktree", "add", s.Worktree, headBranchRef(branch)); err != nil {
 		return Session{}, err
 	}
 	if err := ensureCheckedOutBranch(s.Worktree, branch); err != nil {
+		if _, rmErr := git(top, "worktree", "remove", "--force", s.Worktree); rmErr != nil {
+			return Session{}, fmt.Errorf("%w; could not remove the new worktree %s: %w", err, s.Worktree, rmErr)
+		}
 		return Session{}, err
 	}
 	if err := fastForwardBranch(s.Worktree, branch); err != nil {

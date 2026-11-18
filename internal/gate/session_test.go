@@ -662,6 +662,41 @@ func TestContinueBranchRejectsWorktreeOnOtherBranch(t *testing.T) {
 	}
 }
 
+// TestContinueBranchRefusesBranchCheckedOutElsewhere covers the retry-blocking
+// orphan: worktree add detaches, checkout -B then refuses a branch checked out
+// in another worktree. The refusal must come before the new worktree exists.
+func TestContinueBranchRefusesBranchCheckedOutElsewhere(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	initBareRemote(t, repo, remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-11-ff0011"
+	other := filepath.Join(t.TempDir(), "other")
+	cloneMain(t, repo, remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "x.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	mustGit(t, repo, "fetch", "-q", "origin", branch)
+	mustGit(t, repo, "branch", branch, remoteBranchRef(branch))
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	mustGit(t, repo, "worktree", "add", "-q", elsewhere, branch)
+
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	_, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-11", Branch: branch})
+	if err == nil {
+		t.Fatal("a branch checked out in another worktree must be refused")
+	}
+	if !strings.Contains(err.Error(), "already checked out") || !strings.Contains(err.Error(), elsewhere) {
+		t.Fatalf("refusal should name the worktree that holds the branch: %v", err)
+	}
+	if _, statErr := os.Stat(wt); !os.IsNotExist(statErr) {
+		t.Fatalf("no orphaned worktree should be left at %s: %v", wt, statErr)
+	}
+}
+
 func TestFastForwardRefusesDetachedAtSameSHA(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
