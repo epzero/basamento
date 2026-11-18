@@ -33,6 +33,38 @@ func TestSQLiteNestedDataDirCreated(t *testing.T) {
 	}
 }
 
+// TestOpenRejectsUnsupportedURLWithoutCreatingFiles is the meaningful form of
+// REQ-SQL-002's "without creating any file": the working directory is the
+// directory a regressed parser would resolve a relative path against, so a
+// file created anywhere below it fails the test.
+func TestOpenRejectsUnsupportedURLWithoutCreatingFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, raw := range []string{
+		"mysql://kit@db.example.test/kit",
+		"file:///kit.db",
+		"sqlite://",
+		"postgres://kit@db.example.test",
+		"postgresql://kit@db.example.test/kit",
+		"kit.db",
+	} {
+		s, err := Open(context.Background(), raw, emptyMigrations())
+		if s != nil {
+			_ = s.Close()
+		}
+		if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+			t.Fatalf("%q: got %v, want invalid_argument", raw, err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("%q created %d entries in the working directory", raw, len(entries))
+		}
+	}
+}
+
 func TestSQLiteFileMode0600(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
