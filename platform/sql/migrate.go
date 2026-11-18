@@ -156,5 +156,5 @@ func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 }
 
 func sqliteMemoryPath(path string) bool {
-	return path == ":memory:" || strings.HasSuffix(path, ":memory:")
+	return path == ":memory:"
 }

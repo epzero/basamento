@@ -47,6 +47,13 @@ func TestParseStoreURLSQLiteAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestSQLiteMemoryPathNotFileSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kit:memory:")
+	if sqliteMemoryPath(path) {
+		t.Fatalf("%q must not be memory db", path)
+	}
+}
+
 func TestParseStoreURLSQLiteMemory(t *testing.T) {
 	for _, raw := range []string{"sqlite://:memory:", "sqlite:///:memory:"} {
 		p, err := parseStoreURL(raw)

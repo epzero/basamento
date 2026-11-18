@@ -17,7 +17,7 @@ func chmodSQLiteDBFile(dbPath string) error {
 	}
 	f := os.NewFile(uintptr(fd), dbPath)
 	defer func() { _ = f.Close() }()
-	return os.Chmod(dbPath, 0o600)
+	return f.Chmod(0o600)
 }
 
 func createSQLiteDBFile(dbPath string) error {
