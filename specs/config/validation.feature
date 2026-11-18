@@ -36,7 +36,7 @@ Feature: Validating the configuration
     Given a configuration file sets "<key>" to "<value>"
     When the configuration is validated
     Then validation fails with 1 error naming "<key>"
-    And the error text does not contain any of "<key>", "postgres", "ana", "hunter2", "[bad", "secret-profile", "://"
+    And the error text does not contain any of "ana", "hunter2", "[bad", "secret-profile", "://"
 
     Examples:
       | key     | value                       |
