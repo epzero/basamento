@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -14,12 +13,11 @@ type liveSubscription struct {
 	ch         chan platform.Message
 	bufCap     int
 	mu         sync.Mutex
-	closed     bool
+	ended      bool
+	cc         jetstream.ConsumeContext
 	cancel     context.CancelFunc
-	cancelOnce sync.Once
-	stop       sync.Once
 	onEnd      func()
-	cc         atomic.Pointer[jetstream.ConsumeContext]
+	cancelOnce sync.Once
 }
 
 func newLiveSubscription(buf int, cancel context.CancelFunc, onEnd func()) *liveSubscription {
@@ -31,70 +29,59 @@ func newLiveSubscription(buf int, cancel context.CancelFunc, onEnd func()) *live
 	}
 }
 
-func (s *liveSubscription) setCC(cc jetstream.ConsumeContext) {
-	c := cc
-	s.cc.Store(&c)
-}
-
-func (s *liveSubscription) consumeCC() jetstream.ConsumeContext {
-	p := s.cc.Load()
-	if p == nil {
-		return nil
+func (s *liveSubscription) attach(cc jetstream.ConsumeContext) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		if cc != nil {
+			cc.Stop()
+		}
+		return
 	}
-	return *p
+	s.cc = cc
 }
 
 // deliver attempts a non-blocking send. A full buffer ends the subscription
 // after already-buffered messages without delivering msg (REQ-BUS-010).
 func (s *liveSubscription) deliver(msg platform.Message) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+	if s.ended {
+		s.mu.Unlock()
 		return
 	}
 	select {
 	case s.ch <- msg:
-		return
+		s.mu.Unlock()
 	default:
-	}
-	if len(s.ch) >= s.bufCap {
-		s.endLocked()
-		s.fireCancel()
-		return
-	}
-	select {
-	case s.ch <- msg:
-	default:
-		s.endLocked()
-		s.fireCancel()
+		s.ended = true
+		cc := s.cc
+		close(s.ch)
+		s.mu.Unlock()
+		s.finish(cc)
 	}
 }
 
-func (s *liveSubscription) endLocked() {
-	if s.closed {
+func (s *liveSubscription) end() {
+	s.mu.Lock()
+	if s.ended {
+		s.mu.Unlock()
 		return
 	}
-	s.closed = true
+	s.ended = true
+	cc := s.cc
 	close(s.ch)
+	s.mu.Unlock()
+	s.finish(cc)
 }
 
-func (s *liveSubscription) fireCancel() {
+func (s *liveSubscription) finish(cc jetstream.ConsumeContext) {
+	if cc != nil {
+		cc.Stop()
+	}
 	s.cancelOnce.Do(func() {
 		if s.cancel != nil {
 			s.cancel()
 		}
-	})
-}
-
-func (s *liveSubscription) end(cc jetstream.ConsumeContext) {
-	s.stop.Do(func() {
-		if cc != nil {
-			cc.Stop()
-		}
-		s.mu.Lock()
-		s.endLocked()
-		s.mu.Unlock()
-		s.fireCancel()
 		if s.onEnd != nil {
 			s.onEnd()
 		}

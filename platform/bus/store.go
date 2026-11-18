@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -34,7 +35,7 @@ type Store struct {
 	closeSrv func()
 	stopOnce sync.Once
 
-	closed bool
+	closed atomic.Bool
 	liveMu sync.Mutex
 	live   map[*liveSubscription]struct{}
 }
@@ -114,15 +115,15 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 // servers, stops the in-process NATS.
 func (s *Store) Close() error {
 	s.stopOnce.Do(func() {
+		s.closed.Store(true)
 		s.liveMu.Lock()
-		s.closed = true
 		subs := make([]*liveSubscription, 0, len(s.live))
 		for l := range s.live {
 			subs = append(subs, l)
 		}
 		s.liveMu.Unlock()
 		for _, l := range subs {
-			l.end(l.consumeCC())
+			l.end()
 		}
 		if s.nc != nil {
 			s.nc.Close()
@@ -134,13 +135,17 @@ func (s *Store) Close() error {
 	return nil
 }
 
-func (s *Store) registerLive(l *liveSubscription) {
+func (s *Store) tryRegisterLive(l *liveSubscription) error {
 	s.liveMu.Lock()
 	defer s.liveMu.Unlock()
+	if s.closed.Load() {
+		return unavailable()
+	}
 	if s.live == nil {
 		s.live = map[*liveSubscription]struct{}{}
 	}
 	s.live[l] = struct{}{}
+	return nil
 }
 
 func (s *Store) unregisterLive(l *liveSubscription) {
@@ -150,10 +155,7 @@ func (s *Store) unregisterLive(l *liveSubscription) {
 }
 
 func (s *Store) ready() error {
-	s.liveMu.Lock()
-	closed := s.closed
-	s.liveMu.Unlock()
-	if closed {
+	if s.closed.Load() {
 		return unavailable()
 	}
 	if s.nc == nil || s.nc.Status() != nats.CONNECTED {
@@ -240,11 +242,20 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 	if !ValidSubject(subject) {
 		return nil, invalidSubject()
 	}
+	subCtx, cancel := context.WithCancel(ctx)
+	var live *liveSubscription
+	live = newLiveSubscription(s.subBuf, cancel, func() { s.unregisterLive(live) })
+	if err := s.tryRegisterLive(live); err != nil {
+		cancel()
+		return nil, err
+	}
 	floor, err := purgeFloor(ctx, s.meta, subject)
 	if err != nil {
+		live.end()
 		return nil, err
 	}
 	if after > 0 && after < floor {
+		live.end()
 		return nil, purged(floor)
 	}
 	start := after + 1
@@ -257,13 +268,10 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		OptStartSeq:    start,
 	})
 	if err != nil {
+		live.end()
 		return nil, mapConnErr(err)
 	}
 	replayAfter := after
-	subCtx, cancel := context.WithCancel(ctx)
-	var live *liveSubscription
-	live = newLiveSubscription(s.subBuf, cancel, func() { s.unregisterLive(live) })
-	s.registerLive(live)
 	var cc jetstream.ConsumeContext
 	cc, err = cons.Consume(func(msg jetstream.Msg) {
 		meta, mdErr := msg.Metadata()
@@ -284,14 +292,13 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		live.deliver(m)
 	})
 	if err != nil {
-		cancel()
-		s.unregisterLive(live)
+		live.end()
 		return nil, mapConnErr(err)
 	}
-	live.setCC(cc)
+	live.attach(cc)
 	go func() {
 		<-subCtx.Done()
-		live.end(cc)
+		live.end()
 	}()
 	return live.messages(), nil
 }
