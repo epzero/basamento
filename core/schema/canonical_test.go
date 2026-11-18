@@ -47,6 +47,36 @@ func TestCanonicalizeNumberExamples(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeRefusesExponentNonExactNumber(t *testing.T) {
+	for _, n := range []string{
+		"9007199254740993e0",
+		"0.10000000000000000001e0",
+		"9223372036854775808e0",
+	} {
+		_, err := Canonicalize([]byte(`{"n":` + n + `}`))
+		if err == nil {
+			t.Fatalf("%s: want error", n)
+		}
+	}
+}
+
+func TestCanonicalizePrefixNoPanic(t *testing.T) {
+	doc := `{"a":1,"b":["x"]}`
+	for i := 1; i < len(doc); i++ {
+		func() {
+			defer func() {
+				if recover() != nil {
+					t.Fatalf("panic on prefix %q", doc[:i])
+				}
+			}()
+			_, err := Canonicalize([]byte(doc[:i]))
+			if err == nil {
+				t.Fatalf("prefix %q: want error", doc[:i])
+			}
+		}()
+	}
+}
+
 func TestCanonicalizeRefusesNonExactNumber(t *testing.T) {
 	for _, n := range []string{
 		"9007199254740993",

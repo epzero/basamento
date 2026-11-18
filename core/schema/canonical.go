@@ -2,7 +2,6 @@ package schema
 
 import (
 	"bytes"
-	"encoding/json"
 	"math"
 	"math/big"
 	"sort"
@@ -86,6 +85,9 @@ func (p *canonParser) parseObject() ([]byte, error) {
 	var members []member
 	for {
 		p.skipSpace()
+		if p.i >= len(p.data) {
+			return nil, invalidArgf("unterminated object at %s", p.loc())
+		}
 		if p.data[p.i] != '"' {
 			return nil, invalidArgf("expected string key at %s", p.loc())
 		}
@@ -393,13 +395,19 @@ func losesFloatPrecision(text string, f float64) bool {
 		return false
 	}
 	if strings.ContainsAny(text, "eE") {
-		if _, err := strconv.ParseFloat(text, 64); err != nil {
+		bf, _, err := big.ParseFloat(text, 10, 256, big.ToNearestEven)
+		if err != nil {
 			return true
 		}
-		if f == 0 && !isZeroLiteral(text) {
+		f64, _ := bf.Float64()
+		if f64 != f {
 			return true
 		}
-		return false
+		bfCanon, _, err := big.ParseFloat(ecmaNumber(f), 10, 256, big.ToNearestEven)
+		if err != nil {
+			return true
+		}
+		return bf.Cmp(bfCanon) != 0
 	}
 	if strings.Contains(text, ".") {
 		if text == ecmaNumber(f) {
@@ -457,15 +465,6 @@ func isIntegerLiteral(text string) bool {
 	return true
 }
 
-func isZeroLiteral(text string) bool {
-	switch strings.TrimSpace(text) {
-	case "0", "-0", "+0", "0.0", "-0.0":
-		return true
-	default:
-		return false
-	}
-}
-
 // ecmaNumber formats f as ECMAScript would after RFC 8785 shortest form rules.
 func ecmaNumber(f float64) string {
 	if math.Signbit(f) && f == 0 {
@@ -519,13 +518,4 @@ func (p *canonParser) skipSpace() {
 			return
 		}
 	}
-}
-
-// ParseSchemaObject unmarshals a schema for tests and step helpers.
-func ParseSchemaObject(raw json.RawMessage) (map[string]any, error) {
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, invalidArgf("parse schema: %v", err)
-	}
-	return m, nil
 }
