@@ -1,8 +1,8 @@
 # Comparison with similar systems
 
 Where Basamento sits next to the tools people would otherwise pick, and what
-it takes from each. Facts about other projects were checked in November 2026;
-they move fast, so verify before relying on a cell.
+it takes from each. Facts about other projects move fast, so verify before
+relying on a cell.
 
 ## 1. At a glance
 

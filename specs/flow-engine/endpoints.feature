@@ -2,7 +2,7 @@
 Feature: Reserved edge endpoints
 
   START and FAIL are the entry and the failure exit of a flow. They are edge
-  endpoints, not nodes (owner decision D2, 2026-11-17).
+  endpoints, not nodes (`docs/architecture/flow-engine.md` §1).
 
   @REQ-FLOW-039 @id:FLOW-039-01
   Scenario: START and FAIL are accepted as edge endpoints without a node

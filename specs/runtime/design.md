@@ -188,8 +188,8 @@ The workflow and the activity worker share one context-aware data converter
 that composes the encryption codec of WP-L1-04 and the blob claim-check codec
 over WP-L1-02. The tenant of the run or activity is read from the context
 through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
-`specs/secrets/design.md` §1 requires; an empty id counts as no tenant
-(`owner decision, 2026-11-17`). The codec composes them in this order:
+`specs/secrets/design.md` §1 requires; an empty id counts as no tenant.
+The codec composes them in this order:
 
 1. **On encode** (`REQ-RT-028`, `REQ-RT-031`): the payload is first encrypted
    with the tenant's encryption codec (`REQ-SECRET-002`). If the encrypted
@@ -202,8 +202,7 @@ through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
    claim-check marker — therefore carries `encoding: binary/encrypted`
    (`REQ-RT-031`). A start without a tenant is rejected by `Runtime.Start`
    itself with `invalid_argument` before any step runs or any run history is
-   recorded (`REQ-RT-040`, `RT-031-02`); the API checks as well
-   (`owner decision, 2026-11-17`).
+   recorded (`REQ-RT-040`, `RT-031-02`); the API checks as well.
 2. **On decode** (`REQ-RT-029`, `REQ-RT-032`, `REQ-RT-033`): the history
    payload is first decrypted with the tenant's encryption codec; a payload
    without `encoding: binary/encrypted` is rejected with `invalid_argument`
@@ -243,8 +242,7 @@ the encryption codec rejects it with `invalid_argument` (`REQ-SECRET-004`,
 The checkpoint event threshold is a configuration of the runtime.
 `docs/architecture/runtime.md` (§2, §3) maps `Checkpoint` to ContinueAsNew at
 a fixed event threshold. ContinueAsNew happens **only** at an explicit
-`Checkpoint` call; nothing else the runtime does continues a run as new
-(`owner decision, 2026-11-17`).
+`Checkpoint` call; nothing else the runtime does continues a run as new.
 
 - **The measure is Temporal's history length.** At a `Checkpoint`, the
   workflow compares the threshold with the current run history's length in
@@ -275,7 +273,7 @@ a fixed event threshold. ContinueAsNew happens **only** at an explicit
 - **Checkpoint drains in-flight steps first.** When `Checkpoint` is called
   while a step of the run is in flight, the runtime waits until no step of the
   run is in flight and only then continues the run as new if its history has
-  reached the threshold (`REQ-RT-038`, `owner decision, 2026-11-17`). In
+  reached the threshold (`REQ-RT-038`). In
   `RT-038-01` the checkpoint comes after 5 steps and meets the threshold
   `20` by itself with the events those 5 steps record, while step `b` of the
   parallel pair is still in flight, so the wait is observable: the run
@@ -300,8 +298,8 @@ a fixed event threshold. ContinueAsNew happens **only** at an explicit
 
 ### Version pinning
 
-The `temporalio/cli` release fixes server, API and SDK versions; at this
-writing the pinned release ships server v1.32.2, API v1.63.5 and SDK v1.47.0
+The `temporalio/cli` release fixes server, API and SDK versions; the
+pinned release ships server v1.32.2, API v1.63.5 and SDK v1.47.0
 (`runtime/temporal/embedded/BENCHMARKS.md`). The runtime pins the server major
 and minor version — 1.32 — and "outside the pinned range" means a different
 major or minor (`1.31.9` and `1.33.0` in `RT-037-02`). On `Serve`, the
@@ -332,9 +330,8 @@ store, the payload codec and the simulated key service come from the gate: the
 payload codec and its simulated key service are WP-L1-04's
 (`internal/bdd/steps/secrets.go`), the blob store is WP-L1-02's store, and the
 two are composed here as the data converter this package takes from the
-composition root. The documents of other work packages this work package needs
-(`specs/secrets/`, `specs/blob/`) were in review on their own branches when
-this draft was written; the implementer uses their step library, not a copy.
+composition root. The implementer uses the step library of the other work
+packages this work package needs (`specs/secrets/`, `specs/blob/`), not a copy.
 
 ### Changed outside `runtime/temporal`
 
@@ -347,18 +344,7 @@ blob store of WP-L1-02 through `platform`.
 
 1. **Default step retry limit (`REQ-RT-018`)**: `runtime/runtime.go:48` states `MaxAttempts int // 0 = runtime default`, without pinning a number in `ADR-0002` or `docs/architecture/runtime.md`. This spec chooses `3` attempts for `runtime/local` when `MaxAttempts` is `0`. Confirm whether `3` is the intended default for `local` (and whether `temporal` in `WP-L5-02` should share it).
 2. **Run failure error propagation (`REQ-RT-016`, `REQ-RT-017`)**: `runtime.RunStatus` (`runtime/runtime.go:120-126`) exposes `State` (`running | completed | failed | cancelled | terminated`) and timestamps, but has no `Error` or `Code` field on `RunStatus` itself. This spec asserts the error code on the failed step (`Future.Get`) and asserts that the run's state becomes `"failed"`, without inventing an `internal` or `unavailable` run-level error code mapping. Confirm whether `RunStatus` should remain state-only or whether a contract change is wanted later.
-3. ~~**Shared `Run` row in `specs/glossary.md`**~~: resolved in review round 1, which required `terminated` in the **Run** row; the row now lists it and the **Child run** row keeps the close-policy detail.
-4. **(WP-L5-02) In-flight steps at ContinueAsNew and the counting model**: former
-   questions on how the runtime acknowledges an in-flight step attempt before
-   ContinueAsNew and whether the threshold counts logical runtime events or
-   Temporal history events. **Decided** (`owner decision, 2026-11-17`):
-   ContinueAsNew happens only at `Checkpoint`; `Checkpoint` waits until no
-   step of the run is in flight before continuing, so a continue-as-new never
-   re-runs a step (`REQ-RT-038`), and steps stay at-least-once in general;
-   the threshold is compared with Temporal's history length as the SDK
-   reports it, and the runtime models no event count (`REQ-RT-034`,
-   `REQ-RT-035`). Scenarios keep away from the boundary of the exact count.
-5. **(WP-L5-02) Payload codec composition and claim-check threshold** (`REQ-RT-028` … `REQ-RT-032`):
+3. **(WP-L5-02) Payload codec composition and claim-check threshold** (`REQ-RT-028` … `REQ-RT-032`):
    `docs/architecture/runtime.md` §3 says "On Temporal this is a payload codec,
    which also encrypts", without prescribing the internal ordering of
    encryption and claim-check. This spec encrypts the payload first, stores the
@@ -366,9 +352,4 @@ blob store of WP-L1-02 through `platform`.
    encrypts the resulting claim-check marker so that both the blob store and
    every payload in Temporal's run history hold only `binary/encrypted`
    ciphertext. Confirm this composition (and counting the threshold on the
-   encrypted size), or say if the architect prefers another codec arrangement.
-6. **(WP-L5-02) Who rejects a start without a tenant** (`REQ-RT-040`, `REQ-RT-031`, `RT-031-02`):
-   **Decided** (`owner decision, 2026-11-17`): `Runtime.Start` itself rejects a
-   run without a tenant with `invalid_argument`, and the API checks as well.
-   A tenant is read through `core.TenantFrom(ctx)`; an empty id counts as no
-   tenant.
+   encrypted size), or state another codec arrangement.

@@ -11,7 +11,7 @@ requirements could disagree, the requirements win and this file is fixed first.
 
 The codegen preset is an application built on Basamento, not part of the
 foundation: `presets/codegen` is its own Go module, with its own binary, that
-imports Basamento as a library (owner decision, 2026-11-17), like
+imports Basamento as a library, like
 `runtime/temporal/embedded`, which already has its own `go.mod`. It is not
 compiled into `kit`, has no entry in `layering.yaml` and needs no ADR for
 this.
