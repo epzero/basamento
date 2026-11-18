@@ -23,10 +23,11 @@ layers:
   agent:            [core, model, prompt, tool, runtime]
   auth:             [core, platform, expr]
   api:              [core, platform, stream, model, flow, runtime, agent, tool, auth]
-  cmd/kit:          [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api]
+  cmd/kit:          [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
   tools/gate:         [internal/gate]
   internal/gate:    []
-  internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api]
+  internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
+  internal/config:    [core]
 
 # Fakes: importable only from _test.go files (not checked by `go list` Imports)
 # and from the BDD harness.
@@ -44,3 +45,4 @@ deny_external:
   model:      [go.temporal.io/]
   model/node: [go.temporal.io/]
   runtime:    [go.temporal.io/]
+  internal/config: [go.temporal.io/]

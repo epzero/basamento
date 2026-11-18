@@ -23,3 +23,4 @@ direction is the exception: its ADR is written as **Proposed** (§5).
 | [0012](0012-workers.md) | Workers declare what they serve and pull invocations; the queue's order, capacity, lost workers, workers on demand | Accepted |
 | [0013](0013-blob-upload-urls.md) | Blob uploads: a staged upload URL scoped to the tenant, then a commit that names the content key | Accepted |
 | [0015](0015-how-the-pr-gate-runs-postgres.md) | How the PR gate gets Postgres: `BDD_POSTGRES_URL`, else embedded-postgres v2 on major 16; strict CI fails instead of skipping | Accepted |
+| [0016](0016-internal-config-layer.md) | The `internal/config` layer: grants for `cmd/kit` and the BDD harness only | Accepted |

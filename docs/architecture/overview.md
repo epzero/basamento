@@ -48,7 +48,9 @@ Ports are selected by URL in configuration (see `platform/platform.go`).
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The
 module map below is generated from it (an arrow means "may import"; arrows
 implied by longer paths are omitted). Build tooling (`tools/gate`,
-`internal/gate`, `internal/bdd`) is not shown.
+`internal/gate`, `internal/bdd`) is not shown; other packages under
+`internal/` (for example `internal/config`, ADR-0016) appear when the graph
+names them as product layers.
 
 <!-- BEGIN GENERATED: modules (go tool gate docs -write) -->
 ```mermaid
@@ -61,6 +63,7 @@ flowchart TD
   expr["expr"]
   flow["flow"]
   flow_host["flow/host"]
+  internal_config["internal/config"]
   model["model"]
   model_node["model/node"]
   platform["platform"]
@@ -81,10 +84,12 @@ flowchart TD
   auth --> expr
   auth --> platform
   cmd_kit --> api
+  cmd_kit --> internal_config
   expr --> core
   flow --> expr
   flow_host --> flow
   flow_host --> runtime
+  internal_config --> core
   model --> expr
   model --> platform
   model_node --> model
@@ -117,6 +122,8 @@ flowchart TD
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
 | `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
+| `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
+| `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). **Planned** (WP-L1-05). |
 
 ### Security in the contracts
 
