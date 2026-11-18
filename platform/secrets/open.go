@@ -18,7 +18,7 @@ const (
 // OpenURL opens the secrets port from a key service URL (design §1).
 func OpenURL(ctx context.Context, raw string, opts ...Option) (*Port, error) {
 	o := applyOptions(opts)
-	ks, err := newKeeperService(ctx, raw, o)
+	ks, err := newKeeperService(ctx, raw)
 	if err != nil {
 		logOpenFailure(o, schemeOf(raw), err)
 		return nil, err

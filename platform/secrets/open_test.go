@@ -11,11 +11,10 @@ import (
 	"github.com/epzero/basamento/platform/secrets"
 )
 
-func TestValueDecryptWrongKeyFails(t *testing.T) {
+func TestValueDecryptTamperedFails(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	k3 := bytesFromSeed(3, 32)
-	k4 := bytesFromSeed(4, 32)
 	p3, err := secrets.OpenURL(ctx, "localsecrets://"+base64.StdEncoding.EncodeToString(k3))
 	if err != nil {
 		t.Fatal(err)
@@ -24,13 +23,15 @@ func TestValueDecryptWrongKeyFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p4, err := secrets.OpenURL(ctx, "localsecrets://"+base64.StdEncoding.EncodeToString(k4))
-	if err != nil {
-		t.Fatal(err)
+	if len(ct) > 0 {
+		ct[0] ^= 1
 	}
-	_, err = p4.Decrypt(ctx, ct)
-	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("wrong key: err=%v", err)
+	_, err = p3.Decrypt(ctx, ct)
+	if err == nil {
+		t.Fatal("expected decrypt error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("tampered ciphertext: err=%v", err)
 	}
 }
 
