@@ -27,7 +27,7 @@ and [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
 ## Requirements
 
-- Go 1.26.10 or newer (required by the Temporal server). With an older Go installed, the default `GOTOOLCHAIN=auto` downloads it automatically.
+- Go 1.26.11 or newer (required by the Temporal server). With an older Go installed, the default `GOTOOLCHAIN=auto` downloads it automatically.
 - Optional locally (required in CI): `golangci-lint` v2, `buf`, `govulncheck`, `go-licenses`; `make tools` installs them.
 
 ## Commands

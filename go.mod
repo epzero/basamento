@@ -1,6 +1,6 @@
 module github.com/epzero/basamento
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/cucumber/gherkin/go/v42 v42.0.0

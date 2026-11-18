@@ -9,25 +9,51 @@ permissions:
   contents: read
 
 jobs:
+  line:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - name: Go release line from go.mod
+        id: gover
+        run: |
+          line=$(sed -n 's/^go \([0-9]*\.[0-9]*\)\.[0-9]*$/\1/p' go.mod)
+          echo "line=$line" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.gover.outputs.line }}
+          check-latest: true
+      - name: Install gate tools
+        run: |
+          make tools
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: govulncheck
+        run: govulncheck ./...
+
   flake-hunt:
     # Repeated runs look for nondeterminism; a flaky scenario is quarantined
     # with @quarantine @issue:<key> @until:<date> (docs/engineering/bdd-convention.md).
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
       - run: go test -race -count=10 ./...
 
   slow-lanes:
     # @slow scenarios; @live and @eval join once credentials and recordings exist.
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
       - run: go test -count=1 ./internal/bdd/
         env:
           BDD_TAGS: "@slow && ~@planned && ~@quarantine"
@@ -35,9 +61,11 @@ jobs:
   release-readiness:
     # Reports P0 scenarios still awaiting human acceptance; informational at night.
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
       - run: go tool gate release-check || true

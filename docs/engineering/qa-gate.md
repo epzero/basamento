@@ -19,9 +19,15 @@ with `make tools`, which pins their versions in the `Makefile`.
 Release only: `gate release-check` fails while any P0 scenario lacks a
 person's acceptance.
 
+Go: the root and embedded `go.mod` files name the same minimum patch
+(`ADR-0014`); CI sets `GOTOOLCHAIN=local` and installs Go with
+`go-version-file: go.mod` (except the nightly **line** job, which uses
+`check-latest` on the release line read from `go.mod` and runs
+`govulncheck ./...`).
+
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
-and a flake hunt (repeated runs that look for nondeterminism; a flaky scenario
-is quarantined with an issue and an expiry).
+the **line** job above, and a flake hunt (repeated runs that look for
+nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
 
 ## Gate report
 
