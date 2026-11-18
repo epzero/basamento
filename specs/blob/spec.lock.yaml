@@ -1,0 +1,384 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    BLOB-001-01:
+        hash: sha256:e9800a322e56c3240691071672aadaf33e32fea7ce65a077946cfea7142f26b2
+        reqs:
+            - REQ-BLOB-001
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-001-02:
+        hash: sha256:6f159958318093e169c6db4b01d228e7e1562419baab265e5865f71ebefbff8b
+        reqs:
+            - REQ-BLOB-001
+            - REQ-BLOB-004
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-002-01:
+        hash: sha256:35ff16c061b71dd44e42a62a3ab608e5a1b58b6dfcc05c478d3e5d74b36c18bd
+        reqs:
+            - REQ-BLOB-002
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-002-02:
+        hash: sha256:5059746cbe798d66038bbe90b7b8312c7b61e5fbfcac20f6210afcc987861014
+        reqs:
+            - REQ-BLOB-002
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-002-03:
+        hash: sha256:4f2bb03eeed9c4502f59fe4a1d2be6b980214968807fdc242b90d6b9960930c6
+        reqs:
+            - REQ-BLOB-002
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Data integrity: enforce sha256 content-key addressing and full-stream hash verification without harming existing blobs.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-003-01:
+        hash: sha256:83a25df425c9e08af3039e968aac02d28766c99c97f8ea976c9d4ca75fd016fa
+        reqs:
+            - REQ-BLOB-003
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security: reject malformed and path-traversal keys across all operations without touching stored data.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-003-02:
+        hash: sha256:70d3dae7901a9a4435ddd454d1e557bda836b16673afb874ad5592dac9e54cfc
+        reqs:
+            - REQ-BLOB-003
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security: reject malformed and path-traversal keys across all operations without touching stored data.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-004-01:
+        hash: sha256:31e4bdfdd4949974d19d0cb00c6579f21f07c39fc10a97f89a3ad66ac947cfda
+        reqs:
+            - REQ-BLOB-004
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-005-01:
+        hash: sha256:a45cb697aaf094159c8d0eb575063a6247f43108046e748392f8f64d86c8052b
+        reqs:
+            - REQ-BLOB-005
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-006-01:
+        hash: sha256:98e10b839685606e1f47cc1817b401c79bcfee652c7fd3a938b1b255e40b9bad
+        reqs:
+            - REQ-BLOB-006
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-007-01:
+        hash: sha256:dbbd54b342a30d93761d622c89a3a31f408c8f079b43b7617f777db134f4e943
+        reqs:
+            - REQ-BLOB-007
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-008-01:
+        hash: sha256:c7f8e9e18c45260aabae52ef7c16c21694c8774d58e34715b41eefffff62a631
+        reqs:
+            - REQ-BLOB-008
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-008-02:
+        hash: sha256:64a6049296190396c0a4bd939879108a92b40f598b555a2a49d981cefad76368
+        reqs:
+            - REQ-BLOB-005
+            - REQ-BLOB-008
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-008-03:
+        hash: sha256:161e2f01cc2640b88d5de5d3bca0ad79804285c61aaea3f3cef89c448581647c
+        reqs:
+            - REQ-BLOB-008
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-009-01:
+        hash: sha256:0dc8bdec03056f7231d0819219cad338029508e50592c3669ae2fb70803b07d9
+        reqs:
+            - REQ-BLOB-009
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-009-02:
+        hash: sha256:5d8d4a3b7b6c5de98ea17a5194a74cf16c60059b100c95143b0660cad99fb2c5
+        reqs:
+            - REQ-BLOB-009
+            - REQ-BLOB-012
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-010-01:
+        hash: sha256:f969883621a206ac9b8f7dd1324d5dad1e34ac546b47fc19b2fe95a551a4f3b6
+        reqs:
+            - REQ-BLOB-010
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-010-02:
+        hash: sha256:08944adcbc0f202316ae96ad2fdf25fb70ef5cf8f6e48373593aefb9e868e116
+        reqs:
+            - REQ-BLOB-010
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-011-01:
+        hash: sha256:186a1415674e469dbebab9f243c55a0754d6c1afc20467a1ae25d7258ecebd01
+        reqs:
+            - REQ-BLOB-011
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security and structural tenancy: require tenant context and prevent cross-tenant access or deletion interference.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-012-01:
+        hash: sha256:5e353f8befa9a79c33db123cee84b1fefc48646b7a6a5025d5a56b4572353323
+        reqs:
+            - REQ-BLOB-012
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Durability: keep no partial blobs from failed or cancelled writes and preserve stored blobs and deletions across restarts.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-013-01:
+        hash: sha256:d1efb6e4f64c0ce4eaf7359a657838909629903a5f27b2315e1f2a0804b897f8
+        reqs:
+            - REQ-BLOB-013
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-014-01:
+        hash: sha256:c3422beb49e31bfec202a566d4cba2e3e5bc1f0c473874487c847f52f2a39a93
+        reqs:
+            - REQ-BLOB-014
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-015-01:
+        hash: sha256:defe1efc574574340f9ef93db067d47e7c498622f9a205c580701a3bbb47a5de
+        reqs:
+            - REQ-BLOB-013
+            - REQ-BLOB-015
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-016-01:
+        hash: sha256:96d06afc40f688c6a44453d668a91a37cb6acb9dd948b17dda063bcbae506e9a
+        reqs:
+            - REQ-BLOB-016
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-016-02:
+        hash: sha256:6734a753e1b3afebae6200c847ba429dc57b3b08728fa3e92357a69982193c3e
+        reqs:
+            - REQ-BLOB-010
+            - REQ-BLOB-016
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security: proxied blob URLs enforce expiry and HMAC integrity bound to tenant, key, and expiry.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-017-01:
+        hash: sha256:976f21ffc7f46b9a3a6eb136a1cfa76cfae20cd8df1965234bbd9683fe43884b
+        reqs:
+            - REQ-BLOB-017
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        note: 'Security and URL safety: reject non-positive or over-max blob URL lifetimes so credential-less URLs remain bounded.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-17"
+            note: https://github.com/epzero/basamento/pull/3
+    BLOB-017-02:
+        hash: sha256:ded79415df2c7fcaab01997c82bdbfc39f66d0019b64e86776e279540b2b618a
+        reqs:
+            - REQ-BLOB-013
+            - REQ-BLOB-017
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-018-01:
+        hash: sha256:4851c6aa67966f35662b04b83e45710a68525d81c19c6d087ba8dd829303f633
+        reqs:
+            - REQ-BLOB-018
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-018-02:
+        hash: sha256:4feea5029b9fdb1bc97c090c3a5651f7e25a3adbe8c6f19d7ecdf54273469738
+        reqs:
+            - REQ-BLOB-018
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-019-01:
+        hash: sha256:b22a7f8fca415806da063c081ff1a6188cabc25e9a995e32d891b09c4a72af79
+        reqs:
+            - REQ-BLOB-019
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
+    BLOB-020-01:
+        hash: sha256:263a456734532bf1cfccf3c655f8a982f7a85a84343232064f57dfce3d6cf116
+        reqs:
+            - REQ-BLOB-020
+        tier: P2
+        author: claude-code:spec-author:448763
+        reviewer: antigravity:spec-reviewer:401511
+        approved_at: "2026-11-17"
+        human:
+            status: pending
