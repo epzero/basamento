@@ -43,7 +43,10 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 	if name, blocked := scanBanned(query); blocked {
 		return nil, mappingCompileErr(src, fmt.Sprintf(`undeclared reference "%s"`, name))
 	}
-	code, err := gojq.Compile(query, gojq.WithVariables(varNames))
+	code, err := gojq.Compile(query,
+		gojq.WithVariables(varNames),
+		gojq.WithEnvironLoader(func() []string { return nil }),
+	)
 	if err != nil {
 		return nil, mappingCompileErr(src, err.Error())
 	}
@@ -63,9 +66,13 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 
 // Eval runs the mapping on input with named variables bound in declaration order.
 func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
+	normVars, err := normalizeMappingVars(vars)
+	if err != nil {
+		return nil, mappingEvalErr("mapping evaluation failed")
+	}
 	values := make([]any, len(m.vars))
 	for i, name := range m.vars {
-		values[i] = vars[name]
+		values[i] = normVars[name]
 	}
 	normIn, err := normalizeMappingInput(input)
 	if err != nil {
@@ -234,15 +241,14 @@ func normalizeMappingOutputWalk(v any, w *jsonWalk) (any, error) {
 			return nil, err
 		}
 		defer w.up(ptr)
-		sorted := sortObjectMap(t)
-		for k, val := range sorted {
+		for k, val := range t {
 			nv, err := normalizeMappingOutputWalk(val, w)
 			if err != nil {
 				return nil, err
 			}
-			sorted[k] = nv
+			t[k] = nv
 		}
-		return sorted, nil
+		return t, nil
 	case []any:
 		ptr := addrOf(t)
 		if err := w.down(ptr); err != nil {
@@ -290,67 +296,17 @@ var bannedNames = map[string]bool{
 	"import": true, "include": true, "modulemeta": true,
 }
 
-func scanBannedQuery(q *gojq.Query) (string, bool) {
-	if q == nil {
-		return "", false
+func normalizeMappingVars(vars map[string]any) (map[string]any, error) {
+	if len(vars) == 0 {
+		return vars, nil
 	}
-	if q.Term != nil {
-		if n, ok := scanBannedTerm(q.Term); ok {
-			return n, true
+	out := make(map[string]any, len(vars))
+	for _, name := range sortedVarNames(vars) {
+		nv, err := normalizeMappingInput(vars[name])
+		if err != nil {
+			return nil, err
 		}
+		out[name] = nv
 	}
-	if q.Left != nil {
-		if n, ok := scanBannedQuery(q.Left); ok {
-			return n, true
-		}
-	}
-	if q.Right != nil {
-		if n, ok := scanBannedQuery(q.Right); ok {
-			return n, true
-		}
-	}
-	return "", false
-}
-
-func scanBannedTerm(t *gojq.Term) (string, bool) {
-	if t == nil {
-		return "", false
-	}
-	if t.Type == gojq.TermTypeFunc && t.Func != nil {
-		name := t.Func.Name
-		if bannedNames[name] {
-			return strings.TrimPrefix(name, "$"), true
-		}
-		for _, arg := range t.Func.Args {
-			if n, ok := scanBannedQuery(arg); ok {
-				return n, true
-			}
-		}
-	}
-	if t.Query != nil {
-		if n, ok := scanBannedQuery(t.Query); ok {
-			return n, true
-		}
-	}
-	for _, s := range t.SuffixList {
-		if s.Index != nil && s.Index.Start != nil {
-			if n, ok := scanBannedIndex(s.Index.Start); ok {
-				return n, true
-			}
-		}
-	}
-	return "", false
-}
-
-func scanBannedIndex(q *gojq.Query) (string, bool) {
-	if q == nil || q.Term == nil {
-		return "", false
-	}
-	if q.Term.Type == gojq.TermTypeFunc && q.Term.Func != nil {
-		name := q.Term.Func.Name
-		if bannedNames[name] {
-			return strings.TrimPrefix(name, "$"), true
-		}
-	}
-	return "", false
+	return out, nil
 }
