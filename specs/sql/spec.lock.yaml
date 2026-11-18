@@ -35,6 +35,17 @@ scenarios:
         note: 'New SQL store port behavior: URL open, baseline migration lifecycle, constraint conflict mapping, and cross-dialect timestamps and text.'
         human:
             status: pending
+    SQL-002-02:
+        hash: sha256:88b4c74a1acc1177ba2ff72f2f8fbcd56309b78874e577d18fdab5a4bbdc7ddb
+        reqs:
+            - REQ-SQL-002
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
     SQL-003-01:
         hash: sha256:52903511b2b9d7b9ea9a87422d0efdff458551460bcdfc23c011add8407e79e9
         reqs:
@@ -314,5 +325,115 @@ scenarios:
         reviewer: antigravity:spec-reviewer:24b61c
         approved_at: "2026-11-17"
         note: 'New SQL store port behavior: URL open, baseline migration lifecycle, constraint conflict mapping, and cross-dialect timestamps and text.'
+        human:
+            status: pending
+    SQL-019-01:
+        hash: sha256:b07624212225044ddecefb56accb6e5fea13a25d79db893cd46afb6fd0424fc4
+        reqs:
+            - REQ-SQL-019
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-020-01:
+        hash: sha256:3f7be7de8d90d3123be723af60e8610eeaeffcb4f180bb9f9d951ac0513ba87e
+        reqs:
+            - REQ-SQL-020
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-021-01:
+        hash: sha256:513450e9152d51cee225439168a3a1b6e5074492657524b353ad5759d289569f
+        reqs:
+            - REQ-SQL-021
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-022-01:
+        hash: sha256:597f665ecfa39dea3fc0d71f0c1c3c1f4548b9235139e3e49e9b150590456c42
+        reqs:
+            - REQ-SQL-022
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-023-01:
+        hash: sha256:e960f387ed29ef3ae2536e1cb5d99d0a356f21ba05d6f892c74f41b48873d77c
+        reqs:
+            - REQ-SQL-023
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-023-02:
+        hash: sha256:3da44ca15a2a9feaab15825c66fefc389358cf8eb25de93430f2101f02cf0d39
+        reqs:
+            - REQ-SQL-023
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-023-03:
+        hash: sha256:4163a1f2c3aa3866c00bb85a30721704e77323bde57e5d4da079f0a8b7148e3a
+        reqs:
+            - REQ-SQL-023
+        tier: P2
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        human:
+            status: pending
+    SQL-024-01:
+        hash: sha256:2f6564151b015c0516d5b5543b2c05abcd212a7ffe5d36c418cca1d6f4c02b79
+        reqs:
+            - REQ-SQL-024
+        tier: P0
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: 'Security: SQL store errors redact URL userinfo passwords and credential query parameters, and withhold driver error text when a URL carried a secret.'
+        human:
+            status: pending
+    SQL-024-02:
+        hash: sha256:f3bb95e9b292c41fffb3f0fceedb69e1afb23af70b076ddbe909c50079d54717
+        reqs:
+            - REQ-SQL-024
+        tier: P0
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: 'Security: SQL store errors redact URL userinfo passwords and credential query parameters, and withhold driver error text when a URL carried a secret.'
+        human:
+            status: pending
+    SQL-025-01:
+        hash: sha256:620383c5cf7259eb502d4d2d1e56a83a5843cf89f17767b0709c00f3c4a953e9
+        reqs:
+            - REQ-SQL-025
+        tier: P0
+        author: claude-code:spec-author:e3cb04
+        reviewer: antigravity:spec-reviewer:2159e5
+        approved_at: "2026-11-18"
+        note: 'Security: SQL store errors redact URL userinfo passwords and credential query parameters, and withhold driver error text when a URL carried a secret.'
         human:
             status: pending
