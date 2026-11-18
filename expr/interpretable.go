@@ -55,11 +55,11 @@ func wrapSortedMapper(v ref.Val, adapter *sortedAdapter) ref.Val {
 	if allString {
 		data := make(map[string]any, len(entries))
 		for _, e := range entries {
-			nat, err := e.val.ConvertToNative(reflect.TypeFor[any]())
+			j, err := celValToJSONWalk(e.val, newJSONWalk())
 			if err != nil {
-				return types.NewErr("type conversion error")
+				return types.NewErrFromString(err.Error())
 			}
-			data[e.key.s] = nat
+			data[e.key.s] = j
 		}
 		return &sortedStringMap{adapter: adapter, data: data}
 	}
