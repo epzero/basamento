@@ -20,7 +20,9 @@ type Store struct {
 	exec    *Execer
 }
 
-// Open connects using rawURL, applies migrations from migrations, and returns a Store.
+// Open parses rawURL, connects, applies migrations from migrations, and returns a Store.
+// See package documentation for supported URL forms, migration locking, SQLite file modes,
+// and error mapping during open and migrate.
 func Open(ctx context.Context, rawURL string, migrations fs.FS) (*Store, error) {
 	p, err := parseStoreURL(rawURL)
 	if err != nil {
@@ -146,5 +148,6 @@ func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Exe
 	return err
 }
 
-// ParsedURLRedacted returns the store URL with secrets removed for safe logging.
+// ParsedURLRedacted returns the store URL with userinfo and credential query parameters
+// (password, sslpassword, and other libpq secret keys) replaced for safe logging and errors.
 func (s *Store) ParsedURLRedacted() string { return redactURL(s.url.raw) }

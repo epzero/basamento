@@ -143,7 +143,7 @@ func isMissingTable(err error) bool {
 	return strings.Contains(s, "no such table") || strings.Contains(s, "does not exist")
 }
 
-// SchemaVersion returns the newest applied migration version.
+// SchemaVersion returns the newest applied goose migration version, or zero when none apply.
 func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 	ver, found, err := currentVersion(ctx, s.db, s.dialect)
 	if err != nil {

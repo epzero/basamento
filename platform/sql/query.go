@@ -271,6 +271,8 @@ func TruncateMicrosecond(t time.Time) time.Time {
 }
 
 // TextOrderClause returns an ORDER BY column expression with dialect collation (REQ-SQL-017).
+// col must be a simple identifier matching [A-Za-z_][A-Za-z0-9_]*; otherwise invalid_argument.
+// On Postgres the result appends COLLATE "C"; on SQLite it appends COLLATE BINARY.
 func TextOrderClause(dialectName, col string) (string, error) {
 	if !sqlIdentRe.MatchString(col) {
 		return "", core.NewError(core.CodeInvalidArgument, "sql: invalid order column", nil)
