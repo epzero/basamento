@@ -13,10 +13,12 @@ type KeyService interface {
 	Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error)
 	Unwrap(ctx context.Context, tenant string, ciphertext []byte) ([]byte, error)
 	MasterKeyID() string
-	Scheme() string
 }
 
 func unwrapWithKeys(ctx context.Context, tenant string, ct []byte, id string, keys []KeyService) ([]byte, KeyService, error) {
+	if err := ValidateTenant(tenant); err != nil {
+		return nil, nil, err
+	}
 	try := func(ks KeyService) ([]byte, error) {
 		return ks.Unwrap(ctx, tenant, ct)
 	}
