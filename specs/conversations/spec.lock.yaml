@@ -1,0 +1,446 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    CONV-001-01:
+        hash: sha256:6659262f8b266e974804b5cb3b7e93290b7e91851d7acba1f77534bbf17f68db
+        reqs:
+            - REQ-CONV-001
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-002-01:
+        hash: sha256:e36001ec8da1d932f66496206c0d9192517f098ff40afde34b864ba193fab238
+        reqs:
+            - REQ-CONV-002
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-002-02:
+        hash: sha256:3360923e9136e218487ad0da66e505d42918e34aa8d10764fd6e9ff33d6e06a1
+        reqs:
+            - REQ-CONV-002
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-003-01:
+        hash: sha256:6943a3aadcf462e69d3918697fe44b6da8d460af3a21cbf2d0526aeaccd0d3bd
+        reqs:
+            - REQ-CONV-003
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-004-01:
+        hash: sha256:68bd0c5250a67537be1b3f63340edb553732f969102a2371b971f50d352e098b
+        reqs:
+            - REQ-CONV-004
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-004-02:
+        hash: sha256:0912b61747a1f48c7ddf0716d0915d02bdddc5a4c8d1ce61ca89a8d76ae49639
+        reqs:
+            - REQ-CONV-004
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-005-01:
+        hash: sha256:a013c5306b1bdfde73baaa0ef7568420ac151a17af460829b3211de4207e5a93
+        reqs:
+            - REQ-CONV-005
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Idempotency and cost safety: deduplicating accepted message_id values prevents duplicate turns and duplicate model calls.'
+        human:
+            status: pending
+    CONV-005-02:
+        hash: sha256:366ff7f02e9a6232967e23144509e0579ec57fad09f31f5aa54a06cb87cd51b6
+        reqs:
+            - REQ-CONV-005
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Idempotency and cost safety: deduplicating accepted message_id values prevents duplicate turns and duplicate model calls.'
+        human:
+            status: pending
+    CONV-005-03:
+        hash: sha256:959142a63d76f81ce7620b8d8ede3c681df7a94edf4e447bb520af475f0a43f4
+        reqs:
+            - REQ-CONV-005
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-006-01:
+        hash: sha256:e5580fb3f71ac79bae209668ad3b3ccfb8e2db4c92cfe105e63a68851ce48390
+        reqs:
+            - REQ-CONV-006
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-006-02:
+        hash: sha256:8427f5481729ab275631dd1bb39db36cda77b72290daf50b955a1b29c6b27fc6
+        reqs:
+            - REQ-CONV-006
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-007-01:
+        hash: sha256:80842a8ee34fa45a4499e2b73bacd4996bf4c141165b87509992b82d2c8663a6
+        reqs:
+            - REQ-CONV-007
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-007-02:
+        hash: sha256:fa631c13bdae9f6f346d5357d96d5d6c11918dba9d2f9d928fa241cf5e12a881
+        reqs:
+            - REQ-CONV-007
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-008-01:
+        hash: sha256:d867825c2e09ff12ddae0862c2a5cd32b566570a3a26ed7126824872e6d0d338
+        reqs:
+            - REQ-CONV-008
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-009-01:
+        hash: sha256:2e15094a5094c7373d37f0f7d1944c2c6942041dc179037185e702b687723ad7
+        reqs:
+            - REQ-CONV-009
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-010-01:
+        hash: sha256:9cc2b9f97ba3caa7405100a63115f30ba14541732b5707c1dde30a26212c10cb
+        reqs:
+            - REQ-CONV-010
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-010-02:
+        hash: sha256:ec6b20738ebc0f34c22b11c5863f45fa63c5e6c0d02201ca8ffce77db69abaa4
+        reqs:
+            - REQ-CONV-010
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-011-01:
+        hash: sha256:37f3f729b517a1c1c6c3ba1af8340d473e9c7f7e8286c34b577e376752d552d0
+        reqs:
+            - REQ-CONV-011
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-011-02:
+        hash: sha256:955478121afb01c181e7fe16c63dd42abb7bfab34324eef1a5cdb510760636b5
+        reqs:
+            - REQ-CONV-011
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-012-01:
+        hash: sha256:36208d895c6e2a8d57bfe3989c6b9699bc549c18ef5a43a801a65623d0954bef
+        reqs:
+            - REQ-CONV-012
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-012-02:
+        hash: sha256:8b642d2d3238f66aff3ade2dcacb8a39e3424229943ebef10f0a841d06106821
+        reqs:
+            - REQ-CONV-012
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-012-03:
+        hash: sha256:75b92a9bfdd1a6904e5a02001d4bf6bab6188ecb8984665c352c93a7793c73a4
+        reqs:
+            - REQ-CONV-012
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-012-04:
+        hash: sha256:582cc604d3c58a15944bac582ec3cefdf8a58e2ca4ae5497d0f8d9d920df5f76
+        reqs:
+            - REQ-CONV-012
+            - REQ-CONV-014
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Durability and data integrity: conversation history prior to a ContinueAsNew checkpoint is preserved for later turns.'
+        human:
+            status: pending
+    CONV-013-01:
+        hash: sha256:d062e9cc8523730f3d6d6f0515de1caa97c294475fc6b55ca448e5fa9fd16b9a
+        reqs:
+            - REQ-CONV-013
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-013-02:
+        hash: sha256:2cce8cac58cc5794101220d8bb408cef61893e23b55eda7a77a3aa56ceb88b20
+        reqs:
+            - REQ-CONV-013
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-013-03:
+        hash: sha256:75e68d1a310f597afb2841ae60d8b845a27d23584e3a349ebb52d6c9e2759df7
+        reqs:
+            - REQ-CONV-012
+            - REQ-CONV-013
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-014-01:
+        hash: sha256:b69bef67a3776fbe40fe7a8567cd6245e7e70b6fc687cff079e7452887731c05
+        reqs:
+            - REQ-CONV-014
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
+        human:
+            status: pending
+    CONV-014-02:
+        hash: sha256:891f89e4d508ffdfd7133f8c1abe4d0dbfb3cf2c7ae902fcf991c0447b7de2ef
+        reqs:
+            - REQ-CONV-014
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
+        human:
+            status: pending
+    CONV-014-03:
+        hash: sha256:ec43aae58d7a5a63c5da2f46768d7493b12d87a743beddc65d6d2bbd2f031865
+        reqs:
+            - REQ-CONV-014
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
+        human:
+            status: pending
+    CONV-014-04:
+        hash: sha256:429a2555392086ba9d1cab075ecd396140fb63fd199deab781e0dfeb846dc8ce
+        reqs:
+            - REQ-CONV-014
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
+        human:
+            status: pending
+    CONV-016-01:
+        hash: sha256:0f64a562d0f470836c0a01b511de26d88a08907f67922bf607eb474bda32fb85
+        reqs:
+            - REQ-CONV-016
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-016-02:
+        hash: sha256:9b3ddea3281cd8f4e6fa617d8cf2fb5091c21bee1f1dd079d3a250a3c9d58f1e
+        reqs:
+            - REQ-CONV-016
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-016-03:
+        hash: sha256:3c0cc0518329a67928c673faa399f3d1e41062a1a0e30c89e98c8c718f2e029b
+        reqs:
+            - REQ-CONV-016
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-017-01:
+        hash: sha256:e1cf43c1bc0210820f1cfc3a36dc11e63c334dd99633513fc7392d4471d4b568
+        reqs:
+            - REQ-CONV-017
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-018-01:
+        hash: sha256:2d917c5a2cd5ff80dce6d94b9b40c0e0fcdc365fcebf2d98966c1babbc87934a
+        reqs:
+            - REQ-CONV-018
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-018-02:
+        hash: sha256:186e35e1d2d9bd2752b6b33805587feadb553f58d42197eb5a7ff8cf3cecce25
+        reqs:
+            - REQ-CONV-018
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-018-03:
+        hash: sha256:6ff228c455d8c71d266b12be9d454e3690a9a0d09b2c1d87a0519cebd7b1cc0d
+        reqs:
+            - REQ-CONV-018
+        tier: P0
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
+        human:
+            status: pending
+    CONV-019-01:
+        hash: sha256:90b2887b436c1dff2af521b1dd900a2f590e7bd0adc0fe2ca14466fb880b9a5d
+        reqs:
+            - REQ-CONV-019
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-020-01:
+        hash: sha256:f60a67420f6b7efea5c9f6c379bae5e9833e1d93cf4a0ab711764f8f42664f66
+        reqs:
+            - REQ-CONV-020
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
+    CONV-021-01:
+        hash: sha256:52ff4027c9923d8d3df2727da8fe4705d9727b5c3ef0dfe3769596597fcd18f0
+        reqs:
+            - REQ-CONV-021
+        tier: P2
+        author: claude-code:spec-author:348776
+        reviewer: antigravity:spec-reviewer:5be422
+        approved_at: "2026-11-18"
+        note: New conversation coordinator turn lifecycle, queuing, steering, cancellation, failure recovery, and history behavior.
+        human:
+            status: pending
