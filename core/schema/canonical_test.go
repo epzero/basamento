@@ -86,6 +86,21 @@ func TestCanonicalizeRejectsDeepNesting(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeRejectsUnescapedControlBytes(t *testing.T) {
+	for _, b := range []byte{0x00, 0x01, 0x08, 0x0b, 0x1f} {
+		doc := []byte{'"', b, '"'}
+		_, err := Canonicalize(doc)
+		if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("byte 0x%02x: err=%v", b, err)
+		}
+	}
+	for _, doc := range []string{`"ok"`, `"a\u0001"`, `"\n"`, `"\t"`, `"\u001f"`} {
+		if _, err := Canonicalize([]byte(doc)); err != nil {
+			t.Fatalf("%q: %v", doc, err)
+		}
+	}
+}
+
 func TestCanonicalizePrefixNoPanic(t *testing.T) {
 	doc := `{"a":1,"b":["x"]}`
 	for i := 1; i < len(doc); i++ {
