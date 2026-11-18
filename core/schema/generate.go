@@ -27,7 +27,7 @@ func ForType(t reflect.Type) (*Schema, error) {
 	if err != nil {
 		return nil, invalidArgf("marshal generated schema: %v", err)
 	}
-	raw = patchSliceNullTypes(raw)
+	raw = patchNullTypesInGeneratedSchema(raw)
 	canonical, err := Canonicalize(raw)
 	if err != nil {
 		return nil, err
@@ -46,12 +46,14 @@ func asInt(v any) (int, bool) {
 	}
 }
 
-func patchSliceNullTypes(raw json.RawMessage) json.RawMessage {
+// patchNullTypesInGeneratedSchema walks the generated schema and unions null
+// into slice and string-keyed map types only (not closed struct objects).
+func patchNullTypesInGeneratedSchema(raw json.RawMessage) json.RawMessage {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return raw
 	}
-	patchSchemaValue(doc)
+	patchSchemaValue(doc, true)
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return raw
@@ -59,34 +61,36 @@ func patchSliceNullTypes(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-func patchSchemaValue(v any) {
+func patchSchemaValue(v any, isRoot bool) {
 	switch node := v.(type) {
 	case map[string]any:
-		patchTypeNullUnion(node)
+		if !isRoot {
+			patchTypeNullUnion(node)
+		}
 		if props, ok := node["properties"].(map[string]any); ok {
 			for _, p := range props {
-				patchSchemaValue(p)
+				patchSchemaValue(p, false)
 			}
 		}
 		if items, ok := node["items"]; ok {
-			patchSchemaValue(items)
+			patchSchemaValue(items, false)
 		}
 		if ap, ok := node["additionalProperties"]; ok {
-			patchSchemaValue(ap)
+			patchSchemaValue(ap, false)
 		}
 		if defs, ok := node["$defs"].(map[string]any); ok {
 			for _, d := range defs {
-				patchSchemaValue(d)
+				patchSchemaValue(d, false)
 			}
 		}
 		if prefix, ok := node["prefixItems"].([]any); ok {
 			for _, p := range prefix {
-				patchSchemaValue(p)
+				patchSchemaValue(p, false)
 			}
 		}
 	case []any:
 		for _, e := range node {
-			patchSchemaValue(e)
+			patchSchemaValue(e, false)
 		}
 	}
 }
@@ -104,7 +108,7 @@ func patchTypeNullUnion(pm map[string]any) {
 			pm["type"] = []any{"null", "array"}
 		}
 	case "object":
-		if pm["additionalProperties"] != nil {
+		if _, ok := pm["additionalProperties"].(map[string]any); ok {
 			pm["type"] = []any{"null", "object"}
 		}
 	}
