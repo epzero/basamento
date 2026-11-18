@@ -499,7 +499,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability and data integrity: mid-turn crash recovery on temporal resumes streaming with reset before attempt 2 and records and streams the model message once.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/29
     CONV-022-02:
         hash: sha256:0c74206b36a2233ec82c3415967961e99125f2bb97eb92d1e2c57282dfa1d7c2
         reqs:
@@ -510,7 +513,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability and data integrity: queued messages survive a process crash on temporal and execute in arrival order without loss.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/29
     CONV-023-01:
         hash: sha256:cd412631f07d0a104b234904e1c7c8ddfff250e65b9ac1f3235fc73b68ccda88
         reqs:
@@ -521,4 +527,7 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability and data integrity: re-executing the turn message-recording step is idempotent and never appends a duplicate message.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/29
