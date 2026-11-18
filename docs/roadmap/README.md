@@ -112,6 +112,7 @@ flowchart LR
     WP_L7_01["WP-L7-01<br/>Agent loop"]
     WP_L7_02["WP-L7-02<br/>Tools and MCP"]
     WP_L7_03["WP-L7-03<br/>Conversations"]
+    WP_L7_04["WP-L7-04<br/>Conversations on a durable runtime"]
   end
   subgraph L8_epic["L8 Auth"]
     WP_L8_01["WP-L8-01<br/>Authentication modes"]
@@ -158,6 +159,7 @@ flowchart LR
   WP_L3_03 --> WP_L3_04
   WP_L3_03 --> WP_L6_02
   WP_L3_04 --> WP_L3_07
+  WP_L3_04 --> WP_L7_04
   WP_L3_06 --> WP_L3_03
   WP_L3_07 --> WP_L3_08
   WP_L4_01 --> WP_L4_02
@@ -171,14 +173,17 @@ flowchart LR
   WP_L5_01 --> WP_L7_01
   WP_L5_02 --> WP_L5_03
   WP_L5_03 --> WP_L5_04
+  WP_L5_03 --> WP_L7_04
   WP_L6_01 --> WP_L6_02
   WP_L6_02 --> WP_L6_03
   WP_L6_02 --> WP_L7_03
   WP_L6_03 --> WP_L6_04
+  WP_L6_03 --> WP_L7_04
   WP_L6_03 --> WP_L9_01
   WP_L7_01 --> WP_L7_02
   WP_L7_01 --> WP_L7_03
   WP_L7_02 --> WP_L10_01
+  WP_L7_03 --> WP_L7_04
   WP_L8_01 --> WP_L3_07
   WP_L8_01 --> WP_L8_02
   WP_L8_02 --> WP_L6_03

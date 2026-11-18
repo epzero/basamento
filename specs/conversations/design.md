@@ -152,6 +152,70 @@ restate it. A conversation crash-resume scenario on Temporal (queued and
 steering messages surviving a restart) is a tracked follow-up for a later work
 package that depends on both WP-L7-03 and the Temporal runtime.
 
+That work package is WP-L7-04 (`crash-resume.feature`, `recording.feature`,
+`REQ-CONV-022`, `REQ-CONV-023`). It adds no package. The coordinator and the
+turn are already written against `runtime.Runtime`, and the runtime replays a
+restarted run from the Temporal history (`REQ-RT-002`, `REQ-FLOW-037`): a
+killed process leaves the coordinator run and its child run in the Temporal
+history, and the restarted process's workers continue them. The queued
+messages are in the coordinator's record (`queue`, §2), which is part of that
+history, so the resumed coordinator runs them in arrival order after the
+resumed turn ends (REQ-CONV-022). If `agent/conversation` does not already
+deduplicate a message, WP-L7-04 updates it in place and says so in the pull
+request's note on directories outside its own (AGENTS.md).
+
+**Recorded once (REQ-CONV-023).** A replay or a retried step can execute a
+turn's model call or its message-recording step again for the same turn. The
+turn record must then not append the message a second time:
+
+- a model message is identified by its turn and its position in that turn;
+- recording a completed stream for a message that is already in `messages`
+  is a no-op, the same guarantee `handled` gives user messages (REQ-CONV-005),
+  while an `interrupted` message of the same turn and position is completed in
+  place.
+
+A replay of the turn that calls the model call's step again therefore cannot
+append a second model message (REQ-CONV-023). In `CONV-022-01`, the client
+reattaches with her last cursor after `kit` reports `ready` and before the
+resumed attempt finishes streaming; the streaming model step emits
+`reset{attempt}` immediately before forwarding the retried attempt's first delta
+from the simulator (so `reset` is strictly ordered after the client reattaches
+and before attempt 2's deltas regardless of when the heartbeat timeout fires),
+and the client sees the `reset` (REQ-STRM-004) followed by the completed
+message once (REQ-STRM-002).
+
+### Harness (WP-L7-04)
+
+- **Scenarios.** `CONV-022-01` and `CONV-022-02` are `@level:system`
+  (`crash-resume.feature`). They run the built `kit` binary serving the
+  `embedded` profile against the embedded Temporal server of WP-L5-03, whose
+  SQLite database lives in the `data.dir` the scenario chooses, and they
+  go through the public API of WP-L6-03 (`specs/config/design.md` §6 for the
+  process; `specs/runtime/embedded.feature` for the embedded profile). The
+  restart runs no Temporal test server: the server is the embedded one, on
+  the pinned version, and its file-backed SQLite is what makes the run
+  survive.
+- **Scripted model.** The model is an HTTP simulator started by
+  `internal/bdd` as its own process, reached by `kit` through a provider
+  endpoint configured for the scenario (WP-L3-04, `model/providers`). It is
+  not imported by production code (constitution) and makes no live call
+  (`bdd-convention.md` §5).
+- **Crash.** The harness sends `SIGKILL` to the process, not `SIGTERM`:
+  `SIGTERM` drains the server gracefully (REQ-CONFIG-023) and would let the
+  turn finish. It waits for the process to exit, starts the same binary on
+  the same `data.dir`, and waits for the `ready` line before it continues.
+  The kill is safe to send at any time, not only at one instant: a turn that
+  has not yet started or has already ended resumes as the replay specifies,
+  and a turn killed after its model call completed resumes from the history
+  without a new attempt. The simulator streams `"Once upon"` to the running
+  turn, so the turn is mid-model-call when the process is killed.
+- **Component scenario.** `CONV-023-01` in `recording.feature` is
+  `@level:component` and `@runtime:any`: it drives the coordinator in process
+  and needs no process kill. It runs the turn's recording step a second time
+  for the same model message and reads the history back.
+- **Steps.** The steps go in `internal/bdd/steps/conversation.go` next to
+  WP-L7-03's steps.
+
 ## Open questions
 
 1. **Interrupted turns in subsequent turn history (`REQ-CONV-012`, `CONV-012-02`, `CONV-013-03`):** `ADR-0007` specifies that `cancel` keeps the partial message marked `interrupted`, and `REQ-STRM-005` records interrupted partial messages, but `ADR-0007` does not explicitly say whether failed and cancelled turns' user and interrupted model messages are passed to subsequent turns' child runs. This spec includes both `failed` and `cancelled` turns (with partial model messages marked `interrupted`) in the history later turns see so follow-up turns and retries have context. Confirm whether both should be included, only `failed`, or neither.
