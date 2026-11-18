@@ -18,7 +18,7 @@ the same change that first uses it.
 | **Runtime** | An implementation of the durable contract: `local` (in-process, not durable) or `temporal`. |
 | **Profile** | Deployment shape: `embedded` (one process, single user) or `cloud` (SaaS services). |
 | **Local runtime** | The `local` runtime: runs a flow in-process on goroutines with a journal held in memory only. Not durable: a run does not survive its process (`REQ-RT-005`, `REQ-RT-006`). |
-| **Child run** | A run started by a parent run for a child flow under the child run id the parent chooses, in the parent's tenant. When the parent ends, an in-flight child run follows its close policy: `terminate` moves it to `terminated`, `request_cancel` cancels it to `cancelled`, and `abandon` leaves it `running` (`REQ-RT-014`, `REQ-RT-015`). |
+| **Child run** | A run started by a parent run for a child flow under the child run id the parent chooses, in the parent's tenant; a conversation turn is a child run of its conversation coordinator. When the parent ends, an in-flight child run follows its close policy: `terminate` moves it to `terminated`, `request_cancel` cancels it to `cancelled`, and `abandon` leaves it `running` (`REQ-RT-014`, `REQ-RT-015`). |
 | **Durable event** | A run event persisted in order (`seq`) and replayable from any cursor. |
 | **Delta** | An ephemeral increment of a message (text, audio, progress), ordered by `dseq`, kept while its message is in flight. |
 | **Message** | A model output inside a run, streamed as deltas and completed as a durable event. |
@@ -77,6 +77,13 @@ the same change that first uses it.
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
+| **User message** | A message with a message id and text that a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
+| **Conversation coordinator** | The single run of a conversation (named `conv-<id>`) that orders turns, starts one child run per turn, and checkpoints by continuing as new. |
+| **Turn** | One user message and the model's answer to it, run as one child run of the conversation coordinator. It ends with state `completed`, `failed` or `cancelled`. |
+| **Queued message** | A user message sent while a turn is running, whose turn starts after it. |
+| **Interrupted message** | A model message of a cancelled or failed turn, kept with the text produced so far and marked interrupted. |
+| **Checkpoint threshold** | How many durable calls the conversation coordinator may make since it last started before it checkpoints and continues as new at the next turn boundary; 1000 by default. |
 | **Preset version** | The content hash of a preset's flows, prompts and evals, together with the `@eval` scores recorded for it. A run pins the version it started with; a new version becomes current only when it compiles, does not regress, and a person resolves its review gate. |
 | **Codegen stage** | One of `plan`, `implement`, `verify`, `repair`, `self-review` and `commit` in `codegen.bootstrap` and `codegen.iterate`. A completed stage is checkpointed; a resumed run starts again no stage that has a checkpoint. |
 | **Repair guard** | The bound on the codegen loop: a visit limit (how many times `repair` may run) and a cost limit in milli-points. A guard that is reached ends the run `failed` with code `budget_exceeded`. |
