@@ -108,8 +108,10 @@ func (s *Store) checkKey(key string) error {
 }
 
 // Put stores content under a content key. The tenant comes from ctx.
-// It returns not_found only via other methods; on a hash mismatch it returns
-// invalid_argument. For an existing object the first content type wins.
+// It returns invalid_argument for a malformed key, for content that does not hash
+// to the key, or for a source reader that fails; cancelled when ctx is done;
+// unavailable for a backend or writer failure. For an existing object the new
+// content is verified against the key and the first content type wins per process.
 //
 // New keys stream once to the final object path, hashing as they go. On copy
 // error, cancellation or hash mismatch the writer context is cancelled before

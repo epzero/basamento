@@ -101,20 +101,35 @@ func TestPutDeleteHoldPerKeyLock(t *testing.T) {
 
 	t.Run("PutFailMidStream", func(t *testing.T) {
 		var st *Store
-		b := newTestBucket(2, gcerrors.Unknown)
-		b.onOp = func(op, k string) {
-			if op != "NewTypedWriter" || lockKeyFromBucketKey(k) != lockKey {
-				return
-			}
-			assertPutLockHeld(t, st, lockKey)
-		}
-		st = openStoreWithTestBucket(t, b)
+		var sawObj bool
 		failBody := make([]byte, 256)
 		for i := range failBody {
 			failBody[i] = byte(i)
 		}
 		failKey := ContentKeyOf(failBody)
-		_ = st.Put(ctx, failKey, &chunkReader{b: failBody, chunk: 64}, "text/plain")
+		failLock := contentLockKey("acme", failKey)
+		failObjPath, err := objectPath("acme", failKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := newTestBucket(2, gcerrors.Unknown)
+		b.onOp = func(op, k string) {
+			if op != "NewTypedWriter" || lockKeyFromBucketKey(k) != failLock {
+				return
+			}
+			assertPutLockHeld(t, st, failLock)
+			if k == failObjPath {
+				sawObj = true
+			}
+		}
+		st = openStoreWithTestBucket(t, b)
+		putErr := st.Put(ctx, failKey, &chunkReader{b: failBody, chunk: 64}, "text/plain")
+		if putErr == nil || core.CodeOf(putErr) != core.CodeUnavailable {
+			t.Fatalf("want unavailable, got %v", putErr)
+		}
+		if !sawObj {
+			t.Fatal("object writer hook did not run")
+		}
 	})
 
 	t.Run("Delete", func(t *testing.T) {
