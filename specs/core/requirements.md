@@ -20,7 +20,7 @@ If a requested kind is not 1–16 lowercase letters or digits starting with a le
 ## Tenant context
 
 ### REQ-CORE-005 — Tenant id grammar
-The tenant context shall treat an id as valid only when it is non-empty, at most 128 bytes, valid UTF-8, free of control characters from U+0000 to U+001F and U+007F, neither "." nor "..", contains neither "/" nor "\", and neither begins nor ends with a whitespace character (Unicode `White_Space`).
+When a context carries an id that is non-empty, at most 128 bytes, valid UTF-8, free of control characters from U+0000 to U+001F and U+007F, neither "." nor "..", free of "/" and "\", and neither begins nor ends with a Unicode `White_Space` character, the tenant context shall report that id unchanged.
 
 ### REQ-CORE-006 — Invalid tenant ids are absent
-If a context carries no id, or an id that is not a valid tenant id, then the tenant context shall report no tenant.
+If a context carries no id, or carries an id that fails any condition of REQ-CORE-005, then the tenant context shall report no tenant.

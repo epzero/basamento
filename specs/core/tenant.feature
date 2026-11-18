@@ -32,6 +32,8 @@ Feature: Tenant context
       | " acme"              | leading whitespace          |
       | "acme "              | trailing whitespace         |
       | "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" | 129 bytes |
+      | "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé" | 130 bytes |
+      | "\u00A0acme"      | leading U+00A0              |
 
   @REQ-CORE-005 @security @id:CORE-005-01
   Scenario: A short tenant id is reported unchanged
@@ -47,3 +49,20 @@ Feature: Tenant context
   Scenario: A non-ASCII tenant id is reported unchanged
     When a context carries the tenant id "acme-東京"
     Then the context reports the tenant id "acme-東京"
+
+  @REQ-CORE-005 @security @id:CORE-005-04
+  Scenario: Dots inside a longer tenant id are reported unchanged
+    When a context carries the tenant id "a..b"
+    Then the context reports the tenant id "a..b"
+
+  @REQ-CORE-005 @security @id:CORE-005-05
+  Scenario: Interior whitespace in a tenant id is reported unchanged
+    When a context carries the tenant id "a b"
+    Then the context reports the tenant id "a b"
+
+  @REQ-CORE-006 @security @id:CORE-006-02
+  Scenario: Replacing a valid tenant id with an invalid one reports no tenant
+    Given a context carries the tenant id "acme"
+    When a derived context carries the tenant id "a/b"
+    Then the derived context reports no tenant
+    And the reported tenant id is empty
