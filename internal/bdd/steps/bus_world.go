@@ -37,6 +37,8 @@ type subState struct {
 	ch      <-chan platform.Message
 	cancel  context.CancelFunc
 	got     []platform.Message
+	grow    chan struct{}
+	done    chan struct{}
 }
 
 type busWorld struct {
@@ -45,7 +47,6 @@ type busWorld struct {
 	profile string
 
 	bus     busKV
-	raw     *bus.Store
 	fake    *bustest.Fake
 	nats    *natstest.Server
 	dataDir string
@@ -65,6 +66,7 @@ type busWorld struct {
 	swapWinner    string
 	swapWins      int
 	swapConflicts int
+	lastSwapRev   uint64
 }
 
 func scenarioUsesBus(scn *godog.Scenario) bool {
@@ -113,6 +115,17 @@ func skipBusByProfile(scn *godog.Scenario, backend string) error {
 	return nil
 }
 
+func (w *busWorld) opts(clk core.Clock) bus.Options {
+	o := bus.Options{Clock: clk, SubBuffer: bus.DefaultSubBuffer, MaxMessageSize: bus.DefaultMaxMessageSize}
+	if w.subBuf > 0 {
+		o.SubBuffer = w.subBuf
+	}
+	if w.maxMsg > 0 {
+		o.MaxMessageSize = w.maxMsg
+	}
+	return o
+}
+
 func (w *busWorld) ensureOpen(ctx context.Context) error {
 	if w.serverDown && w.bus != nil {
 		return nil
@@ -126,13 +139,7 @@ func (w *busWorld) ensureOpen(ctx context.Context) error {
 	clk := world(ctx).Core.clock
 	switch w.backend {
 	case "fake":
-		w.fake = bustest.NewFake(clk)
-		if w.subBuf > 0 {
-			w.fake.SetSubBuffer(w.subBuf)
-		}
-		if w.maxMsg > 0 {
-			w.fake.SetMaxMessageSize(w.maxMsg)
-		}
+		w.fake = bustest.NewFake(clk, w.opts(clk))
 		w.bus = w.fake
 	case "embedded":
 		if w.dataDir == "" {
@@ -142,18 +149,10 @@ func (w *busWorld) ensureOpen(ctx context.Context) error {
 			}
 			w.dataDir = dir
 		}
-		opts := bus.Options{Clock: clk, SubBuffer: bus.DefaultSubBuffer, MaxMessageSize: bus.DefaultMaxMessageSize}
-		if w.subBuf > 0 {
-			opts.SubBuffer = w.subBuf
-		}
-		if w.maxMsg > 0 {
-			opts.MaxMessageSize = w.maxMsg
-		}
-		st, err := bus.OpenEmbedded(ctx, w.dataDir, opts)
+		st, err := bus.OpenEmbedded(ctx, w.dataDir, w.opts(clk))
 		if err != nil {
 			return err
 		}
-		w.raw = st
 		w.bus = st
 	case "cloud":
 		if w.nats == nil {
@@ -168,18 +167,10 @@ func (w *busWorld) ensureOpen(ctx context.Context) error {
 			}
 			w.nats = srv
 		}
-		opts := bus.Options{Clock: clk, SubBuffer: bus.DefaultSubBuffer, MaxMessageSize: bus.DefaultMaxMessageSize}
-		if w.subBuf > 0 {
-			opts.SubBuffer = w.subBuf
-		}
-		if w.maxMsg > 0 {
-			opts.MaxMessageSize = w.maxMsg
-		}
-		st, err := bus.OpenCloud(ctx, w.nats.URL, opts)
+		st, err := bus.OpenCloud(ctx, w.nats.URL, w.opts(clk))
 		if err != nil {
 			return err
 		}
-		w.raw = st
 		w.bus = st
 	default:
 		return fmt.Errorf("unknown bus backend %q", w.backend)
@@ -193,9 +184,8 @@ func (w *busWorld) teardown() {
 			s.cancel()
 		}
 	}
-	if w.raw != nil {
-		_ = w.raw.Close()
-		w.raw = nil
+	if st, ok := w.bus.(*bus.Store); ok {
+		_ = st.Close()
 	}
 	if w.fake != nil {
 		_ = w.fake.Close()
@@ -216,24 +206,15 @@ func (w *busWorld) restartEmbedded(ctx context.Context) error {
 	if w.backend != "embedded" {
 		return fmt.Errorf("restart only on embedded backend")
 	}
-	if w.raw != nil {
-		_ = w.raw.Close()
-		w.raw = nil
-		w.bus = nil
+	if st, ok := w.bus.(*bus.Store); ok {
+		_ = st.Close()
 	}
+	w.bus = nil
 	clk := world(ctx).Core.clock
-	opts := bus.Options{Clock: clk, SubBuffer: bus.DefaultSubBuffer, MaxMessageSize: bus.DefaultMaxMessageSize}
-	if w.subBuf > 0 {
-		opts.SubBuffer = w.subBuf
-	}
-	if w.maxMsg > 0 {
-		opts.MaxMessageSize = w.maxMsg
-	}
-	st, err := bus.OpenEmbedded(ctx, w.dataDir, opts)
+	st, err := bus.OpenEmbedded(ctx, w.dataDir, w.opts(clk))
 	if err != nil {
 		return err
 	}
-	w.raw = st
 	w.bus = st
 	w.subs = map[string]*subState{}
 	return nil
@@ -243,7 +224,8 @@ func msgBytes(label string) []byte { return []byte(label) }
 
 func (w *busWorld) publish(ctx context.Context, subject, label string, data []byte) error {
 	if err := w.ensureOpen(ctx); err != nil {
-		return err
+		w.lastErr = err
+		return nil
 	}
 	if data == nil {
 		data = msgBytes(label)
@@ -299,9 +281,18 @@ func (w *busWorld) startSub(ctx context.Context, name, subject string, after uin
 		cancel()
 		return nil
 	}
-	w.subs[name] = &subState{name: name, subject: subject, ch: ch, cancel: cancel}
+	st := &subState{
+		name:    name,
+		subject: subject,
+		ch:      ch,
+		cancel:  cancel,
+		grow:    make(chan struct{}, 512),
+		done:    make(chan struct{}),
+	}
+	w.subs[name] = st
 	if name == "fast" || name == "s1" || name == "s2" {
-		go func(sn string, inbox <-chan platform.Message) {
+		go func(sn string, inbox <-chan platform.Message, grow chan struct{}, done chan struct{}) {
+			defer close(done)
 			for {
 				m, ok := <-inbox
 				if !ok {
@@ -310,8 +301,32 @@ func (w *busWorld) startSub(ctx context.Context, name, subject string, after uin
 				w.mu.Lock()
 				w.subs[sn].got = append(w.subs[sn].got, m)
 				w.mu.Unlock()
+				grow <- struct{}{}
 			}
-		}(name, ch)
+		}(name, ch, st.grow, st.done)
+	}
+	return nil
+}
+
+func (w *busWorld) requireSubOK() error {
+	if w.subErr != nil {
+		return w.subErr
+	}
+	return nil
+}
+
+func waitSubMsgs(ctx context.Context, sub *subState, n int) error {
+	if n == 0 {
+		return nil
+	}
+	for i := 0; i < n; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-sub.grow:
+		case <-sub.done:
+			return fmt.Errorf("subscription %s ended after %d/%d messages", sub.name, len(sub.got), n)
+		}
 	}
 	return nil
 }
@@ -422,8 +437,8 @@ func (w *busWorld) stopServer() {
 		w.fake.Stop()
 		return
 	}
-	if w.raw != nil {
-		_ = w.raw.Close()
+	if st, ok := w.bus.(*bus.Store); ok {
+		_ = st.Close()
 	}
 }
 

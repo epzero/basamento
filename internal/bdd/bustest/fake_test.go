@@ -7,11 +7,12 @@ import (
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
+	"github.com/epzero/basamento/platform/bus"
 )
 
 func TestFakeKVExpiryAtDeadline(t *testing.T) {
 	clk := coretest.NewFakeClock(time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC))
-	f := NewFake(clk)
+	f := NewFake(clk, bus.Options{Clock: clk})
 	ctx := context.Background()
 	if _, err := f.Put(ctx, "lock.r1", []byte("ana"), 30*time.Second); err != nil {
 		t.Fatal(err)
