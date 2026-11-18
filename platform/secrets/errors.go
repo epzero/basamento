@@ -64,7 +64,49 @@ func classifyKeeperErr(ctx context.Context, err error, scheme string, op keeperO
 	if errors.Is(err, context.DeadlineExceeded) {
 		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: err, Retryable: true}
 	}
-	switch gcerrors.Code(err) {
+	if scheme == "localsecrets" {
+		return classifyLocalKeeperErr(op, err)
+	}
+	return classifyCloudKeeperErr(errorCode(err), scheme, op)
+}
+
+func errorCode(err error) gcerrors.ErrorCode {
+	type withCode interface{ Code() gcerrors.ErrorCode }
+	var wc withCode
+	if errors.As(err, &wc) {
+		return wc.Code()
+	}
+	return gcerrors.Code(err)
+}
+
+func classifyLocalKeeperErr(op keeperOp, err error) error {
+	switch errorCode(err) {
+	case gcerrors.InvalidArgument, gcerrors.FailedPrecondition:
+		if op == opDecryptValue {
+			return errInvalidArgument(msgValueCannotDecrypt)
+		}
+		if op == opUnwrapKeyset {
+			return errInternal(msgKeysetCannotUnwrap)
+		}
+		return errInternal(msgKeyServiceRefused)
+	case gcerrors.PermissionDenied, gcerrors.NotFound, gcerrors.Unimplemented, gcerrors.AlreadyExists:
+		if op == opUnwrapKeyset {
+			return errInternal(msgKeysetCannotUnwrap)
+		}
+		return errInternal(msgKeyServiceRefused)
+	default:
+		if op == opDecryptValue {
+			return errInvalidArgument(msgValueCannotDecrypt)
+		}
+		if op == opUnwrapKeyset {
+			return errInternal(msgKeysetCannotUnwrap)
+		}
+		return errInternal(msgKeyServiceRefused)
+	}
+}
+
+func classifyCloudKeeperErr(code gcerrors.ErrorCode, scheme string, op keeperOp) error {
+	switch code {
 	case gcerrors.InvalidArgument, gcerrors.FailedPrecondition:
 		if op == opDecryptValue {
 			return errInvalidArgument(msgValueCannotDecrypt)
@@ -76,9 +118,6 @@ func classifyKeeperErr(ctx context.Context, err error, scheme string, op keeperO
 		}
 		return errInternal(msgKeyServiceRefused)
 	default:
-		if op == opDecryptValue {
-			return errInvalidArgument(msgValueCannotDecrypt)
-		}
 		return errUnavailableRetry(scheme)
 	}
 }
