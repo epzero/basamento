@@ -22,7 +22,7 @@ func TestForAnyRejected(t *testing.T) {
 func TestWalkInvalidUnexportedField(t *testing.T) {
 	type s struct {
 		X int
-		y int
+		_ int
 	}
 	if _, ok := walkInvalidField(reflect.TypeOf(s{}), "", map[reflect.Type]bool{}); ok {
 		t.Fatal("unexported field should not block schema for exported fields")
