@@ -127,6 +127,10 @@ func strictNumberSyntax(text string) bool {
 	return i == len(text)
 }
 
+// losesFloatPrecision reports whether text denotes a value different from the
+// canonical form of f (REQ-SCHEMA-035). It compares exact rationals: a
+// limited-precision big.Float would round long literals down to the canonical
+// value and accept them silently.
 func losesFloatPrecision(text string, f float64) bool {
 	if !strictNumberSyntax(text) {
 		return true
@@ -134,33 +138,19 @@ func losesFloatPrecision(text string, f float64) bool {
 	if math.IsInf(f, 0) || math.IsNaN(f) {
 		return true
 	}
-	bf, _, err := big.ParseFloat(text, 10, 256, big.ToNearestEven)
-	if err != nil {
-		return true
-	}
-	f64, _ := bf.Float64()
-	if math.IsInf(f64, 0) || math.IsNaN(f64) {
-		return true
-	}
-	if f64 != f {
-		return true
-	}
-	if f == 0 && bf.Sign() != 0 {
-		return true
-	}
 	canon := ecmaNumber(f)
 	if text == canon {
 		return false
 	}
-	bText, _, err := big.ParseFloat(text, 10, 256, big.ToNearestEven)
-	if err != nil {
+	exact, ok := new(big.Rat).SetString(text)
+	if !ok {
 		return true
 	}
-	bCanon, _, err := big.ParseFloat(canon, 10, 256, big.ToNearestEven)
-	if err != nil {
+	canonical, ok := new(big.Rat).SetString(canon)
+	if !ok {
 		return true
 	}
-	return bText.Cmp(bCanon) != 0
+	return exact.Cmp(canonical) != 0
 }
 
 // ecmaNumber formats f as ECMAScript Number::toString (RFC 8785 shortest form).

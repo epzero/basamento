@@ -74,6 +74,16 @@ func TestCanonicalizeRefusesExponentNonExactNumber(t *testing.T) {
 	}
 }
 
+// A long but bounded literal that differs from its canonical form far below
+// float64's ~17 significant digits must be rejected, not rounded (REQ-SCHEMA-035).
+func TestCanonicalizeRejectsPrecisionLossBelowFloat256(t *testing.T) {
+	text := "0.1" + strings.Repeat("0", 79) + "1" // 82 significant mantissa digits
+	_, err := Canonicalize([]byte(`{"n":` + text + `}`))
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("want invalid_argument, got %v", err)
+	}
+}
+
 func TestCanonicalizeRejectsDeepNesting(t *testing.T) {
 	for _, prefix := range []string{
 		strings.Repeat("[", maxNestingDepth+1) + "1" + strings.Repeat("]", maxNestingDepth+1),
