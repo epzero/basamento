@@ -104,7 +104,7 @@ flowchart TD
 
 | Package | Role |
 | --- | --- |
-| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`). `core/coretest` fakes are test-only. **Implemented.** |
+| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`), canonical JSON and JSON Schema (`core/schema`). `core/coretest` fakes are test-only. **Implemented.** |
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
