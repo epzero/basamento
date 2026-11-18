@@ -18,7 +18,7 @@ wiring, specified with `kit serve` (WP-L1-05), not here.
   `tls`; anything else is refused. Credentials in the URL (a user name, a
   password or a token) travel in clear over `nats://`, so there they are
   accepted only for a loopback host: `localhost`, an address in `127.0.0.0/8`
-  or `::1`. Any other host needs `tls://` (REQ-BUS-026). The check runs on the
+  or `::1`. Any other host needs `tls://` (REQ-BUS-029). The check runs on the
   parsed URL before the client connects, so a refused URL reaches no network
   and its scenario needs no remote server. A `nats://` URL without
   credentials is accepted on any host: a refusal would not protect a secret
@@ -35,7 +35,7 @@ wiring, specified with `kit serve` (WP-L1-05), not here.
   the codes of REQ-BUS-013 and the context mapping below. The store directory
   is `0700`: an existing one is narrowed to `0700` before the server starts,
   and a directory the process cannot narrow fails the open with `internal`
-  (REQ-BUS-028), rather than letting another local user read cursors and
+  (REQ-BUS-031), rather than letting another local user read cursors and
   locks.
 
 ## 2. Port changes
@@ -116,7 +116,7 @@ system clock in production):
   most the maximum message size minus the eight-byte deadline header that
   every KV record starts with: 1 MiB − 8 = 1,048,568 bytes by default. `Put`
   and `CompareAndSwap` refuse a larger value with `invalid_argument` on every
-  backend, before writing (REQ-BUS-029). The connection's `max_payload` must
+  backend, before writing (REQ-BUS-032). The connection's `max_payload` must
   allow at least the maximum message size plus the header; when it does not,
   the open fails with `invalid_argument` instead of accepting values the
   transport cannot carry. The client's `max_payload` is a second bound, as in
@@ -125,8 +125,8 @@ system clock in production):
   no empty token, no wildcard (`*`, `>`), no whitespace.
 - **Key**: ASCII letters and digits and `-`, `_`, `/`, `=`, `.`; 1 to 512
   bytes; dot-separated tokens, none empty, so no leading or trailing `.` and
-  no `a..b`; no wildcard, no whitespace. A key is checked by one function
-  that the store and the fake share; a refused key fails with
+  no `a..b`; no wildcard, no whitespace. A key is checked by one function,
+  `ValidKey` of `platform/bus`, which the fake applies too; a refused key fails with
   `invalid_argument` before any storage call (REQ-BUS-012). The grammar is
   narrower than the NATS KV key grammar: letters with a case, accents and
   other scripts are refused, so a key is written with ASCII only.
@@ -168,7 +168,7 @@ system clock in production):
   this means closing the store's connection, for the embedded implementation
   stopping the in-process server, and for the cloud implementation the
   `nats-server` started for it.
-- A stream or bucket the bus cannot use (REQ-BUS-027) is set up on the
+- A stream or bucket the bus cannot use (REQ-BUS-030) is set up on the
   `nats-server` of the cloud row before the open, with a second client:
   `KIT_BUS` is created with a mirror, a source or `Retention: WorkQueuePolicy`
   (the faults that make it incompatible without a mismatch in message

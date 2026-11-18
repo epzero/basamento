@@ -32,7 +32,7 @@ Feature: The embedded bus keeps its data across restarts
     Then the subscription fails with code "not_found"
     And the error reports the bus sequence of "m3" as the last purged
 
-  @REQ-BUS-028 @id:BUS-028-01
+  @REQ-BUS-031 @id:BUS-031-01
   Scenario: Opening on a store directory others can read makes it private
     Given the store directory of the embedded data directory has mode "0755"
     When the embedded bus is opened

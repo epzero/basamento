@@ -4,7 +4,7 @@ Feature: Streams and buckets the bus can use
   needs when it finds nothing, accepts what already matches its configuration,
   and refuses anything else without changing it.
 
-  @REQ-BUS-027 @id:BUS-027-01
+  @REQ-BUS-030 @id:BUS-030-01
   Scenario: A matching JetStream setup the bus did not create is used as it is
     Given the JetStream assets match the bus configuration
     When the cloud bus opens on "nats://127.0.0.1:<port>"
@@ -12,7 +12,7 @@ Feature: Streams and buckets the bus can use
     And message "m1" is published on subject "run.r1.deltas"
     And a subscriber to "run.r1.deltas" from the start receives "m1" and nothing else
 
-  @REQ-BUS-027 @contract @id:BUS-027-02
+  @REQ-BUS-030 @contract @id:BUS-030-02
   Scenario Outline: A stream or bucket the bus cannot use is refused and left unchanged
     Given the bus asset "<asset>" is configured as "<fault>"
     When the cloud bus opens on "nats://127.0.0.1:<port>"

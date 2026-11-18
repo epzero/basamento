@@ -41,8 +41,16 @@ Feature: Limits, invalid arguments and an unreachable server
       | lock.>    | 0s  |
       | .lock     | 0s  |
       | lock.     | 0s  |
-      | lock..r1  | 0s  |
       | lock.r1   | -1s |
+
+  @REQ-BUS-012 @id:BUS-012-03
+  Scenario Outline: A key with an empty dot-separated token is refused
+    When entry "<key>" is put with value "v" and TTL "0s"
+    Then the put fails with code "invalid_argument"
+
+    Examples:
+      | key      |
+      | lock..r1 |
 
   @REQ-BUS-013 @id:BUS-013-01
   Scenario: Calls fail with unavailable while the bus server is down
@@ -52,7 +60,7 @@ Feature: Limits, invalid arguments and an unreachable server
     Then the publish fails with code "unavailable"
     And the read fails with code "unavailable"
 
-  @REQ-BUS-026 @security @id:BUS-026-01
+  @REQ-BUS-029 @security @id:BUS-029-01
   Scenario Outline: A cloud URL with credentials over plain nats is accepted only on loopback
     When the cloud bus opens on "<url>"
     Then the open <result>
@@ -66,7 +74,7 @@ Feature: Limits, invalid arguments and an unreachable server
       | nats://localhost:1                            | fails with code "unavailable"                                           |
       | nats://10.0.0.1:1                             | fails with code "unavailable"                                           |
 
-  @REQ-BUS-029 @id:BUS-029-01
+  @REQ-BUS-032 @id:BUS-032-01
   Scenario Outline: A KV value at the bound is stored, one byte over is refused
     Given the maximum message size is 1024 bytes
     And entry "cursor.r1" is put with value "seed"
