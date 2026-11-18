@@ -23,7 +23,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability and money safety: resumed run feeds recorded turn and tool results without re-invoking completed steps.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-003-01:
         hash: sha256:d78c6017be9581d247a20a5a5fe647a30305ed519acc848680f6f8910c2179f3
         reqs:
@@ -100,7 +103,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Money safety (@cost): reserves estimated turn cost against cost cap before model invocation and settles actual charge.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-009-02:
         hash: sha256:7be136196c70d7f12f2212b4ec8a33de5a6f8f043bd636c048037c2c77725e2e
         reqs:
@@ -112,7 +118,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Money safety (@cost): spending the exact cost cap allows a zero-cost follow-up turn without stopping early.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-010-01:
         hash: sha256:bcd1f7919c7fcf1e5be58dfa9a24e626cdb61d51fb15891a7a65bfa4f15f4736
         reqs:
@@ -123,7 +132,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Money safety (@cost): stops the agent loop with cost_cap_reached before a turn whose reservation exceeds the cap.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-011-01:
         hash: sha256:bab9078118dea2feb77364f3a27a819a574ecb90b02317e32d7eba606a0a6d1f
         reqs:
@@ -134,7 +146,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Spend control (@cost): stops the agent loop with token_cap_reached before a turn whose input tokens exceed the cap.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-011-02:
         hash: sha256:7158a63fa2495e6562b5813b55128cce12e340004e5df27f0dd24cd38be324fc
         reqs:
@@ -145,7 +160,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Spend control (@cost): reaching the exact token cap allows a zero-token follow-up turn without stopping early.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-012-01:
         hash: sha256:291d8770d6fff18e31d1a0c1e2d522facf33815224de6c7d8c9d42917141f9a7
         reqs:
@@ -233,7 +251,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Spend control (@cost): target agent enforces its own token cap independently of the handing-off agent''s usage.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-018-03:
         hash: sha256:3c7cb0684126e45ac66db914bcbcdfdfe26235faa04a8b5a9ced9d572ea5e499
         reqs:
@@ -244,7 +265,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Money safety (@cost): target agent enforces its own cost cap independently of the handing-off agent''s spend.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
     AGENT-019-01:
         hash: sha256:b36f4eb9bcfb476f2f2899705edf681fe6c3bf08cdc33e66bce153cb875658a4
         reqs:
