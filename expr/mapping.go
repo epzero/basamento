@@ -29,10 +29,11 @@ type Mapping struct {
 	stepLimit uint64
 }
 
-// CompileMapping parses and validates a jq mapping. Names of banned jq builtins
-// (clock, environment, and input functions) are reserved: a mapping must not
-// call them or use those names in definitions or parameters, even when a call
-// would resolve to the program's own definition.
+// CompileMapping parses and validates a jq mapping. Banned builtin names are
+// reserved only as function calls, user definitions, parameters, pattern
+// variables, and $-prefixed object shorthand keys such as $ENV; JSON field
+// names and object literal keys are data and remain allowed (for example
+// .input and {env: .env}).
 func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapping, error) {
 	for _, v := range varNames {
 		if v == "$ENV" {
@@ -290,7 +291,7 @@ func mappingReservedNameDetail(name string) string {
 
 var bannedNames = map[string]bool{
 	"now": true, "localtime": true, "strflocaltime": true,
-	"env": true, "$ENV": true,
+	"env": true, "$ENV": true, "$__loc__": true, "$__prog_args": true,
 	"input": true, "inputs": true, "input_filename": true, "input_line_number": true,
 	"debug": true, "stderr": true, "halt": true, "halt_error": true,
 	"import": true, "include": true, "modulemeta": true, "get_search_list": true,

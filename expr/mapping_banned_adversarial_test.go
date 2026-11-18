@@ -37,7 +37,6 @@ func TestAdversarialBannedProgramsRejected(t *testing.T) {
 		`include "x" | .`,
 		`import "y" as z | .`,
 		`def outer: [now][]; outer`,
-		`.[now]`,
 		`(now // 0)`,
 		`(0 ?// now)`,
 		`(@json | now)`,

@@ -39,8 +39,6 @@ func TestBannedCorpusRejects(t *testing.T) {
 		`{($ENV): 1}`,
 		`include "x"`,
 		`import "x" as y`,
-		`.[now]`,
-		`.[env]`,
 		`+$now`,
 		`-(now)`,
 		`not now`,

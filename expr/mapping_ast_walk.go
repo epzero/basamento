@@ -8,6 +8,14 @@ import (
 	"github.com/itchyny/gojq"
 )
 
+// scanBannedAST rejects jq programs that call or bind banned impure builtins.
+// Function calls (Func.Name), definitions and parameters (FuncDef), pattern
+// variables whose names are reserved (Pattern.Name), label/break names, import
+// forms, and object shorthand keys that name $ENV-style variables (ObjectKeyVal
+// keys beginning with $) are blocked. Field selectors (.now), object literal
+// keys ({now: .now}, {now}), and pattern keys without a $ prefix are data only
+// and are allowed.
+//
 // gojqASTStructs is every struct type that may appear in a parsed query AST.
 // The reflection walker fail-closes on any other gojq struct.
 var gojqASTStructs = map[string]bool{
@@ -75,16 +83,18 @@ func walkAST(v reflect.Value) (string, bool, error) {
 				if n, ok := checkBannedName(v.FieldByName("Name").String()); ok {
 					return n, true, nil
 				}
-			case "Index":
+			case "FuncDef":
 				if n, ok := checkBannedName(v.FieldByName("Name").String()); ok {
 					return n, true, nil
 				}
-			case "ObjectKeyVal":
-				if n, ok := checkBannedName(v.FieldByName("Key").String()); ok {
-					return n, true, nil
+				args := v.FieldByName("Args")
+				for i := 0; i < args.Len(); i++ {
+					if n, ok := checkBannedName(args.Index(i).String()); ok {
+						return n, true, nil
+					}
 				}
-			case "PatternObject":
-				if n, ok := checkBannedName(v.FieldByName("Key").String()); ok {
+			case "ObjectKeyVal":
+				if n, ok := checkBannedVarKey(v.FieldByName("Key").String()); ok {
 					return n, true, nil
 				}
 			}
@@ -134,4 +144,13 @@ func checkBannedName(name string) (string, bool) {
 		return strings.TrimPrefix(name, "$"), true
 	}
 	return "", false
+}
+
+// checkBannedVarKey rejects {$ENV} and other banned identifiers used as $-prefixed
+// object field shorthand (jq binds them to special variables, not plain data keys).
+func checkBannedVarKey(key string) (string, bool) {
+	if key == "" || key[0] != '$' {
+		return "", false
+	}
+	return checkBannedName(key)
 }
