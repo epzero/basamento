@@ -1,10 +1,46 @@
 # Runtime: design notes
 
+## The request tenant follows the context
+
+The rule binds every runtime on `Runtime.Start` (`StartRequest`), on the run
+references of `Describe`, `Cancel` and `Resolve`, and on the `RunQuery` of
+`List` (`REQ-RT-042`). The tenant of a call is the context's
+(`core.TenantFrom(ctx)`); a tenant field the call carries
+(`StartRequest.TenantID`, `RunRef.TenantID`, `RunQuery.TenantID`) may be empty
+or equal to it, and nothing else. A field that names a different tenant is a
+mismatch, not a request on that tenant: the call fails with
+`invalid_argument` and nothing is started, changed or returned. The runtime
+never falls back to the field, so a start that names `globex` on an `acme`
+context starts no run in either tenant (`RT-042-01`), and an `acme` caller
+cannot read, cancel or resolve through a reference that says `globex`
+(`RT-042-02` … `RT-042-05`). This check comes before the same-tenant lookup,
+so the `not_found` of `REQ-RT-025` keeps answering for a reference that agrees
+with the context.
+
+The context is the only source of the tenant for the same reason it is for
+`platform.AuditEvent.Tenant`: one source, and no field a caller can set to
+reach another tenant's runs. The rule does not trust the field over the
+context, as `Record` does not trust the event over the context, and it fails
+closed without a tenant.
+
+Enforcing the context against the field also fails closed when the context has
+no tenant; an empty context id counts as no tenant, not a tenant that matches
+an empty field. On the local runtime every call without a context tenant is
+rejected with `invalid_argument` (`REQ-RT-044`). On the temporal runtime,
+`Describe`, `Cancel`, `Resolve` and `List` are rejected the same way
+(`REQ-RT-045`), and `Start` is covered by `REQ-RT-040`.
+
+The tenant a call is served under is the context's, so a returned `RunRef`
+carries the run's own tenant (`REQ-RT-043`): the reference a start returns,
+the `RunStatus.Ref` a description returns and each item of a listing name the
+run's tenant, never an empty string or a field the caller passed.
+
 ## Local runtime (WP-L5-01)
 
-Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019` and
-`REQ-RT-021` … `REQ-RT-027` in `local.feature` to the implementer. This work
-package changes no contract file.
+Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019`,
+`REQ-RT-021` … `REQ-RT-027` and `REQ-RT-042` … `REQ-RT-044` in
+`local.feature` to the implementer. This work package changes no contract
+file.
 
 ### Ports the composition root supplies
 
@@ -107,8 +143,8 @@ its own.
 
 ## Temporal runtime (WP-L5-02)
 
-Decisions for `runtime/temporal` that leave `REQ-RT-039` … `REQ-RT-041` and
-`REQ-RT-028` … `REQ-RT-038` in `temporal.feature` to the implementer. It
+Decisions for `runtime/temporal` that leave `REQ-RT-028` … `REQ-RT-043` and
+`REQ-RT-045` in `temporal.feature` to the implementer. It
 builds on the payload codec of WP-L1-04 (`specs/secrets/`) and the blob store
 of WP-L1-02 (`specs/blob/`); it does not respecify either. This work package
 changes no contract file.
