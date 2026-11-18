@@ -70,9 +70,9 @@ hand-off with `needs-human`, one question, with options.
 ## Self-review, before the pull request
 
 1. `go tool gate review plan -base origin/main -head <branch>` gives the
-   tier, which sets the depth and effort: the finders and verifiers of
-   `code-review.md` §2 to §4, at the tiers of `agent-workflow.md` §2.3.
-   Spawn them as code reviewer sessions.
+   tier, which sets the finders of `code-review.md` §2 to §4, at the tiers
+   of `agent-workflow.md` §2.3. Each finding gets one verifier in the
+   self-review (`code-review.md` §1). Spawn them as code reviewer sessions.
 2. Surviving important findings go to the implementer as
    `code-changes-requested` (`go tool gate agent status … -issue <id>`).
 3. Later-round finders follow `code-review.md` §6. Give them, as separate
