@@ -22,82 +22,107 @@ CI reports that the Postgres half of G3 never executed. WP-L1-01 (PR #39) went
 through three review rounds with no run against a live Postgres server; the
 matrix promised both dialects but CI proved only SQLite.
 
-A Postgres server for the gate is not a live vendor call: it is hermetic
-infrastructure beside the test process, like SQLite on disk. The owner asked
-whether [embedded-postgres](https://github.com/fergusstrange/embedded-postgres)
-could supply that server instead of a CI service container
-(Linear EP0-49).
+Embedded-postgres was weighed against a CI service container so a developer or
+agent without Docker runs the same Postgres pass as CI. A Postgres server for
+the gate is not a live vendor call when bounded: checksum-pinned bundle download
+in the prefetch step (and on a local first start) is gate infrastructure of the
+same class as pulling a CI service image, not a vendor API; in CI the BDD step
+does no network I/O (see offline rule below). Hermetic beside the test process,
+like SQLite on disk.
 
-**embedded-postgres v2** (sources: the repository README and
-[release v2.0.0](https://github.com/fergusstrange/embedded-postgres/releases);
-[CLI docs](https://github.com/fergusstrange/embedded-postgres/blob/main/docs/cli.md);
-[issue #95](https://github.com/fergusstrange/embedded-postgres/issues/95)):
-module `github.com/fergusstrange/embedded-postgres/v2`; v2.0.0 released
-2026-10-19, v2.0.1 current; requires Go 1.26+. It downloads real PostgreSQL
-binaries on first start (checksums pinned in the library manifest; default
-download base is the project's GitHub release assets). Cache defaults to
-`os.UserCacheDir()/embedded-postgres/v2`. It exposes `StartContext`,
-`ConnectionURL()`, `Close`, version pins `V15`…`V18` (16 → **16.15.1**), and
-`RunAs` for root test runners. PostgreSQL cannot run as root; GitHub-hosted
+**embedded-postgres v2.0.1** ([README](https://github.com/fergusstrange/embedded-postgres/tree/v2.0.1);
+[CLI](https://github.com/fergusstrange/embedded-postgres/blob/v2.0.1/docs/cli.md)):
+module `github.com/fergusstrange/embedded-postgres/v2`; requires Go 1.26+. The
+module embeds `internal/binaries/manifest.json`: each Postgres bundle has a
+SHA-256 and a URL on
+`theseus-rs/postgresql-binaries` releases; `DownloadProvider.Acquire` verifies
+the hash before extract (the pin rides on `go.mod`/`go.sum`). A companion
+supervisor is built from `./cmd/embedded-postgres` at the pinned module version
+(`Config.Supervisor` or `EP_SUPERVISOR`; the gate does not download it from the
+library's release page). Cache defaults to `os.UserCacheDir()/embedded-postgres/v2`.
+API: `StartContext`, `ConnectionURL()`, `Close`, version pins `V15`…`V18`
+(16 → **16.15.1**), `RunAs` for root runners. `DefaultConfig()` uses port 5432
+and user/password/database `postgres`; `Port(0)` picks a free port. Host in the
+URL is `127.0.0.1`, `sslmode=disable`. PostgreSQL cannot run as root;
 `ubuntu-latest` runners are not root.
+
+WP-L1-01's driver (PR #39, not on `main` yet) will read **`BDD_POSTGRES_URL`**
+as the **admin** URL (typically `/postgres`), create `bdd_<pid>_<seq>` databases
+and drop only those (`DROP DATABASE IF EXISTS ... WITH (FORCE)`). Empty
+`os.Getenv` means unset.
 
 ## Decision
 
-A **run** is one scenario in one **pass** (a pass is a profile or a SQL
-dialect: SQLite pass, Postgres pass, embedded profile, cloud profile, as
-scenario tags and `specs/sql/design.md` §5 define). A **skip** is one run that
-did not execute. `.gate/bdd.json` records every run; strict mode fails on any
-skip; the summary line counts skipped runs, and **`<total>` is the sum of the
-per-reason counts**.
+A **run** is one scenario in one **pass** (SQLite pass, Postgres pass, or a
+profile pass, as tags and `specs/sql/design.md` §5 define). A **skip** is one
+run that did not execute. With **`GATE_STRICT=1`**, any skip fails the gate; the
+summary line counts skips and **`<total>`** is the sum of per-reason counts.
+This ADR does not edit requirement text; the designer updates
+`specs/sql/design.md` §5 in its own spec pull request to name `BDD_POSTGRES_URL`,
+embedded fallback when the variable is empty, and strict vs skip behaviour
+(before or with implementation).
 
 ### Server source and precedence
 
 | Rule | Detail |
 | --- | --- |
-| **URL first** | If **`BDD_POSTGRES_URL`** is set, the SQL conformance driver uses that server (CI service container, a developer's own instance, or `docker run` below). The URL names the **server** (maintenance database on that server), not one shared scenario database. The role may **create databases**. |
-| **Embedded fallback** | If the URL is unset, the driver starts one embedded server with **`github.com/fergusstrange/embedded-postgres/v2`**, then connects via the URL the library returns. |
-| **Unavailable** | With **`GATE_STRICT=1`** (always in CI), a Postgres pass that can neither reach the URL nor start the embedded server **fails** the gate — never a skip. Without strict (local default), the same situation is a **skip** with reason from the closed set below. In CI a skip is impossible. |
+| **Precedence** | **`BDD_POSTGRES_URL` non-empty** → use that server only. **Empty or absent** → start embedded `github.com/fergusstrange/embedded-postgres/v2` and use `ConnectionURL()`. |
+| **URL path** | The URL is the **server** (maintenance database), not one scenario database. The role must **create databases**. No fallback to embedded if the URL path is chosen: malformed, unreachable, unauthorised, or a role without `CREATEDB` is **unavailable** on the URL path, not a switch to embedded. |
+| **Unavailable** | URL path failed or embedded start failed: under **`GATE_STRICT=1`** the gate **fails**; otherwise one skipped Postgres run with reason **`postgres-unavailable`**. A server up but unable to create or use a scenario's fresh database is a **failed run**, never a skip. |
+| **Admin URL** | On any path the driver creates and drops **only** the databases it created. |
 
 ### Postgres major and pins
 
 | Rule | Detail |
 | --- | --- |
-| **Conformance major** | **Postgres 16** is the gate's conformance target (`postgres.V16` → **16.15.1** per the library manifest). The supported major stays 16 until a later ADR adds a matrix. |
-| **Where pinned** | The library version is pinned in the root **`go.mod`**; the major is chosen in code (`V16`), not only by the library default (which is V18). |
-| **Who moves it** | Bumping the library or changing the chosen major touches high-tier paths (`go.mod`, possibly `internal/bdd`). The **owner** approves every move. |
+| **Conformance major** | **Postgres 16** in CI (`postgres.V16` → **16.15.1** per the embedded manifest). Stays 16 until a later ADR adds a matrix. |
+| **URL major** | A URL names whatever major the operator runs; the driver does not check it. The authoritative major-16 run is CI's (embedded, or a owner-pinned 16 container if CI moves). |
+| **Pins** | Library version in root **`go.mod`**; major **`V16`** in code (library default is V18). Bumps touch high-tier paths; the **owner** approves. |
 
-### Process and database lifecycle
-
-| Rule | Detail |
-| --- | --- |
-| **Scope** | One embedded server (or one URL) per **`go test` process** of **`internal/bdd`** — not one global server for the whole module unless the implementation shares it via `TestMain` inside that package. |
-| **Per scenario** | One **fresh database** per scenario on that server, created and dropped by the driver as `specs/sql/design.md` §5 requires, so parallel packages and separate head and base runs of `gate redgreen` never share database state. |
-| **Driver surface** | The conformance driver depends only on a **server URL**; the library that supplies it is replaceable (embedded, container, or local install). |
-| **Root runners** | When the test process runs as root (some containers), start uses the library's **`RunAs`** so PostgreSQL runs as a non-root account. |
-
-### Cache, CI prefetch, and offline behaviour
+### Process, databases, and embedded settings
 
 | Rule | Detail |
 | --- | --- |
-| **Cache location** | Use the library default cache under the user cache dir, or an explicit cache dir the workflow sets for CI. |
-| **CI cache** | **`actions/cache`** keyed on the **library module version** and the **Postgres bundle version** (16.15.1). |
-| **Prefetch** | Before `make gate`, a workflow step runs the library's **`embedded-postgres prefetch`** (or equivalent) with retries so the BDD test step does **no network** on a warm cache. The CLI supports **`exec --offline`** for offline runs ([CLI docs](https://github.com/fergusstrange/embedded-postgres/blob/main/docs/cli.md)). |
-| **Supply chain** | Binary checksums are pinned in the library release; our pin is the **`go.mod`** version. A project-owned mirror may replace `DownloadProvider` later without changing the driver contract. |
+| **G3** | One embedded server (or one URL) per **`go test` process** of **`internal/bdd`** inside `go test -race ./...`. |
+| **G4** | `gate redgreen` runs `go test ./internal/bdd/ -run TestFeatures` **once per newly activated scenario** in a detached base worktree (`internal/gate/redgreen.go`): each is a new process and may start embedded again. |
+| **Per scenario** | One **fresh database** per scenario, as `specs/sql/design.md` §5 requires. |
+| **Driver surface** | The conformance driver depends only on a **server URL**; the supplier is replaceable. |
+| **Loopback** | Embedded: **`Port(0)`** (never default 5432), random password per process, or **`UnixSocket(dir)`** without TCP — no listener beyond loopback. |
+| **Collation** | Text order is pinned by REQ-SQL-017 (`COLLATE "C"`); embedded uses `C`/UTF8; a URL server may differ. |
+| **Root runners** | Embedded start uses **`RunAs`** when the test process is root. |
 
-### Skip reporting, strict mode, summary, red→green, nightly
+### Supply chain
+
+| Asset | Rule |
+| --- | --- |
+| **Bundles** | SHA-256 in the embedded module manifest; download from `theseus-rs/postgresql-binaries` (or `DownloadProvider.BaseURL` + `/<version>/<asset>` for a mirror later). |
+| **Supervisor and CLI** | Same executable built from the **pinned module** (`go build ./cmd/embedded-postgres` or `go tool` at that version); gate **never** fetches supervisor binaries from the library release page. |
+| **Secrets in output** | `.gate/bdd.json`, the summary line, test logs and the `gate-report` artifact name the server **`embedded`** or **`url`** only — never URL, host, user or password. |
+
+### Cache, CI prefetch, and offline
 
 | Rule | Detail |
 | --- | --- |
-| **Postgres pass** | A **Postgres pass** is the Postgres dialect pass of the SQL conformance driver (`specs/sql/design.md` §5), not every scenario tagged `@profile:cloud`. |
-| **Skip reasons** | Codes live in **`internal/bdd`** as a closed set; the initial member is **`postgres-unavailable`**. Adding a code changes that set. |
-| **Report file** | After every BDD run, **`internal/bdd`** writes **`.gate/bdd.json`**: every run, with outcome passed, failed, or skip with reason. |
-| **Enforcement** | With **`GATE_STRICT=1`**, `TestFeatures` **fails if any run was a skip**, for any reason — godog strict mode does not fail on skips and `make gate` runs `go test` directly. A missing Postgres dialect run while the SQLite run executed is one skipped run. |
-| **Summary line** | When the BDD test step completes successfully, **`make gate`** invokes a **gate tool** subcommand that reads `.gate/bdd.json` and prints exactly one line: **`gate: scenario runs skipped: <total>`**, and when `<total>` is not zero, **` (<reason>: <count>, ...)`** with reasons sorted lexicographically, decimal counts, no trailing space. In CI the line is always **`gate: scenario runs skipped: 0`**. |
-| **Local `make gate`** | No Docker required for Postgres when the embedded path works. Optional: set **`BDD_POSTGRES_URL`** to an external server. |
-| **Red→green** | In CI the head run cannot record a skip under strict mode, so every newly active scenario that includes a Postgres run has executed that run at head; the base run uses the same job environment (including embedded start or the same URL). Locally a skipped Postgres run appears in the summary line; CI is authoritative. |
-| **Nightly (Postgres majors)** | Nightly does not matrix Postgres majors while only one major is supported. If a later ADR declares oldest and newest supported majors, nightly runs the Postgres conformance passes on both. |
+| **One directory** | CI sets one cache path: **`actions/cache`**, prefetch `--cache-dir`, and driver `Storage.CacheDir` (from env in `internal/bdd`; locally the library default). |
+| **Prefetch** | Before `make gate`, run the CLI **built from the `go.mod` pin** (for example `go tool embedded-postgres prefetch --cache-dir ...`) with retries — **no** `curl \| bash` or unpinned workflow binary. |
+| **Offline in CI** | Under strict mode the driver sets **`DownloadProvider{Offline: true}`**; a cache miss **fails** the gate instead of downloading in the BDD step. Locally the first start may download. |
+| **Cache key** | Runner **OS and architecture** plus **library module version** (bundle version is fixed by that pin). Eviction after seven days unused is normal; a cold run runs prefetch again. |
+| **Bad cache** | `invalid cache entry ... remove or repair` fails the start; under strict, the gate; CI fixes by bumping the cache key. |
 
-Local server via Docker (also copied into `docs/engineering/qa-gate.md` by the implementation):
+### Reporting, summary, red→green, nightly, CI
+
+| Rule | Detail |
+| --- | --- |
+| **Postgres pass** | The Postgres dialect pass of the SQL conformance driver, not every `@profile:cloud` scenario. |
+| **Skip reasons** | Closed set in **`internal/bdd`**; initial code **`postgres-unavailable`**. |
+| **`.gate/bdd.json`** | Written **before `TestFeatures` returns**, every run and outcome (including failed scenarios). |
+| **Summary line** | Only if the BDD step exits zero: **`make gate`** runs a **gate tool** subcommand printing **`gate: scenario runs skipped: <total>`** and, if nonzero, sorted **`(reason: count, ...)`**. CI expects **`: 0`**. |
+| **Strict enforcement** | `TestFeatures` fails on any skip (godog strict does not). Unavailable Postgres under strict fails per the rule above. |
+| **Red→green** | CI head cannot skip under strict; each activated scenario's base run uses the same job environment. |
+| **Nightly** | No Postgres major matrix until a later ADR; then conformance on declared oldest and newest. |
+| **CI job** | No `services.postgres` as implemented here; **`GATE_STRICT=1`**. Postgres from embedded or from workflow-set **`BDD_POSTGRES_URL`**. |
+
+Local server via Docker (documented in `docs/engineering/qa-gate.md` once implemented):
 
 ```bash
 docker run --rm -d --name basamento-gate-pg \
@@ -106,61 +131,52 @@ docker run --rm -d --name basamento-gate-pg \
 export BDD_POSTGRES_URL='postgres://kit:kit@127.0.0.1:5432/kit?sslmode=disable'
 ```
 
-The container role is the image superuser so it may create databases. The port binds loopback only.
-
-### CI workflow shape
-
-| Rule | Detail |
-| --- | --- |
-| **No service container** | The `gate` job does **not** declare a `services.postgres` block when this ADR is implemented as written. Postgres comes from embedded start or from `BDD_POSTGRES_URL` if the workflow sets it. |
-| **Strict** | Job `env` keeps **`GATE_STRICT=1`**. |
+Loopback bind; superuser may create databases.
 
 ## Alternatives considered
 
 | Alternative | Why rejected (or kept open) |
 | --- | --- |
-| **Postgres 16 service container only** (prior draft on ADR-0014) | Works and stays valid: `services.postgres` with **`image: postgres:16-bookworm@sha256:<digest>`**, **`--health-cmd pg_isready`**, and **`BDD_POSTGRES_URL`** to the maintenance database. Rejected as the *only* path because developers and agents without Docker never run the Postgres pass before CI — the failure mode WP-L1-01 showed. **Choosing this instead is a small edit:** set the URL in the workflow and omit the embedded dependency; the driver unchanged. |
-| **Hybrid: container in CI, embedded locally** | Two code paths; CI proves a different stack than a laptop unless both always run the same driver entry. Rejected: one precedence rule (URL then embedded) keeps one behaviour everywhere when CI does not set the URL. |
-| **Separate required job only for Postgres passes** | Splits G3, duplicates checkout and tool install, and still needs strict rules so the main job cannot ignore Postgres. |
-| **Nightly only** | Pull requests could merge without Postgres dialect passes in CI. |
+| **Postgres 16 service container only** | Valid: `postgres:16-bookworm@sha256:<digest>`, health check, **`BDD_POSTGRES_URL`**. Requires **Docker locally**; switching CI is a **one-file** `gate.yml` edit (high tier, owner approval). Rejected as the only path: without Docker, nothing runs the Postgres pass before CI (WP-L1-01). Driver unchanged if CI sets the URL only. |
+| **Hybrid: container in CI, embedded locally** | CI and laptop prove different stacks. Rejected: one precedence rule when CI leaves the URL empty. |
+| **Separate required job only for Postgres passes** | Splits G3, duplicates setup, still needs strict main-job rules. |
+| **Nightly only** | PRs merge without Postgres dialect passes in CI. |
 | **Wire-protocol simulator** | Cannot prove advisory locks, migration locking, or real SQLSTATE mapping. |
-| **Skip and warn only in CI** | Contradicts `GATE_STRICT=1` on the `gate` job. |
-| **Download Postgres with our own script** | Re-implements checksum manifests, cache layout, supervisor lifecycle, and cross-platform bundles the library already ships; higher maintenance for the same outcome. |
-| **Vendored Postgres tree in the repository** | Large binary artifacts in git, per-platform paths, and manual security updates; fights the gate's "no live vendor calls" spirit without matching the library's lease-based cache. |
-| **embedded-postgres v1 or ad-hoc in-process Postgres** | The old one-line rejection was "not hermetic, platform-specific, and slow." Against **v2:** checksum-pinned downloads and a shared cache make runs **more hermetic** after prefetch, but the **first** fetch still needs the network — partly true. **Platform-specific** is **weaker**: upstream CI covers Linux and macOS amd64/arm64 and Windows amd64 ([README](https://github.com/fergusstrange/embedded-postgres)). **Slow** **still holds**: `initdb` plus server start per `go test` process costs seconds; `gate redgreen` runs head and base, doubling startup (unverified wall-clock; see below). v2 is one month old with one maintainer — maturity risk, not a reason to dismiss the mechanism if CI caches and the URL fallback stay available. |
+| **Skip and warn only in CI** | Contradicts `GATE_STRICT=1`. |
+| **Our own download script** | Rebuilds manifests, cache, supervisor; same outcome, more maintenance. |
+| **Vendored Postgres in git** | Large binaries, manual security updates. |
+| **embedded-postgres without this design** | v2 checksum-pinned bundles and multi-OS CI reduce platform risk; first fetch still needs network; **startup cost per `go test` process** remains (G3 one start, G4 one per activated scenario). Young module (v2.0.1); URL/container fallback stays. |
 
 ## Consequences
 
-**Cost.** A test-only dependency in the root `go.mod`. First embedded start downloads PostgreSQL from GitHub releases (megabytes per platform); CI caches and prefetches that blob. Each `internal/bdd` test process pays startup time before scenarios run. Disk holds cache entries under the user cache dir.
+**Cost.** Test-only dependency in root `go.mod`. Prefetch downloads bundles and fills cache; G3 pays one embedded start per `internal/bdd` process, G4 adds one per activated scenario. Disk under the cache directory.
 
-**Risks.** v2 is young (2026-10-19) with a single maintainer. CI depends on GitHub release download availability unless prefetch and `actions/cache` always hit. The library licence and the licences of downloaded PostgreSQL bundles are **not yet checked** against `go-licenses`.
+**Risks.** v2 is recent with a small maintainer set. Prefetch depends on `theseus-rs` release availability unless cache hits.
 
-**Revert.** Roll back the `go.mod` pin, the embedded provider in `internal/bdd`, workflow cache/prefetch steps, strict skip rules, and `.gate/bdd.json` reporting together. Point CI at a service container with `BDD_POSTGRES_URL` only if embedded is withdrawn.
+**Cleanup.** If a test process or CI job is killed, the library supervisor stops PostgreSQL ([CLI wrapper protocol](https://github.com/fergusstrange/embedded-postgres/blob/v2.0.1/docs/cli.md)); hosted runners are discarded after the job.
 
-**Open facts the implementation must prove before merging**
+**Revert.** Roll back `go.mod`, embedded provider, workflow cache/prefetch, skip rules and `.gate/bdd.json` together. **If embedded proves unreliable in CI** (cold-cache download failures, startup past job limits, licence block), the owner moves CI to a digest-pinned **`postgres:16-bookworm`** service with **`BDD_POSTGRES_URL`** in `gate.yml` in its own pull request; driver, skip rules and summary line stay.
 
-| Fact | If it fails |
+## Conditions
+
+| Condition | If it fails |
 | --- | --- |
-| `go-licenses` accepts the library and any bundles it pulls in | Do not merge until licences are cleared or an exception is recorded; fallback: URL + service container only. |
-| `govulncheck` and `gate layering` stay green with a test-only import from `internal/bdd` | Fix layering or dependency placement; fallback: isolate bootstrap in a `_test`-only helper package. |
-| Prefetch + cache key (library version + Postgres 16.15.1) makes the BDD step network-free on warm CI; retries handle rate limits | Keep prefetch retries; if downloads remain flaky, set `BDD_POSTGRES_URL` to a service container in the workflow. |
-| Wall-clock cost of embedded start per `go test` process is acceptable on CI and locally; `gate redgreen` (two runs) stays within job time limits | Tune one-server-per-process vs `TestMain`; worst case revert to container-only in CI. |
-| Postgres **16.15.1** passes the conformance driver: advisory locks for migration locking, SQLSTATE mapping, `CREATE DATABASE` per scenario | Fix driver or pin a different 16.x bundle via library bump; fallback external server on 16. |
-| Behaviour matches strict/skip rules: unreachable URL and failed embedded start fail under `GATE_STRICT=1` | Fix enforcement before merge; do not ship silent skips in CI. |
-
-## Questions for the owner
-
-1. **Embedded default in CI** — Approve starting Postgres from embedded-postgres when `BDD_POSTGRES_URL` is unset, rather than requiring a service container? (Yes → implement this ADR; no → keep container-only and drop embedded from CI.)
-2. **Major 16** — Approve Postgres **16** (not 18, the library default) as the sole gate major until a later matrix ADR? (Approve / defer.)
+| `go-licenses` accepts the library and tool dependency; bundle licences (PostgreSQL and contents) are recorded in `docs/engineering/qa-gate.md` and covered by owner approval of the implementation | Licence block; fallback URL + service container in CI. |
+| `govulncheck` and `gate layering` stay green | Fix placement; fallback isolate bootstrap in test-only package. |
+| Prefetch + cache key keep the BDD step offline in CI; retries handle 429/5xx | Set `BDD_POSTGRES_URL` to a service container in the workflow. |
+| Wall-clock of embedded starts fits job limits (G3 + G4 process counts above) | Tune sharing; worst case container-only CI. |
+| Postgres **16.15.1** passes conformance (advisory locks, SQLSTATE, per-scenario `CREATE DATABASE`) | Bump library or use external 16. |
+| Unavailable and strict rules behave as written | Do not merge silent CI skips. |
 
 ## Implementation changes these files
 
 | Path | Change |
 | --- | --- |
-| `go.mod` and `go.sum` | Pin `github.com/fergusstrange/embedded-postgres/v2` (test dependency via `internal/bdd`). |
-| `internal/bdd` | Postgres provider: honor `BDD_POSTGRES_URL`, else embedded `V16`; closed skip-reason set; write `.gate/bdd.json`; strict-mode fail on skip and on unavailable Postgres when strict. |
-| The gate tool (`go tool gate`) | Subcommand reading `.gate/bdd.json` and printing `gate: scenario runs skipped: …`. |
-| `Makefile` | After the BDD test step succeeds, run the summary subcommand. |
-| `.github/workflows/gate.yml` | Cache and prefetch steps; **no** `services.postgres`; keep `GATE_STRICT=1`. |
-| `review.yaml` and `CODEOWNERS` | High tier for new enforcement paths if needed; regenerate with `go tool gate docs -write`. |
-| `docs/engineering/qa-gate.md` | Postgres paragraph (embedded default, optional `BDD_POSTGRES_URL`, `docker run`, strict vs local); G3/G4 rows; summary-line contract. |
+| `go.mod` and `go.sum` | Pin `github.com/fergusstrange/embedded-postgres/v2`; tool for prefetch CLI. |
+| `internal/bdd` | Precedence, embedded `V16`, `Offline` in CI, loopback settings, closed skips, `.gate/bdd.json`, strict failures; shared cache dir env. |
+| The gate tool (`go tool gate`) | Subcommand for `gate: scenario runs skipped: …`. |
+| `Makefile` | Summary subcommand after BDD success only. |
+| `.github/workflows/gate.yml` | Cache, prefetch from pinned CLI; no `services.postgres`; `GATE_STRICT=1`. |
+| `review.yaml` and `CODEOWNERS` | Regenerate with `go tool gate docs -write` if needed. |
+| `docs/engineering/qa-gate.md` | Postgres (embedded, `BDD_POSTGRES_URL`, docker recipe, strict vs local, not-a-vendor-call bound, bundle licences, G3/G4, summary line). |
+| `specs/sql/design.md` §5 | Designer: name `BDD_POSTGRES_URL`, embedded when empty, skip vs strict; own spec PR before or with implementation. |
