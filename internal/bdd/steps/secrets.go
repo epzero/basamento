@@ -5,12 +5,11 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"regexp"
@@ -64,6 +63,7 @@ type simKeyRegistry struct {
 	unwraps          int
 	unwrapByCodec    map[*secrets.Codec]int
 	plainByTenant    map[string][]byte
+	nonceSeq         uint64
 }
 
 func newSimRegistry() *simKeyRegistry {
@@ -127,10 +127,7 @@ func (s *simKeyService) encrypt(tenant string, plain []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
+	nonce := s.reg.nextNonce(gcm.NonceSize())
 	return gcm.Seal(nonce, nonce, inner, nil), nil
 }
 
@@ -184,6 +181,17 @@ func (r *simKeyRegistry) countUnwrap() {
 	r.mu.Lock()
 	r.unwraps++
 	r.mu.Unlock()
+}
+
+func (r *simKeyRegistry) nextNonce(size int) []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nonceSeq++
+	nonce := make([]byte, size)
+	if size >= 8 {
+		binary.BigEndian.PutUint64(nonce[size-8:], r.nonceSeq)
+	}
+	return nonce
 }
 
 func (r *simKeyRegistry) noteKeysetPlain(tenant string, plain []byte) {
