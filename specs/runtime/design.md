@@ -1,11 +1,11 @@
 # Runtime: design notes
 
-## The request tenant follows the context (EP0-42)
+## The request tenant follows the context
 
 The rule binds every runtime on `Runtime.Start` (`StartRequest`), on the run
 references of `Describe`, `Cancel` and `Resolve`, and on the `RunQuery` of
-`List` (`REQ-RT-042`, owner decision, 2026-11-17). The tenant of a call is
-the context's (`core.TenantFrom(ctx)`); a tenant field the call carries
+`List` (`REQ-RT-042`). The tenant of a call is the context's
+(`core.TenantFrom(ctx)`); a tenant field the call carries
 (`StartRequest.TenantID`, `RunRef.TenantID`, `RunQuery.TenantID`) may be empty
 or equal to it, and nothing else. A field that names a different tenant is a
 mismatch, not a request on that tenant: the call fails with
@@ -16,6 +16,12 @@ cannot read, cancel or resolve through a reference that says `globex`
 (`RT-042-02` … `RT-042-05`). This check comes before the same-tenant lookup,
 so the `not_found` of `REQ-RT-025` keeps answering for a reference that agrees
 with the context.
+
+The context is the only source of the tenant for the same reason it is for
+`platform.AuditEvent.Tenant`: one source, and no field a caller can set to
+reach another tenant's runs. The rule does not trust the field over the
+context, as `Record` does not trust the event over the context, and it fails
+closed without a tenant.
 
 Enforcing the context against the field also fails closed when the context has
 no tenant (and an empty context id is no tenant, not a tenant that matches an
