@@ -14,8 +14,9 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core   *coreWorld
-	Prompt *promptWorld
+	Core    *coreWorld
+	Prompt  *promptWorld
+	Secrets *secretsWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -30,4 +31,5 @@ func Initialize(sc *godog.ScenarioContext) {
 	})
 	registerCore(sc)
 	registerPrompt(sc)
+	registerSecrets(sc)
 }

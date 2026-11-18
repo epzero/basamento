@@ -1,6 +1,6 @@
 # Secrets: key wrapping and payload encryption
 
-Status: **Planned** (WP-L1-04, `platform/secrets`). Design: ADR-0004, ADR-0002,
+Status: **Implemented** (WP-L1-04, `platform/secrets`). Design: ADR-0004, ADR-0002,
 [`design.md`](design.md). Constitution article 7: payloads in history are
 encrypted.
 
