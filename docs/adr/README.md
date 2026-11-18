@@ -21,4 +21,4 @@ direction is the exception: its ADR is written as **Proposed** (§5).
 | [0010](0010-bdd-specs-agent-review-and-gate.md) | BDD specs, agent-first review with tiers, deterministic gate | Accepted |
 | [0011](0011-flow-host-and-node-handlers.md) | The flow host and node handlers are layers of their own | Accepted |
 | [0012](0012-workers.md) | Workers declare what they serve and pull invocations; the queue's order, capacity, lost workers, workers on demand | Accepted |
-| [0013](0013-blob-upload-urls.md) | Blob uploads: a staged upload URL scoped to the tenant, then a commit that names the content key | Proposed |
+| [0013](0013-blob-upload-urls.md) | Blob uploads: a staged upload URL scoped to the tenant, then a commit that names the content key | Accepted |

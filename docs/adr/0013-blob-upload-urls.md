@@ -1,10 +1,6 @@
 # ADR-0013 — Blob uploads go through a staged upload URL and a commit
 
-**Status:** proposed · **Date:** 2026-11-18
-
-Proposed at the designer's request while the architect was unavailable. The
-owner chose the direction on 2026-11-18 (EP0-22). The architect accepts it,
-or amends it, before it merges.
+**Status:** accepted · **Date:** 2026-11-18
 
 ## Context
 
@@ -206,7 +202,7 @@ which is a bad upload like a size overrun.
 - **Docs.** `specs/blob/design.md` says the port's method set "stays as it
   is"; that line is amended with a pointer here, as are ADR-0012 and
   `docs/architecture/browser-runner.md` where they say "scoped URLs".
-- **Not decided here:** whether the platform itself accepts multipart
+- **Outside this decision:** whether the platform itself accepts multipart
   uploads of objects over the provider's single-PUT limit (S3's 5 GiB); the
   first version sets `MaxSize` accordingly and a caller with a larger file
   splits it or uses `Put`. Nor how a client resumes an interrupted upload.
