@@ -485,3 +485,29 @@ scenarios:
             by: human:epzero
             at: "2026-11-17"
             note: https://github.com/epzero/basamento/pull/6
+    BUS-027-01:
+        hash: sha256:7824170e078c2043f9e13f40cc797805a2619cc4daaa5f06c6e4a38e90fff2fc
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-027
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:537f82
+        approved_at: "2026-11-18"
+        note: 'New behavior: a call with a cancelled context fails cancelled and one past its deadline fails timeout, storing nothing; already-cancelled context and an epoch deadline keep the gate deterministic; no data loss or contract change.'
+        ref: https://github.com/epzero/basamento/pull/56
+        human:
+            status: pending
+    BUS-028-01:
+        hash: sha256:ac34a80896b97d9b1feb0ed7bf11f403fca44e788dd76242358a92bd538ec97e
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-028
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:537f82
+        approved_at: "2026-11-18"
+        note: 'New behavior: a call with a cancelled context fails cancelled and one past its deadline fails timeout, storing nothing; already-cancelled context and an epoch deadline keep the gate deterministic; no data loss or contract change.'
+        ref: https://github.com/epzero/basamento/pull/56
+        human:
+            status: pending
