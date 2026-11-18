@@ -248,7 +248,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Run durability and determinism: an in-progress run stays pinned to the flow definition hash it started with when newer versions are registered.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21
     FLOW-028-01:
         hash: sha256:f12b6481baec4368806d0f5d7963e83fcef24970605bab6b2c50ddad40f6e74e
         reqs:
@@ -389,7 +392,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Replay durability and determinism: replaying a recorded history reproduces the exact durable calls in order without re-executing completed steps.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21
     FLOW-038-01:
         hash: sha256:e4d9cf880b62268db1e088be95056eab8cf03c0d6b8b160bd5b1dca707b734a3
         reqs:
@@ -410,4 +416,7 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Superstep scheduling determinism: starting all durable calls in a superstep in command order before waiting prevents blocking or reordering parallel operations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/21
