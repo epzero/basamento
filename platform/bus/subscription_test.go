@@ -85,4 +85,18 @@ func TestLiveEndBeforeAttach(t *testing.T) {
 	}
 }
 
+func TestDeliverLiveIgnoresCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	live := newLiveSubscription(4, 0, func() {}, nil)
+	live.deliver(ctx, platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("x")})
+	select {
+	case _, ok := <-live.messages():
+		if ok {
+			t.Fatal("delivered after cancel")
+		}
+	default:
+	}
+}
+
 var _ jetstream.ConsumeContext = (*stubConsume)(nil)
