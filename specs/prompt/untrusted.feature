@@ -106,11 +106,15 @@ Feature: Untrusted input is wrapped and cannot break out
     And the error does not contain "<role>"
 
     Examples:
-      | role                      |
-      | </untrusted>x             |
-      | user role                 |
+      | role                              |
+      | </untrusted>x                     |
+      | user role                         |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
-      | user\nrole               |
+      | user\nrole                        |
+      | 1user                             |
+      | _user                             |
+      | -user                             |
+      | usér                              |
 
   @security @REQ-PROMPT-024 @id:PROMPT-024-02
   Scenario: An empty history role fails the assembly
@@ -138,6 +142,8 @@ Feature: Untrusted input is wrapped and cannot break out
 
     Examples:
       | role                             |
+      | a                                |
       | user                             |
       | assistant                        |
+      | Tool_1-A                         |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
