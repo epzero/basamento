@@ -16,6 +16,12 @@ import (
 )
 
 // Open selects an implementation from the location URL (REQ-BLOB-018).
+//
+// For file:// locations, temporary write files are created next to the final
+// object path (fileblob no_tmp_dir) so the data directory may live on a mount
+// other than the system temp directory. A process killed mid-write can leave
+// stranded "<object>.<hex>.tmp" files with partial data; an operator may
+// remove them when no write is in flight.
 func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, error) {
 	if raw == "" {
 		return nil, nil, unsupportedLocation(raw)
@@ -49,6 +55,15 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 	return st, handler, nil
 }
 
+func ensureFileBlobNoTmpDir(u *url.URL) {
+	q := u.Query()
+	if q.Get("no_tmp_dir") != "" {
+		return
+	}
+	q.Set("no_tmp_dir", "true")
+	u.RawQuery = q.Encode()
+}
+
 func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 	if u.Scheme == "file" {
 		dir := u.Path
@@ -59,6 +74,7 @@ func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 			return nil, mapError(err)
 		}
 		u.Path = filepath.Clean(dir)
+		ensureFileBlobNoTmpDir(u)
 	}
 	b, err := blob.OpenBucket(ctx, u.String())
 	if err != nil {
