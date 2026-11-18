@@ -2,32 +2,44 @@ package secrets
 
 import (
 	"context"
+	"log/slog"
 
-	"gocloud.dev/secrets"
+	"github.com/epzero/basamento/core"
 )
 
-// Port implements platform.Secrets over a gocloud key keeper.
+// Port implements platform.Secrets over the same production key service as the
+// payload codec (design §1).
 type Port struct {
-	keeper *secrets.Keeper
-	scheme string
+	ks   *keeperKeyService
+	opts options
 }
 
 // Encrypt wraps plaintext with the master key.
 func (p *Port) Encrypt(ctx context.Context, plaintext []byte) ([]byte, error) {
-	ct, err := p.keeper.Encrypt(ctx, plaintext)
+	ct, err := p.ks.encryptValue(ctx, plaintext)
 	if err != nil {
-		return nil, errUnavailable(p.scheme)
+		return nil, err
 	}
+	p.opts.loggerOrDefault().Debug("secrets value encrypted", slog.String("scheme", p.ks.scheme))
 	return ct, nil
 }
 
 // Decrypt unwraps ciphertext with the master key.
 func (p *Port) Decrypt(ctx context.Context, ciphertext []byte) ([]byte, error) {
-	pt, err := p.keeper.Decrypt(ctx, ciphertext)
+	pt, err := p.ks.decryptValue(ctx, ciphertext)
 	if err != nil {
-		return nil, errInvalidArgument(msgValueCannotDecrypt)
+		p.opts.loggerOrDefault().Debug("secrets value decrypt failed",
+			slog.String("scheme", p.ks.scheme),
+			slog.String("code", string(core.CodeOf(err))))
+		return nil, err
 	}
+	p.opts.loggerOrDefault().Debug("secrets value decrypted", slog.String("scheme", p.ks.scheme))
 	return pt, nil
+}
+
+// SetLogger sets where the port writes operational records (optional).
+func (p *Port) SetLogger(l *slog.Logger) {
+	p.opts.logger = l
 }
 
 var _ interface {
