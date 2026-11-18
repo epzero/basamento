@@ -83,6 +83,17 @@ func cellAt(row *messages.PickleTableRow, idx int) string {
 	return strings.TrimSpace(row.Cells[idx].Value)
 }
 
+// namedBytes is the declared type behind the scenario phrase "a named Go type
+// "NamedBytes" with underlying type "[]byte"". reflect.StructOf cannot create
+// named types at run time, so the type is declared here and looked up by the
+// name the field tables use.
+type namedBytes []byte
+
+// declaredNamedTypes maps scenario type names to the Go types declared for them.
+var declaredNamedTypes = map[string]reflect.Type{
+	"NamedBytes": reflect.TypeFor[namedBytes](),
+}
+
 func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) {
 	s = strings.TrimSpace(s)
 	if t, ok := named[s]; ok {
@@ -94,6 +105,10 @@ func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) 
 	switch s {
 	case "string":
 		return reflect.TypeFor[string](), nil
+	case "byte":
+		return reflect.TypeFor[byte](), nil
+	case "json.RawMessage":
+		return reflect.TypeFor[json.RawMessage](), nil
 	case "int":
 		return reflect.TypeFor[int](), nil
 	case "int64":

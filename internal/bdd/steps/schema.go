@@ -169,6 +169,18 @@ func registerSchema(sc *godog.ScenarioContext) {
 		return nil
 	})
 
+	sc.Step(`^a named Go type "([^"]*)" with underlying type "([^"]*)"$`, func(ctx context.Context, name, underlying string) error {
+		t, ok := declaredNamedTypes[name]
+		if !ok {
+			return fmt.Errorf("no declared named type %q", name)
+		}
+		if underlying != "[]byte" || t.Kind() != reflect.Slice || t.Elem() != reflect.TypeFor[byte]() {
+			return fmt.Errorf("declared type %q does not have underlying type %q", name, underlying)
+		}
+		schemaCtx(ctx).types[name] = t
+		return nil
+	})
+
 	sc.Step(`^a Go struct type "([^"]*)" with fields:$`, func(ctx context.Context, typeName string, table *godog.Table) error {
 		fields, err := tableToStructFields(table, schemaCtx(ctx).types)
 		if err != nil {
@@ -187,6 +199,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 	sc.Step(`^the schema has exactly the properties (.+)$`, assertProperties)
 	sc.Step(`^the schema requires exactly the properties (.+)$`, assertRequired)
 	sc.Step(`^property "([^"]*)" of the schema has the description "([^"]*)"$`, assertDescription)
+	sc.Step(`^property "([^"]*)" of the schema has contentEncoding "([^"]*)"$`, assertContentEncoding)
 
 	sc.Step(`^the schema accepts the instance (\{[^}].+|\{.+\}|\[.+\])$`, func(ctx context.Context, inst string) error {
 		w := schemaCtx(ctx)
@@ -237,6 +250,24 @@ func registerSchema(sc *godog.ScenarioContext) {
 		vs := schema.Violations(err)
 		if len(vs) == 0 {
 			return fmt.Errorf("no violations")
+		}
+		return nil
+	})
+
+	sc.Step(`^the schema rejects the instance (\{.+\}|\[.+\])$`, func(ctx context.Context, inst string) error {
+		w := schemaCtx(ctx)
+		var err error
+		if w.compiled != nil {
+			err = w.compiled.Validate(json.RawMessage(inst))
+		} else {
+			c, cErr := compileGenerated(w, firstGenKey(w))
+			if cErr != nil {
+				return cErr
+			}
+			err = c.Validate(json.RawMessage(inst))
+		}
+		if err == nil {
+			return fmt.Errorf("accepted")
 		}
 		return nil
 	})
@@ -575,6 +606,20 @@ func assertDescription(ctx context.Context, prop, desc string) error {
 	p, _ := props[prop].(map[string]any)
 	if p == nil || p["description"] != desc {
 		return fmt.Errorf("description %v", p)
+	}
+	return nil
+}
+
+func assertContentEncoding(ctx context.Context, prop, enc string) error {
+	sch := schemaCtx(ctx).generated[firstGenKey(schemaCtx(ctx))]
+	m, err := parseSchemaObject(sch.Raw)
+	if err != nil {
+		return err
+	}
+	props, _ := m["properties"].(map[string]any)
+	p, _ := props[prop].(map[string]any)
+	if p == nil || p["contentEncoding"] != enc {
+		return fmt.Errorf("contentEncoding %v", p)
 	}
 	return nil
 }
