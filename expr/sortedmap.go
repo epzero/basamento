@@ -32,9 +32,10 @@ func (a *sortedAdapter) NativeToValue(value any) ref.Val {
 			return types.NewErrFromString(err.Error())
 		}
 		return newSortedAnyMap(a, entries)
-	default:
-		rv := reflect.ValueOf(value)
-		if rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String {
+	}
+	rv := reflect.ValueOf(value)
+	if rv.Kind() == reflect.Map {
+		if rv.Type().Key().Kind() == reflect.String {
 			out := make(map[string]any, rv.Len())
 			iter := rv.MapRange()
 			for iter.Next() {
@@ -42,8 +43,13 @@ func (a *sortedAdapter) NativeToValue(value any) ref.Val {
 			}
 			return &sortedStringMap{adapter: a, data: out}
 		}
-		return a.inner.NativeToValue(value)
+		entries, err := nativeMapEntries(a, rv)
+		if err != nil {
+			return types.NewErrFromString(err.Error())
+		}
+		return newSortedAnyMap(a, entries)
 	}
+	return a.inner.NativeToValue(value)
 }
 
 type sortedStringMap struct {
@@ -313,6 +319,21 @@ func nativeAnyMapEntries(a *sortedAdapter, m map[any]any) ([]sortedEntry, error)
 	return entries, nil
 }
 
+// nativeMapEntries converts any typed Go map into sorted entries, so every
+// map an expression sees has the same key order whatever its Go key type.
+func nativeMapEntries(a *sortedAdapter, rv reflect.Value) ([]sortedEntry, error) {
+	entries := make([]sortedEntry, 0, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		mk, ok := classifyMapKey(a.NativeToValue(iter.Key().Interface()))
+		if !ok {
+			return nil, fmt.Errorf("unsupported map key type")
+		}
+		entries = append(entries, sortedEntry{key: mk, val: a.NativeToValue(iter.Value().Interface())})
+	}
+	return entries, nil
+}
+
 func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMap {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].key.less(entries[j].key)
@@ -379,11 +400,11 @@ func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
 		if len(m.entries) != len(ov.entries) {
 			return types.Bool(false)
 		}
-		for i := range m.entries {
-			if !mapKeysEqual(m.entries[i].key, ov.entries[i].key) {
-				return types.Bool(false)
-			}
-			if m.entries[i].val.Equal(ov.entries[i].val) != types.True {
+		// Keys can sort into different positions when their kinds differ
+		// (int < uint < double), so match by lookup, not by index.
+		for _, e := range m.entries {
+			v, found := ov.Find(e.key.key)
+			if !found || e.val.Equal(v) != types.True {
 				return types.Bool(false)
 			}
 		}
