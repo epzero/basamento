@@ -48,6 +48,10 @@ func registerCore(sc *godog.ScenarioContext) {
 		world(ctx).Core.clock.Advance(time.Duration(ms) * time.Millisecond)
 		return nil
 	})
+	sc.Step(`^the clock advances by (\d+) hours?$`, func(ctx context.Context, h int) error {
+		world(ctx).Core.clock.Advance(time.Duration(h) * time.Hour)
+		return nil
+	})
 	sc.Step(`^an id generator$`, func(ctx context.Context) error {
 		world(ctx).Core.generator()
 		return nil
