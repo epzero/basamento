@@ -64,10 +64,10 @@ func withPostgresMigrateLock(ctx context.Context, db *sql.DB, fn func() error) e
 func runMigrations(ctx context.Context, db *sql.DB, d dialect, migrations fs.FS) error {
 	provider, err := goose.NewProvider(gooseDialect(d), db, migrations)
 	if err != nil {
-		return core.NewError(core.CodeInternal, "sql: migration provider failed", nil)
+		return mapExecErr(err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
-		return core.NewError(core.CodeInternal, "sql: migration failed", nil)
+		return mapExecErr(err)
 	}
 	return nil
 }
@@ -153,11 +153,6 @@ func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return ver, nil
-}
-
-// MaxMigrationVersion reports the highest version in migrations.
-func MaxMigrationVersion(migrations fs.FS) (int64, error) {
-	return maxMigrationVersion(migrations)
 }
 
 func sqliteMemoryPath(path string) bool {
