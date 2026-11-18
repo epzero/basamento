@@ -801,6 +801,30 @@ func TestListSessionsMergedWithTagNamedLikeBase(t *testing.T) {
 	}
 }
 
+// assertUnpushedBranchIsOpen commits work on the session's new branch and
+// checks that the brand-new, unpushed branch is not reported as merged.
+func assertUnpushedBranchIsOpen(t *testing.T, repo string, s Session, base string) {
+	t.Helper()
+	if remote, err := git(repo, "config", "--get", "branch."+s.Branch+".remote"); err == nil {
+		t.Fatalf("a branch created from the base must not track it: branch.%s.remote=%q", s.Branch, remote)
+	}
+	commitFile(t, s.Worktree, "new-work.txt")
+	sessions, err := ListSessions(repo, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ss := range sessions {
+		if ss.Branch != s.Branch {
+			continue
+		}
+		if ss.Merged {
+			t.Fatalf("unpushed branch %s must not be merged; sessions=%+v", s.Branch, sessions)
+		}
+		return
+	}
+	t.Fatalf("session branch %s not listed: %+v", s.Branch, sessions)
+}
+
 func TestNewSessionBaseOriginMain(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
@@ -815,6 +839,7 @@ func TestNewSessionBaseOriginMain(t *testing.T) {
 	if !strings.HasPrefix(s.Branch, "WP-L7-01-") {
 		t.Fatalf("unexpected branch %+v", s)
 	}
+	assertUnpushedBranchIsOpen(t, repo, s, "origin/main")
 }
 
 func TestNewSessionBaseMainWithTagShadow(t *testing.T) {
@@ -874,6 +899,7 @@ func TestNewSessionDefaultBaseOnlyOriginMain(t *testing.T) {
 	if !strings.HasPrefix(s.Branch, "WP-L7-04-") {
 		t.Fatalf("unexpected session %+v", s)
 	}
+	assertUnpushedBranchIsOpen(t, repo, s, "main")
 }
 
 func TestListSessionsUnresolvableBaseListsAnyway(t *testing.T) {

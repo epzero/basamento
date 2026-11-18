@@ -419,7 +419,7 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		if err != nil {
 			return Session{}, err
 		}
-		if _, err := git(top, "worktree", "add", "-b", s.Branch, s.Worktree, baseRef); err != nil {
+		if _, err := git(top, "worktree", "add", "--no-track", "-b", s.Branch, s.Worktree, baseRef); err != nil {
 			return Session{}, err
 		}
 	}
