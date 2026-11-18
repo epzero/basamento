@@ -59,7 +59,7 @@ func wrapKeyset(ctx context.Context, ks KeyService, tenant string, h *keyset.Han
 }
 
 func unwrapKeyset(ctx context.Context, tenant string, rec StoredKeyset, keys []KeyService) (*keyset.Handle, error) {
-	plain, _, err := unwrapWithKeys(ctx, tenant, rec.Wrapped, rec.MasterKeyID, keys)
+	plain, err := unwrapWithKeys(ctx, tenant, rec.Wrapped, rec.MasterKeyID, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -81,4 +81,28 @@ func keyStatusEnabled(h *keyset.Handle, id uint32) bool {
 		}
 	}
 	return false
+}
+
+func handleHasKey(h *keyset.Handle, id uint32) bool {
+	return keyStatusEnabled(h, id)
+}
+
+func parseDataKeyID(idBytes []byte) (uint32, error) {
+	idStr := string(idBytes)
+	if len(idStr) == 0 || len(idStr) > 10 {
+		return 0, errInvalidArgument(msgPayloadCannotDecrypt)
+	}
+	for _, c := range idStr {
+		if c < '0' || c > '9' {
+			return 0, errInvalidArgument(msgPayloadCannotDecrypt)
+		}
+	}
+	var n uint64
+	for _, c := range idStr {
+		n = n*10 + uint64(c-'0')
+	}
+	if n > uint64(^uint32(0)) {
+		return 0, errInvalidArgument(msgPayloadCannotDecrypt)
+	}
+	return uint32(n), nil
 }
