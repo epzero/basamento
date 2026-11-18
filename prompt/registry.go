@@ -133,6 +133,9 @@ func Assemble(t *Template, ref string, inputs map[string]string, history []Histo
 	if err := validateInputs(idx, inputs); err != nil {
 		return nil, err
 	}
+	if err := validateHistory(history); err != nil {
+		return nil, err
+	}
 	ordered := orderSegments(t.Segments)
 	dropped := 0
 	hist := append([]HistoryEntry(nil), history...)

@@ -73,7 +73,7 @@ func partHasUnpairedDelimiters(p AssembledPart) bool {
 		return false
 	}
 	for _, h := range p.History {
-		if hasUnpairedDelimiters(h.Text) {
+		if hasUnpairedDelimiters(h.Text) || hasUnpairedDelimiters(h.Role) || hasUnpairedDelimiters(h.Role+h.Text) {
 			return true
 		}
 	}
