@@ -54,6 +54,10 @@ func (f *faultBucket) SignedURL(ctx context.Context, key string, opts *blob.Sign
 	return f.inner.SignedURL(ctx, key, opts)
 }
 
+func (f *faultBucket) ListKeys(ctx context.Context, prefix string) ([]string, error) {
+	return f.inner.ListKeys(ctx, prefix)
+}
+
 func (f *faultBucket) Close() error { return f.inner.Close() }
 
 func openFileStore(t *testing.T) (*Store, bucketBackend, string) {
@@ -63,8 +67,8 @@ func openFileStore(t *testing.T) (*Store, bucketBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &Store{bucket: b, clock: coretest.NewFakeClock(time.Unix(1700000000, 0))}
-	return st, b, dir
+	st := &Store{bucket: wrapBucket(b), clock: coretest.NewFakeClock(time.Unix(1700000000, 0)), rand: coretest.SeededRand(1), embedded: true}
+	return st, wrapBucket(b), dir
 }
 
 func TestPutMetaFailureNoObject(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"gocloud.dev/blob"
@@ -14,13 +15,17 @@ import (
 
 // Store is a tenant-scoped content store over one bucket.
 type Store struct {
-	bucket   bucketBackend
-	clock    core.Clock
-	maxTTL   time.Duration
-	embedded bool
-	baseURL  string
-	signKey  []byte
-	putLocks keyedMu
+	bucket    bucketBackend
+	clock     core.Clock
+	maxTTL    time.Duration
+	embedded  bool
+	baseURL   string
+	signKey   []byte
+	putLocks  keyedMu
+	stageSeq  uint64
+	rand      io.Reader
+	lastSweep time.Time
+	sweepMu   sync.Mutex
 }
 
 // Close releases the underlying bucket.
