@@ -156,6 +156,35 @@ func originFetchRefspec(branch string) string {
 	return "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
 }
 
+// headSymbolicRef returns HEAD when it points at a branch; detached checkouts return an error.
+func headSymbolicRef(dir string) (string, error) {
+	out, err := git(dir, "symbolic-ref", "-q", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func headOnBranch(dir, branch string) (bool, error) {
+	ref, err := headSymbolicRef(dir)
+	if err != nil {
+		return false, nil
+	}
+	return ref == headBranchRef(branch), nil
+}
+
+func ensureCheckedOutBranch(dir, branch string) error {
+	on, err := headOnBranch(dir, branch)
+	if err != nil {
+		return err
+	}
+	if on {
+		return nil
+	}
+	_, err = git(dir, "checkout", "-q", "-B", branch, headBranchRef(branch))
+	return err
+}
+
 // reviewDetachSHA is the commit a code reviewer detaches at: origin when pushed, else local.
 func reviewDetachSHA(dir, branch string) (string, error) {
 	if err := validateBranchName(branch); err != nil {
@@ -209,9 +238,16 @@ func fastForwardBranch(dir, branch string) error {
 	if !onOrigin {
 		return nil
 	}
-	abbref, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || abbref != branch {
-		return fmt.Errorf("worktree must be on branch %s to fast-forward (currently on %s); run git checkout %s in that worktree, then run gate agent new again", branch, abbref, branch)
+	on, err := headOnBranch(dir, branch)
+	if err != nil {
+		return err
+	}
+	if !on {
+		cur := "detached HEAD"
+		if ref, symErr := headSymbolicRef(dir); symErr == nil {
+			cur = ref
+		}
+		return fmt.Errorf("worktree must be on branch %s to fast-forward (currently on %s); run git checkout %s in that worktree, then run gate agent new again", branch, cur, branch)
 	}
 	if _, err := git(dir, "fetch", "origin", originFetchRefspec(branch)); err != nil {
 		return err
@@ -337,9 +373,15 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	}
 	switch {
 	case linked || r.NoWorktree:
-		if s.Branch, err = git(top, "rev-parse", "--abbrev-ref", "HEAD"); err != nil {
-			return Session{}, err
+		ref, symErr := headSymbolicRef(top)
+		if symErr != nil {
+			return Session{}, symErr
 		}
+		const headPrefix = "refs/heads/"
+		if !strings.HasPrefix(ref, headPrefix) {
+			return Session{}, fmt.Errorf("worktree HEAD is %s; run from a branch checkout", ref)
+		}
+		s.Branch = strings.TrimPrefix(ref, headPrefix)
 	default:
 		prefix := r.Issue
 		if prefix == "" {
@@ -347,7 +389,11 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		}
 		s.Branch = prefix + "-" + id.Instance
 		s.Worktree = filepath.Join(filepath.Dir(top), filepath.Base(top)+"-worktrees", s.Branch)
-		if _, err := git(top, "worktree", "add", "-b", s.Branch, s.Worktree, r.Base); err != nil {
+		start := r.Base
+		if !strings.HasPrefix(start, "refs/") {
+			start = headBranchRef(start)
+		}
+		if _, err := git(top, "worktree", "add", "-b", s.Branch, s.Worktree, start); err != nil {
 			return Session{}, err
 		}
 	}
@@ -369,7 +415,10 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		if _, err := git(top, "fetch", "origin", originFetchRefspec(branch)); err != nil {
 			return Session{}, err
 		}
-		if _, err := git(top, "branch", "--track", branch, remoteBranchRef(branch)); err != nil {
+		if _, err := git(top, "branch", "-f", branch, remoteBranchRef(branch)); err != nil {
+			return Session{}, err
+		}
+		if _, err := git(top, "branch", "--set-upstream-to", remoteBranchRef(branch), branch); err != nil {
 			return Session{}, err
 		}
 	}
@@ -385,7 +434,7 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		if status != "" {
 			return Session{}, fmt.Errorf("this worktree has changes; it must be clean to check out %s", branch)
 		}
-		if _, err := git(top, "checkout", "-q", "-B", branch, headBranchRef(branch)); err != nil {
+		if err := ensureCheckedOutBranch(top, branch); err != nil {
 			return Session{}, err
 		}
 		if err := fastForwardBranch(top, branch); err != nil {
@@ -399,13 +448,16 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		if linkErr != nil || !linkedWT {
 			return Session{}, fmt.Errorf("path %s exists but is not a linked worktree for branch %s", s.Worktree, branch)
 		}
-		abbref, headErr := git(s.Worktree, "rev-parse", "--abbrev-ref", "HEAD")
-		if headErr != nil || abbref != branch {
-			on := abbref
-			if headErr != nil {
-				on = "unknown"
+		on, headErr := headOnBranch(s.Worktree, branch)
+		if headErr != nil {
+			return Session{}, headErr
+		}
+		if !on {
+			cur := "detached HEAD"
+			if ref, symErr := headSymbolicRef(s.Worktree); symErr == nil {
+				cur = ref
 			}
-			return Session{}, fmt.Errorf("worktree %s is not on branch %s (on %s)", s.Worktree, branch, on)
+			return Session{}, fmt.Errorf("worktree %s is not on branch %s (on %s)", s.Worktree, branch, cur)
 		}
 		if cur, readErr := readSession(s.Worktree); readErr == nil && cur.Branch == branch {
 			s.Previous = handoffFrom(cur)
@@ -417,7 +469,10 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 	} else if !os.IsNotExist(err) {
 		return Session{}, err
 	}
-	if _, err := git(top, "worktree", "add", s.Worktree, branch); err != nil {
+	if _, err := git(top, "worktree", "add", s.Worktree, headBranchRef(branch)); err != nil {
+		return Session{}, err
+	}
+	if err := ensureCheckedOutBranch(s.Worktree, branch); err != nil {
 		return Session{}, err
 	}
 	if err := fastForwardBranch(s.Worktree, branch); err != nil {
@@ -583,7 +638,7 @@ func ReleaseSession(dir, instance, base string, force bool) (Session, error) {
 		}
 		// -D: after a squash merge git's own -d does not see the branch as
 		// merged; the check above already did.
-		if _, err := git(dir, "branch", "-D", s.Branch); err != nil {
+		if _, err := git(dir, "update-ref", "-d", headBranchRef(s.Branch)); err != nil {
 			return Session{}, err
 		}
 		return s.Session, nil

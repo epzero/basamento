@@ -444,6 +444,119 @@ func TestContinueBranchRefusesDiverged(t *testing.T) {
 	}
 }
 
+// repoWithPushedBranchAndConflictingTag tracks branch from origin, then adds a
+// local tag with the same name on another commit (reviewer repro).
+func repoWithPushedBranchAndConflictingTag(t *testing.T, branch string) (repo, other, branchHead string) {
+	t.Helper()
+	repo = gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+	other = filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "branch-tip.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+	branchHead, _ = git(other, "rev-parse", headBranchRef(branch))
+	mustGit(t, repo, "fetch", "origin", originFetchRefspec(branch))
+	mustGit(t, repo, "branch", "--track", branch, remoteBranchRef(branch))
+	mustGit(t, repo, "checkout", "-q", "main")
+	commitFile(t, repo, "tag-target.txt")
+	mustGit(t, repo, "tag", branch)
+	return repo, other, branchHead
+}
+
+func TestContinueBranchLocalTagShadowsBranchName(t *testing.T) {
+	const branch = "ambig08"
+	repo, other, branchHead := repoWithPushedBranchAndConflictingTag(t, branch)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L6-07", Branch: branch})
+	if err != nil {
+		t.Fatalf("continue -branch with tag shadow: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Worktree, "branch-tip.txt")); err != nil {
+		t.Fatalf("worktree should follow branch ref, not tag: %v", err)
+	}
+	head, _ := git(s.Worktree, "rev-parse", "HEAD")
+	if head != branchHead {
+		t.Fatalf("HEAD %s should match branch tip %s", head, branchHead)
+	}
+	commitFile(t, other, "round2.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+	s2, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L6-07", Branch: branch})
+	if err != nil {
+		t.Fatalf("reuse worktree with tag shadow: %v", err)
+	}
+	if s2.Worktree != s.Worktree {
+		t.Fatal("should reuse branch worktree")
+	}
+	if _, err := os.Stat(filepath.Join(s2.Worktree, "round2.txt")); err != nil {
+		t.Fatalf("fast-forward should reach origin: %v", err)
+	}
+}
+
+func TestCodeReviewerSnapshotIgnoresLocalTagShadow(t *testing.T) {
+	const branch = "ambig09"
+	repo, other, branchHead := repoWithPushedBranchAndConflictingTag(t, branch)
+	cr1, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-08", Branch: branch})
+	if err != nil {
+		t.Fatalf("round-1 reviewer: %v", err)
+	}
+	snap, _ := git(cr1.Worktree, "rev-parse", "HEAD")
+	if snap != branchHead {
+		t.Fatalf("snapshot %s should match branch %s", snap, branchHead)
+	}
+	commitFile(t, other, "v2.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+	newHead, _ := git(other, "rev-parse", headBranchRef(branch))
+	cr2, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-08", Branch: branch})
+	if err != nil {
+		t.Fatalf("round-2 reviewer: %v", err)
+	}
+	snap2, _ := git(cr2.Worktree, "rev-parse", "HEAD")
+	if snap2 != newHead {
+		t.Fatalf("round-2 snapshot %s should match origin %s", snap2, newHead)
+	}
+}
+
+func TestReleaseSessionWithLocalTagShadowingBranch(t *testing.T) {
+	const branch = "ambig10"
+	repo, _, _ := repoWithPushedBranchAndConflictingTag(t, branch)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L6-09", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := ParseIdentity(s.Identity)
+	if _, err := ReleaseSession(repo, id.Instance, "main", true); err != nil {
+		t.Fatalf("release with tag shadow: %v", err)
+	}
+	if _, err := git(repo, "rev-parse", "--verify", headBranchRef(branch)); err == nil {
+		t.Fatal("branch ref should be deleted")
+	}
+}
+
+func TestContinueBranchWhenNameMatchesWorktreeFile(t *testing.T) {
+	const branch = "readme"
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	commitFile(t, repo, "readme")
+	mustGit(t, repo, "push", "-q", "origin", "main")
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "spec-on-branch.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L6-10", Branch: branch})
+	if err != nil {
+		t.Fatalf("branch name matching a tree path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Worktree, "spec-on-branch.txt")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCodeReviewerRound2SnapshotsPushedHead(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
