@@ -11,7 +11,7 @@ import (
 func TestTryRegisterLiveAfterClose(t *testing.T) {
 	st := &Store{live: map[*liveSubscription]struct{}{}}
 	st.closed.Store(true)
-	live := newLiveSubscription(4, func() {}, nil)
+	live := newLiveSubscription(4, 0, func() {}, nil)
 	err := st.tryRegisterLive(live)
 	if err == nil {
 		t.Fatal("expected unavailable")
@@ -27,21 +27,21 @@ func TestTryRegisterLiveAfterClose(t *testing.T) {
 func TestLiveAttachEndOrdering(t *testing.T) {
 	t.Parallel()
 	cc := newStubConsume()
-	live := newLiveSubscription(2, func() {}, nil)
+	live := newLiveSubscription(2, 0, func() {}, nil)
 	live.end()
 	live.attach(cc)
 	if cc.stopCount() != 1 {
 		t.Fatalf("attach after end stops=%d", cc.stopCount())
 	}
 	cc2 := newStubConsume()
-	live2 := newLiveSubscription(2, func() {}, nil)
+	live2 := newLiveSubscription(2, 0, func() {}, nil)
 	live2.attach(cc2)
 	live2.end()
 	if cc2.stopCount() != 1 {
 		t.Fatalf("end after attach stops=%d", cc2.stopCount())
 	}
 	cc3 := newStubConsume()
-	live3 := newLiveSubscription(2, func() {}, nil)
+	live3 := newLiveSubscription(2, 0, func() {}, nil)
 	live3.end()
 	live3.attach(cc3)
 	live3.end()

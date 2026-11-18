@@ -52,13 +52,14 @@ func TestLiveSubscriptionEndOnce(t *testing.T) {
 				cancels++
 				cancel()
 			}
-			live := newLiveSubscription(2, subCancel, nil)
+			live := newLiveSubscription(2, 0, subCancel, nil)
 			cc := newStubConsume()
-			msg := platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("x")}
+			msg := platform.Message{Subject: "run.r1.d", Seq: 2, Data: []byte("x")}
 			live.attach(cc)
-			live.deliver(msg)
-			live.deliver(msg)
-			live.deliver(msg) // overflow
+			delCtx := context.Background()
+			live.deliver(delCtx, msg)
+			live.deliver(delCtx, msg)
+			live.deliver(delCtx, msg) // overflow (live seq > replayThrough)
 			<-ctx.Done()
 			live.end()
 			live.end()
@@ -76,7 +77,7 @@ func TestLiveSubscriptionEndOnce(t *testing.T) {
 
 func TestLiveEndBeforeAttach(t *testing.T) {
 	cc := newStubConsume()
-	live := newLiveSubscription(2, func() {}, nil)
+	live := newLiveSubscription(2, 0, func() {}, nil)
 	live.end()
 	live.attach(cc)
 	if cc.stopCount() != 1 {

@@ -113,3 +113,18 @@ func TestOpenCloudRejectsKVBucketTTL(t *testing.T) {
 		t.Fatal("expected failure for bucket ttl")
 	}
 }
+
+func TestIncompatibleRejectsMirrorAndSources(t *testing.T) {
+	mir := &jetstream.StreamSource{Name: "OTHER"}
+	if !incompatibleBusStreamConfig(jetstream.StreamConfig{
+		Subjects: []string{busSubjectPrefix + ">"},
+		Mirror:   mir,
+	}, DefaultMaxMessageSize) {
+		t.Fatal("bus stream mirror")
+	}
+	if !incompatibleKVBackingStreamConfig(jetstream.StreamConfig{
+		Sources: []*jetstream.StreamSource{mir},
+	}) {
+		t.Fatal("kv sources")
+	}
+}
