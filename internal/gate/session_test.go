@@ -807,20 +807,85 @@ func TestNewSessionBaseMainWithTagShadow(t *testing.T) {
 
 func TestResolveBaseRejectsLeadingDash(t *testing.T) {
 	repo := gitRepo(t)
-	if _, err := ListSessions(repo, "-evil"); err == nil {
-		t.Fatal("base starting with - must be refused")
-	} else if !strings.Contains(err.Error(), "-evil") {
-		t.Fatalf("error should name base: %v", err)
+	if _, err := ListSessions(repo, "-evil"); err != nil {
+		t.Fatal("ListSessions must not error on unresolvable base")
 	}
 	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-03", Base: "-x"}); err == nil {
 		t.Fatal("NewSession must reject base -x")
 	}
 }
 
-func TestResolveBaseUnknown(t *testing.T) {
+func repoWithOnlyOriginMain(t *testing.T) string {
+	t.Helper()
 	repo := gitRepo(t)
-	if _, err := ListSessions(repo, "no-such-base"); err == nil {
-		t.Fatal("unknown base must fail")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
+	mustGit(t, repo, "checkout", "-q", "--detach", "HEAD")
+	mustGit(t, repo, "branch", "-D", "main")
+	if _, err := git(repo, "rev-parse", "--verify", headBranchRef("main")); err == nil {
+		t.Fatal("local main should be gone")
+	}
+	if _, err := git(repo, "rev-parse", "--verify", remoteBranchRef("main")); err != nil {
+		t.Fatal("origin/main should exist")
+	}
+	return repo
+}
+
+func TestListSessionsDefaultBaseOnlyOriginMain(t *testing.T) {
+	repo := repoWithOnlyOriginMain(t)
+	if _, err := ListSessions(repo, "main"); err != nil {
+		t.Fatalf("ListSessions with default base when only origin/main exists: %v", err)
+	}
+}
+
+func TestNewSessionDefaultBaseOnlyOriginMain(t *testing.T) {
+	repo := repoWithOnlyOriginMain(t)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-04"})
+	if err != nil {
+		t.Fatalf("NewSession default base from origin/main: %v", err)
+	}
+	if !strings.HasPrefix(s.Branch, "WP-L7-04-") {
+		t.Fatalf("unexpected session %+v", s)
+	}
+}
+
+func TestListSessionsUnresolvableBaseListsAnyway(t *testing.T) {
+	repo := gitRepo(t)
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleDispatcher, NoWorktree: true}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := ListSessions(repo, "no-such-base")
+	if err != nil {
+		t.Fatalf("ListSessions must not fail on unresolvable base: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one session, got %+v", sessions)
+	}
+	if sessions[0].Merged {
+		t.Fatal("merged must be unknown when base does not resolve")
+	}
+}
+
+func TestReleaseSessionUnresolvableBaseFailSafe(t *testing.T) {
+	repo := gitRepo(t)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := ParseIdentity(s.Identity)
+	if _, err := ReleaseSession(repo, id.Instance, "no-such-base", false); err == nil {
+		t.Fatal("must not release unproven merge without force")
+	} else if !strings.Contains(err.Error(), "no-such-base") {
+		t.Fatalf("error should name base: %v", err)
+	}
+}
+
+func TestResolveBaseUnknownRejectsNewSession(t *testing.T) {
+	repo := gitRepo(t)
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-06", Base: "no-such-base"}); err == nil {
+		t.Fatal("unknown base must fail NewSession")
 	} else if !strings.Contains(err.Error(), "no-such-base") || !strings.Contains(err.Error(), "local branch") {
 		t.Fatalf("error should explain accepted bases: %v", err)
 	}
