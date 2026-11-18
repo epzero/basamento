@@ -252,12 +252,12 @@ func renderAll(t *Template, ordered []Segment, idx map[string]Input, inputs map[
 
 func renderSegment(seg Segment, idx map[string]Input, inputs, trusted map[string]string, rawSizes map[string]int) (AssembledPart, int, error) {
 	sub := map[string]string{}
-	varNames := VariablesInText(seg.Text)
 	size := CodePointCount(stripVars(seg.Text))
-	for _, name := range varNames {
+	for _, m := range varRef.FindAllStringSubmatch(seg.Text, -1) {
+		name := m[1]
+		size += rawSizes[name]
 		in := idx[name]
 		raw := inputs[name]
-		size += rawSizes[name]
 		if in.Trust == TrustTrusted {
 			sub[name] = raw
 		} else {
