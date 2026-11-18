@@ -39,8 +39,6 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
   - `unordered key` (a map key whose kind has no place in the order of §4)
   - `output over the output limit` (a mapping output over its output limit,
     §5)
-  - `mapping construction` (a mapping that builds a list or an object with
-    more entries than its output limit allows, §5)
 - A compiled `Program` or `Mapping` is immutable and safe for concurrent use.
 - `expr` imports only `core` (`layering.yaml`). It reads schemas as JSON, so
   it does not need `core/schema` (§2).
@@ -115,21 +113,15 @@ nothing is coerced from strings.
   Go map order, including which error an evaluation reports first. A custom
   type adapter that returns a sorted map for every native map, and an AST
   or evaluation decorator for map literals, is one way to do it.
-- **Keys of no order** (REQ-EXPR-022, REQ-EXPR-023): a map key with any
+- **Keys of no order** (REQ-EXPR-022): a map key with any
   other CEL type, such as a timestamp, a duration or a list, has no place in
   that order. An evaluation that iterates over such a map fails with the
   cause `unordered key`; it never falls back to Go map order and never drops
-  the entry. The same cause fails an evaluation that passes such a map on,
-  because a map with non-string keys has no JSON form (§3). The error does
+  the entry. An evaluation that returns such a map without iterating over it
+  fails with the cause `no JSON form`, as every map with non-string keys does
+  (REQ-EXPR-012). The error does
   not name the key or its value, which may be a credential a mapping has
   resolved.
-- **Keys that are not values** (REQ-EXPR-024): CEL builds a map literal
-  before anything can iterate it, and an entry such as `{[1, 2]: 'a'}` goes
-  in without error, while the map is not equal to itself. The adapter keeps
-  every entry it cannot order instead of dropping it, and building or
-  reading such a map fails with the cause `no such key`. An evaluation that
-  reads one key of the map and never needs the entry, as with `exists`,
-  succeeds.
 - **Cost**: cel-go's runtime cost tracking, with a limit per environment,
   default **1 000 000**. Cost is counted in cel-go's units, which do not
   depend on time or machine, so the same evaluation fails at the same point

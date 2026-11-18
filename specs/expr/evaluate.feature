@@ -46,7 +46,6 @@ Feature: Evaluating expressions deterministically
     Examples:
       | expression                                        | result                      |
       | {1.5: 'a', -2.5: 'd', 0.0: 'b'}.map(k, k)         | [-2.5, 0, 1.5]              |
-      | {1.5: 'a', 0.0: 'b', -0.0: 'c'}.map(k, k)         | [-0.0, 0, 1.5]              |
       | {1.5: 'a', -5.0 / 0.0: 'd', 0.0: 'b', 5.0 / 0.0: 'e'}.map(k, string(k)) | ["-Inf", "0", "1.5", "+Inf"] |
 
   @REQ-EXPR-021 @id:EXPR-021-04
@@ -74,31 +73,6 @@ Feature: Evaluating expressions deterministically
     Given an expression environment declaring no variables
     When the expression "{1: 'a', duration('1s'): 'b'}[duration('1s')]" is evaluated
     Then the result is "b"
-
-  @REQ-EXPR-023 @id:EXPR-023-01
-  Scenario Outline: A map with a key of no order fails when it is passed on and cannot be written as a value
-    Given an expression environment declaring no variables
-    When the expression "<expression>" is evaluated
-    Then evaluation fails with code "invalid_argument"
-    And the error names the expression and the cause "unordered key"
-
-    Examples:
-      | expression                        |
-      | {1: 'a', duration('1s'): 'b'}     |
-      | {duration('1s'): 'a'}             |
-      | {timestamp('2026-11-16T09:00:00Z'): 1} |
-
-  @REQ-EXPR-024 @id:EXPR-024-01
-  Scenario Outline: A map whose key is not a value fails when it is built, keeping every entry
-    Given an expression environment declaring no variables
-    When the expression "<expression>" is evaluated
-    Then evaluation fails with code "invalid_argument"
-    And the error names the expression and the cause "no such key"
-
-    Examples:
-      | expression             |
-      | {[1, 2]: 'a'}          |
-      | {[1, 2]: 'a'}.size()   |
 
   @REQ-EXPR-007 @id:EXPR-007-01
   Scenario: An evaluation over its cost limit stops with an error

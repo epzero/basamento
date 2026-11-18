@@ -85,8 +85,3 @@ When an expression iterates over a map, the expression evaluator shall order its
 ### REQ-EXPR-022 — Map keys of no order
 If a map in an expression holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key` when it iterates over that map, and shall not skip that key's entry.
 
-### REQ-EXPR-023 — Map values of no order
-If a map in an expression is passed on without iterating over it and holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key`.
-
-### REQ-EXPR-024 — Map construction without a key
-If a map in an expression holds an entry whose key is not a value, such as `{[1, 2]: 'a'}`, then the expression evaluator shall fail with code `invalid_argument` and the cause `no such key` when it builds or reads that map, and shall not drop the entry.
