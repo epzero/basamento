@@ -28,3 +28,22 @@ func TestSignUploadDistinctFromRead(t *testing.T) {
 		t.Fatal("wrong staging key must not verify")
 	}
 }
+
+func TestVerifyUploadChecksSignatureBeforeExpiry(t *testing.T) {
+	t.Parallel()
+	key := []byte("signing-key-for-tests-only")
+	tenant := "acme"
+	stage := "stage_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM1234"
+	exp := int64(1000)
+	readSig := signRead(key, tenant, "deadbeef", exp)
+	if verifyUpload(key, tenant, stage, readSig, exp, 100, "text/plain", time.Unix(exp+1, 0)) {
+		t.Fatal("wrong signature must not verify even when expired")
+	}
+	upSig := signUpload(key, tenant, stage, exp, 100, "text/plain")
+	if verifyUpload(key, tenant, stage, upSig, exp, 100, "text/plain", time.Unix(exp, 0)) {
+		t.Fatal("good signature must reject at expiry")
+	}
+	if !verifyUpload(key, tenant, stage, upSig, exp, 100, "text/plain", time.Unix(exp-1, 0)) {
+		t.Fatal("good signature should verify before expiry")
+	}
+}
