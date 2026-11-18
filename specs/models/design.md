@@ -1,7 +1,7 @@
 # Models: structured output and middleware (WP-L3-02)
 
 Decisions the implementer must follow in `model/structured` and
-`model/middleware`. The requirements are REQ-MODEL-043 to REQ-MODEL-067
+`model/middleware`. The requirements are REQ-MODEL-043 to REQ-MODEL-066
 (`requirements.md`); where this note is silent, the requirements win.
 `docs/architecture/model-layer.md` §5 and ADR-0006 set the rules; every
 number below that the docs leave open is a choice for the reviewer to weigh.
@@ -13,7 +13,7 @@ number below that the docs leave open is a choice for the reviewer to weigh.
   default, REQ-MODEL-043), across both structured-output ladder tries and
   retry middleware tries. A call that only needs a plain chat answer still
   has that budget: a non-structured call retries until the budget is spent
-  (REQ-MODEL-048, REQ-MODEL-067). Every attempt that reaches a model is one **model
+  (REQ-MODEL-048, REQ-MODEL-066). Every attempt that reaches a model is one **model
   invocation** (`Invoker.Start`); the local JSON repair after the last
   supported rung is not a model invocation (it makes no `Invoker.Start` call)
   but consumes 1 attempt from the call's attempt budget (REQ-MODEL-065). A
@@ -77,7 +77,7 @@ deadline, the call's retry index `k`, and the current rung:
 | Decision | Choice |
 | --- | --- |
 | Retried | `core.IsRetryable(err)` is true, the attempt produced no event, and attempt budget remains; the next attempt uses the same rung (REQ-MODEL-048) |
-| Not retried | non-retryable errors (MODEL-049-01), failures after an event (MODEL-050-01), and a retryable error once the budget is spent, which fails the call with that error (REQ-MODEL-067) |
+| Not retried | non-retryable errors (MODEL-049-01), failures after an event (MODEL-050-01), and a retryable error once the budget is spent, which fails the call with that error (REQ-MODEL-066) |
 | Base and factor | the base wait is 1000 ms before the call's first retry and doubles on each subsequent retry of the call (`1000 ms × 2^(k-1)` before retry `k`, counting retries within the call) |
 | Jitter | in `[0, 50%]` of that retry's base wait, added to it and drawn from the call's seeded randomness; the jitter never becomes part of the next base wait, and the same seed gives the same waits (REQ-MODEL-051) |
 | Retry-After | the longer of `base wait + jitter` and `core.Error.RetryAfter` (REQ-MODEL-052) |
@@ -101,7 +101,7 @@ start of the attempt and is replaced by the idle timer at the first event
 (reset on each subsequent event); the per-attempt total timer covers the
 streaming attempt (REQ-MODEL-058). Each fires once on the fake clock and
 cancels the attempt with `core.CodeTimeout`, `Retryable: true`, so
-REQ-MODEL-048 retries it while attempt budget (REQ-MODEL-067) and the call
+REQ-MODEL-048 retries it while attempt budget (REQ-MODEL-066) and the call
 total timeout (REQ-MODEL-053) allow (MODEL-056-01). A timer that fires cancels the attempt,
 not the call; whether another attempt follows is decided by the retry rules
 (REQ-MODEL-048, REQ-MODEL-050, REQ-MODEL-053).
@@ -173,20 +173,25 @@ Three layers, most specific first: the tenant's override, the deployment's
 override, the snapshot shipped with the binary (REQ-MODEL-071). The most
 specific layer that has an entry for the model supplies that model's whole
 price entry for the call (layers do not merge rules or fall through when a
-rule's `when` does not hold).
+rule's `when` does not hold: MODEL-073-03).
 - A model's price in a layer is either a **set of rate rules** (each with
   rates and an optional `when`, as in `docs/architecture/model-layer.md` §7
   YAML) or a **formula** of its own. A test or a flow that states a price as
   `Given a model "X" priced at "<CEL>" milli-points` (the phrase of
   `cost.feature` and `middleware.feature`) sets the model's formula in every
   layer; `is priced by the shipped snapshot at "<CEL>" milli-points` sets
-  only the shipped snapshot layer; and `has the rate rules "input <a> and
+  only the shipped snapshot layer; `has the rate rules "input <a> and
   output <b>" per million tokens` sets one unconditional rule in the shipped
-  snapshot.
+  snapshot; and `the model "X" has the rate rules:` / `tenant "T" overrides
+  the rate rules of "X" with:` followed by a table with a `when` column and
+  an `input` and an `output` column (milli-points per million tokens) set
+  those rules, in table order, in the shipped snapshot or in the tenant's
+  layer. A price rule table may also set the deployment's layer the same way
+  (an empty layer holds no entry).
 - The chosen layer's rules are tried in their table order; the first whose
   `when` holds for the invocation applies to all its tokens (MODEL-069-01,
-  MODEL-070-01). A rule without `when` always holds (`always` in the
-  scenarios). Token rates are in
+  MODEL-070-01). A rule whose `when` cell is `always` has no condition and
+  always holds. Token rates are in
   **milli-points per million tokens**: a million input tokens cost `input`
   milli-points (rate `280` = 280 milli-points per million tokens = 0.28
   milli-points per thousand tokens), and a million output tokens cost `output`
@@ -202,7 +207,7 @@ rule's `when` does not hold).
   its tenant is the empty tenant, which has no overrides (MODEL-072-02).
 - Where no layer has an entry for the model, or the chosen layer's rate rules
   have none whose `when` holds for the call, pricing fails with
-  `core.CodeUnsupported` (REQ-MODEL-073, MODEL-073-01..02) —
+  `core.CodeUnsupported` (REQ-MODEL-073, MODEL-073-01..03) —
   the same code a model with no rung gets (REQ-MODEL-046), since `core` has no
   code for "no price".
 
@@ -246,6 +251,13 @@ rule's `when` does not hold).
   5000`; the snapshot then prices it at `input × 9 + output × 8`, but the
   charge is the captured entry on the settled usage, `1000 × 1 + 200 × 8 =
   2600`.
+- In MODEL-078-02 the call starts at `2026-10-01T16:59Z`, when only the
+  `always` rule holds, and the estimate is `1000 × 280 / 1e6 + 500 × 1100 /
+  1e6 = 0.28 + 0.55 = 0.83`, rounded to `1` milli-point. It settles at
+  `17:05Z`, when the clock-selected rule `at.getHours('UTC') >= 17` holds,
+  but `at` is the recorded start time, so the charge is `250000 × 280 / 1e6 +
+  20000 × 1100 / 1e6 = 70 + 22 = 92` milli-points; a settlement that read the
+  clock again would charge the first rule's `35 + 11 = 46`.
 
 ## C5. Pricing is fixed when the invocation starts
 
@@ -256,7 +268,8 @@ rule's `when` does not hold).
   usage evaluates `when` and the formula against actual `usage`, `params`,
   `tenant`, and that recorded `at` using the captured price entry, whatever
   the price table changes while the call is running (REQ-MODEL-078,
-  MODEL-078-01). A retry of the same logical call (same client ref) uses the
+  MODEL-078-01); MODEL-078-02 settles a call started just before a rule's
+  window opens), whatever the clock reads. A retry of the same logical call (same client ref) uses the
   same captured pricing.
 
 ## C6. Consumers of this section
@@ -276,8 +289,8 @@ rule's `when` does not hold).
 ## Open questions
 
 1. **Cost requirement: REQ-MODEL-006 re-locking (`requirements.md`, approved text).** REQ-MODEL-077 says the reservation uses the estimate of C4 for **every** paid call, while REQ-MODEL-006 says "estimated by the model's price formula". They agree for a model with rate rules; for a model that declares its own formula (a video model priced on `params.duration_s`), REQ-MODEL-006 read literally leaves the estimate to that formula, which the docs define no usage for; under C4 it gets the same usage (counted input tokens, output limit). Should REQ-MODEL-006 be re-locked to cite REQ-MODEL-077, or does this WP leave it (cost, P1 re-review either way)?
-2. **Default token formula and cached/reasoning tokens (REQ-MODEL-074, REQ-MODEL-075).** `model-layer.md` §7 leaves the exact default token formula open; the spec prices `input_tokens` and `output_tokens` at the chosen rule's per-million rates and ignores `cached_tokens` and `reasoning_tokens` unless a model provides its own formula or rule (MODEL-074-01, MODEL-075-01).
-3. **Default formula and the WP-L3-02 fixture (`design.md` §5, MODEL-060-01, MODEL-061-01).** `middleware.feature` and the earlier section's §5 price `sim-chat` with `(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000` milli-points, which at the per-million rates of C2 would be 1,000,000,000× the default formula of REQ-MODEL-074 (`input × 1e-6 + output × 8e-6`). The scenarios are approved text; the implementer of WP-L3-02 must state that price as a model formula in the manner of C2 (a fixture), not as rules fed to the default formula. If the owner wants the two reconciled, it is a WP-L3-02 spec change (P1).
+2. **Default token formula and cached/reasoning tokens (REQ-MODEL-074, REQ-MODEL-075).** `model-layer.md` §7 leaves the exact default token formula open; the spec prices `input_tokens` and `output_tokens` at the chosen rule's per-million rates and ignores `cached_tokens` and `reasoning_tokens` unless a model provides its own formula or rule; `cached_tokens` and `reasoning_tokens` are parts of `input_tokens` and `output_tokens`, not added to them (MODEL-074-01, MODEL-075-01).
+3. **Default formula and the WP-L3-02 fixture (`design.md` §5, MODEL-060-01, MODEL-061-01).** `middleware.feature` and the earlier section's §5 price `sim-chat` with `(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000` milli-points, which at the per-million rates of C2 would be 1,000× the default formula of REQ-MODEL-074 (`input × 1e-6 + output × 8e-6`: `1000 × 1e-6 + 1000 × 8e-6 = 0.009` against `1 + 8 = 9`). The scenarios are approved text; the implementer of WP-L3-02 must state that price as a model formula in the manner of C2 (a fixture), not as rules fed to the default formula. If the owner wants the two reconciled, it is a WP-L3-02 spec change (P1).
 4. **Where overrides are configured (Open Question 4).** The roadmap and docs name the layers but not who writes deployment and tenant overrides (a config file for the deployment, which API or command for a tenant). WP-L3-06 specifies only reading and applying the three layers in `model/catalog`; should the write side be a task of WP-L3-06, or another work package?
 5. **Rounding of an exact half (REQ-MODEL-076, MODEL-076-01..02).** The docs give no rule; half up was chosen (MODEL-076-01) because it never under-charges a fraction of cost. Confirm, or choose half to even.
 6. **The estimate's counted input tokens (REQ-MODEL-077, C4, MODEL-077-01, MODEL-078-01).** The docs say "counted input tokens" without saying by which tokenizer. The model's own tokenizer is proposed, with a deterministic test tokenizer in the gate; where a descriptor names none, the implementer must pick one and say so.

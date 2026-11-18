@@ -87,6 +87,14 @@ Feature: Model catalog and price table
     When the price table estimates a call of "sim-noprice" with 1000 counted input tokens and an output limit of 500 tokens
     Then pricing fails with code "unsupported"
 
+  @REQ-MODEL-073 @cost @wp:WP-L3-06 @id:MODEL-073-03
+  Scenario: An override whose rules do not hold does not fall through to the snapshot
+    Given tenant "acme" overrides the rate rules of "sim-chat" with:
+      | when                         | input | output |
+      | usage.input_tokens > 1000000 | 560   | 2200   |
+    When the price table estimates a call of "sim-chat" in tenant "acme" with 1000 counted input tokens and an output limit of 500 tokens
+    Then pricing fails with code "unsupported"
+
   @REQ-MODEL-074 @cost @id:MODEL-074-01
   Scenario: The default token formula uses the chosen per-million rates
     Given the model "sim-chat" has the rate rules "input 250 and output 10000" per million tokens
@@ -94,10 +102,10 @@ Feature: Model catalog and price table
     Then 4 milli-points are charged for the call
 
   @REQ-MODEL-075 @cost @id:MODEL-075-01
-  Scenario: Cached and reasoning tokens are not counted by the default formula
-    Given the model "sim-chat" has the rate rules "input 250 and output 10000" per million tokens
-    When a call of "sim-chat" spends 4000 input tokens, of which 500 cached, and 300 output tokens, of which 100 reasoning
-    Then 4 milli-points are charged for the call
+  Scenario: Cached and reasoning tokens are not counted a second time by the default formula
+    Given the model "sim-chat" has the rate rules "input 2500 and output 10000" per million tokens
+    When a call of "sim-chat" spends 4000 input tokens, of which 1000 cached, and 300 output tokens, of which 100 reasoning
+    Then 13 milli-points are charged for the call
 
   @REQ-MODEL-076 @cost @id:MODEL-076-01
   Scenario: An exact half rounds up to a whole milli-point
@@ -125,3 +133,16 @@ Feature: Model catalog and price table
     When the price table prices the settled usage of call "c1" as 1000 input tokens and 200 output tokens
     Then 5000 milli-points were estimated for call "c1"
     And 2600 milli-points are charged for call "c1"
+
+  @REQ-MODEL-078 @cost @wp:WP-L3-06 @id:MODEL-078-02
+  Scenario: Settlement applies the start time's rules, not the clock at settlement
+    Given the model "sim-chat" has the rate rules:
+      | when                     | input | output |
+      | at.getHours('UTC') >= 17 | 140   | 550    |
+      | always                   | 280   | 1100   |
+    And the clock reads "2026-10-01T16:59:00Z"
+    And a call "c2" of "sim-chat" started with 1000 counted input tokens and an output limit of 500 tokens
+    And the clock reads "2026-10-01T17:05:00Z"
+    When the price table prices the settled usage of call "c2" as 250000 input tokens and 20000 output tokens
+    Then 92 milli-points are charged for call "c2"
+    And call "c2" was estimated at 1 milli-point

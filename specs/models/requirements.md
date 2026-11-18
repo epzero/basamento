@@ -1,6 +1,6 @@
 # Models: one invocation contract
 
-Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04; workers in WP-L3-07 and
+Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04, WP-L3-06; workers in WP-L3-07 and
 WP-L3-08). Design: ADR-0006, ADR-0012,
 `docs/architecture/model-layer.md`.
 
