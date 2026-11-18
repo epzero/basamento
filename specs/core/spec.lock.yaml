@@ -67,3 +67,88 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    CORE-005-01:
+        hash: sha256:195f28473a2990914e3f5fe3b29859afecf229657fb0ee793ce71c767735f6f9
+        reqs:
+            - REQ-CORE-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security: the tenant id is the isolation boundary; an over-accepted id escapes its path segment, collides another tenant''s keys or splits a log line. The grammar (128-byte bound, UTF-8, C0/DEL, whole-id dots, separators, edge White_Space) is checked here and, where designer-decided (interior whitespace, dots inside ids), shown accepted.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-005-02:
+        hash: sha256:27db49fcc3c3461cd9b4f3ad5c7a0a030c3e63aa79e9d96d56ece53c8b23bdb0
+        reqs:
+            - REQ-CORE-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security: the tenant id is the isolation boundary; an over-accepted id escapes its path segment, collides another tenant''s keys or splits a log line. The grammar (128-byte bound, UTF-8, C0/DEL, whole-id dots, separators, edge White_Space) is checked here and, where designer-decided (interior whitespace, dots inside ids), shown accepted.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-005-03:
+        hash: sha256:c695104787e0e83613d46351281db9c4d07e3e10275c60218db762c2ec4f1453
+        reqs:
+            - REQ-CORE-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security: the tenant id is the isolation boundary; an over-accepted id escapes its path segment, collides another tenant''s keys or splits a log line. The grammar (128-byte bound, UTF-8, C0/DEL, whole-id dots, separators, edge White_Space) is checked here and, where designer-decided (interior whitespace, dots inside ids), shown accepted.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-005-04:
+        hash: sha256:60859a2cb7626e426445034e0446732567655979ac985b243e2d84f13a13bf90
+        reqs:
+            - REQ-CORE-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security: the tenant id is the isolation boundary; an over-accepted id escapes its path segment, collides another tenant''s keys or splits a log line. The grammar (128-byte bound, UTF-8, C0/DEL, whole-id dots, separators, edge White_Space) is checked here and, where designer-decided (interior whitespace, dots inside ids), shown accepted.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-005-05:
+        hash: sha256:122f659b0306913643c4fff573779fca564d4971529dadc942953b2141f7d33b
+        reqs:
+            - REQ-CORE-005
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security: the tenant id is the isolation boundary; an over-accepted id escapes its path segment, collides another tenant''s keys or splits a log line. The grammar (128-byte bound, UTF-8, C0/DEL, whole-id dots, separators, edge White_Space) is checked here and, where designer-decided (interior whitespace, dots inside ids), shown accepted.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-006-01:
+        hash: sha256:7a397ee247884b97c5f9658403b6146dd78b0b4f9240d63922e61ed077ce1db2
+        reqs:
+            - REQ-CORE-005
+            - REQ-CORE-006
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security choke point: TenantFrom is the one place the grammar is enforced, so an accepted invalid id would reach blob keys, payload associated data and logs. Covers absent, empty, separators, whole-id dots, invalid UTF-8, C0/DEL, edge White_Space incl. U+00A0, the 129/130-byte boundaries and replacement of a valid id.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
+    CORE-006-02:
+        hash: sha256:f1ae1da2bf0a1db9faf530f29b8326bb955f9f8b4a69d054fe089731a9a6a60c
+        reqs:
+            - REQ-CORE-006
+        tier: P0
+        author: claude-code:spec-author:34bca5
+        reviewer: opencode:spec-reviewer:c1895e
+        approved_at: "2026-11-18"
+        note: 'Security choke point: TenantFrom is the one place the grammar is enforced, so an accepted invalid id would reach blob keys, payload associated data and logs. Covers absent, empty, separators, whole-id dots, invalid UTF-8, C0/DEL, edge White_Space incl. U+00A0, the 129/130-byte boundaries and replacement of a valid id.'
+        ref: https://github.com/epzero/basamento/pull/43
+        human:
+            status: pending
