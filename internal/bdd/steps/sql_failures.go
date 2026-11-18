@@ -89,7 +89,7 @@ func writeWhileRefused(ctx context.Context, tenant, refusal string) error {
 	if w.profile == "cloud" {
 		err = refusePostgresWrite(ctx, w, refusal)
 	} else {
-		release, err = holdSQLiteWriteLock(ctx, w)
+		release, err = holdSQLiteWriteLock(ctx, w, refusal)
 	}
 	if err != nil {
 		return err
@@ -103,8 +103,19 @@ func writeWhileRefused(ctx context.Context, tenant, refusal string) error {
 
 // holdSQLiteWriteLock takes the database's write lock from a second connection
 // and turns the store's busy timeout off, so the next write fails at once with
-// SQLITE_BUSY (or SQLITE_LOCKED) instead of waiting for the timeout.
-func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld) (func(), error) {
+// SQLITE_BUSY (or SQLITE_LOCKED) instead of waiting for the timeout. A busy
+// refusal holds an immediate transaction; a locked one holds an exclusive
+// lock, so the two examples use different lock modes on the same real file.
+func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld, refusal string) (func(), error) {
+	begin := ""
+	switch refusal {
+	case "busy":
+		begin = `BEGIN IMMEDIATE`
+	case "locked":
+		begin = `BEGIN EXCLUSIVE`
+	default:
+		return nil, fmt.Errorf("unknown sqlite refusal %q", refusal)
+	}
 	if w.dataDir == "" {
 		return nil, fmt.Errorf("no sqlite data directory")
 	}
@@ -121,7 +132,7 @@ func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld) (func(), error) {
 		_ = blocker.Close()
 		return nil, err
 	}
-	if _, err := conn.ExecContext(ctx, `BEGIN EXCLUSIVE`); err != nil {
+	if _, err := conn.ExecContext(ctx, begin); err != nil {
 		_ = conn.Close()
 		_ = blocker.Close()
 		return nil, err
