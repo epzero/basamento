@@ -212,11 +212,11 @@ func registerCore(sc *godog.ScenarioContext) {
 // step as `"a\b"`. So before strconv.Unquote, a backslash that does not start
 // one of the escapes the feature documents (\u, \x and \") is put back as the
 // `\\` the author wrote. A backslash the table layer leaves behind is already
-// a collapsed pair, so every one of them is re-doubled, including the second
-// of two: a run then collapses to the literal backslashes the row names. That
-// also keeps Unquote from accepting Go escapes the feature does not document:
-// \n, \t, \r, \a, \f, \v, octal, \U and \\ all arrive as backslashes and stay
-// literal.
+// a collapsed pair, so each one is re-doubled, including the second of two and
+// the last of them before the closing quote: a run then collapses to the
+// literal backslashes the row names. That also keeps Unquote from accepting Go
+// escapes the feature does not document: \n, \t, \r, \a, \f, \v, octal, \U and
+// \\ all arrive as backslashes and stay literal.
 func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
 	if literal == "absent" {
 		return "", false, nil
@@ -232,12 +232,15 @@ func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
 }
 
 // redoubleBackslashes restores the backslash the Gherkin table layer consumes,
-// for every backslash that is not the start of a documented escape.
+// for every backslash that is not the start of a documented escape. A
+// backslash immediately before the closing quote is always literal too: \"
+// there would leave the literal unterminated.
 func redoubleBackslashes(lit string) string {
 	var b strings.Builder
 	b.Grow(len(lit) + 8)
 	for i := 0; i < len(lit); i++ {
-		if lit[i] == '\\' && i+1 < len(lit) && !isTenantLiteralEscape(lit[i+1]) {
+		if lit[i] == '\\' && i+1 < len(lit) &&
+			(i+1 == len(lit)-1 || !isTenantLiteralEscape(lit[i+1])) {
 			b.WriteString(`\\`)
 			continue
 		}
