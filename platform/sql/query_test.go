@@ -56,10 +56,76 @@ func TestQueryRowRejectsNULInArgument(t *testing.T) {
 }
 
 func TestRewritePlaceholdersPostgres(t *testing.T) {
+	t.Parallel()
 	e := &Execer{dialect: dialectPostgres}
-	got := e.rewrite("SELECT * FROM t WHERE id = ? AND x = ?")
-	want := "SELECT * FROM t WHERE id = $1 AND x = $2"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "bind_only",
+			in:   "SELECT * FROM t WHERE id = ? AND x = ?",
+			want: "SELECT * FROM t WHERE id = $1 AND x = $2",
+		},
+		{
+			name: "single_quoted",
+			in:   "SELECT '?' AS q, ? FROM t",
+			want: "SELECT '?' AS q, $1 FROM t",
+		},
+		{
+			name: "double_quoted",
+			in:   `SELECT "?" FROM t WHERE id = ?`,
+			want: `SELECT "?" FROM t WHERE id = $1`,
+		},
+		{
+			name: "line_comment",
+			in:   "SELECT ? -- bind ?\nFROM t WHERE x = ?",
+			want: "SELECT $1 -- bind ?\nFROM t WHERE x = $2",
+		},
+		{
+			name: "block_comment",
+			in:   "SELECT /* ? */ ? FROM t",
+			want: "SELECT /* ? */ $1 FROM t",
+		},
+		{
+			name: "dollar_quoted",
+			in:   "SELECT $tag$? literal$tag$, ? FROM t",
+			want: "SELECT $tag$? literal$tag$, $1 FROM t",
+		},
+		{
+			name: "dollar_empty_tag",
+			in:   "SELECT $$?$$, ? FROM t",
+			want: "SELECT $$?$$, $1 FROM t",
+		},
+		{
+			name: "double_question",
+			in:   "SELECT ?? FROM t",
+			want: "SELECT $1$2 FROM t",
+		},
+		{
+			name:    "reject_dollar_number",
+			in:      "SELECT $1 FROM t",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := e.rewrite(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }
