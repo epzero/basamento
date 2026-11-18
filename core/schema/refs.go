@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+var schemaDataKeywords = map[string]struct{}{
+	"const":    {},
+	"default":  {},
+	"examples": {},
+}
+
 func validateRefsClosed(baseID string, raw json.RawMessage, set map[string]json.RawMessage) error {
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -23,14 +29,17 @@ func walkRefs(baseID string, v any, set map[string]json.RawMessage) error {
 			if err != nil {
 				return invalidArgf("resolve reference: %v", err)
 			}
-			if strings.HasPrefix(target, "#") {
-				return nil
-			}
-			if _, ok := set[target]; !ok {
-				return invalidArg("schema reference not in set", map[string]any{"reference": refName(ref, target)})
+			docID := stripFragment(target)
+			if docID != "" && !strings.HasPrefix(ref, "#") {
+				if _, ok := set[docID]; !ok {
+					return invalidArg("schema reference not in set", map[string]any{"reference": refName(ref, target)})
+				}
 			}
 		}
 		for _, key := range sortedMapKeys(o) {
+			if _, skip := schemaDataKeywords[key]; skip {
+				continue
+			}
 			if err := walkRefs(baseID, o[key], set); err != nil {
 				return err
 			}
@@ -43,6 +52,13 @@ func walkRefs(baseID string, v any, set map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+func stripFragment(u string) string {
+	if i := strings.Index(u, "#"); i >= 0 {
+		return u[:i]
+	}
+	return u
 }
 
 func resolveRef(base, ref string) (string, error) {
