@@ -32,7 +32,7 @@ tools: ## install the pinned optional tools into $(go env GOPATH)/bin
 gate: static spec test redgreen ## everything the PR gate runs
 	@echo "gate: all checks passed"
 
-static: fmt vet build layering lint vuln licenses buf ## G1
+static: fmt vet build layering gomod lint vuln licenses buf ## G1
 
 fmt:
 	@out="$$(git ls-files -co --exclude-standard '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -45,6 +45,9 @@ build:
 
 layering:
 	$(GATE) layering
+
+gomod:
+	$(GATE) gomod
 
 lint:
 	$(call tool,golangci-lint,golangci-lint run ./...)
