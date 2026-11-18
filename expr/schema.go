@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"cel.dev/cel-go/cel"
@@ -176,7 +177,7 @@ func (st *schemaType) objectType(s map[string]any, path string) (*cel.Type, stri
 		ap := s["additionalProperties"]
 		switch apv := ap.(type) {
 		case map[string]any:
-			elem, _, err := st.mapSchema(apv, path+"*")
+			elem, _, err := st.mapSchemaVisit(apv, path+"*", nil)
 			if err != nil {
 				return nil, "", err
 			}
@@ -264,6 +265,8 @@ func sanitizeTypeName(path string) string {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
 		} else {
+			b.WriteByte('_')
+			b.WriteString(strconv.FormatInt(int64(r), 16))
 			b.WriteByte('_')
 		}
 	}
