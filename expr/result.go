@@ -2,11 +2,13 @@ package expr
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,12 +19,11 @@ import (
 
 func celValToJSON(val ref.Val) (any, error) {
 	if types.IsError(val) {
-		msg := val.(*types.Err).Error()
-		cause := mapCELCause(msg)
-		if cause != "" {
-			return nil, errors.New(cause)
+		cause := mapCELCause(val.(*types.Err).Error())
+		if cause == "" {
+			cause = "evaluation failed"
 		}
-		return nil, errors.New(msg)
+		return nil, errors.New(cause)
 	}
 	if val.Type() == types.TypeType {
 		return nil, fmt.Errorf("no JSON form")
@@ -35,7 +36,11 @@ func celValToJSON(val ref.Val) (any, error) {
 	case types.Int:
 		return int64(v), nil
 	case types.Uint:
-		return int64(v), nil
+		u := uint64(v)
+		if u > math.MaxInt64 {
+			return json.Number(strconv.FormatUint(u, 10)), nil
+		}
+		return int64(u), nil
 	case types.Double:
 		f := float64(v)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -54,6 +59,8 @@ func celValToJSON(val ref.Val) (any, error) {
 		return sortObjectMap(v.data), nil
 	case *sortedStringMap:
 		return sortObjectMap(v.data), nil
+	case *sortedAnyMap:
+		return nil, fmt.Errorf("no JSON form")
 	}
 	if l, ok := val.(traits.Lister); ok {
 		return listToJSON(l)
