@@ -67,7 +67,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-006-03:
         hash: sha256:daf152ede19cef2323a2fcd90bf6b0de401e2f87feed781343127d77466f5746
         reqs:
@@ -78,7 +81,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-006-04:
         hash: sha256:287a1e085f130945d69001801b87dc7ea738fad2b078c2d4163a24a85a501c7b
         reqs:
@@ -89,7 +95,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-007-01:
         hash: sha256:c81239fe5fe04f5fb720242f24a434ed2a953fa7e67dcd142b93c4c44b57aba5
         reqs:
@@ -100,7 +109,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-007-02:
         hash: sha256:cee5550b5fdab1d9240e53582390821c7250f533645989e4970ef10ddc26a217
         reqs:
@@ -111,7 +123,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: secrets and credential values must be redacted before telemetry is kept or exported.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-010-01:
         hash: sha256:d9ac3e201a25e7a092946066795ad20776520bd42b8158d9c998903ef1ef1d4e
         reqs:
@@ -177,7 +192,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: tenant isolation on embedded span-store reads prevents cross-tenant data access.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/14
     TELEM-014-01:
         hash: sha256:e1bea974a1c0a67b71533bed016749f501f622ee3ebe7166f4b8b22b44401382
         reqs:
