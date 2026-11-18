@@ -145,7 +145,7 @@ func (h *UploadHandler) writeStaged(ctx context.Context, tid core.TenantID, stag
 		return mapError(err)
 	}
 	limited := io.LimitReader(body, readLimit(max))
-	n, err := copyStagingBody(w, limited, h.Store.stagingFirstWriteHook)
+	n, err := copyStagingBody(w, limited)
 	if err != nil {
 		abortStagingWriter(cancel, w)
 		return mapError(err)
@@ -191,10 +191,9 @@ func abortStagingWriter(cancel context.CancelFunc, w *blob.Writer) {
 
 const stagingCopyBuf = 32 * 1024
 
-func copyStagingBody(w io.Writer, body io.Reader, onFirstWrite func()) (int64, error) {
+func copyStagingBody(w io.Writer, body io.Reader) (int64, error) {
 	buf := make([]byte, stagingCopyBuf)
 	var total int64
-	var notified bool
 	for {
 		nr, err := body.Read(buf)
 		if nr > 0 {
@@ -202,10 +201,6 @@ func copyStagingBody(w io.Writer, body io.Reader, onFirstWrite func()) (int64, e
 			total += int64(nw)
 			if werr != nil {
 				return total, werr
-			}
-			if !notified && onFirstWrite != nil {
-				onFirstWrite()
-				notified = true
 			}
 		}
 		if errors.Is(err, io.EOF) {

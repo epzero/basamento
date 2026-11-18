@@ -28,9 +28,6 @@ type Store struct {
 	lastSweep    time.Time
 	sweepRetryAt time.Time
 	sweepMu      sync.Mutex
-	// stagingFirstWriteHook runs once on the first Write of an in-flight proxied PUT.
-	// Production leaves it nil; in-package tests may set it.
-	stagingFirstWriteHook func()
 }
 
 func stageLockKey(tid core.TenantID, stageKey string) string {

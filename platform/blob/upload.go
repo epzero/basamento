@@ -245,15 +245,3 @@ func (s *Store) finishSuccessfulCommit(ctx context.Context, tid core.TenantID, s
 	}
 	return nil
 }
-
-// WriteStagedObjectForTest writes a staged object bypassing the upload URL (conformance only).
-func WriteStagedObjectForTest(ctx context.Context, s *Store, tid core.TenantID, stageKey string, body []byte, contentType string) error {
-	if !ValidateStagingKey(stageKey) {
-		return core.NewError(core.CodeInvalidArgument, "malformed staging key", nil)
-	}
-	path, err := stageObjectPath(tid, stageKey)
-	if err != nil {
-		return err
-	}
-	return s.bucket.WriteAll(ctx, path, body, &blob.WriterOptions{ContentType: contentType})
-}

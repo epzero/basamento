@@ -14,7 +14,9 @@
 //
 // Expired embedded slots are swept lazily: after signature-verified handler or
 // store calls, at most once per maximum URL lifetime, with a one-minute retry
-// after a failed list. Sweeps list each tenant's stage/ prefix only.
+// after a failed list. Sweeps list each tenant's stage/ prefix only and ignore
+// keys that are not well-formed staging slots (including stranded *.tmp partial
+// writes an operator may remove when no upload is in flight).
 //
 // Tenant ids must be one safe path segment until shared validation lands in core
 // (EP0-52); see validateTenantSegment.

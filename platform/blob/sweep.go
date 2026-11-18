@@ -48,14 +48,6 @@ func (s *Store) runSweep(ctx context.Context) error {
 	return err
 }
 
-// SweepExpiredStagingSlots deletes embedded staging slots past their expiry (REQ-BLOB-030).
-func (s *Store) SweepExpiredStagingSlots(ctx context.Context) error {
-	if !s.embedded {
-		return nil
-	}
-	return s.runSweep(ctx)
-}
-
 func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 	tenants, err := s.bucket.ListTenantPrefixes(ctx)
 	if err != nil {
@@ -70,6 +62,9 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 				return nil
 			}
 			stageKey := strings.TrimSuffix(strings.TrimPrefix(k, prefix), ".slot")
+			if !ValidateStagingKey(stageKey) {
+				return nil
+			}
 			id := tenant + "/" + stageKey
 			if seen[id] {
 				return nil
