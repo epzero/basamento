@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,8 +30,7 @@ type schemaWorld struct {
 	lastViolRuns [][]schema.Violation
 	structVal    any
 	encodedJSON  []byte
-	httpServer   *httptest.Server
-	httpReqs     int
+	httpProbe    *loopbackHTTPProbe
 	fileURI      string
 	expectURL    string
 }
@@ -57,6 +54,14 @@ func registerSchema(sc *godog.ScenarioContext) {
 		w := world(ctx)
 		if w.Schema == nil {
 			w.Schema = newSchemaWorld()
+		}
+		return ctx, nil
+	})
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		w := schemaCtx(ctx)
+		if w.httpProbe != nil {
+			w.httpProbe.shutdown()
+			w.httpProbe = nil
 		}
 		return ctx, nil
 	})
@@ -331,18 +336,24 @@ func registerSchema(sc *godog.ScenarioContext) {
 
 	sc.Step(`^an HTTP server outside the schema set serving "([^"]*)":$`, func(ctx context.Context, name string, doc *godog.DocString) error {
 		w := schemaCtx(ctx)
-		w.httpReqs = 0
-		w.httpServer = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			w.httpReqs++
-			_, _ = rw.Write([]byte(strings.TrimSpace(doc.Content)))
-		}))
-		w.expectURL = w.httpServer.URL + "/" + name
-		_ = name
+		if w.httpProbe != nil {
+			w.httpProbe.shutdown()
+		}
+		probe, baseURL, err := newLoopbackHTTPProbe()
+		if err != nil {
+			return err
+		}
+		w.httpProbe = probe
+		w.expectURL = baseURL + "/" + name
+		_ = doc
 		return nil
 	})
 	sc.Step(`^a schema referencing that server's URL for "([^"]*)"$`, func(ctx context.Context, name string) error {
 		w := schemaCtx(ctx)
-		ref := w.httpServer.URL + "/" + name
+		if w.httpProbe == nil {
+			return fmt.Errorf("no HTTP probe server")
+		}
+		ref := w.httpProbe.baseURL + "/" + name
 		w.schemas[""] = json.RawMessage(fmt.Sprintf(`{"$ref": %q}`, ref))
 		return nil
 	})
@@ -357,8 +368,13 @@ func registerSchema(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the HTTP server received 0 requests$`, func(ctx context.Context) error {
-		if schemaCtx(ctx).httpReqs != 0 {
-			return fmt.Errorf("requests %d", schemaCtx(ctx).httpReqs)
+		w := schemaCtx(ctx)
+		if w.httpProbe == nil {
+			return fmt.Errorf("no HTTP probe server")
+		}
+		conns := w.httpProbe.shutdown()
+		if conns != 0 {
+			return fmt.Errorf("requests %d", conns)
 		}
 		return nil
 	})

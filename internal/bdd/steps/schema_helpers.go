@@ -3,10 +3,13 @@ package steps
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/cucumber/godog"
 	messages "github.com/cucumber/messages/go/v34"
@@ -317,4 +320,50 @@ func compileGenerated(w *schemaWorld, alias string) (*schema.Compiled, error) {
 		return nil, fmt.Errorf("no generated schema")
 	}
 	return schema.Compile(sch.Raw)
+}
+
+// loopbackHTTPProbe listens on loopback TCP and counts inbound connections.
+// It stands in for an HTTP server without importing net/http.
+type loopbackHTTPProbe struct {
+	ln       net.Listener
+	baseURL  string
+	conns    atomic.Int32
+	stopOnce sync.Once
+	done     chan struct{}
+}
+
+func newLoopbackHTTPProbe() (*loopbackHTTPProbe, string, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", err
+	}
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return nil, "", fmt.Errorf("loopback listener: not TCP")
+	}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", tcpAddr.Port)
+	p := &loopbackHTTPProbe{ln: ln, baseURL: baseURL, done: make(chan struct{})}
+	go p.acceptLoop()
+	return p, baseURL, nil
+}
+
+func (p *loopbackHTTPProbe) acceptLoop() {
+	defer close(p.done)
+	for {
+		c, err := p.ln.Accept()
+		if err != nil {
+			return
+		}
+		p.conns.Add(1)
+		_ = c.Close()
+	}
+}
+
+// shutdown closes the listener, waits for the accept loop to exit, and
+// returns how many connections were accepted.
+func (p *loopbackHTTPProbe) shutdown() int {
+	p.stopOnce.Do(func() { _ = p.ln.Close() })
+	<-p.done
+	return int(p.conns.Load())
 }
