@@ -114,7 +114,7 @@ func (s *FileStore) CreateIfAbsent(tenant string, record StoredKeyset) (bool, er
 		}
 		return false, err
 	}
-	if _, err := syncDir(s.dir); err != nil {
+	if err := syncDir(s.dir); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -239,17 +239,14 @@ func writeRecordAtomic(path string, tenant string, record StoredKeyset) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
-	if _, err := syncDir(dir); err != nil {
-		return err
-	}
-	return nil
+	return syncDir(dir)
 }
 
-func syncDir(dir string) (bool, error) {
+func syncDir(dir string) error {
 	df, err := os.Open(dir)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer func() { _ = df.Close() }()
-	return true, df.Sync()
+	return df.Sync()
 }

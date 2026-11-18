@@ -6,9 +6,12 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
-// KeyService wraps and unwraps blobs with a deployment master key. Associated
-// data carries the tenant when the implementation supports it; otherwise the
-// tenant is authenticated inside the plaintext (design §2).
+// KeyService wraps and unwraps blobs with a deployment master key (design §2).
+//
+// Custom implementations must authenticate the tenant inside the wrapped
+// plaintext using the exported helpers FrameBoundPlaintext on Wrap and
+// ParseBoundPlaintext on Unwrap—the same uvarint-length-prefixed framing as the
+// production keeper—or tenants lose cryptographic binding to their keysets.
 type KeyService interface {
 	Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error)
 	Unwrap(ctx context.Context, tenant string, ciphertext []byte) ([]byte, error)
