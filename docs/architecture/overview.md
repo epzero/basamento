@@ -37,6 +37,7 @@ of `kit`. Status words: **Implemented**,
 | Bus + KV | `nats-server` in-process with JetStream | NATS cluster | `nats-server`, `nats.go` |
 | Secrets (key wrapping) | local key | KMS or Vault Transit | `gocloud.dev/secrets` + Tink |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
+| Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
 | Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |
 | Telemetry | slog + OTel spans to SQLite for the inspector | OTLP | `opentelemetry-go` |
 
@@ -103,7 +104,7 @@ flowchart TD
 
 | Package | Role |
 | --- | --- |
-| `core` | ids, clock, error taxonomy. `core/coretest` fakes are test-only. **Implemented.** |
+| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`). `core/coretest` fakes are test-only. **Implemented.** |
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
@@ -116,6 +117,36 @@ flowchart TD
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
 | `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
+
+### Security in the contracts
+
+Three rules hold across the ports that touch tenant data; the doc comments in
+`core/tenant.go` and `platform/platform.go` are the contract (ADR-0004,
+ADR-0012 §10, constitution §7–8).
+
+- **The tenant comes from the context, only.** Callers set it with
+  `core.WithTenant` and read it with `core.TenantFrom`, which reports a nil
+  or empty context as tenantless. A port that needs a tenant fails closed
+  with `invalid_argument` when there is none; nothing falls back to an empty
+  or default tenant.
+- **Credentials.** The vault stores named secrets per tenant, reached only by
+  the reference `cred://<name>`. Names are 1 to 128 characters from A–Z,
+  a–z, 0–9, `.`, `_`, `-` and `/`, made of `/`-separated segments none of
+  which is empty, `.` or `..`; equivalently, with the length limit checked
+  separately, they match
+  `^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,}))(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\.(?:[A-Za-z0-9_-]|[A-Za-z0-9._-]{2,})))*$`.
+  A name cannot walk the store key (`<prefix>/<tenant>/<name>`, ADR-0004) out
+  of its tenant's entries or carry query, fragment or control characters
+  into an error or an audit event; an invalid name is rejected without being
+  echoed. `Resolve` records the use through `Audit` before it returns the
+  value, and returns `unavailable` with no value if the record fails.
+- **Audit.** One append-only store for every producer. An event's tenant is
+  the context's; `Record` rejects an event whose tenant disagrees with the
+  context, and a producer with no tenant cannot write under one. Events with
+  no tenant are **deployment-level**: refused joins with an unknown pool
+  token (REQ-MODEL-029), shared-pool and launch events, and operator actions.
+  They belong to the deployment and tenant-scoped reads never return them.
+  An event carries IDs, never a secret or a raw token.
 
 ## 4. Where to read more
 
