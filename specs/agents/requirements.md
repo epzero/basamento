@@ -48,7 +48,7 @@ If the agent run's used tokens plus a model turn's input tokens would exceed the
 If the agent run's elapsed time from the start of the run on the run clock is at least the time cap when starting a model turn, then the agent loop shall end the agent run as completed with state `time_cap_reached` and its completed model turns in order without invoking the model.
 
 ### REQ-AGENT-016 — A handoff carries the turns
-When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node, every model turn of the run in order, the run's start time on the run clock and the time cap in effect for the run: that agent's own time cap, or, when it has none, the time cap its input carries, or `null` when neither exists.
+When a model turn requests a handoff to an agent whose node the flow defines, the agent loop shall end the agent run as completed with state `handoff`, the target node, every model turn of the run in order, the run's start time on the run clock and the time cap in effect for the run: the time cap its input carries or, when its input carries none, that agent's own time cap, or `null` when neither exists.
 
 ### REQ-AGENT-017 — A handoff starts the target with the turns
 When an `agent` node's input carries a handoff with the target node, the agent loop shall make the target agent's first model turn with the carried turns in the message history.
@@ -57,10 +57,10 @@ When an `agent` node's input carries a handoff with the target node, the agent l
 When an `agent` node's input carries a handoff with the target node, the agent loop shall take the target agent's step cap, cost cap and token cap in place of the first agent's.
 
 ### REQ-AGENT-019 — The time cap spans the handoff
-When an `agent` node's input carries a handoff with the target node and the first agent has a time cap, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against that time cap.
+When an `agent` node's input carries a handoff with the target node and a time cap, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against the carried time cap, whether or not the target agent has a time cap of its own.
 
-### REQ-AGENT-029 — The target's time cap when the first agent had none
-When an `agent` node's input carries a handoff with the target node, the first agent has no time cap and the target agent has one, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against the target agent's time cap.
+### REQ-AGENT-029 — The target's own time cap when nothing is carried
+When an `agent` node's input carries a handoff with the target node and no time cap, and the target agent has a time cap of its own, the agent loop shall measure the target agent's elapsed time on the run clock from the run's start against that time cap.
 
 ### REQ-AGENT-020 — A handoff to an agent the flow does not define
 If a model turn requests a handoff to an agent whose node the flow does not define, then the agent run shall fail with code `not_found` naming the agent.

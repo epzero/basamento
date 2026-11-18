@@ -145,9 +145,9 @@ The run's output:
 included: that turn's assistant message, as recorded, holds the `handoff_to`
 request, exactly as the requests of its other tool calls. `started_at` is the
 run's start time on the run clock (`dc.Now()`, design §1); `time_cap` is the
-time cap in effect for the chain (REQ-AGENT-019, REQ-AGENT-029), written as a
-Go duration string (`"1m"`, `"90s"`) or `null` when neither the incoming handoff
-nor this agent sets one (REQ-AGENT-016).
+time cap in effect for the chain (REQ-AGENT-016, REQ-AGENT-019,
+REQ-AGENT-029), written as a Go duration string (`"1m"`, `"90s"`) or `null`
+when neither the incoming handoff nor this agent sets one (REQ-AGENT-016).
 
 The node's outgoing edge leads to the target node, which receives this output
 as its input and the same run clock. When the target's handler sees
@@ -164,14 +164,16 @@ spend and usage, so carried turns never refuse a handoff; the chain's **time
 cap** is the incoming `time_cap` when present, otherwise this agent's own
 `caps.time` (REQ-AGENT-019, REQ-AGENT-029), and it is measured from
 `started_at` on the run clock, so a chain is bounded in time whatever its
-length. So when the first agent has one, its cap governs the target even if
-the target sets its own. Each agent's handoff output carries the time cap in
-effect for that agent (`null` when neither an incoming handoff nor this agent
-sets one, or the active duration string otherwise), and each further handoff
-carries that active value on. The target's first turn
-boundary is checked like any
-other (design §0.2), the time cap included, so a target that starts at or past
-the cap runs no turn.
+length. So the incoming cap governs the target even if the target sets its
+own, and the target's own cap applies only when the handoff carries none
+(REQ-AGENT-019, REQ-AGENT-029). Each agent's handoff output carries the time
+cap in effect for that agent (`null` when neither an incoming handoff nor this
+agent sets one, or the active duration string otherwise), and each further
+handoff carries that active value on: a middle agent's handoff output repeats
+the carried cap, not its own (with triage capped at `1m`, B at `10m` and C,
+B's output has time cap `1m`). The target's first turn boundary is checked
+like any other (design §0.2), the time cap included, so a target that starts
+at or past the cap runs no turn.
 
 A handoff is not a cap: if the target requests a handoff in its first turn,
 the chain continues and the next agent receives the target's turns too.
@@ -223,7 +225,7 @@ pull request of its own.
 ## Design choices
 
 1. **Handoff mechanism (`design.md` §4):** Expressing a model handoff as a reserved `handoff_to` tool call intercepted by the agent loop (rather than a `model.Result` field or structured output convention) is a design choice not fixed by `docs/architecture/flow-engine.md` or `model-layer.md`.
-2. **Caps across a handoff (`REQ-AGENT-018`, `REQ-AGENT-019`, `REQ-AGENT-029`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while preserving the chain's `started_at` and first active `caps.time` (`REQ-AGENT-019` when the first agent sets one, even if the target also sets one; `REQ-AGENT-029` when only the target sets one) is a design choice for WP-L7-01.
+2. **Caps across a handoff (`REQ-AGENT-016`, `REQ-AGENT-018`, `REQ-AGENT-019`, `REQ-AGENT-029`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while keeping the chain's `started_at` and one time cap for the whole chain is a design choice for WP-L7-01: the incoming handoff's `time_cap` governs the target even when the target sets its own (REQ-AGENT-019), a target's own `caps.time` applies only when the handoff carries none (REQ-AGENT-029), and each handoff output carries the cap in effect for its run, or `null` when there is none (REQ-AGENT-016).
 3. **Memory policy retention rule (`REQ-AGENT-023`–`025`, `design.md` §5):** Keeping `system` messages + whole model turn 1 (with its tool results) + the most recent whole turns that fit in `input_tokens` is a design choice for WP-L7-01 (`docs/roadmap/L7-agents.md` names "memory policy" without prescribing the algorithm).
 4. **Turn-boundary check order (`design.md` §6):** Checking `cancellation → time cap → step cap → memory policy (input token limit) → token cap → cost reservation` is a design choice that determines which terminal state wins when two caps are reached at the same boundary.
 

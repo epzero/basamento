@@ -74,6 +74,29 @@ Feature: Handoff to another agent
     And the agent run of "fixer" is completed with output "Fixed."
     And the scripted model of "fixer" received 1 invocation
 
+  @REQ-AGENT-019 @id:AGENT-019-03
+  Scenario: The first agent's time cap governs a target with its own
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has a time cap of 1 minute
+    And agent "fixer" has a time cap of 10 minutes
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 40 seconds on the run clock
+    And the scripted model of "fixer" requests tool "search" in each of 2 turns after the handoff, and its model turn 1 takes 20 seconds on the run clock
+    When the agent runs of "triage" and then "fixer" run
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "1m"
+    And the agent run of "fixer" is completed with state "time_cap_reached"
+    And the scripted model of "fixer" received 1 invocation
+
+  @REQ-AGENT-016 @REQ-AGENT-019 @id:AGENT-019-04
+  Scenario: A middle agent's handoff carries the cap it received
+    Given the run clock starts at "2026-11-17T10:00:00Z"
+    And agent "triage" has a time cap of 2 minutes
+    And agent "fixer" has a time cap of 10 minutes
+    And the scripted model of "triage" requests a handoff to agent "fixer" in model turn 1, which takes 10 seconds on the run clock
+    And the scripted model of "fixer" requests a handoff to agent "triage" in model turn 1, which takes 10 seconds on the run clock
+    When the agent runs of "triage" and then "fixer" run
+    Then the agent run of "triage" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "2m"
+    And the agent run of "fixer" is completed with state "handoff" with started_at "2026-11-17T10:00:00Z" and time cap "2m"
+
   @REQ-AGENT-029 @id:AGENT-029-01
   Scenario: The target applies its own time cap when the first agent had none
     Given the run clock starts at "2026-11-17T10:00:00Z"
