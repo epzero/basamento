@@ -17,6 +17,28 @@ func TestCompileRelativeRefRejected(t *testing.T) {
 	}
 }
 
+func TestCompileClosedWorldRefDeterministic(t *testing.T) {
+	set := map[string]json.RawMessage{
+		"https://example.com/a": json.RawMessage(`{"$ref":"https://example.com/missing-a"}`),
+		"https://example.com/b": json.RawMessage(`{"$ref":"https://example.com/missing-b"}`),
+	}
+	var first string
+	for range 20 {
+		_, err := compileSet(set, "https://example.com/a")
+		if core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("code %v", core.CodeOf(err))
+		}
+		ref := ReferenceFromErr(err)
+		if first == "" {
+			first = ref
+			continue
+		}
+		if ref != first {
+			t.Fatalf("nondeterministic ref %q vs %q", first, ref)
+		}
+	}
+}
+
 func TestCompileInvalidSchemaLocation(t *testing.T) {
 	_, err := Compile(json.RawMessage(`{"type": "object", "required": "approved"}`))
 	vs := SchemaViolations(err)

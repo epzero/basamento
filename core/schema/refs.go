@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -29,14 +30,14 @@ func walkRefs(baseID string, v any, set map[string]json.RawMessage) error {
 				return invalidArg("schema reference not in set", map[string]any{"reference": refName(ref, target)})
 			}
 		}
-		for _, sub := range o {
-			if err := walkRefs(baseID, sub, set); err != nil {
+		for _, key := range sortedMapKeys(o) {
+			if err := walkRefs(baseID, o[key], set); err != nil {
 				return err
 			}
 		}
 	case []any:
-		for _, sub := range o {
-			if err := walkRefs(baseID, sub, set); err != nil {
+		for i := range o {
+			if err := walkRefs(baseID, o[i], set); err != nil {
 				return err
 			}
 		}
@@ -61,4 +62,13 @@ func resolveRef(base, ref string) (string, error) {
 
 func refName(original, _ string) string {
 	return original
+}
+
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

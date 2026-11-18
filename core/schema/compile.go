@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	js "github.com/santhosh-tekuri/jsonschema/v6"
@@ -24,7 +25,13 @@ func newCompiler() *js.Compiler {
 
 func compileSet(schemas map[string]json.RawMessage, rootID string) (*Compiled, error) {
 	c := newCompiler()
-	for id, raw := range schemas {
+	ids := make([]string, 0, len(schemas))
+	for id := range schemas {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		raw := schemas[id]
 		if err := validateRefsClosed(id, raw, schemas); err != nil {
 			return nil, err
 		}
