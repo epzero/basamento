@@ -1,6 +1,6 @@
 # One entry point for agents, people and CI: `make gate`.
 # Optional tools are skipped locally when missing; CI sets GATE_STRICT=1.
-# BASE=<git ref> enables the red→green and `buf breaking` checks.
+# BASE=<git ref> enables red→green, `hygiene` spec/code separation, and `buf breaking`.
 
 GO   ?= go
 BASE ?=
@@ -19,7 +19,7 @@ define tool
 	else echo "gate: skip $(1) (not installed)"; fi
 endef
 
-.PHONY: gate tools static spec test bdd redgreen fmt vet build lint vuln licenses buf buf-breaking layering release-check
+.PHONY: gate tools static spec test bdd redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene release-check
 
 # Built from source with this project's Go: a prebuilt golangci-lint cannot
 # type-check a standard library newer than the Go it was built with.
@@ -32,7 +32,7 @@ tools: ## install the pinned optional tools into $(go env GOPATH)/bin
 gate: static spec test redgreen ## everything the PR gate runs
 	@echo "gate: all checks passed"
 
-static: fmt vet build layering lint vuln licenses buf ## G1
+static: fmt vet build layering hygiene lint vuln licenses buf ## G1
 
 fmt:
 	@out="$$(git ls-files -co --exclude-standard '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -45,6 +45,9 @@ build:
 
 layering:
 	$(GATE) layering
+
+hygiene:
+	$(GATE) hygiene $(if $(BASE),-base '$(BASE)')
 
 lint:
 	$(call tool,golangci-lint,golangci-lint run ./...)

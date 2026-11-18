@@ -7,6 +7,7 @@
 //	gate docs [-write]       # generated diagrams match layering.yaml and the roadmap
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
+//	gate hygiene [-base <ref>] # test determinism, prod test-hook isolation, spec/code separation
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
 //	gate spec trace [-json]   # requirement → scenario matrix
@@ -99,6 +100,13 @@ func main() {
 		errs, err := gate.Layering(root)
 		must(err)
 		report("layering", errs)
+	case "hygiene":
+		fs := flag.NewFlagSet("hygiene", flag.ExitOnError)
+		base := fs.String("base", "", "optional git ref for diff-level checks (spec/code separation)")
+		must(fs.Parse(os.Args[2:]))
+		errs, err := gate.Hygiene(root, *base)
+		must(err)
+		report("hygiene", errs)
 	case "spec":
 		if len(os.Args) < 3 {
 			usage()
@@ -322,6 +330,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | hygiene [-base <ref>] | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
 	os.Exit(2)
 }
