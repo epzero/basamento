@@ -77,6 +77,13 @@ the same change that first uses it.
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Preset version** | The content hash of a preset's flows, prompts and evals, together with the `@eval` scores recorded for it. A run pins the version it started with; a new version becomes current only when it compiles, does not regress, and a person resolves its review gate. |
+| **Codegen stage** | One of `plan`, `implement`, `verify`, `repair`, `self-review` and `commit` in `codegen.bootstrap` and `codegen.iterate`. A completed stage is checkpointed; a resumed run starts again no stage that has a checkpoint. |
+| **Repair guard** | The bound on the codegen loop: a visit limit (how many times `repair` may run) and a cost limit in milli-points. A guard that is reached ends the run `failed` with code `budget_exceeded`. |
+| **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A codegen run writes modules and runs the plan's tests in one; nothing it writes reaches a repository. A **simulated sandbox** stands in for it in the gate. |
+| **Git host** | The remote a codegen run reads a repository from and commits to, behind the repository's own port. A **simulated git host** is its deterministic stand-in in the gate, recording commits, branches and writer calls. |
+| **Review gate** | A `gate` node where a person approves or rejects a proposal. The preset uses it only for a new preset version, never in a codegen run, which commits without one. |
+| **Self-review** | The `self-review` codegen stage, in which an agent reviews the workspace for findings before the commit under a visit limit (the **self-review guard**); findings go back to repair. It starts no reviewer session and asks no person. |
 | **Model id** | The name a model is looked up by in the catalog and passed in a request, such as `sim-chat`. |
 | **Rate rule** | One row of a model's price: rates per million tokens (input, output, …) and an optional condition, the `when`, under which they apply. |
 | **Price formula** | The CEL expression that turns call parameters, usage and rates into milli-points, where cached tokens are part of the input and reasoning tokens part of the output. A model may declare its own; otherwise the default token formula applies. |
@@ -115,7 +122,6 @@ the same change that first uses it.
 | **Tool** | A named operation an agent or a flow's `tool` node may call: its name, description and input JSON Schema, and a run with arguments that satisfy the schema. A call is one step that runs once. |
 | **Allowlist** | The tools one caller was given. A call to any other tool is refused. |
 | **MCP server** | An external service that lists tools with their schemas and runs them when called; the platform reaches it through an MCP client. A **simulated MCP server** stands in for it in the gate. |
-| **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A **simulated sandbox** stands in for it in the gate. |
 | **Durable event log** | The per-run, ordered record of a run's durable events (`seq`), written in the same transaction as the state change that records them. |
 | **Outbox** | The durable event log, read as work to relay: each entry is an event pending publication to the bus until it is marked relayed. |
 | **Relay** | The component that publishes a run's outbox entries to the bus in `seq` order and marks them relayed after the bus accepts them. |
