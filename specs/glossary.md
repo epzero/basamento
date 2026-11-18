@@ -41,7 +41,7 @@ the same change that first uses it.
 | **Worker template** | The description of workers a pool can start on demand: what one serves, its capacity, the minimum and maximum to run, its **cold start** (the usual time from launch to joining) and its launcher. A template is `degraded` after repeated failed launches. |
 | **Launcher** | What starts workers from a worker template when the **scaler** asks. A **launch** is pending until its worker joins or its **cold-start deadline** passes. A launched worker joins with a single-use **join token**. |
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
-| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). |
+| **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..` (REQ-CRED-006, REQ-CRED-007). |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical call. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |
@@ -53,8 +53,8 @@ the same change that first uses it.
 | **Project** | A container of flows, runs and assets inside a tenant; roles are granted per project. |
 | **Principal** | An authenticated user or service token acting within a tenant. |
 | **Worker token** | A token issued to an external service for one session (such as a browser session), limited to that session's resources and a fixed expiry. A **pool token** instead lets a worker join one pool, and a **join token** admits one launched worker. |
-| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value. |
-| **Audit store** | The append-only, tenant-scoped table that the SQL implementation of `platform.Audit` writes; one store serves every producer. Reading it returns only the calling tenant's events. |
+| **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value or a raw token. Its tenant is the caller's; an event with no tenant is **deployment-level** (a refused join with an unknown pool token, shared-pool and launch events, operator actions), kept out of tenant-scoped reads. |
+| **Audit store** | The append-only table that the SQL implementation of `platform.Audit` writes; one store serves every producer (tenant events and deployment-level events). Tenant-scoped reads return only the calling tenant's events. |
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
@@ -64,4 +64,4 @@ the same change that first uses it.
 | **Data key**, **keyset** | A tenant's keyset is its data keys, one of them **primary**, stored only wrapped by the master key. New payloads use the primary data key; earlier ones still decrypt. |
 | **Payload codec** | Encrypts each payload a runtime records in history with the tenant's primary data key, and decrypts it on the way back. |
 | **Credential store** | The vault: a tenant's named credentials, stored only encrypted, written and rotated through a write-only API and resolved by `cred://` reference inside a step. |
-| **Credential name** | The `<name>` of a `cred://<name>` reference: 1–128 characters among ASCII letters, digits, `.`, `_`, `-` and `/`. |
+| **Credential name** | The `<name>` of a `cred://<name>` reference: 1–128 characters among ASCII letters, digits, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..`. |

@@ -29,16 +29,16 @@ If a deletion names a credential the tenant does not store, then the credential 
 If a credential store call carries no tenant in its context, then the credential store shall reject the call with code `invalid_argument`.
 
 ### REQ-CRED-006 — Valid credential names
-The credential store shall accept a credential name of 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`.
+The credential store shall accept a credential name of 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/` whose `/`-separated segments are each non-empty and neither `.` nor `..`.
 
 ### REQ-CRED-007 — Invalid credential names
-If a credential name is empty, longer than 128 characters, contains a character other than `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, or has a `/`-separated segment that is empty, `.` or `..`, then the credential store shall reject the call with code `invalid_argument`.
+If a credential name is empty, longer than 128 characters, contains a character other than `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, or has a `/`-separated segment that is empty, `.` or `..`, then the credential store shall reject the call with code `invalid_argument` and an error message that does not contain the rejected name.
 
 ### REQ-CRED-008 — Reference form
 The credential store shall resolve only a reference of the form `cred://` followed by a valid credential name.
 
 ### REQ-CRED-009 — Malformed references
-If a reference is not `cred://` followed by a valid credential name, then the credential store shall reject the resolution with code `invalid_argument`.
+If a reference is not `cred://` followed by a valid credential name, then the credential store shall reject the resolution with code `invalid_argument` and an error message that does not contain the rejected reference.
 
 ### REQ-CRED-010 — Missing credential
 If a reference names a credential that no tenant stores, then the credential store shall fail the resolution with code `not_found`.
@@ -64,10 +64,10 @@ When a caller lists credentials, the credential store shall return them ordered 
 ## Audit
 
 ### REQ-CRED-017 — Audit of a use
-When a credential reference is resolved for a tenant, the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, credential name as resource, outcome `allowed`, and the principal, run and step from context or empty when absent.
+When a credential reference is resolved for a tenant, the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, credential reference `cred://<name>` as resource, outcome `allowed`, and the principal, run and step from context or empty when absent.
 
 ### REQ-CRED-018 — Audit of a failed use
-If a resolution of a well-formed reference with a tenant in context fails during lookup or decryption, then the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, requested credential name as resource, outcome `failed`, failure code as reason, and the principal, run and step from context or empty when absent.
+If a resolution of a well-formed reference with a tenant in context fails during lookup or decryption, then the credential store shall hand the `platform.Audit` port an audit event with the time, tenant, action `credential.resolve`, requested credential reference `cred://<name>` as resource, outcome `failed`, failure code as reason, and the principal, run and step from context or empty when absent.
 
 ### REQ-CRED-032 — No audit without tenant or valid reference
 If a resolution carries no tenant or a malformed reference, then the credential store shall hand the `platform.Audit` port no audit event.
@@ -87,8 +87,14 @@ The audit store shall append every recorded audit event as a new row and shall n
 ### REQ-CRED-031 — Audit reads are scoped to the tenant
 When a caller reads audit events, the audit store shall return only the events recorded for the calling tenant.
 
-### REQ-CRED-033 — Tenant required by the audit store
-If an audit store call carries no tenant in its context, then the audit store shall reject the call with code `invalid_argument`.
+### REQ-CRED-033 — Tenant required for audit reads
+If an audit read carries no tenant in its context, then the audit store shall reject the call with code `invalid_argument`.
+
+### REQ-CRED-034 — Event tenant must match context
+If an audit event handed to the audit store carries a non-empty tenant that differs from the calling context's tenant, then the audit store shall reject the record with code `invalid_argument`.
+
+### REQ-CRED-035 — Deployment-level audit events
+When an audit event with an empty tenant is recorded without a tenant in context, the audit store shall append it as a deployment-level event excluded from tenant audit reads.
 
 ## Storage
 

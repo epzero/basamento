@@ -16,8 +16,8 @@ Feature: Credential audit
     When the reference "cred://vendor/anthropic" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
     Then the resolution returns "sk-live-4f9a2c"
     And the audit log of tenant "acme" is exactly:
-      | principal | action             | resource         | run | step | outcome | reason | time                 |
-      | human:ana | credential.resolve | vendor/anthropic | r1  | s2   | allowed |        | 2026-10-01T09:00:00Z |
+      | principal | action             | resource                | run | step | outcome | reason | time                 |
+      | human:ana | credential.resolve | cred://vendor/anthropic | r1  | s2   | allowed |        | 2026-10-01T09:00:00Z |
 
   @security @REQ-CRED-017 @id:CRED-017-02
   Scenario: A resolution with no principal, run or step in context audits empty fields
@@ -25,16 +25,16 @@ Feature: Credential audit
     When the reference "cred://vendor/anthropic" is resolved for tenant "acme"
     Then the resolution returns "sk-live-4f9a2c"
     And the audit log of tenant "acme" is exactly:
-      | principal | action             | resource         | run | step | outcome | reason | time                 |
-      |           | credential.resolve | vendor/anthropic |     |      | allowed |        | 2026-10-01T09:00:00Z |
+      | principal | action             | resource                | run | step | outcome | reason | time                 |
+      |           | credential.resolve | cred://vendor/anthropic |     |      | allowed |        | 2026-10-01T09:00:00Z |
 
   @security @REQ-CRED-018 @id:CRED-018-01
   Scenario: A resolution that finds no credential is audited
     When the reference "cred://vendor/absent" is resolved for tenant "acme" by principal "human:ana" in run "r1" at step "s2"
     Then the resolution fails with code "not_found"
     And the audit log of tenant "acme" is exactly:
-      | principal | action             | resource      | run | step | outcome | reason    | time                 |
-      | human:ana | credential.resolve | vendor/absent | r1  | s2   | failed  | not_found | 2026-10-01T09:00:00Z |
+      | principal | action             | resource             | run | step | outcome | reason    | time                 |
+      | human:ana | credential.resolve | cred://vendor/absent | r1  | s2   | failed  | not_found | 2026-10-01T09:00:00Z |
 
   @security @REQ-CRED-032 @REQ-CRED-009 @id:CRED-032-01
   Scenario: A malformed reference is rejected without an audit event

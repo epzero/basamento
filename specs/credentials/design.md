@@ -17,7 +17,7 @@ data key, keyset) apply here but are not respecified.
 | Backing store | `Backend`: where encrypted credential rows live. One SQL backend ships here; an external secret manager implements the same interface. It never sees a plaintext value. |
 | Secrets port | `platform.Secrets`: `Encrypt` on put, `Decrypt` on resolve. The master key, data keys and keysets belong to WP-L1-04 and never to this package. |
 | Audit port | `platform.Audit`: the audit sink the store is given, `Record(ctx, platform.AuditEvent) error`, called once per resolution of a well-formed reference with a tenant in context (owner decision, 2026-11-17). |
-| Audit store | `AuditStore`: this package's SQL implementation of `platform.Audit`, an append-only, tenant-scoped table (REQ-CRED-029 to REQ-CRED-031). |
+| Audit store | `AuditStore`: this package's SQL implementation of `platform.Audit`, an append-only table holding tenant events and deployment-level events, with tenant-scoped reads (REQ-CRED-029 to REQ-CRED-035). |
 | Use context | `Use`: principal, run and step, carried by the context of a resolution. |
 
 The constructor is `New(backend Backend, audit platform.Audit, secrets platform.Secrets, clock core.Clock) *Store`;
@@ -160,7 +160,7 @@ A credential resolution fills one event as follows:
 | `Tenant` | the tenant from `core.TenantFrom(ctx)` |
 | `Principal` | `Use.Principal`, empty when absent |
 | `Action` | `credential.resolve` |
-| `Resource` | the credential name, never the value or the ciphertext |
+| `Resource` | the credential reference (`cred://<name>`), never the value or the ciphertext |
 | `Outcome` | `allowed` when the resolution returns a value, `failed` on any failure |
 | `RunID`, `Step` | `Use.RunID`, `Use.StepID`, empty when absent |
 | `Reason` | empty on success; on failure the error code (`not_found`, `internal` or `unavailable`) |
@@ -204,18 +204,22 @@ CREATE TABLE audit_events (
 CREATE INDEX audit_events_tenant_at ON audit_events (tenant_id, at, id);
 ```
 
-`Record` takes `Tenant` from `core.TenantFrom(ctx)` and appends one row
-(REQ-CRED-029); optional fields are stored as empty strings, never `NULL`, so
-a read returns the event as recorded. A `Record` call with no tenant in its
-context is rejected with `invalid_argument` (REQ-CRED-033): this is the
-credentials store's fail-closed rule (REQ-CRED-005), stricter than the port,
-whose contract (PR #25, `platform/platform.go`) lets a producer write a
-deployment-level event with no tenant. `AuditStore` is that contract's store
-for every producer, and its table keys rows by `tenant_id`, so it admits
-only tenant audit events; a future producer needs deployment-level events,
-it is added then, additively, with its own review. The table is
-append-only: `AuditStore` exposes `Record` and `Read` and no update or delete,
-and the package's SQL uses only `INSERT` and `SELECT` on it (REQ-CRED-030).
+`Record` derives the effective tenant from `core.TenantFrom(ctx)` and appends
+one row (REQ-CRED-029); optional fields are stored as empty strings, never
+`NULL`, so a read returns the event as recorded. Following `platform.Audit`
+(PR #25, `platform/platform.go`):
+
+- With a tenant `t` in `ctx`, `e.Tenant` must be empty or equal to `t`; `Record`
+  rejects a different `e.Tenant` with code `invalid_argument` (REQ-CRED-034)
+  and otherwise stores `t`.
+- Without a tenant in `ctx`, `e.Tenant` must be empty; `Record` rejects a
+  non-empty `e.Tenant` with code `invalid_argument` (REQ-CRED-034), and stores
+  an empty `e.Tenant` (`tenant_id = ""`) as a deployment-level event
+  (REQ-CRED-035).
+
+The table is append-only: `AuditStore` exposes `Record` and `Read` and no
+update or delete, and the package's SQL uses only `INSERT` and `SELECT` on it
+(REQ-CRED-030).
 
 ```go
 // Read returns the calling tenant's events, ordered by time then id.
@@ -223,8 +227,9 @@ func (a *AuditStore) Read(ctx context.Context) ([]platform.AuditEvent, error)
 ```
 
 `Read` takes the tenant from `core.TenantFrom(ctx)` and returns only that
-tenant's rows (REQ-CRED-031); a context without a tenant fails with
-`invalid_argument` (REQ-CRED-033). `Read` is not on `platform.Audit`, whose only operation is
+tenant's rows (REQ-CRED-031), never deployment-level (`tenant_id = ""`) rows
+(REQ-CRED-035); a context without a tenant fails with `invalid_argument`
+(REQ-CRED-033). `Read` is not on `platform.Audit`, whose only operation is
 `Record`; it is the package's inspection API for the console and the BDD
 driver.
 
@@ -274,12 +279,14 @@ Codes come from `core`; no new code is added.
 | The key service is unavailable during put or resolve (REQ-CRED-027) | `unavailable` | the Secrets port's error, naming the scheme only |
 | The audit event of a resolution cannot be written (REQ-CRED-028) | `unavailable` | the audit store's error, naming the store only |
 | An external backend is unreachable | `unavailable` | the backend's error, naming the store only |
-| An audit record or read without a tenant (REQ-CRED-033) | `invalid_argument` | from the shared tenant accessor, tenant is required |
+| Audit `Record` whose event tenant disagrees with context (REQ-CRED-034) | `invalid_argument` | `invalid audit tenant` |
+| Audit `Read` without a tenant (REQ-CRED-033) | `invalid_argument` | from the shared tenant accessor, `tenant is required` |
 
 Missing and another tenant's credential share code and message, so a caller
 cannot tell them apart. Errors use fixed messages and never echo the value,
-the ciphertext or a raw reference. Log records may carry the tenant, the
-credential name and the outcome, never the value or the ciphertext.
+the ciphertext, an invalid credential name or a raw reference. Log records may
+carry the tenant, the credential name and the outcome, never the value or the
+ciphertext.
 
 ## 9. Test support
 
@@ -311,7 +318,9 @@ it, in the `internal/bdd` package:
   in-flight replacement of REQ-CRED-025 deterministically.
 - Inspection steps read the `credentials` rows through the SQL store and the
   audit events through `AuditStore.Read` for the tenant in the step; they are
-  test helpers, not a production API.
+  test helpers, not a production API. A SQL inspection helper also reads
+  deployment-level audit rows (`tenant_id = ""`) directly for `CRED-035-01`,
+  because `AuditStore.Read` never returns them.
 
 Unit tests in `platform/credentials` use fakes defined in their own `_test.go`
 files. No test double enters production code, and no new test-only package is

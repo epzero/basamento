@@ -78,6 +78,7 @@ Feature: Credential values
       | name |
       | a |
       | Vendor.A_1/x-y |
+      | .a/b..c |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
 
   @security @REQ-CRED-007 @id:CRED-007-01
@@ -89,11 +90,11 @@ Feature: Credential values
 
     Examples:
       | name |
-      | |
       | vendor anthropic |
       | vendor/anthropic% |
       | vendor:anthropic |
       | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
+      | a/./b |
       | ../a |
       | a/../b |
       | /a |
@@ -104,6 +105,18 @@ Feature: Credential values
   Scenario: An invalid credential name is rejected on delete
     When the credential "vendor anthropic" is deleted for tenant "acme"
     Then the deletion fails with code "invalid_argument"
+    And the error does not contain "vendor anthropic"
+
+  @security @REQ-CRED-007 @id:CRED-007-03
+  Scenario Outline: An empty or dot credential name is rejected on put
+    When the value "sk-live-4f9a2c" is put as "<name>" for tenant "acme"
+    Then the put fails with code "invalid_argument"
+    And no credential is stored for any tenant
+
+    Examples:
+      | name |
+      |      |
+      | .    |
 
   @security @REQ-CRED-015 @REQ-CRED-014 @id:CRED-015-01
   Scenario: A listing returns the tenant's credential names and never a value

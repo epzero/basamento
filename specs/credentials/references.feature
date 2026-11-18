@@ -25,21 +25,29 @@ Feature: Credential references and tenancy
     Given the value "sk-live-4f9a2c" is put as "vendor/anthropic" for tenant "acme"
     When the reference "<ref>" is resolved for tenant "acme"
     Then the resolution fails with code "invalid_argument"
+    And the error does not contain "<ref>"
     And no value is returned
 
     Examples:
       | ref |
       | vendor/anthropic |
-      | cred:// |
       | vault://vendor/anthropic |
       | cred://vendor/anthropic% |
       | cred://vendor/anthropic?version=1 |
       | cred://Vendor anthropic |
+      | cred://. |
+      | cred://a/./b |
       | cred://../a |
       | cred://a/../b |
       | cred:///a |
       | cred://a/ |
       | cred://a//b |
+
+  @security @REQ-CRED-009 @id:CRED-009-02
+  Scenario: A reference with no name is rejected
+    When the reference "cred://" is resolved for tenant "acme"
+    Then the resolution fails with code "invalid_argument"
+    And no value is returned
 
   @security @REQ-CRED-010 @id:CRED-010-01
   Scenario: A reference to a missing credential fails
