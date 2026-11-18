@@ -11,10 +11,10 @@ import (
 )
 
 type sortedAdapter struct {
-	inner ref.TypeAdapter
+	inner ref.TypeAdapter //nolint:staticcheck // cel-go still exposes ref.TypeAdapter on the registry.
 }
 
-func newSortedAdapter(inner ref.TypeAdapter) *sortedAdapter {
+func newSortedAdapter(inner ref.TypeAdapter) *sortedAdapter { //nolint:staticcheck
 	if inner == nil {
 		inner = types.DefaultTypeAdapter
 	}
@@ -141,4 +141,216 @@ func (it *sortedMapIter) Next() ref.Val {
 	}
 	it.idx++
 	return types.String(it.keys[it.idx])
+}
+
+type mapKeyKind int
+
+const (
+	keyBool mapKeyKind = iota
+	keyInt
+	keyUint
+	keyString
+)
+
+type mapKey struct {
+	kind mapKeyKind
+	b    bool
+	i    int64
+	u    uint64
+	s    string
+	key  ref.Val
+}
+
+func classifyMapKey(k ref.Val) (mapKey, bool) {
+	switch v := k.(type) {
+	case types.Bool:
+		return mapKey{kind: keyBool, b: bool(v), key: k}, true
+	case types.Int:
+		return mapKey{kind: keyInt, i: int64(v), key: k}, true
+	case types.Uint:
+		return mapKey{kind: keyUint, u: uint64(v), key: k}, true
+	case types.String:
+		return mapKey{kind: keyString, s: string(v), key: k}, true
+	default:
+		return mapKey{}, false
+	}
+}
+
+func (k mapKey) less(o mapKey) bool {
+	if k.kind != o.kind {
+		return k.kind < o.kind
+	}
+	switch k.kind {
+	case keyBool:
+		return !k.b && o.b
+	case keyInt:
+		return k.i < o.i
+	case keyUint:
+		return k.u < o.u
+	case keyString:
+		return k.s < o.s
+	default:
+		return false
+	}
+}
+
+type sortedEntry struct {
+	key mapKey
+	val ref.Val
+}
+
+type sortedAnyMap struct {
+	adapter *sortedAdapter
+	entries []sortedEntry
+}
+
+func mapKeysEqual(a, b mapKey) bool {
+	if a.kind != b.kind {
+		return false
+	}
+	switch a.kind {
+	case keyBool:
+		return a.b == b.b
+	case keyInt:
+		return a.i == b.i
+	case keyUint:
+		return a.u == b.u
+	case keyString:
+		return a.s == b.s
+	default:
+		return false
+	}
+}
+
+func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMap {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key.less(entries[j].key)
+	})
+	return &sortedAnyMap{adapter: adapter, entries: entries}
+}
+
+func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) []sortedEntry {
+	var entries []sortedEntry
+	it := m.Iterator()
+	for it.HasNext().Equal(types.True) == types.True {
+		k := it.Next()
+		mk, ok := classifyMapKey(k)
+		if !ok {
+			continue
+		}
+		v, found := m.Find(k)
+		if !found {
+			continue
+		}
+		entries = append(entries, sortedEntry{key: mk, val: v})
+	}
+	return entries
+}
+
+func (m *sortedAnyMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	return nil, fmt.Errorf("type conversion error")
+}
+
+func (m *sortedAnyMap) ConvertToType(typeVal ref.Type) ref.Val {
+	return types.NewErr("type conversion error")
+}
+
+func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
+	ov, ok := other.(*sortedAnyMap)
+	if !ok {
+		return types.Bool(false)
+	}
+	if len(m.entries) != len(ov.entries) {
+		return types.Bool(false)
+	}
+	for i := range m.entries {
+		if !mapKeysEqual(m.entries[i].key, ov.entries[i].key) {
+			return types.Bool(false)
+		}
+		if m.entries[i].val.Equal(ov.entries[i].val) != types.True {
+			return types.Bool(false)
+		}
+	}
+	return types.Bool(true)
+}
+
+func (m *sortedAnyMap) Type() ref.Type {
+	return types.MapType
+}
+
+func (m *sortedAnyMap) Value() any { return m.entries }
+
+func (m *sortedAnyMap) Contains(key ref.Val) ref.Val {
+	_, ok := m.Find(key)
+	return types.Bool(ok)
+}
+
+func (m *sortedAnyMap) Find(key ref.Val) (ref.Val, bool) {
+	mk, ok := classifyMapKey(key)
+	if !ok {
+		return types.NewErr("no such key"), false
+	}
+	for _, e := range m.entries {
+		if mapKeysEqual(e.key, mk) {
+			return e.val, true
+		}
+	}
+	return types.NewErr("no such key"), false
+}
+
+func (m *sortedAnyMap) Get(key ref.Val) ref.Val {
+	v, ok := m.Find(key)
+	if !ok {
+		return types.NewErr("no such key")
+	}
+	return v
+}
+
+func (m *sortedAnyMap) Iterator() traits.Iterator {
+	keys := make([]ref.Val, len(m.entries))
+	for i, e := range m.entries {
+		keys[i] = e.key.key
+	}
+	return &sortedAnyMapIter{keys: keys, idx: -1}
+}
+
+func (m *sortedAnyMap) Size() ref.Val {
+	return types.Int(len(m.entries))
+}
+
+type sortedAnyMapIter struct {
+	keys []ref.Val
+	idx  int
+}
+
+func (it *sortedAnyMapIter) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	return nil, fmt.Errorf("type conversion on iterators not supported")
+}
+
+func (it *sortedAnyMapIter) ConvertToType(typeVal ref.Type) ref.Val {
+	return types.NewErr("no such overload")
+}
+
+func (it *sortedAnyMapIter) Equal(other ref.Val) ref.Val {
+	return types.NewErr("no such overload")
+}
+
+func (it *sortedAnyMapIter) Type() ref.Type {
+	return types.IteratorType
+}
+
+func (it *sortedAnyMapIter) Value() any {
+	return nil
+}
+
+func (it *sortedAnyMapIter) HasNext() ref.Val {
+	return types.Bool(it.idx+1 < len(it.keys))
+}
+
+func (it *sortedAnyMapIter) Next() ref.Val {
+	if it.idx+1 >= len(it.keys) {
+		return types.NewErr("no such key")
+	}
+	it.idx++
+	return it.keys[it.idx]
 }

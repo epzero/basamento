@@ -33,26 +33,53 @@ func wrapSortedMapper(v ref.Val, adapter *sortedAdapter) ref.Val {
 	if !ok || adapter == nil {
 		return v
 	}
-	if _, sorted := v.(*sortedStringMap); sorted {
+	switch v.(type) {
+	case *sortedStringMap, *sortedAnyMap:
 		return v
 	}
-	data := map[string]any{}
-	it := m.Iterator()
-	for it.HasNext().Equal(types.True) == types.True {
-		k := it.Next()
-		ks, ok := k.(types.String)
-		if !ok {
+	entries := extractMapperEntries(m, adapter)
+	if len(entries) == 0 {
+		// Fall back to string-only extraction for string-keyed maps.
+		data := map[string]any{}
+		it := m.Iterator()
+		for it.HasNext().Equal(types.True) == types.True {
+			k := it.Next()
+			ks, ok := k.(types.String)
+			if !ok {
+				return v
+			}
+			val, found := m.Find(k)
+			if !found {
+				continue
+			}
+			nat, err := val.ConvertToNative(reflect.TypeFor[any]())
+			if err != nil {
+				return v
+			}
+			data[string(ks)] = nat
+		}
+		if len(data) == 0 {
 			return v
 		}
-		val, found := m.Find(k)
-		if !found {
-			continue
-		}
-		nat, err := val.ConvertToNative(reflect.TypeFor[any]())
-		if err != nil {
-			return v
-		}
-		data[string(ks)] = nat
+		return &sortedStringMap{adapter: adapter, data: data}
 	}
-	return &sortedStringMap{adapter: adapter, data: data}
+	allString := true
+	for _, e := range entries {
+		if e.key.kind != keyString {
+			allString = false
+			break
+		}
+	}
+	if allString {
+		data := make(map[string]any, len(entries))
+		for _, e := range entries {
+			nat, err := e.val.ConvertToNative(reflect.TypeFor[any]())
+			if err != nil {
+				return v
+			}
+			data[e.key.s] = nat
+		}
+		return &sortedStringMap{adapter: adapter, data: data}
+	}
+	return newSortedAnyMap(adapter, entries)
 }
