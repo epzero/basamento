@@ -77,7 +77,8 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 			seen[id] = true
 			meta, ok, rerr := s.readSlot(ctx, core.TenantID(tenant), stageKey)
 			if rerr != nil {
-				return rerr
+				joined = append(joined, rerr)
+				return nil
 			}
 			if !ok || !meta.expired(now) {
 				return nil

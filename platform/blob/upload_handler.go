@@ -1,7 +1,6 @@
 package blob
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -134,17 +133,25 @@ var (
 	errSlotRefused  = errors.New("staging slot refused")
 )
 
-// writeStaged reads the body without opening the staged object, then takes the
-// per-slot lock and publishes only while the slot is still open (REQ-BLOB-025,
-// REQ-BLOB-026). Bounded uploads buffer at most max+1 bytes in memory.
+// writeStaged streams the body into a bucket writer without the per-slot lock.
+// The object is not published until w.Close succeeds under the lock (REQ-BLOB-025,
+// REQ-BLOB-026). Memory use is O(copy buffer), not O(max). A failed replay leaves
+// any prior staged object in place; only a successful Close replaces it.
 func (h *UploadHandler) writeStaged(ctx context.Context, tid core.TenantID, stageKey, stagePath, contentType string, max int64, body io.Reader) error {
-	var buf bytes.Buffer
-	limited := io.LimitReader(body, readLimit(max))
-	n, err := io.Copy(&buf, limited)
+	wctx, cancel := context.WithCancel(ctx)
+	w, err := h.Store.bucket.NewWriter(wctx, stagePath, &blob.WriterOptions{ContentType: contentType})
 	if err != nil {
+		cancel()
+		return mapError(err)
+	}
+	limited := io.LimitReader(body, readLimit(max))
+	n, err := copyStagingBody(w, limited, h.Store.stagingFirstWriteHook)
+	if err != nil {
+		abortStagingWriter(cancel, w)
 		return mapError(err)
 	}
 	if n > max {
+		abortStagingWriter(cancel, w)
 		return errBodyTooLarge
 	}
 
@@ -153,33 +160,62 @@ func (h *UploadHandler) writeStaged(ctx context.Context, tid core.TenantID, stag
 
 	meta, ok, err := h.Store.readSlot(ctx, tid, stageKey)
 	if err != nil {
+		abortStagingWriter(cancel, w)
 		return err
 	}
 	if !ok || meta.expired(h.Store.clock.Now()) || meta.ContentType != contentType || meta.Max != max {
+		abortStagingWriter(cancel, w)
 		return errSlotRefused
 	}
 	spent, err := h.Store.commitRecordExists(ctx, tid, stageKey)
 	if err != nil {
+		abortStagingWriter(cancel, w)
 		return err
 	}
 	if spent {
+		abortStagingWriter(cancel, w)
 		return errSlotRefused
 	}
-	wctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	w, err := h.Store.bucket.NewWriter(wctx, stagePath, &blob.WriterOptions{ContentType: contentType})
-	if err != nil {
-		return mapError(err)
-	}
-	if _, err := io.Copy(w, &buf); err != nil {
-		cancel()
-		_ = w.Close()
-		return mapError(err)
-	}
 	if err := w.Close(); err != nil {
+		cancel()
 		return mapError(err)
 	}
+	cancel()
 	return nil
+}
+
+func abortStagingWriter(cancel context.CancelFunc, w *blob.Writer) {
+	cancel()
+	_ = w.Close()
+}
+
+const stagingCopyBuf = 32 * 1024
+
+func copyStagingBody(w io.Writer, body io.Reader, onFirstWrite func()) (int64, error) {
+	buf := make([]byte, stagingCopyBuf)
+	var total int64
+	var notified bool
+	for {
+		nr, err := body.Read(buf)
+		if nr > 0 {
+			nw, werr := w.Write(buf[:nr])
+			total += int64(nw)
+			if werr != nil {
+				return total, werr
+			}
+			if !notified && onFirstWrite != nil {
+				onFirstWrite()
+				notified = true
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 func parseUploadPath(p string) (tenant, stageKey string, ok bool) {
