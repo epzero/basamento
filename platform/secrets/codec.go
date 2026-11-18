@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 
@@ -22,7 +23,13 @@ type Codec struct {
 	keys  []KeyService
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+	opts  options
 }
+
+func (c *Codec) setOptions(o options) { c.opts = o }
+
+// SetLogger sets where the codec writes operational records (optional).
+func (c *Codec) SetLogger(l *slog.Logger) { c.opts.logger = l }
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
 // are previous keys still able to unwrap stored keysets.
@@ -65,13 +72,15 @@ func (c *Codec) Encode(ctx context.Context, p Payload) (Payload, error) {
 	if err != nil {
 		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
 	}
-	return Payload{
+	out := Payload{
 		Metadata: map[string][]byte{
 			"encoding":          []byte(EncodingEncrypted),
 			MetaEncryptionKeyID: []byte(idStr),
 		},
 		Data: ct,
-	}, nil
+	}
+	c.opts.loggerOrDefault().Debug("payload encoded", slog.String("tenant", tenant))
+	return out, nil
 }
 
 // Decode decrypts an encoded payload for the tenant in ctx. It never creates a keyset.
@@ -105,6 +114,7 @@ func (c *Codec) Decode(ctx context.Context, p Payload) (Payload, error) {
 		}
 		out, decErr := c.decryptWithHandle(h, tenant, idStr, p.Data)
 		if decErr == nil {
+			c.opts.loggerOrDefault().Debug("payload decoded", slog.String("tenant", tenant))
 			return out, nil
 		}
 		if !reloaded {
@@ -130,9 +140,15 @@ func (c *Codec) decryptWithHandle(h *keyset.Handle, tenant, idStr string, ct []b
 	}
 	inner, err := prim.Decrypt(ct, payloadAssocData(tenant, idStr))
 	if err != nil {
+		c.opts.loggerOrDefault().Debug("payload decrypt failed", slog.String("tenant", tenant))
 		return Payload{}, errInvalidArgument(msgPayloadCannotDecrypt)
 	}
-	return unmarshalInner(inner)
+	out, err := unmarshalInner(inner)
+	if err != nil {
+		c.opts.loggerOrDefault().Debug("payload inner parse failed", slog.String("tenant", tenant))
+		return Payload{}, err
+	}
+	return out, nil
 }
 
 func (c *Codec) keysetForEncode(ctx context.Context, tenant string) (*keyset.Handle, error) {
