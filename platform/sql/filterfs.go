@@ -3,6 +3,7 @@ package sql
 import (
 	"fmt"
 	"io/fs"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -20,11 +21,34 @@ type filterFS struct {
 	max int
 }
 
+func (f filterFS) migrationAllowed(name string) bool {
+	base := path.Base(name)
+	if !strings.HasSuffix(base, ".sql") {
+		return true
+	}
+	if i := strings.Index(base, "_"); i > 0 {
+		v, err := strconv.Atoi(base[:i])
+		if err == nil {
+			return v <= f.max
+		}
+	}
+	return true
+}
+
 func (f filterFS) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	if !f.migrationAllowed(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
 	return f.all.Open(name)
 }
 
 func (f filterFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrInvalid}
+	}
 	entries, err := fs.ReadDir(f.all, name)
 	if err != nil {
 		return nil, err
@@ -35,22 +59,22 @@ func (f filterFS) ReadDir(name string) ([]fs.DirEntry, error) {
 			out = append(out, e)
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".sql") {
-			out = append(out, e)
+		full := path.Join(name, e.Name())
+		if !f.migrationAllowed(full) {
 			continue
 		}
-		base := e.Name()
-		if i := strings.Index(base, "_"); i > 0 {
-			v, err := strconv.Atoi(base[:i])
-			if err == nil && v <= f.max {
-				out = append(out, e)
-			}
-		}
+		out = append(out, e)
 	}
 	return out, nil
 }
 
 func (f filterFS) ReadFile(name string) ([]byte, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "readfile", Path: name, Err: fs.ErrInvalid}
+	}
+	if !f.migrationAllowed(name) {
+		return nil, &fs.PathError{Op: "readfile", Path: name, Err: fs.ErrNotExist}
+	}
 	return fs.ReadFile(f.all, name)
 }
 
@@ -64,21 +88,54 @@ type versionExcludeFS struct {
 	exclude int
 }
 
-func (f versionExcludeFS) Open(name string) (fs.File, error) { return f.all.Open(name) }
+func (f versionExcludeFS) migrationAllowed(name string) bool {
+	base := path.Base(name)
+	prefix := fmt.Sprintf("%05d_", f.exclude)
+	if strings.HasPrefix(base, prefix) && strings.HasSuffix(base, ".sql") {
+		return false
+	}
+	return true
+}
+
+func (f versionExcludeFS) Open(name string) (fs.File, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
+	}
+	if !f.migrationAllowed(name) {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	return f.all.Open(name)
+}
 
 func (f versionExcludeFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrInvalid}
+	}
 	entries, err := fs.ReadDir(f.all, name)
 	if err != nil {
 		return nil, err
 	}
-	prefix := fmt.Sprintf("%05d_", f.exclude)
 	var out []fs.DirEntry
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+		if e.IsDir() {
 			out = append(out, e)
+			continue
 		}
+		full := path.Join(name, e.Name())
+		if !f.migrationAllowed(full) {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out, nil
 }
 
-func (f versionExcludeFS) ReadFile(name string) ([]byte, error) { return fs.ReadFile(f.all, name) }
+func (f versionExcludeFS) ReadFile(name string) ([]byte, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "readfile", Path: name, Err: fs.ErrInvalid}
+	}
+	if !f.migrationAllowed(name) {
+		return nil, &fs.PathError{Op: "readfile", Path: name, Err: fs.ErrNotExist}
+	}
+	return fs.ReadFile(f.all, name)
+}
