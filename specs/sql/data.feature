@@ -63,3 +63,38 @@ Feature: Transactions, constraints and values on both dialects
     When tenant "acme" stores an item with key "k1" and a note containing a NUL character
     Then the call fails with code "invalid_argument"
     And tenant "acme" has no item with key "k1"
+
+  @REQ-SQL-022 @id:SQL-022-01
+  Scenario Outline: A not-null or check violation is rejected as invalid input
+    When tenant "acme" stores an item with key "<key>" at the zero time
+    Then the call fails with code "invalid_argument"
+    And tenant "acme" has no item with key "<key>"
+
+    Examples:
+      | key    |
+      | k-null |
+      | k-tag  |
+
+  @REQ-SQL-023 @profile:embedded @id:SQL-023-01
+  Scenario Outline: Busy and locked SQLite databases are retryable
+    When tenant "acme" runs an insert that the embedded SQLite database refuses with "<refusal>"
+    Then the call fails with code "unavailable"
+    And the error is marked retryable
+
+    Examples:
+      | refusal   |
+      | busy      |
+      | locked    |
+
+  @REQ-SQL-023 @profile:cloud @id:SQL-023-02
+  Scenario Outline: Deadlocks and serialization failures are retryable
+    Given an empty database
+    When a SQL store is opened with the sample migrations 1 to 3
+    And tenant "acme" runs a statement under the session setting "<setting>"
+    Then the call fails with code "unavailable"
+    And the error is marked retryable
+
+    Examples:
+      | setting                                        |
+      | default_transaction_isolation = "serializable" |
+      | lock_timeout = "0"                             |
