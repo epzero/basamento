@@ -36,6 +36,34 @@ func TestLintAssembledRejectsDelimiterLookAlikes(t *testing.T) {
 	}
 }
 
+func TestLintAssembledCloseFollowedByAngleBracket(t *testing.T) {
+	t.Helper()
+	reg := NewRegistry()
+	tpl := &Template{
+		ID: "doc", Version: "1",
+		Inputs:   []Input{{Name: "doc"}},
+		Segments: []Segment{{Name: "dyn", Kind: KindDynamic, Budget: 100, Text: `{{doc}}>ok`}},
+	}
+	if _, err := reg.Register(tpl); err != nil {
+		t.Fatal(err)
+	}
+	a, err := reg.Assemble("doc@1", map[string]string{"doc": "hi"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := LintAssembled(a); len(f) != 0 {
+		t.Fatalf("close followed by '>': %+v", f)
+	}
+	want := `<untrusted source="doc">hi</untrusted>>ok`
+	if got := a.Parts[0].Text; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+	opens, closes := CountUntrustedDelimiters(a.Parts[0].Text)
+	if opens != 1 || closes != 1 {
+		t.Fatalf("opens=%d closes=%d, want 1 and 1", opens, closes)
+	}
+}
+
 func TestNeutralizeUnicodeSpaceLookAlikes(t *testing.T) {
 	t.Helper()
 	cases := []struct {

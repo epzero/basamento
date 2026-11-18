@@ -155,9 +155,6 @@ func scanCanonicalClose(text string, i int) (end int, ok bool) {
 		return 0, false
 	}
 	end = i + len(closeDelim)
-	if end < len(text) && text[end] == '>' {
-		return 0, false
-	}
 	return end, true
 }
 
