@@ -217,7 +217,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 			return fmt.Errorf("no error")
 		}
 		if !core.IsRetryable(err) {
-			return fmt.Errorf("error %v is not retryable", err)
+			return fmt.Errorf("error is not retryable: %w", err)
 		}
 		return nil
 	})
