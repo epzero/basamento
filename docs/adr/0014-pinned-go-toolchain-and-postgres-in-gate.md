@@ -1,6 +1,6 @@
 # ADR-0014 — Pinned Go toolchain and Postgres in the PR gate
 
-**Status:** accepted
+**Status:** accepted · **Date:** 2026-11-18
 
 ## Context
 
