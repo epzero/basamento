@@ -33,6 +33,7 @@ type schemaWorld struct {
 	httpProbe    *loopbackHTTPProbe
 	fileURI      string
 	expectURL    string
+	tempDir      string
 }
 
 func newSchemaWorld() *schemaWorld {
@@ -55,6 +56,11 @@ func registerSchema(sc *godog.ScenarioContext) {
 		if w.Schema == nil {
 			w.Schema = newSchemaWorld()
 		}
+		dir, err := os.MkdirTemp("", "basamento-schema-bdd-*")
+		if err != nil {
+			return ctx, err
+		}
+		w.Schema.tempDir = dir
 		return ctx, nil
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
@@ -62,6 +68,10 @@ func registerSchema(sc *godog.ScenarioContext) {
 		if w.httpProbe != nil {
 			w.httpProbe.shutdown()
 			w.httpProbe = nil
+		}
+		if w.tempDir != "" {
+			_ = os.RemoveAll(w.tempDir)
+			w.tempDir = ""
 		}
 		return ctx, nil
 	})
@@ -160,13 +170,12 @@ func registerSchema(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^a Go struct type "([^"]*)" with fields:$`, func(ctx context.Context, typeName string, table *godog.Table) error {
-		fields, err := tableToStructFields(table)
+		fields, err := tableToStructFields(table, schemaCtx(ctx).types)
 		if err != nil {
 			return err
 		}
 		t := reflect.StructOf(fields)
 		schemaCtx(ctx).types[typeName] = t
-		registerNamedType(typeName, t)
 		return nil
 	})
 
@@ -380,9 +389,11 @@ func registerSchema(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^a schema file "([^"]*)" on disk containing:$`, func(ctx context.Context, name string, doc *godog.DocString) error {
-		dir := filepath.Join(os.TempDir(), "basamento-schema-bdd")
-		_ = os.MkdirAll(dir, 0o755)
-		path := filepath.Join(dir, name)
+		w := schemaCtx(ctx)
+		if w.tempDir == "" {
+			return fmt.Errorf("no scenario temp directory")
+		}
+		path := filepath.Join(w.tempDir, name)
 		if err := os.WriteFile(path, []byte(strings.TrimSpace(doc.Content)), 0o644); err != nil {
 			return err
 		}

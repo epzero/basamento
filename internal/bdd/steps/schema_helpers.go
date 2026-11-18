@@ -19,7 +19,7 @@ import (
 
 var valueFieldRE = regexp.MustCompile(`(\w+)\s+"([^"]*)"`)
 
-func tableToStructFields(table *godog.Table) ([]reflect.StructField, error) {
+func tableToStructFields(table *godog.Table, named map[string]reflect.Type) ([]reflect.StructField, error) {
 	if len(table.Rows) < 2 {
 		return nil, fmt.Errorf("empty field table")
 	}
@@ -27,7 +27,7 @@ func tableToStructFields(table *godog.Table) ([]reflect.StructField, error) {
 	var fields []reflect.StructField
 	for _, row := range table.Rows[1:] {
 		name := cellAt(row, nameIdx)
-		goType, err := parseGoType(cellAt(row, typeIdx))
+		goType, err := parseGoType(cellAt(row, typeIdx), named)
 		if err != nil {
 			return nil, err
 		}
@@ -83,15 +83,9 @@ func cellAt(row *messages.PickleTableRow, idx int) string {
 	return strings.TrimSpace(row.Cells[idx].Value)
 }
 
-var namedTypes = map[string]reflect.Type{}
-
-func registerNamedType(name string, t reflect.Type) {
-	namedTypes[name] = t
-}
-
-func parseGoType(s string) (reflect.Type, error) {
+func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) {
 	s = strings.TrimSpace(s)
-	if t, ok := namedTypes[s]; ok {
+	if t, ok := named[s]; ok {
 		return t, nil
 	}
 	if strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "<") {
@@ -116,7 +110,7 @@ func parseGoType(s string) (reflect.Type, error) {
 		return reflect.TypeFor[complex128](), nil
 	}
 	if strings.HasPrefix(s, "[]") {
-		elem, err := parseGoType(strings.TrimPrefix(s, "[]"))
+		elem, err := parseGoType(strings.TrimPrefix(s, "[]"), named)
 		if err != nil {
 			return nil, err
 		}
@@ -131,14 +125,14 @@ func parseGoType(s string) (reflect.Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		elem, err := parseGoType(s[end+1:])
+		elem, err := parseGoType(s[end+1:], named)
 		if err != nil {
 			return nil, err
 		}
 		return reflect.ArrayOf(n, elem), nil
 	}
 	if strings.HasPrefix(s, "map[string]") {
-		elem, err := parseGoType(strings.TrimPrefix(s, "map[string]"))
+		elem, err := parseGoType(strings.TrimPrefix(s, "map[string]"), named)
 		if err != nil {
 			return nil, err
 		}
