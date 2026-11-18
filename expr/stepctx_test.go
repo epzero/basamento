@@ -6,7 +6,7 @@ import (
 	"github.com/itchyny/gojq"
 )
 
-func TestRepeatStepPolls(t *testing.T) {
+func TestStepLimitCancelsRepeat(t *testing.T) {
 	q, err := gojq.Parse("repeat(1)")
 	if err != nil {
 		t.Fatal(err)
@@ -15,11 +15,16 @@ func TestRepeatStepPolls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := newStepContext(10_000_000)
+	ctx := newStepContext(100)
 	iter := code.RunWithContext(ctx, nil)
-	v, ok := iter.Next()
-	if !ok {
-		t.Fatal("no first value")
+	for {
+		_, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if ctx.limitExceeded() {
+			return
+		}
 	}
-	t.Logf("first=%v", v)
+	t.Fatal("want step limit cancellation")
 }
