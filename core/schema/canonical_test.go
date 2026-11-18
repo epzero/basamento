@@ -3,6 +3,8 @@ package schema
 import (
 	"strings"
 	"testing"
+
+	"github.com/epzero/basamento/core"
 )
 
 func TestCanonicalizeWhitespaceAndSort(t *testing.T) {
@@ -68,6 +70,18 @@ func TestCanonicalizeRefusesExponentNonExactNumber(t *testing.T) {
 		_, err := Canonicalize([]byte(`{"n":` + n + `}`))
 		if err == nil {
 			t.Fatalf("%s: want error", n)
+		}
+	}
+}
+
+func TestCanonicalizeRejectsDeepNesting(t *testing.T) {
+	for _, prefix := range []string{
+		strings.Repeat("[", maxNestingDepth+1) + "1" + strings.Repeat("]", maxNestingDepth+1),
+		strings.Repeat(`{"a":`, maxNestingDepth+1) + `1` + strings.Repeat("}", maxNestingDepth+1),
+	} {
+		_, err := Canonicalize([]byte(prefix))
+		if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("prefix depth: err=%v", err)
 		}
 	}
 }
