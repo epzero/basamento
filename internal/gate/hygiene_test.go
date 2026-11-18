@@ -340,6 +340,7 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 | [` + "`todo`" + `](todo/requirements.md) | Implemented (WP-L1-02). |
 | [` + "`partial`" + `](partial/requirements.md) | Planned (WP-L1-03, WP-L1-04). |
 | [` + "`mixed`" + `](mixed/requirements.md) | Implemented (WP-L1-07). |
+| [` + "`wip`" + `](wip/requirements.md) | In progress (WP-L1-09). |
 | [` + "`dup`" + `](dup/requirements.md) | Planned (WP-L1-06). |
 | [` + "`dup`" + `](dup/requirements.md) | Implemented (WP-L1-06). |
 | [` + "`orphan`" + `](orphan/requirements.md) | Planned (WP-L9-99). |
@@ -355,6 +356,8 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 		"specs/mixed/a.feature": feature("  @REQ-MIX-001 @id:MIX-001-01\n  Scenario: a\n    Given a\n\n" +
 			"  @REQ-MIX-001 @id:MIX-001-02 @planned @wp:WP-L1-07\n  Scenario: b\n    Given b\n\n" +
 			"  @REQ-MIX-001 @id:MIX-001-03 @planned @wp:WP-L1-08\n  Scenario: c\n    Given c\n"),
+		"specs/wip/requirements.md":     "### REQ-WIP-001 — w\nThe system shall.\n",
+		"specs/wip/a.feature":           feature("  @REQ-WIP-001 @id:WIP-001-01\n  Scenario: a\n    Given a\n"),
 		"specs/dup/requirements.md":     "### REQ-DUP-001 — u\nThe system shall.\n",
 		"specs/dup/a.feature":           feature("  @REQ-DUP-001 @id:DUP-001-01 @planned @wp:WP-L1-06\n  Scenario: a\n    Given a\n"),
 		"specs/missing/requirements.md": "### REQ-MISS-001 — m\nThe system shall.\n",
@@ -366,6 +369,7 @@ func TestCheckSpecsReadmeDetectsDriftAndIntegrationWithDocs(t *testing.T) {
 	}
 	for _, want := range []string{
 		`capability "done" has all 1 scenario(s) active, but its status still says "Planned (WP-L1-01)."`,
+		`capability "wip" has all 1 scenario(s) active, but its status still says "In progress (WP-L1-09)."`,
 		`capability "todo" has 1 @planned scenario(s), but its status says "Implemented (WP-L1-02)."`,
 		`capability "mixed" has 2 @planned scenario(s), but its status says "Implemented (WP-L1-07)."`,
 		`missing capability row for "missing"`,

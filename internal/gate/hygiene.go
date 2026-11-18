@@ -425,7 +425,7 @@ func CheckSpecsReadme(root string) ([]string, error) {
 		}
 		lower := strings.ToLower(status)
 		switch {
-		case c.active > 0 && c.planned == 0 && strings.HasPrefix(lower, "planned"):
+		case c.active > 0 && c.planned == 0 && (strings.HasPrefix(lower, "planned") || strings.HasPrefix(lower, "in progress")):
 			errs = append(errs, fmt.Sprintf("specs/README.md: capability %q has all %d scenario(s) active, but its status still says %q; update it to Implemented", capName, c.active, status))
 		case c.planned > 0 && strings.HasPrefix(lower, "implemented"):
 			errs = append(errs, fmt.Sprintf("specs/README.md: capability %q has %d @planned scenario(s), but its status says %q; use Planned (or In progress) until every scenario is active", capName, c.planned, status))
