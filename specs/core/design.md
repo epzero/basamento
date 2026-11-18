@@ -13,7 +13,8 @@ reads it.
   later call replaces the earlier id; the parent context is unchanged.
 - `TenantFrom` returns `(TenantID, bool)`. It reports no tenant — an empty id
   and `false` — when the context is nil, carries no id, or carries an id that
-  is not valid.
+  is not valid; anything outside the grammar is treated as no tenant, so port
+  calls on that context return `invalid_argument`.
 - `TenantFrom` is the single choke point for the grammar. Validity is decided
   when a context is read, not when it is built, so no caller can carry an
   invalid id past it.
@@ -29,8 +30,11 @@ the port's existing rule does the rest.
 
 An id is valid when it is non-empty and at most 128 bytes, valid UTF-8, free of
 control characters from U+0000 to U+001F and U+007F, neither `.` nor `..`, and
-contains neither `/` nor `\` (`REQ-CORE-005`). Dots inside a longer id, such as
-`acme.eu`, are allowed; only the two whole-id values are refused.
+contains neither `/` nor `\`, and neither begins nor ends with a whitespace
+character (Unicode `White_Space`) (`REQ-CORE-005`).
+Dots inside a longer id, such as `acme.eu`, are allowed; only the two whole-id
+values are refused. The edge rule keeps two ids that look the same, such as
+" acme" and "acme", from naming two different tenants.
 
 The grammar keeps a tenant id a single opaque segment. Capabilities place it in
 positions that are not escaped: blob objects live at `<tenant id>/<content
