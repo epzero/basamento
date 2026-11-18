@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -88,7 +89,7 @@ func TestRotationRecordNamesUnknownMaster(t *testing.T) {
 
 func TestRotationVerifiedSkipUnwrapDenied(t *testing.T) {
 	t.Parallel()
-	newK := &budgetKey{id: "mk-new", failUnwrap: true}
+	newK := &budgetKey{id: "mk-new", failUnwrapNotCanary: true}
 	old := &budgetKey{id: "mk-old"}
 	store := &memKeysetStore{data: map[string]StoredKeyset{}}
 	c, _ := NewCodec(store, []KeyService{old})
@@ -141,31 +142,74 @@ func (f *failCanaryKey) Unwrap(context.Context, string, []byte) ([]byte, error) 
 	return nil, errInternal(msgKeyServiceRefused)
 }
 
-func TestCreateKeysetRaceMasterRotation(t *testing.T) {
-	t.Parallel()
-	gate := make(chan struct{})
-	old := &budgetKey{id: "mk-old", gate: gate}
-	newK := &budgetKey{id: "mk-new"}
-	store := &memKeysetStore{data: map[string]StoredKeyset{}}
-	c, _ := NewCodec(store, []KeyService{old})
-	ctx := core.WithTenant(context.Background(), "newco")
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, _ = c.Encode(ctx, plainPayload("first"))
-	}()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- c.RotateMasterKey(ctx, newK)
-	}()
-	close(gate)
-	wg.Wait()
-	if err := <-errCh; err != nil {
-		t.Fatalf("rotate: %v", err)
+type raceSignalStore struct {
+	memKeysetStore
+	tenantsListed chan struct{}
+}
+
+func (s *raceSignalStore) Tenants(ctx context.Context) ([]string, error) {
+	if s.tenantsListed != nil {
+		select {
+		case s.tenantsListed <- struct{}{}:
+		default:
+		}
 	}
-	if store.data["newco"].MasterKeyID != "mk-new" {
-		t.Fatalf("record master %q", store.data["newco"].MasterKeyID)
+	return s.memKeysetStore.Tenants(ctx)
+}
+
+func TestCreateKeysetRaceMasterRotation(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		gate := make(chan struct{})
+		inWrap := make(chan struct{}, 1)
+		listed := make(chan struct{}, 1)
+		store := &raceSignalStore{
+			memKeysetStore: memKeysetStore{data: map[string]StoredKeyset{}},
+			tenantsListed:  listed,
+		}
+		old := &budgetKey{id: "mk-old", gate: gate, inWrap: inWrap}
+		newK := &budgetKey{id: "mk-new"}
+		c, err := NewCodec(store, []KeyService{old})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := core.WithTenant(context.Background(), "newco")
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := c.Encode(ctx, plainPayload("first")); err != nil {
+				t.Error(err)
+			}
+		}()
+
+		rotateDone := make(chan error, 1)
+		go func() {
+			<-inWrap
+			rotateDone <- c.RotateMasterKey(ctx, newK)
+		}()
+
+		for g := 0; g < 200; g++ {
+			select {
+			case <-listed:
+				goto releaseGate
+			default:
+				runtime.Gosched()
+			}
+		}
+	releaseGate:
+		close(gate)
+		wg.Wait()
+		if err := <-rotateDone; err != nil {
+			t.Fatalf("iter %d rotate: %v", i, err)
+		}
+		rec, ok, err := store.Get(ctx, "newco")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok || rec.MasterKeyID != "mk-new" {
+			t.Fatalf("iter %d record master %q ok=%v", i, rec.MasterKeyID, ok)
+		}
 	}
 }
 

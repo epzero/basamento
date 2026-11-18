@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -8,36 +9,46 @@ import (
 
 func TestValidateTenantREQCORE005(t *testing.T) {
 	t.Parallel()
-	valid := []string{"acme", "ACME", "a", "a.b", "a..b", "tenant-with-dashes", "tenant_with_underscores", "tenant.with.dots"}
+	valid := []string{
+		"acme",
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"acme-東京",
+		"a..b",
+		"a b",
+	}
 	for _, id := range valid {
 		if err := ValidateTenant(id); err != nil {
 			t.Fatalf("%q valid: %v", id, err)
 		}
 	}
-	invalid := []struct {
-		id string
-	}{
-		{""},
-		{"."},
-		{".."},
-		{"acme/sub"},
-		{"acme\\sub"},
-		{" acme"},
-		{"acme "},
-		{"acme\x00evil"},
-		{"acme\x1f"},
-		{"acme\x7f"},
+	invalid := []string{
+		"",
+		".",
+		"..",
+		"a/.part",
+		"a\\b",
+		"\xff\xfe",
+		"a\u0000b",
+		"a\u000ab",
+		"a\u001fb",
+		"a\u007fb",
+		" acme",
+		"acme ",
+		"\u00a0acme",
+		strings.Repeat("a", 129),
+		"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
 	}
-	for _, tc := range invalid {
-		if err := ValidateTenant(tc.id); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-			t.Fatalf("%q: err=%v", tc.id, err)
+	for _, id := range invalid {
+		err := ValidateTenant(id)
+		if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("%q: err=%v", id, err)
 		}
 	}
-	long := make([]byte, 129)
-	for i := range long {
-		long[i] = 'x'
+	longUTF8 := "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+	if len(longUTF8) != 130 {
+		t.Fatalf("long UTF-8 case len=%d", len(longUTF8))
 	}
-	if err := ValidateTenant(string(long)); err == nil {
-		t.Fatal("long tenant accepted")
+	if err := ValidateTenant(longUTF8); err == nil {
+		t.Fatal("130-byte UTF-8 tenant accepted")
 	}
 }

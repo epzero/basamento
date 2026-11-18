@@ -10,19 +10,29 @@ import (
 )
 
 type budgetKey struct {
-	id         string
-	unwraps    atomic.Int32
-	wraps      atomic.Int32
-	gate       chan struct{}
-	failUnwrap bool
+	id                  string
+	unwraps             atomic.Int32
+	wraps               atomic.Int32
+	gate                chan struct{}
+	inWrap              chan struct{}
+	failUnwrap          bool
+	failUnwrapNotCanary bool
 }
 
 func (b *budgetKey) MasterKeyID() string { return b.id }
 func (b *budgetKey) Close() error        { return nil }
 
 func (b *budgetKey) Wrap(ctx context.Context, tenant string, plain []byte) ([]byte, error) {
-	if b.gate != nil && tenant != canaryTenant {
-		<-b.gate
+	if tenant != canaryTenant {
+		if b.inWrap != nil {
+			select {
+			case b.inWrap <- struct{}{}:
+			default:
+			}
+		}
+		if b.gate != nil {
+			<-b.gate
+		}
 	}
 	b.wraps.Add(1)
 	inner, err := FrameBoundPlaintext(tenant, plain)
@@ -34,7 +44,7 @@ func (b *budgetKey) Wrap(ctx context.Context, tenant string, plain []byte) ([]by
 
 func (b *budgetKey) Unwrap(ctx context.Context, tenant string, ct []byte) ([]byte, error) {
 	b.unwraps.Add(1)
-	if b.failUnwrap {
+	if b.failUnwrap || (b.failUnwrapNotCanary && tenant != canaryTenant) {
 		return nil, errUnavailableRetry("awskms")
 	}
 	if len(ct) < 5 || string(ct[:5]) != "wrap:" {
@@ -222,5 +232,60 @@ func TestUnwrapBudgetTwoCodecsMasterRotation(t *testing.T) {
 	}
 	if newK.unwraps.Load() > 1 {
 		t.Fatalf("decode after master rotation unwraps=%d", newK.unwraps.Load())
+	}
+}
+
+func TestUnwrapBudgetColdCodecFiftyEncodesDecodesOneUnwrap(t *testing.T) {
+	t.Parallel()
+	ks := &budgetKey{id: "mk"}
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	creator, err := NewCodec(store, []KeyService{ks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := core.WithTenant(context.Background(), "acme")
+	if _, err := creator.Encode(ctx, plainPayload("seed")); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := NewCodec(store, []KeyService{ks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ks.unwraps.Store(0)
+	for i := 0; i < 50; i++ {
+		enc, err := cold.Encode(ctx, plainPayload("payload"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cold.Decode(ctx, enc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ks.unwraps.Load() != 1 {
+		t.Fatalf("unwraps %d want 1", ks.unwraps.Load())
+	}
+}
+
+func TestUnwrapBudgetCreatingCodecZeroUnwrapsManyOps(t *testing.T) {
+	t.Parallel()
+	ks := &budgetKey{id: "mk"}
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	c, err := NewCodec(store, []KeyService{ks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := core.WithTenant(context.Background(), "acme")
+	ks.unwraps.Store(0)
+	for i := 0; i < 50; i++ {
+		enc, err := c.Encode(ctx, plainPayload("payload"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Decode(ctx, enc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ks.unwraps.Load() != 0 {
+		t.Fatalf("unwraps %d want 0", ks.unwraps.Load())
 	}
 }
