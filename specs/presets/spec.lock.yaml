@@ -3,180 +3,191 @@
 version: 1
 scenarios:
     PRESET-001-01:
-        hash: sha256:49e170ad7ed7ea8d827aa041b23cbde996ca5894e5c7e582e0a547ae1ad0de86
+        hash: sha256:a773015cb2ef97453c95f640df536dbddd43474ee01da8a064f4f285a07a8677
         reqs:
             - REQ-PRESET-001
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-002-01:
-        hash: sha256:c6c46d428dcd4187f94de655ed4d561da2f798a334ac669d17901f16b3fd565f
+        hash: sha256:6da5ced8f14322a9cc61e4d819861376fea0990270a9fa64b5445bcd7f369b48
         reqs:
             - REQ-PRESET-002
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-003-01:
-        hash: sha256:d80b869e3889ff6cbbf7e2d67eddfd6b1b561038bb578a6efdf1f716bd9f5a91
+        hash: sha256:e39c36bc3189b977a67593b798faba554f6efbda5d7fea3ac80bff98bbe0d4c6
         reqs:
             - REQ-PRESET-003
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Durability and determinism: crash resume skips checkpointed stages and sandbox calls, and pinned run versions survive version updates.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Durability and determinism: crash resume skips checkpointed stages, sandbox calls, and model requests across attempts.'
         human:
             status: pending
     PRESET-004-01:
-        hash: sha256:656423ce1796c5902eb4690c04b46bd5ca7a480f86c778b3649ce391876efd8b
+        hash: sha256:bbca6d0e46bec4f5d9f35cb919433de0ddf35f1fef353239bdac68d66b5e998b
         reqs:
             - REQ-PRESET-004
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-005-01:
-        hash: sha256:1833b0b02b9364e8ba0d7e513011c58f08dadc1c9d69bb22f9c8c4234014fc88
+        hash: sha256:76668bf95f7aa0d532769f79e8afccaa1a89e7a476f4538bd42619791ebb5df7
         reqs:
             - REQ-PRESET-005
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-006-01:
-        hash: sha256:5d09e9273a2a42e99cee559a21e96698f5b41a73acd0f2ce8e040bf108f05e6d
+        hash: sha256:805218cbbe4ca68a266b613f58f7ce7834a15cac47b80a934ba6217e0baf4559
         reqs:
             - REQ-PRESET-006
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-007-01:
-        hash: sha256:b844171745c07008b27cdbdd35174a76aebc5083da6e195b49f1727c8acbe972
+        hash: sha256:c3654f004e396803d7a2aac03e44be2237826269c2f5abb66b22a5ad0bcf779f
         reqs:
             - REQ-PRESET-007
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Loop budget guard (@cost): visit and milli-point limits bound repair loops and fail with budget_exceeded.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Loop budget guard (@cost): repair visit and milli-point limits bound the repair loop and fail with budget_exceeded.'
         human:
             status: pending
     PRESET-007-02:
-        hash: sha256:8e8e142efb3a322554f663243d3b6e4e0d10c08318dbd2cc031c22cfd7257e81
+        hash: sha256:a20d316080bea75ab302e6850801d979e3114bb553e1b28ac7c833f03f3e5e13
         reqs:
             - REQ-PRESET-007
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Loop budget guard (@cost): visit and milli-point limits bound repair loops and fail with budget_exceeded.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Loop budget guard (@cost): repair visit and milli-point limits bound the repair loop and fail with budget_exceeded.'
         human:
             status: pending
     PRESET-008-01:
-        hash: sha256:824f36f6ad32a043c0a5eb05ba4d2c26134a26ac6d2c6552e4fb0a7826876dea
+        hash: sha256:d0517d77ee5db5b7217ad46acd0305a98dbf87413251f920793df611a06afb13
         reqs:
             - REQ-PRESET-008
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: author self-review and return to repair replace the pre-commit human review gate.'
         human:
             status: pending
     PRESET-009-01:
-        hash: sha256:fdc10e6a0e378621d89dc6b0cf5c7cb42d33fca7b6e4d45798d636c7bc95155f
+        hash: sha256:ff76a63287adc21249350cc73038deef923a65c3421ccf28456a155127f85457
         reqs:
             - REQ-PRESET-009
-        tier: P0
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: author self-review and return to repair replace the pre-commit human review gate.'
         human:
             status: pending
     PRESET-010-01:
-        hash: sha256:55eb61f37fd4e04a45e7af757a64fe520e1e5df31cecc2feb87eabccbeb72d95
+        hash: sha256:6ba8a4557cc61124cb4e68dca5b06f8575f3add518b514f91bb6845c795329c4
         reqs:
             - REQ-PRESET-010
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Repository write safety: no writer calls before commit stage, bootstrap commits verified workspace once, and iterate never writes the default branch.'
         human:
             status: pending
     PRESET-011-01:
-        hash: sha256:f1e0b6e941ac0ecea71e25227b95d36be00d5aaf38c02e8af1a1913f00c69409
+        hash: sha256:5f6ebde7dfe284e1857d527ab79158bfaa16cb5141aa0a7bbefce00bbae5f4a5
         reqs:
             - REQ-PRESET-011
-        tier: P2
+        tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Repository write safety: no writer calls before commit stage, bootstrap commits verified workspace once, and iterate never writes the default branch.'
         human:
             status: pending
     PRESET-012-01:
-        hash: sha256:d0ca06c77c43b170d9959a011c738ad71495712336df54799b1db26122646140
+        hash: sha256:6547d55326128073901e5db512f58bc7e7e1e539ceb8991fb37ef28f49aae6bb
         reqs:
             - REQ-PRESET-012
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: author self-review and return to repair replace the pre-commit human review gate.'
         human:
             status: pending
     PRESET-012-02:
-        hash: sha256:5b941ff206cf2c0e156845a44d70f5f5f96bc99356d765cdb8099bfffd12f849
+        hash: sha256:4752e2519b04d62da9c0a6a8d8254183d730b1e91e0154ad3d800d103f83577c
         reqs:
             - REQ-PRESET-012
-        tier: P2
+            - REQ-PRESET-020
+        tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Loop budget guard (@cost) and write safety: exhausted self-review visits fail with budget_exceeded and make no branch, commit, or writer call.'
         human:
             status: pending
     PRESET-013-01:
-        hash: sha256:a65ed61cd165478c3e1e6cfdce06b9fa4a26f94b0b48a8ea25370d03e3befc65
+        hash: sha256:242f706e1d4b3864d4dae8dddbe6c51e3037eef63b218bc7402bde509f3c3211
         reqs:
             - REQ-PRESET-013
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Repository write safety: no writes before review approval, single commit of reviewed workspace, and iterate never writes the default branch.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Repository write safety: no writer calls before commit stage, bootstrap commits verified workspace once, and iterate never writes the default branch.'
         human:
             status: pending
     PRESET-014-01:
-        hash: sha256:126ebfc0dae04728fde861f8f3c96d3f7e8a160ab71c1ed01083318c5598b2be
+        hash: sha256:60b59fa2ec064e36ce868221c11f26e18c57bf755b7c5ba0134c2d1810ef54af
         reqs:
             - REQ-PRESET-014
         tier: P0
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
-        note: 'Durability and determinism: crash resume skips checkpointed stages and sandbox calls, and pinned run versions survive version updates.'
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Determinism and durability: in-flight runs keep their pinned preset version and prompts across version updates.'
         human:
             status: pending
     PRESET-015-01:
-        hash: sha256:5089ee4ae9a7d10e7ccd8291eb90ccb9c52de8de743339ea50de153285cfd173
+        hash: sha256:b9c9d27e2fcbe092e9ecb4f4bea606d232a67efe80c4041d2e7f019318505f33
         reqs:
             - REQ-PRESET-015
-        tier: P2
+        tier: P1
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Changed agreed behavior: stage log, checkpoints, and Background updated for the self-review stage and guard.'
         human:
             status: pending
     PRESET-016-01:
@@ -185,8 +196,8 @@ scenarios:
             - REQ-PRESET-016
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-017-01:
@@ -195,8 +206,8 @@ scenarios:
             - REQ-PRESET-017
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-017-02:
@@ -205,8 +216,8 @@ scenarios:
             - REQ-PRESET-017
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-017-03:
@@ -215,8 +226,8 @@ scenarios:
             - REQ-PRESET-017
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-018-01:
@@ -225,8 +236,8 @@ scenarios:
             - REQ-PRESET-018
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-018-02:
@@ -235,8 +246,8 @@ scenarios:
             - REQ-PRESET-018
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-019-01:
@@ -245,8 +256,8 @@ scenarios:
             - REQ-PRESET-019
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
         human:
             status: pending
     PRESET-019-02:
@@ -255,7 +266,18 @@ scenarios:
             - REQ-PRESET-019
         tier: P2
         author: claude-code:spec-author:470745
-        reviewer: antigravity:spec-reviewer:056934
-        approved_at: "2026-11-17"
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    PRESET-020-01:
+        hash: sha256:edd3b24c113185e27baef90c6b817e96e0011ab7b43a17a810020689cf3d809c
+        reqs:
+            - REQ-PRESET-020
+        tier: P0
+        author: claude-code:spec-author:470745
+        reviewer: antigravity:spec-reviewer:da5c51
+        approved_at: "2026-11-18"
+        note: 'Loop budget guard (@cost) and write safety: exhausted self-review visits fail with budget_exceeded and make no branch, commit, or writer call.'
         human:
             status: pending
