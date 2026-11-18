@@ -35,8 +35,10 @@ func (e *Execer) rewrite(q string) (string, error) {
 }
 
 // rewritePostgresPlaceholders converts ? bind markers to $n for Postgres, without
-// touching ? inside single-quoted strings, double-quoted identifiers, line or
-// block comments, or dollar-quoted bodies. Queries must not use $n markers.
+// touching ? inside single-quoted strings, Postgres escape and typed strings
+// (E/e, B/b, X/x, U&/u& only when not preceded by an identifier character),
+// double-quoted identifiers, line or block comments, or dollar-quoted bodies
+// ($ only when not preceded by an identifier character). Queries must not use $n markers.
 func rewritePostgresPlaceholders(q string) (string, error) {
 	var b strings.Builder
 	n := 0
@@ -53,61 +55,59 @@ func rewritePostgresPlaceholders(q string) (string, error) {
 			j := skipBlockCommentPostgres(q, i)
 			b.WriteString(q[i:j])
 			i = j
-		case q[i] == 'E' && i+1 < len(q) && q[i+1] == '\'':
-			j, err := skipPostgresEscapeString(q, i+1)
-			if err != nil {
-				return "", err
-			}
-			b.WriteString(q[i:j])
-			i = j
-		case q[i] == '\'':
-			j := i + 1
-			for j < len(q) {
-				if q[j] == '\'' {
-					if j+1 < len(q) && q[j+1] == '\'' {
-						j += 2
-						continue
-					}
-					j++
-					break
+		default:
+			if j, ok, err := skipPostgresPrefixedString(q, i); ok {
+				if err != nil {
+					return "", err
 				}
-				j++
-			}
-			b.WriteString(q[i:j])
-			i = j
-		case q[i] == '"':
-			j := i + 1
-			for j < len(q) {
-				if q[j] == '"' {
-					if j+1 < len(q) && q[j+1] == '"' {
-						j += 2
-						continue
-					}
-					j++
-					break
-				}
-				j++
-			}
-			b.WriteString(q[i:j])
-			i = j
-		case q[i] == '$':
-			if _, j, ok := skipDollarQuoted(q, i); ok {
 				b.WriteString(q[i:j])
 				i = j
-				continue
+				break
 			}
-			if i+1 < len(q) && q[i+1] >= '0' && q[i+1] <= '9' {
-				return "", core.NewError(core.CodeInvalidArgument, "sql: query uses $n placeholders; use ?", nil)
+			switch q[i] {
+			case '\'':
+				j := skipSingleQuotedString(q, i)
+				b.WriteString(q[i:j])
+				i = j
+			case '"':
+				j := i + 1
+				for j < len(q) {
+					if q[j] == '"' {
+						if j+1 < len(q) && q[j+1] == '"' {
+							j += 2
+							continue
+						}
+						j++
+						break
+					}
+					j++
+				}
+				b.WriteString(q[i:j])
+				i = j
+			case '$':
+				if i > 0 && postgresIdentTailByte(q[i-1]) {
+					b.WriteByte(q[i])
+					i++
+					break
+				}
+				if _, j, ok := skipDollarQuoted(q, i); ok {
+					b.WriteString(q[i:j])
+					i = j
+					break
+				}
+				if i+1 < len(q) && q[i+1] >= '0' && q[i+1] <= '9' {
+					return "", core.NewError(core.CodeInvalidArgument, "sql: query uses $n placeholders; use ?", nil)
+				}
+				b.WriteByte(q[i])
+				i++
+			case '?':
+				n++
+				fmt.Fprintf(&b, "$%d", n)
+				i++
+			default:
+				b.WriteByte(q[i])
+				i++
 			}
-			b.WriteByte(q[i])
-			i++
-		case q[i] == '?':
-			n++
-			fmt.Fprintf(&b, "$%d", n)
-			i++
-		default:
-			b.WriteByte(q[i])
-			i++
 		}
 	}
 	return b.String(), nil
@@ -132,6 +132,61 @@ func skipBlockCommentPostgres(q string, i int) int {
 	return j
 }
 
+func postgresIdentTailByte(b byte) bool {
+	if b == '_' || b == '$' {
+		return true
+	}
+	if b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
+		return true
+	}
+	return b >= 0x80
+}
+
+func skipSingleQuotedString(q string, i int) int {
+	if i >= len(q) || q[i] != '\'' {
+		return i
+	}
+	j := i + 1
+	for j < len(q) {
+		if q[j] == '\'' {
+			if j+1 < len(q) && q[j+1] == '\'' {
+				j += 2
+				continue
+			}
+			j++
+			break
+		}
+		j++
+	}
+	return j
+}
+
+// skipPostgresPrefixedString skips typed string literals (E'/e', B'/b', X'/x', U&'/u&')
+// when not preceded by an identifier character. The second bool is true when i was advanced.
+func skipPostgresPrefixedString(q string, i int) (int, bool, error) {
+	if i > 0 && postgresIdentTailByte(q[i-1]) {
+		return i, false, nil
+	}
+	if i+2 < len(q) && (q[i] == 'U' || q[i] == 'u') && q[i+1] == '&' && q[i+2] == '\'' {
+		j, err := skipPostgresEscapeString(q, i+2)
+		return j, true, err
+	}
+	if i+1 < len(q) {
+		switch q[i] {
+		case 'E', 'e':
+			if q[i+1] == '\'' {
+				j, err := skipPostgresEscapeString(q, i+1)
+				return j, true, err
+			}
+		case 'B', 'b', 'X', 'x':
+			if q[i+1] == '\'' {
+				return skipSingleQuotedString(q, i+1), true, nil
+			}
+		}
+	}
+	return i, false, nil
+}
+
 func skipPostgresEscapeString(q string, i int) (int, error) {
 	if i >= len(q) || q[i] != '\'' {
 		return i, nil
@@ -143,6 +198,10 @@ func skipPostgresEscapeString(q string, i int) (int, error) {
 			continue
 		}
 		if q[j] == '\'' {
+			if j+1 < len(q) && q[j+1] == '\'' {
+				j += 2
+				continue
+			}
 			j++
 			break
 		}

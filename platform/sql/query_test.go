@@ -120,6 +120,101 @@ func TestRewritePlaceholdersPostgres(t *testing.T) {
 			want: `SELECT E'\\?' AS q, $1 FROM t`,
 		},
 		{
+			name: "escape_string_lowercase",
+			in:   `SELECT e'\'?', ?`,
+			want: `SELECT e'\'?', $1`,
+		},
+		{
+			name: "like_plain_string_not_escape",
+			in:   `WHERE a LIKE'\' AND b = ?`,
+			want: `WHERE a LIKE'\' AND b = $1`,
+		},
+		{
+			name: "escape_string_doubled_quote",
+			in:   `SELECT E'a''?', ?`,
+			want: `SELECT E'a''?', $1`,
+		},
+		{
+			name: "escape_after_ident_letter",
+			in:   `SELECT size'?', ?`,
+			want: `SELECT size'?', $1`,
+		},
+		{
+			name: "escape_after_ident_digit",
+			in:   `SELECT x1'?', ?`,
+			want: `SELECT x1'?', $1`,
+		},
+		{
+			name: "escape_after_ident_underscore",
+			in:   `SELECT _e'?', ?`,
+			want: `SELECT _e'?', $1`,
+		},
+		{
+			name: "escape_after_ident_dollar",
+			in:   `SELECT $e'?', ?`,
+			want: `SELECT $e'?', $1`,
+		},
+		{
+			name: "escape_after_high_byte",
+			in:   "SELECT \xe2e'?', ?",
+			want: "SELECT \xe2e'?', $1",
+		},
+		{
+			name: "escape_at_start",
+			in:   `E'\?', ?`,
+			want: `E'\?', $1`,
+		},
+		{
+			name: "escape_after_paren",
+			in:   `(E'\?', ?)`,
+			want: `(E'\?', $1)`,
+		},
+		{
+			name: "escape_after_comma",
+			in:   `x, E'\?', ?`,
+			want: `x, E'\?', $1`,
+		},
+		{
+			name: "escape_after_space",
+			in:   ` x E'\?', ?`,
+			want: ` x E'\?', $1`,
+		},
+		{
+			name: "dollar_after_ident",
+			in:   `SELECT foo$tag$?, ?`,
+			want: `SELECT foo$tag$$1, $2`,
+		},
+		{
+			name: "dollar_quote_after_space",
+			in:   `SELECT $tag$? in$tag$, ?`,
+			want: `SELECT $tag$? in$tag$, $1`,
+		},
+		{
+			name: "byte_string",
+			in:   `SELECT B'??', ?`,
+			want: `SELECT B'??', $1`,
+		},
+		{
+			name: "byte_string_after_ident",
+			in:   `SELECT fooB'?', ?`,
+			want: `SELECT fooB'?', $1`,
+		},
+		{
+			name: "hex_string",
+			in:   `SELECT X'AB?', ?`,
+			want: `SELECT X'AB?', $1`,
+		},
+		{
+			name: "unicode_string",
+			in:   `SELECT U&'a\0441?', ?`,
+			want: `SELECT U&'a\0441?', $1`,
+		},
+		{
+			name: "unicode_string_after_ident",
+			in:   `SELECT fooU&'?', ?`,
+			want: `SELECT fooU&'?', $1`,
+		},
+		{
 			name: "nested_block_comment",
 			in:   "SELECT /* /* ? */ ? */ 1 WHERE x = ?",
 			want: "SELECT /* /* ? */ ? */ 1 WHERE x = $1",
