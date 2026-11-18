@@ -1,0 +1,325 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    CONFIG-001-01:
+        hash: sha256:24c8989f3ad1cd89fe3a83c72f6c0e189277198bc900b2e3d93bb2825f6518d9
+        reqs:
+            - REQ-CONFIG-001
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-001-02:
+        hash: sha256:55424e4b3fa16da0618cddba7656a95dd0f9ccbbddf7c9d57f35db9ef310b686
+        reqs:
+            - REQ-CONFIG-001
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-002-01:
+        hash: sha256:fedf4c1c593d88b54968d98e7a7cc9268e3f89fdd50846bf39560a35931a4b8e
+        reqs:
+            - REQ-CONFIG-002
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-003-01:
+        hash: sha256:dcf8730d23bf3aeb3682f130028e6d92f5fc99cc105dbe08c902e8c96f3f8333
+        reqs:
+            - REQ-CONFIG-003
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-003-02:
+        hash: sha256:7d97d4df2945082324b7ddb237b8a715bc6d4984935efd3d4ffa11a30df627cf
+        reqs:
+            - REQ-CONFIG-003
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-004-01:
+        hash: sha256:0c96f308d73b6f717dcfe2ec160e03648600b8a5400995aaa27d4d41dab2042b
+        reqs:
+            - REQ-CONFIG-004
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-004-02:
+        hash: sha256:7d7fbbf72bc6b1698ce8fef9869bb64c61e27e663c72cf305b15d8278f8d423a
+        reqs:
+            - REQ-CONFIG-004
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-005-01:
+        hash: sha256:a9ce38b881084e46873a61f5b4e4429edd1a8bdccdc6882e5646cc1946053e2b
+        reqs:
+            - REQ-CONFIG-005
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-005-02:
+        hash: sha256:3b2a4441dd80afbac0896ebbbb843f5f468eb2fa1cc04d11bd7f94f8cd928f0d
+        reqs:
+            - REQ-CONFIG-005
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Fail-closed safety: invalid configuration exits before opening any listener or creating files in data.dir.'
+        human:
+            status: pending
+    CONFIG-006-01:
+        hash: sha256:3580e74b47903999984958c4186c160a0140937872209551dda4c4acb7d69880
+        reqs:
+            - REQ-CONFIG-006
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-006-02:
+        hash: sha256:55cedcada3f78358edda2a40a3ad6b86a4c4233d8e078132cb5757d124fe1321
+        reqs:
+            - REQ-CONFIG-006
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-007-01:
+        hash: sha256:5a16e4834527e666538e8693978a015cf1032deba9f2c24ade02bc03592bb083
+        reqs:
+            - REQ-CONFIG-007
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Security: validation errors must never leak URL credentials, host/path/query parts, or echoed invalid values.'
+        human:
+            status: pending
+    CONFIG-007-02:
+        hash: sha256:d93b7fd610a97ac70d773f462fb22793bff5dedfa8ae89bb66e8c29b75b0c0aa
+        reqs:
+            - REQ-CONFIG-007
+            - REQ-CONFIG-017
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Security: validation errors must never leak URL credentials, host/path/query parts, or echoed invalid values.'
+        human:
+            status: pending
+    CONFIG-008-01:
+        hash: sha256:e3f93a266ec93c0a00565f1a52049452b7b1a99a978d6c8e547e927f050a4131
+        reqs:
+            - REQ-CONFIG-008
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Security: effective configuration report must mask URL passwords as ***.'
+        human:
+            status: pending
+    CONFIG-009-01:
+        hash: sha256:f4562b90855181a5cbcadd4a93c1b39d57d55217f3cc97c922f1f3bb85308401
+        reqs:
+            - REQ-CONFIG-009
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-010-01:
+        hash: sha256:29b2438d10bf75793d40b0e6cc31ab77f4199280bd12835e871511ea6110ac44
+        reqs:
+            - REQ-CONFIG-010
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-011-01:
+        hash: sha256:b3eedff745a79504e92d8321fd21a78599509e90257e857804631b9af3755eba
+        reqs:
+            - REQ-CONFIG-011
+            - REQ-CONFIG-013
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-012-01:
+        hash: sha256:4e2767a82aeceaa71458a0c5ab2e9af9b60d56a8b496352ef25d55a157faeaf5
+        reqs:
+            - REQ-CONFIG-012
+            - REQ-CONFIG-013
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-014-01:
+        hash: sha256:e8754a05df5bb2beeff373a20e0cff0e4142d38acbd002b664227a57fa261108
+        reqs:
+            - REQ-CONFIG-014
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-014-02:
+        hash: sha256:f15fdd2e0c22517543b744d3b2d7a70e1267c6cf45951151dd8e0e2cfce243e0
+        reqs:
+            - REQ-CONFIG-014
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-015-01:
+        hash: sha256:15a6695d5bfa0fee816abd718625676bd2fea5d782b2cae39a8f7303dee6f179
+        reqs:
+            - REQ-CONFIG-015
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-016-01:
+        hash: sha256:d4813a6441047ad5a5a1c335423d064aa7cce0bd2d2b60abea925afebb986038
+        reqs:
+            - REQ-CONFIG-016
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Security: default listen.addr is loopback-only (127.0.0.1:8080) so an unauthenticated server is not exposed on the network.'
+        human:
+            status: pending
+    CONFIG-016-02:
+        hash: sha256:34a9c173065420e7f22efde075677c4d670c29c21c7207328546f434d5cc263d
+        reqs:
+            - REQ-CONFIG-016
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Security: default listen.addr is loopback-only (127.0.0.1:8080) so an unauthenticated server is not exposed on the network.'
+        human:
+            status: pending
+    CONFIG-017-01:
+        hash: sha256:950f93e93c4decbca1443544a7fe576982284097b23cff08105649c08f81e95c
+        reqs:
+            - REQ-CONFIG-017
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-018-01:
+        hash: sha256:7a75ba215708a0c19867311ba785de3642ae469eb5d67f7139d0bb8ae8bf804c
+        reqs:
+            - REQ-CONFIG-018
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-019-01:
+        hash: sha256:4cb0b228c4454a1b016eba2af6fa3e7919d2093b7910d548ee4353495f9629da
+        reqs:
+            - REQ-CONFIG-019
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-020-01:
+        hash: sha256:2ab9b5534c103a8467b3cb6b06750a0ca6b365a9f1765d531c315cfb51c6d23f
+        reqs:
+            - REQ-CONFIG-020
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-021-01:
+        hash: sha256:9beabb596fffadbf40f849f3c984dbd6d4d984c634f06454073bc6bf18edfe43
+        reqs:
+            - REQ-CONFIG-021
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-022-01:
+        hash: sha256:7b4f3f6911da7ac3e976814497c00ccb7ca92b722607cbaeefc8c7250741a414
+        reqs:
+            - REQ-CONFIG-022
+        tier: P2
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    CONFIG-023-01:
+        hash: sha256:0bada8cb1a7bc734e558c2ac8cde2349de75c077dae6f81b536fded6cfd60704
+        reqs:
+            - REQ-CONFIG-023
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Data safety and durability: termination signal drains in-flight requests up to shutdown.timeout and always closes every port cleanly.'
+        human:
+            status: pending
+    CONFIG-024-01:
+        hash: sha256:0c732912f5091e07ea7a7fcd48635ca909b09c2ca8f1b0dd33ace31418c93d10
+        reqs:
+            - REQ-CONFIG-024
+        tier: P0
+        author: claude-code:spec-author:f0c127
+        reviewer: antigravity:spec-reviewer:8e5d19
+        approved_at: "2026-11-18"
+        note: 'Data safety and durability: termination signal drains in-flight requests up to shutdown.timeout and always closes every port cleanly.'
+        human:
+            status: pending
