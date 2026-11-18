@@ -37,31 +37,13 @@ func wrapSortedMapper(v ref.Val, adapter *sortedAdapter) ref.Val {
 	case *sortedStringMap, *sortedAnyMap:
 		return v
 	}
-	entries := extractMapperEntries(m, adapter)
+	entries, err := extractMapperEntries(m, adapter)
+	if err != nil {
+		return types.NewErr("unsupported map key type")
+	}
 	if len(entries) == 0 {
-		// Fall back to string-only extraction for string-keyed maps.
-		data := map[string]any{}
-		it := m.Iterator()
-		for it.HasNext().Equal(types.True) == types.True {
-			k := it.Next()
-			ks, ok := k.(types.String)
-			if !ok {
-				return v
-			}
-			val, found := m.Find(k)
-			if !found {
-				continue
-			}
-			nat, err := val.ConvertToNative(reflect.TypeFor[any]())
-			if err != nil {
-				return v
-			}
-			data[string(ks)] = nat
-		}
-		if len(data) == 0 {
-			return v
-		}
-		return &sortedStringMap{adapter: adapter, data: data}
+		// Empty map literal; unclassified key kinds fail in extractMapperEntries above.
+		return newSortedAnyMap(adapter, nil)
 	}
 	allString := true
 	for _, e := range entries {
@@ -75,7 +57,7 @@ func wrapSortedMapper(v ref.Val, adapter *sortedAdapter) ref.Val {
 		for _, e := range entries {
 			nat, err := e.val.ConvertToNative(reflect.TypeFor[any]())
 			if err != nil {
-				return v
+				return types.NewErr("type conversion error")
 			}
 			data[e.key.s] = nat
 		}

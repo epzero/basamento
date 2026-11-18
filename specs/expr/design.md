@@ -104,7 +104,8 @@ nothing is coerced from strings.
 - **Map iteration**: every map an expression sees, bound from a variable,
   written as a literal or built during evaluation, iterates its keys in
   ascending order. Keys of one type sort by value (strings by Unicode code
-  point); mixed key types sort `bool` < `int` < `uint` < `string`. This makes
+  point); mixed key types sort `bool` < `int` < `uint` < `double` < `string`,
+  with `double` keys ordered numerically (all NaNs last, −0 before +0). This makes
   `map`, `filter`, `all`, `exists`, `exists_one` and two-variable
   comprehensions independent of Go map order, including which error an
   evaluation reports first. A custom type adapter that returns a sorted map

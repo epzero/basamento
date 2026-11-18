@@ -2,6 +2,7 @@ package expr
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 
@@ -149,6 +150,7 @@ const (
 	keyBool mapKeyKind = iota
 	keyInt
 	keyUint
+	keyDouble
 	keyString
 )
 
@@ -157,6 +159,7 @@ type mapKey struct {
 	b    bool
 	i    int64
 	u    uint64
+	d    float64
 	s    string
 	key  ref.Val
 }
@@ -169,11 +172,34 @@ func classifyMapKey(k ref.Val) (mapKey, bool) {
 		return mapKey{kind: keyInt, i: int64(v), key: k}, true
 	case types.Uint:
 		return mapKey{kind: keyUint, u: uint64(v), key: k}, true
+	case types.Double:
+		f := float64(v)
+		return mapKey{kind: keyDouble, d: f, key: k}, true
 	case types.String:
 		return mapKey{kind: keyString, s: string(v), key: k}, true
 	default:
 		return mapKey{}, false
 	}
+}
+
+// mapKeyDoubleLess orders bool < int < uint < double < string at the map level.
+// For doubles it orders values ascending numerically, places −0 before +0, and
+// orders all NaNs last (tie-broken by math.Float64bits).
+func mapKeyDoubleLess(a, b float64) bool {
+	aNaN, bNaN := math.IsNaN(a), math.IsNaN(b)
+	if aNaN && bNaN {
+		return math.Float64bits(a) < math.Float64bits(b)
+	}
+	if aNaN {
+		return false
+	}
+	if bNaN {
+		return true
+	}
+	if a == 0 && b == 0 {
+		return math.Signbit(a) && !math.Signbit(b)
+	}
+	return a < b
 }
 
 func (k mapKey) less(o mapKey) bool {
@@ -187,6 +213,8 @@ func (k mapKey) less(o mapKey) bool {
 		return k.i < o.i
 	case keyUint:
 		return k.u < o.u
+	case keyDouble:
+		return mapKeyDoubleLess(k.d, o.d)
 	case keyString:
 		return k.s < o.s
 	default:
@@ -215,6 +243,8 @@ func mapKeysEqual(a, b mapKey) bool {
 		return a.i == b.i
 	case keyUint:
 		return a.u == b.u
+	case keyDouble:
+		return a.d == b.d
 	case keyString:
 		return a.s == b.s
 	default:
@@ -229,22 +259,26 @@ func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMa
 	return &sortedAnyMap{adapter: adapter, entries: entries}
 }
 
-func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) []sortedEntry {
+func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntry, error) {
 	var entries []sortedEntry
 	it := m.Iterator()
 	for it.HasNext().Equal(types.True) == types.True {
 		k := it.Next()
 		mk, ok := classifyMapKey(k)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("unsupported map key type")
 		}
 		v, found := m.Find(k)
 		if !found {
-			continue
+			return nil, fmt.Errorf("no such key")
 		}
 		entries = append(entries, sortedEntry{key: mk, val: v})
 	}
-	return entries
+	n := int(m.Size().(types.Int))
+	if len(entries) != n {
+		return nil, fmt.Errorf("unsupported map key type")
+	}
+	return entries, nil
 }
 
 func (m *sortedAnyMap) ConvertToNative(typeDesc reflect.Type) (any, error) {

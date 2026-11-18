@@ -242,15 +242,10 @@ func jsonTypeOf(v any) string {
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return "number"
 		}
-		const maxInt64Exclusive = 9223372036854775808.0
-		const minInt64Inclusive = -9223372036854775808.0
-		if f >= maxInt64Exclusive || f < minInt64Inclusive {
-			if f == math.Trunc(f) {
-				return "integer"
-			}
-			return "number"
+		if float64IntegralOutsideInt64(f) {
+			return "integer"
 		}
-		if f == math.Trunc(f) {
+		if _, ok := float64IntegralInt64(f); ok {
 			return "integer"
 		}
 		return "number"

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"regexp"
 	"strings"
 
@@ -249,15 +248,11 @@ func bindInt(val any) (int64, error) {
 		}
 		return i, nil
 	case float64:
-		if v != math.Trunc(v) {
+		i, ok := float64IntegralInt64(v)
+		if !ok {
 			return 0, fmt.Errorf("wrong type")
 		}
-		const maxInt64Exclusive = 9223372036854775808.0
-		const minInt64Inclusive = -9223372036854775808.0
-		if v >= maxInt64Exclusive || v < minInt64Inclusive {
-			return 0, fmt.Errorf("wrong type")
-		}
-		return int64(v), nil
+		return i, nil
 	case int:
 		return int64(v), nil
 	case int64:

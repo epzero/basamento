@@ -56,9 +56,9 @@ func celValToJSON(val ref.Val) (any, error) {
 	case types.Bytes:
 		return base64.StdEncoding.EncodeToString(v), nil
 	case *jsonObjectVal:
-		return sortObjectMap(v.data), nil
+		return jsonObjectValToJSON(v)
 	case *sortedStringMap:
-		return sortObjectMap(v.data), nil
+		return stringMapDataToJSON(v.data)
 	case *sortedAnyMap:
 		return nil, fmt.Errorf("no JSON form")
 	}
@@ -137,6 +137,64 @@ func normalizeNativeJSON(v any) (any, error) {
 		return formatTimestampUTC(t), nil
 	default:
 		return v, nil
+	}
+}
+
+func stringMapDataToJSON(data map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(data))
+	for k, v := range data {
+		jv, err := bindingValueToJSON(v)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = jv
+	}
+	return sortObjectMap(out), nil
+}
+
+func jsonObjectValToJSON(o *jsonObjectVal) (map[string]any, error) {
+	if o == nil {
+		return nil, nil
+	}
+	out := make(map[string]any, len(o.data))
+	for k, v := range o.data {
+		jv, err := bindingValueToJSON(v)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = jv
+	}
+	return sortObjectMap(out), nil
+}
+
+func bindingValueToJSON(v any) (any, error) {
+	switch t := v.(type) {
+	case *jsonObjectVal:
+		return jsonObjectValToJSON(t)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			jv, err := bindingValueToJSON(val)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = jv
+		}
+		return sortObjectMap(out), nil
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			jv, err := bindingValueToJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = jv
+		}
+		return out, nil
+	case ref.Val:
+		return celValToJSON(t)
+	default:
+		return t, nil
 	}
 }
 
