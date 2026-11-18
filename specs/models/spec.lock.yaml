@@ -1155,7 +1155,7 @@ scenarios:
             - REQ-MODEL-067
         tier: P2
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'New behavior: catalog descriptor lookup by model id and not_found error on unknown id.'
         human:
@@ -1166,7 +1166,7 @@ scenarios:
             - REQ-MODEL-068
         tier: P2
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'New behavior: catalog descriptor lookup by model id and not_found error on unknown id.'
         human:
@@ -1177,7 +1177,7 @@ scenarios:
             - REQ-MODEL-069
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
         human:
@@ -1188,7 +1188,7 @@ scenarios:
             - REQ-MODEL-070
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
         human:
@@ -1199,7 +1199,7 @@ scenarios:
             - REQ-MODEL-071
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
@@ -1210,7 +1210,7 @@ scenarios:
             - REQ-MODEL-071
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
@@ -1221,7 +1221,7 @@ scenarios:
             - REQ-MODEL-071
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
@@ -1232,7 +1232,7 @@ scenarios:
             - REQ-MODEL-072
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
         human:
@@ -1243,7 +1243,7 @@ scenarios:
             - REQ-MODEL-072
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
         human:
@@ -1254,7 +1254,7 @@ scenarios:
             - REQ-MODEL-073
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
@@ -1265,7 +1265,7 @@ scenarios:
             - REQ-MODEL-073
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
@@ -1276,7 +1276,7 @@ scenarios:
             - REQ-MODEL-073
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
@@ -1287,20 +1287,34 @@ scenarios:
             - REQ-MODEL-074
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
-        note: 'Cost safety: default token formula pricing per million tokens without double-counting or subtracting cached and reasoning tokens.'
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
             status: pending
     MODEL-075-01:
-        hash: sha256:4714144676d57d4ff22a0aad2e06d6ddaeca9818cd39ffb9bb93d710d7526045
+        hash: sha256:092c743e7afef969693551c6876a1be3babeabd4801c8cd0cb9bc4f3b549cdb7
         reqs:
             - REQ-MODEL-075
+            - REQ-MODEL-081
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
-        note: 'Cost safety: default token formula pricing per million tokens without double-counting or subtracting cached and reasoning tokens.'
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: pending
+    MODEL-075-02:
+        hash: sha256:856662c048fd997e92dd227a301aa6d78063bc39b3c62b125ea75bd44783614e
+        reqs:
+            - REQ-MODEL-075
+            - REQ-MODEL-079
+            - REQ-MODEL-081
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
             status: pending
     MODEL-076-01:
@@ -1309,7 +1323,7 @@ scenarios:
             - REQ-MODEL-076
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
         human:
@@ -1320,7 +1334,7 @@ scenarios:
             - REQ-MODEL-076
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
         human:
@@ -1331,7 +1345,7 @@ scenarios:
             - REQ-MODEL-077
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety: pre-start reservation estimate from counted input tokens, output limit, and call parameters.'
         human:
@@ -1342,7 +1356,7 @@ scenarios:
             - REQ-MODEL-078
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
         human:
@@ -1353,8 +1367,41 @@ scenarios:
             - REQ-MODEL-078
         tier: P0
         author: claude-code:spec-author:beac34
-        reviewer: antigravity:spec-reviewer:fa5b01
+        reviewer: antigravity:spec-reviewer:1d54e5
         approved_at: "2026-11-18"
         note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
+        human:
+            status: pending
+    MODEL-080-01:
+        hash: sha256:192f83c608aa73bae7fb1e55acf7c02e1089ec922e89af0d5bd56fc61c6c90ea
+        reqs:
+            - REQ-MODEL-080
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: pending
+    MODEL-081-01:
+        hash: sha256:f8168fba16af546f8b797c21c9da180281121e65dc25b690d4ae58d02c5ba8ee
+        reqs:
+            - REQ-MODEL-081
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
+        human:
+            status: pending
+    MODEL-082-01:
+        hash: sha256:0187f183d2385ffe9810c3b48aafd1610ac7705aebea26757e39aeed1a5017af
+        reqs:
+            - REQ-MODEL-082
+        tier: P0
+        author: claude-code:spec-author:beac34
+        reviewer: antigravity:spec-reviewer:1d54e5
+        approved_at: "2026-11-18"
+        note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
             status: pending
