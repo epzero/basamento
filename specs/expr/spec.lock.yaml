@@ -402,3 +402,15 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/51
         human:
             status: pending
+    EXPR-026-01:
+        hash: sha256:60ca3ca4fa0fe3b281a697270d9b8d6f891c7475f02ae69af21fc5ef515903ed
+        reqs:
+            - REQ-EXPR-026
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:1cc967
+        approved_at: "2026-11-18"
+        note: 'Security: a mapping that includes a module or imports a data file reads the host filesystem, and module contents would make evaluation depend on files not bound as variables; refusing both at compile time keeps a mapping closed over its inputs and replay-deterministic. Covers the include and data-import forms; the plain module import is already approved in EXPR-015-01.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
