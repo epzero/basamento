@@ -92,7 +92,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Fail-closed safety: invalid configuration exits before opening any listener or creating files in data.dir.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-006-01:
         hash: sha256:3580e74b47903999984958c4186c160a0140937872209551dda4c4acb7d69880
         reqs:
@@ -123,7 +126,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: validation errors must never leak URL credentials, host/path/query parts, or echoed invalid values.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-007-02:
         hash: sha256:d93b7fd610a97ac70d773f462fb22793bff5dedfa8ae89bb66e8c29b75b0c0aa
         reqs:
@@ -135,7 +141,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: validation errors must never leak URL credentials, host/path/query parts, or echoed invalid values.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-008-01:
         hash: sha256:e3f93a266ec93c0a00565f1a52049452b7b1a99a978d6c8e547e927f050a4131
         reqs:
@@ -146,7 +155,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: effective configuration report must mask URL passwords as ***.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-009-01:
         hash: sha256:f4562b90855181a5cbcadd4a93c1b39d57d55217f3cc97c922f1f3bb85308401
         reqs:
@@ -229,7 +241,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: default listen.addr is loopback-only (127.0.0.1:8080) so an unauthenticated server is not exposed on the network.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-016-02:
         hash: sha256:34a9c173065420e7f22efde075677c4d670c29c21c7207328546f434d5cc263d
         reqs:
@@ -240,7 +255,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: default listen.addr is loopback-only (127.0.0.1:8080) so an unauthenticated server is not exposed on the network.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-017-01:
         hash: sha256:950f93e93c4decbca1443544a7fe576982284097b23cff08105649c08f81e95c
         reqs:
@@ -311,7 +329,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Data safety and durability: termination signal drains in-flight requests up to shutdown.timeout and always closes every port cleanly.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
     CONFIG-024-01:
         hash: sha256:0c732912f5091e07ea7a7fcd48635ca909b09c2ca8f1b0dd33ace31418c93d10
         reqs:
@@ -322,4 +343,7 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Data safety and durability: termination signal drains in-flight requests up to shutdown.timeout and always closes every port cleanly.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/10
