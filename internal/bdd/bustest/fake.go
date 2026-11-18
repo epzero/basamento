@@ -17,6 +17,7 @@ import (
 type Fake struct {
 	clock   core.Clock
 	mu      sync.Mutex
+	pubMu   sync.Mutex
 	bufSize int
 	maxSize int
 
@@ -44,13 +45,14 @@ type kvEntry struct {
 }
 
 type sub struct {
-	subject string
-	after   uint64
-	ch      chan platform.Message
-	ctx     context.Context
-	cancel  context.CancelFunc
-	bufCap  int
-	ended   bool
+	subject       string
+	after         uint64
+	replayThrough uint64
+	ch            chan platform.Message
+	cancel        context.CancelFunc
+	replayDone    chan struct{}
+	ended         bool
+	chClosed      bool
 }
 
 // NewFake builds a fake bus and KV. Limits follow bus.Options when nonzero.
@@ -69,11 +71,6 @@ func NewFake(clock core.Clock, opts bus.Options) *Fake {
 		purgeFloor: map[string]uint64{},
 		kv:         map[string]kvEntry{},
 	}
-}
-
-// SubscribeWithBuffer opens a subscription with explicit channel and overflow caps.
-func (f *Fake) SubscribeWithBuffer(ctx context.Context, subject string, after uint64, chanBuf, overflowCap int) (<-chan platform.Message, error) {
-	return f.subscribe(ctx, subject, after, chanBuf, overflowCap)
 }
 
 // Stop simulates bus unavailability without destroying state.
@@ -123,6 +120,13 @@ func (f *Fake) checkTTL(ttl time.Duration) error {
 	return nil
 }
 
+func (f *Fake) checkKVValue(value []byte) error {
+	if len(value) > bus.MaxKVValueBytes(f.maxSize) {
+		return core.NewError(core.CodeInvalidArgument, "kv value too large", nil)
+	}
+	return nil
+}
+
 func (f *Fake) lastSeqLocked(subject string) uint64 {
 	floor := f.purgeFloor[subject]
 	var max uint64
@@ -140,6 +144,8 @@ func (f *Fake) lastSeqLocked(subject string) uint64 {
 // Publish stores a message and delivers it to active subscribers of the subject.
 func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
 	_ = ctx
+	f.pubMu.Lock()
+	defer f.pubMu.Unlock()
 	if err := f.unavailable(); err != nil {
 		return 0, err
 	}
@@ -154,26 +160,26 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 	seq := f.streamSeq
 	msg := platform.Message{Subject: subject, Seq: seq, Data: append([]byte(nil), data...)}
 	f.retained[subject] = append(f.retained[subject], retainedMsg{seq: seq, data: msg.Data})
-	for _, s := range f.subs {
-		if s.subject == subject && !s.ended {
-			f.deliverToSubLocked(s, msg)
-		}
-	}
+	snap := append([]*sub(nil), f.subs...)
 	f.mu.Unlock()
+	for _, s := range snap {
+		if s.subject != subject {
+			continue
+		}
+		if s.replayDone != nil {
+			<-s.replayDone
+		}
+		f.mu.Lock()
+		if !s.ended {
+			f.deliverLiveLocked(s, msg)
+		}
+		f.mu.Unlock()
+	}
 	return seq, nil
 }
 
-func (f *Fake) deliverToSubLocked(s *sub, msg platform.Message) {
+func (f *Fake) deliverLiveLocked(s *sub, msg platform.Message) {
 	if s.ended || msg.Seq <= s.after {
-		return
-	}
-	select {
-	case s.ch <- msg:
-		return
-	default:
-	}
-	if len(s.ch) >= s.bufCap {
-		s.endLocked(f)
 		return
 	}
 	select {
@@ -185,11 +191,11 @@ func (f *Fake) deliverToSubLocked(s *sub, msg platform.Message) {
 
 func (s *sub) endLocked(f *Fake) {
 	if s.ended {
+		f.removeSub(s)
 		return
 	}
 	s.ended = true
 	s.cancel()
-	close(s.ch)
 	f.removeSub(s)
 }
 
@@ -210,10 +216,6 @@ func (f *Fake) endAllSubs() {
 
 // Subscribe opens a subject subscription after the given bus sequence.
 func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-chan platform.Message, error) {
-	return f.subscribe(ctx, subject, after, f.bufSize, f.bufSize)
-}
-
-func (f *Fake) subscribe(ctx context.Context, subject string, after uint64, chanBuf, overflowCap int) (<-chan platform.Message, error) {
 	if err := f.unavailable(); err != nil {
 		return nil, err
 	}
@@ -226,29 +228,52 @@ func (f *Fake) subscribe(ctx context.Context, subject string, after uint64, chan
 		f.mu.Unlock()
 		return nil, core.NewError(core.CodeNotFound, "purged", map[string]any{"purged_through": floor})
 	}
+	replayThrough := f.lastSeqLocked(subject)
 	subCtx, cancel := context.WithCancel(ctx)
 	s := &sub{
-		subject: subject,
-		after:   after,
-		ch:      make(chan platform.Message, chanBuf),
-		ctx:     subCtx,
-		cancel:  cancel,
-		bufCap:  overflowCap,
+		subject:       subject,
+		after:         after,
+		replayThrough: replayThrough,
+		ch:            make(chan platform.Message, f.bufSize),
+		cancel:        cancel,
+		replayDone:    make(chan struct{}),
 	}
+	var replay []retainedMsg
 	for _, m := range f.retained[subject] {
 		if m.seq > after {
-			replay := platform.Message{Subject: subject, Seq: m.seq, Data: append([]byte(nil), m.data...)}
-			f.deliverToSubLocked(s, replay)
+			replay = append(replay, m)
 		}
 	}
 	f.subs = append(f.subs, s)
 	f.mu.Unlock()
 	go func() {
+		for _, m := range replay {
+			f.mu.Lock()
+			ended := s.ended
+			f.mu.Unlock()
+			if ended {
+				break
+			}
+			msg := platform.Message{Subject: subject, Seq: m.seq, Data: append([]byte(nil), m.data...)}
+			if m.seq <= replayThrough {
+				select {
+				case s.ch <- msg:
+				case <-subCtx.Done():
+					return
+				}
+			}
+		}
+		close(s.replayDone)
 		<-subCtx.Done()
 		f.mu.Lock()
-		if !s.ended {
-			s.endLocked(f)
+		if !s.chClosed {
+			s.chClosed = true
+			close(s.ch)
 		}
+		if !s.ended {
+			s.ended = true
+		}
+		f.removeSub(s)
 		f.mu.Unlock()
 	}()
 	return s.ch, nil
@@ -341,6 +366,9 @@ func (f *Fake) Put(ctx context.Context, key string, value []byte, ttl time.Durat
 	if err := f.checkTTL(ttl); err != nil {
 		return 0, err
 	}
+	if err := f.checkKVValue(value); err != nil {
+		return 0, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.kvRevSeq++
@@ -360,6 +388,9 @@ func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, rev
 		return 0, err
 	}
 	if err := f.checkTTL(ttl); err != nil {
+		return 0, err
+	}
+	if err := f.checkKVValue(value); err != nil {
 		return 0, err
 	}
 	f.mu.Lock()

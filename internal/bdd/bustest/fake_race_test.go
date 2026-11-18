@@ -22,15 +22,6 @@ func TestFakeConcurrentPubSubRace(t *testing.T) {
 			cancel()
 			t.Fatal(err)
 		}
-		var wg sync.WaitGroup
-		for p := 0; p < 4; p++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, _ = f.Publish(ctx, subject, []byte("x"))
-			}()
-		}
-		wg.Wait()
 		go func() {
 			for {
 				select {
@@ -43,6 +34,15 @@ func TestFakeConcurrentPubSubRace(t *testing.T) {
 				}
 			}
 		}()
+		var wg sync.WaitGroup
+		for p := 0; p < 4; p++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = f.Publish(ctx, subject, []byte("x"))
+			}()
+		}
+		wg.Wait()
 		cancel()
 	}
 }
