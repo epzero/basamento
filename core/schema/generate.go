@@ -21,6 +21,12 @@ func For[T any]() (*Schema, error) {
 
 // ForType generates a JSON Schema for a Go type.
 func ForType(t reflect.Type) (*Schema, error) {
+	if t == nil {
+		return nil, invalidArg("nil type", nil)
+	}
+	if t.Kind() == reflect.Interface {
+		return nil, invalidArg("type has no JSON form", map[string]any{"field": "interface{}"})
+	}
 	if path, ok := invalidFieldPath(t); ok {
 		return nil, invalidArg("type has no JSON form", map[string]any{"field": path})
 	}
@@ -107,7 +113,7 @@ func collectAliasByteSliceTypes(t reflect.Type, ts map[reflect.Type]*gjschema.Sc
 		switch typ.Kind() {
 		case reflect.Struct:
 			for _, f := range reflect.VisibleFields(typ) {
-				if f.Anonymous {
+				if f.Anonymous || !f.IsExported() {
 					continue
 				}
 				if jsonName(f) == "" {
@@ -136,7 +142,7 @@ func isByteSliceAlias(typ reflect.Type) bool {
 func patchSchemaValue(v any, isRoot bool) {
 	switch node := v.(type) {
 	case map[string]any:
-		if !isRoot {
+		if patchRootNull(node, isRoot) {
 			patchTypeNullUnion(node)
 		}
 		if props, ok := node["properties"].(map[string]any); ok {
@@ -186,6 +192,21 @@ func patchTypeNullUnion(pm map[string]any) {
 	}
 }
 
+func patchRootNull(node map[string]any, isRoot bool) bool {
+	if !isRoot {
+		return true
+	}
+	t, _ := node["type"].(string)
+	switch t {
+	case "array":
+		return true
+	case "object":
+		return openMapObject(node)
+	default:
+		return false
+	}
+}
+
 func openMapObject(pm map[string]any) bool {
 	ap, ok := pm["additionalProperties"]
 	if !ok {
@@ -222,7 +243,7 @@ func walkInvalidField(t reflect.Type, prefix string, seen map[reflect.Type]bool)
 		return prefix, true
 	case reflect.Struct:
 		for _, f := range reflect.VisibleFields(t) {
-			if f.Anonymous {
+			if f.Anonymous || !f.IsExported() {
 				continue
 			}
 			if jsonName(f) == "" {
@@ -262,7 +283,13 @@ func jsonName(f reflect.StructField) string {
 	if tag == "" {
 		return f.Name
 	}
-	name, _, _ := parseTag(tag)
+	name, _, hadComma := parseTag(tag)
+	if name == "" {
+		if hadComma {
+			return f.Name
+		}
+		return f.Name
+	}
 	return name
 }
 
