@@ -45,4 +45,13 @@ deny_external:
   model:      [go.temporal.io/]
   model/node: [go.temporal.io/]
   runtime:    [go.temporal.io/]
-  internal/config:    [go.temporal.io/]
+  internal/config:
+    - go.temporal.io/
+    - gocloud.dev/
+    - github.com/jackc/pgx/
+    - modernc.org/
+    - github.com/nats-io/
+    - github.com/tink-crypto/
+    - github.com/aws/
+    - cloud.google.com/
+    - github.com/Azure/
