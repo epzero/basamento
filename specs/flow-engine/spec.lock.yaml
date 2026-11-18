@@ -406,6 +406,61 @@ scenarios:
         approved_at: "2026-11-18"
         human:
             status: pending
+    FLOW-039-01:
+        hash: sha256:845d02044c064bb7db63cd7a0eb41a52f58b309cba62e81e87e3924af5190ddf
+        reqs:
+            - REQ-FLOW-039
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-040-01:
+        hash: sha256:a198e01083f932ce1be6ffd757583998b763db25022ccddfa09c07c0c0afb98f
+        reqs:
+            - REQ-FLOW-040
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-041-01:
+        hash: sha256:391a4b9ba3ae9fbf9510a5f9d580cadea3e421fdc43f8b8cdd94c21c81c83734
+        reqs:
+            - REQ-FLOW-041
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-042-01:
+        hash: sha256:03892bb51efd72c4bcccc6f529a4b8e184c2b54a70b377b52ab1d06e1ce8fb1f
+        reqs:
+            - REQ-FLOW-042
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
+    FLOW-043-01:
+        hash: sha256:fffe7267456600bb927a2e7dbbc4f5ab24b2ec273f4e75d156a35982c2cbca96
+        reqs:
+            - REQ-FLOW-043
+        tier: P2
+        author: claude-code:spec-author:f53a30
+        reviewer: antigravity:spec-reviewer:128a8c
+        approved_at: "2026-11-17"
+        note: New flow compiler behavior for reserved START and FAIL edge endpoints (WP-L4-01).
+        human:
+            status: pending
     FLOW-044-01:
         hash: sha256:eef986ed27018c2f648508004acea388b497c96a75d649c41198093462022bcc
         reqs:

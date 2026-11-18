@@ -16,10 +16,23 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
 - A single `authz.Check(principal, action, resource)` runs in a connect
   interceptor. Denials return `permission_denied` and write an audit event
   (REQ-AUTH-004).
+- **Audit**: every producer, the credential store and this check among them,
+  records through `platform.Audit`. There is one audit store, owned by the
+  credential store (WP-L1-06): an append-only table with tenant-scoped reads.
+  Authorization is another producer (denials), not the owner of a second
+  store. An event never carries a secret value or a raw token: `Principal`
+  is a user ID or service token ID, and pool and join tokens are logged
+  only as hashed identifiers. An event's tenant comes from the context;
+  `Record` rejects an event that names a different tenant, and a producer
+  on a tenant path fails closed when it has no tenant. Events with no tenant
+  are deployment-level: refused joins with an unknown pool token
+  (REQ-MODEL-029), shared-pool and launch events (ADR-0012 §10, §12), and
+  operator actions. Tenant-scoped reads never return them. See
+  [`overview.md`](overview.md) §3.
 - Optional **CEL conditions** for attribute rules (`resource.owner ==
   principal.id`), reusing the expression engine. No Casbin.
-- **Tenancy**: every repository call takes a tenant context
-  (REQ-AUTH-002). Postgres row-level security is a second line of defense in
+- **Tenancy**: every repository call takes a tenant context, set with
+  `core.WithTenant` and read with `core.TenantFrom` (REQ-AUTH-002). Postgres row-level security is a second line of defense in
   the cloud profile.
 - **Worker tokens**: scoped to one session's resources with a fixed expiry,
   for the browser runner and other external services (REQ-AUTH-005).
@@ -29,6 +42,9 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
   serves and leases that work. A worker started on demand joins with a
   single-use token made for that launch (ADR-0012).
 - **Credentials**: vendor keys live in the vault (ADR-0004) and are used by
-  reference; no role can read a value back.
+  reference, `cred://<name>`; no role can read a value back. A name is 1 to
+  128 characters from A–Z, a–z, 0–9, `.`, `_`, `-` and `/`, made of
+  `/`-separated segments none of which is empty, `.` or `..`, so it cannot
+  walk out of the tenant's entries (REQ-CRED-006, REQ-CRED-007).
 - The `Authorizer` port leaves room for OpenFGA if sharing ever becomes
   graph-shaped.
