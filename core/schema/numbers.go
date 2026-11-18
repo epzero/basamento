@@ -153,7 +153,9 @@ func losesFloatPrecision(text string, f float64) bool {
 	return exact.Cmp(canonical) != 0
 }
 
-// ecmaNumber formats f as ECMAScript Number::toString (RFC 8785 shortest form).
+// ecmaNumber formats f as ECMAScript Number::toString (RFC 8785 §3.2.2.3).
+// Fixed notation applies to 1e-6 <= |f| < 1e21; everything else uses the
+// exponential form with an explicit sign and no padding.
 func ecmaNumber(f float64) string {
 	if math.Signbit(f) && f == 0 {
 		f = 0
@@ -165,33 +167,7 @@ func ecmaNumber(f float64) string {
 	if abs > 0 && (abs < 1e-6 || abs >= 1e21) {
 		return ecmaExponential(f)
 	}
-	fixed := ecmaFixed(f)
-	if roundTrips(f, fixed) {
-		if p := powerOfTenExponent(f); p >= 20 {
-			exp := ecmaExponential(f)
-			if roundTrips(f, exp) && len(exp) < len(fixed) {
-				return exp
-			}
-		}
-		return fixed
-	}
-	return ecmaExponential(f)
-}
-
-// powerOfTenExponent reports n when f = ±10^n, else -1.
-func powerOfTenExponent(f float64) int {
-	if f == 0 {
-		return -1
-	}
-	abs := math.Abs(f)
-	if math.Abs(abs-math.Trunc(abs)) > 0 {
-		return -1
-	}
-	n := math.Log10(abs)
-	if math.Abs(n-math.Trunc(n)) > 1e-9 {
-		return -1
-	}
-	return int(math.Round(n))
+	return ecmaFixed(f)
 }
 
 func ecmaFixed(f float64) string {
@@ -218,9 +194,4 @@ func ecmaExponential(f float64) string {
 		}
 	}
 	return s
-}
-
-func roundTrips(f float64, text string) bool {
-	g, err := strconv.ParseFloat(text, 64)
-	return err == nil && g == f
 }
