@@ -65,3 +65,26 @@ If a flow declares a reducer for a key that is not a key of the flow's state sch
 
 ### REQ-FLOW-026 — An invalid state schema
 If a flow declares a state schema that is not a valid JSON Schema, then the flow builder shall reject it with code `invalid_argument`, naming the location in the schema of the violation.
+## Reserved edge endpoints (WP-L4-01)
+
+`START` and `FAIL` are reserved names for the entry and the failure exit of a flow
+(owner decision D2, 2026-11-17; `docs/architecture/flow-engine.md` §1). They are
+edge endpoints only: neither is declared as a node. Every rejection below fails
+with code `invalid_argument`, naming the node or edge at fault (REQ-FLOW-040 to
+REQ-FLOW-042) or stating that the flow needs exactly one edge from `START`
+(REQ-FLOW-043).
+
+### REQ-FLOW-039 — START and FAIL need no node
+The flow compiler shall accept an edge from `START` and an edge to `FAIL` without `START` or `FAIL` being declared as a node.
+
+### REQ-FLOW-040 — START and FAIL are not node names
+If a flow declares a node named `START` or `FAIL`, then the flow compiler shall reject the flow with code `invalid_argument` and name the node.
+
+### REQ-FLOW-041 — START is only an edge source
+If an edge targets `START`, then the flow compiler shall reject the flow with code `invalid_argument` and name the edge.
+
+### REQ-FLOW-042 — FAIL is only an edge target
+If an edge starts at `FAIL`, then the flow compiler shall reject the flow with code `invalid_argument` and name the edge.
+
+### REQ-FLOW-043 — Exactly one edge starts at START
+If a flow has no edge from `START`, or more than one, then the flow compiler shall reject the flow with code `invalid_argument`, stating that the flow needs exactly one edge from `START`.
