@@ -17,27 +17,26 @@ schema is not here; `expr` (WP-L2-01) builds on this package.
   ECMAScript exponent rules); no third-party canonicalizer.
 
 Library output beyond the required object shape (`properties`, `required` and
-property `description`) is never part of the contract on its own: type and
-constraint scenarios state behavior through validation, so a library upgrade
-that changes how a generated schema expresses them but not what it accepts
-keeps the scenarios green.
+property `description` or `contentEncoding`) is never part of the contract on
+its own: type and constraint scenarios state behavior through validation, so
+a library upgrade that changes how a generated schema expresses them but not
+what it accepts keeps the scenarios green.
 
 ### Bytes and raw JSON
 
 `encoding/json` writes a `[]byte` as a base64 string and a nil `[]byte` as
-`null`. The generator gives `[]byte`, and any named type whose underlying type
-is `[]byte`, the schema `{"type": ["null", "string"], "contentEncoding":
-"base64"}` (REQ-SCHEMA-038). `contentEncoding` is an annotation in draft
-2020-12, so validation checks the JSON type only and accepts any string; the
-base64 form of the content is what `encoding/json` writes (REQ-SCHEMA-008).
-The generator recognizes named byte-slice types only where it can name them,
-so the scenarios declare them explicitly.
+`null`. The generator gives `[]byte`, and any named type other than
+`json.RawMessage` whose underlying type is `[]byte`, the schema `{"type":
+["null", "string"], "contentEncoding": "base64"}` (REQ-SCHEMA-038).
+`contentEncoding` is an annotation in draft 2020-12, so validation checks the
+JSON type only and accepts any string; the base64 form of the content is what
+`encoding/json` writes (REQ-SCHEMA-008).
 
 `json.RawMessage` is a `[]byte` with its own encoding, so it gets its own
 entry in the generator's type schemas: the empty schema `{}`, which accepts
 every JSON value including `null` (REQ-SCHEMA-039). Fixed-length `[N]byte`
-arrays get no special case: they are JSON arrays of exactly `N` integers from
-0 to 255, not excluding `null` (REQ-SCHEMA-040).
+arrays get no special case: under REQ-SCHEMA-002 they are JSON arrays of
+exactly `N` integers, excluding `null` (REQ-SCHEMA-040).
 
 ## Interfaces the implementer follows
 
@@ -79,6 +78,13 @@ Locations are JSON Pointers (RFC 6901): `~` is written `~0`, `/` is written
 `required` and `additionalProperties` at the object; this package moves them
 to the property (REQ-SCHEMA-021), one violation per property. Messages are
 English for logs (`core.Error.Message`); none of them is part of a scenario.
+
+## How the scenarios run
+
+The scenarios build Go types with `reflect.StructOf`, which cannot create a
+named type at run time. A named type used by a scenario, such as `NamedBytes`
+with underlying type `[]byte`, is therefore declared in the step driver and
+looked up by its name in the field tables.
 
 ## Instances and numbers
 

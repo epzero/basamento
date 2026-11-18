@@ -35,13 +35,13 @@ When a value of a Go type is encoded with `encoding/json`, the schema validator 
 ## Bytes and raw JSON
 
 ### REQ-SCHEMA-038 — Byte slices are base64 strings
-When a schema is generated from a Go struct type, the schema generator shall give a field of type `[]byte`, or of a named type whose underlying type is `[]byte`, the schema of a nullable string whose content is base64, admitting `null` and strings and nothing else.
+When a schema is generated from a Go struct type, the schema generator shall give a field of type `[]byte`, or of a named type other than `json.RawMessage` whose underlying type is `[]byte`, the schema of a nullable string with `contentEncoding` `"base64"`, admitting `null` and any string and nothing else.
 
 ### REQ-SCHEMA-039 — Raw JSON admits any value
 When a schema is generated from a Go struct type, the schema generator shall give a field of type `json.RawMessage` a schema that admits every JSON value, including `null`.
 
 ### REQ-SCHEMA-040 — Fixed byte arrays are integer arrays
-When a schema is generated from a Go struct type, the schema generator shall give a field of type `[N]byte` the schema of an array of exactly `N` integers from 0 to 255, admitting neither `null` nor strings.
+When a schema is generated from a Go struct type, the schema generator shall give a field of type `[N]byte` the schema of an array of exactly `N` integers, admitting neither `null` nor strings.
 
 ## Compiling schemas
 
