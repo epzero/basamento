@@ -1,0 +1,399 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    SCHEMA-001-01:
+        hash: sha256:6474e78acb283e025ad0df6e116ce0d6e2b38254a1b42d4d1be0ae366779aed9
+        reqs:
+            - REQ-SCHEMA-001
+            - REQ-SCHEMA-003
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-002-01:
+        hash: sha256:cd3430ce47303c98c4c658243d9f9f55e81995fb0ac039ce30664aba83b14bdf
+        reqs:
+            - REQ-SCHEMA-002
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-002-02:
+        hash: sha256:048f71865725ab8342d435652d6a0ceed328eb71a686da989e341fcd62b74cd0
+        reqs:
+            - REQ-SCHEMA-002
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-003-01:
+        hash: sha256:751f5118faefc8b0a97ff00183f7bae6151240a8b8b987e352813a09dc023a08
+        reqs:
+            - REQ-SCHEMA-003
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-004-01:
+        hash: sha256:dcf30b1278ff02c23f8a80a7fdd144b841d215e61d7c16dded0cd7e61dc07b1f
+        reqs:
+            - REQ-SCHEMA-004
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-005-01:
+        hash: sha256:9bf71c385204925d42e202775f039f37e19c768124e0ffc2b77c4a525a7a2b65
+        reqs:
+            - REQ-SCHEMA-005
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-006-01:
+        hash: sha256:ee0940926482f7a91f1e00f271ebbcfe499ab85001cecabaf6e23307396b8cdf
+        reqs:
+            - REQ-SCHEMA-006
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-007-01:
+        hash: sha256:657aec6b2e5228d2f41cd62894ab1057f7afbaf0e0304fe5d7158845bd150df7
+        reqs:
+            - REQ-SCHEMA-007
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism: generating a schema from the same Go type always yields identical canonical bytes for flow IR content hashing.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-008-01:
+        hash: sha256:3bc5219d1af489f61120458e1f213b34efd35ab9b46b1718e391f270109d2f59
+        reqs:
+            - REQ-SCHEMA-008
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-010-01:
+        hash: sha256:a79dc81d609e12bdd0f9e630c33827bddf216a09f193e0539044a8045ecb1692
+        reqs:
+            - REQ-SCHEMA-010
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-011-01:
+        hash: sha256:ba59f6d25c5585beff997faf62b2e6959f97004824ccce5848b1c150f9890cfc
+        reqs:
+            - REQ-SCHEMA-011
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-012-01:
+        hash: sha256:56d59d87ae1bb0f3638a0dd06a9b233d7193de9e1bc18cb707398fd427ae2b7a
+        reqs:
+            - REQ-SCHEMA-012
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-012-02:
+        hash: sha256:366b93e7f26e508e8d1d02cc4b2d1f7cd8078a0809418fbfcee73f7a66278030
+        reqs:
+            - REQ-SCHEMA-012
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-012-03:
+        hash: sha256:4448dcdacd5d4a93c766075c72d9e17c72f27791fe64febb2b61fe65b425cbb9
+        reqs:
+            - REQ-SCHEMA-012
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Security: schema compilation resolves only within the closed schema set and never fetches HTTP, file, or unresolved relative references.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-013-01:
+        hash: sha256:10d091d42df9272d04d1c3fe5e0c45bb4690b361fca1cb8925745ac8616c8f16
+        reqs:
+            - REQ-SCHEMA-013
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-020-01:
+        hash: sha256:c369de98e8d39879412eeb1e22156fd62509b7daf8a4f0880f0fc937470efaee
+        reqs:
+            - REQ-SCHEMA-020
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-021-01:
+        hash: sha256:4067a0e626edacde23cbc578a821cfb16770df1c5294c91e85eb4a7ad95984fd
+        reqs:
+            - REQ-SCHEMA-021
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-022-01:
+        hash: sha256:1cf2be1100870ff4f5c3ff69aa89612c98285dde0a40acb295229b545e5851d1
+        reqs:
+            - REQ-SCHEMA-022
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-023-01:
+        hash: sha256:41767462d48e4ebe8f5ba18d541227ff4b46082ed34b822761ca2c1a731f43da
+        reqs:
+            - REQ-SCHEMA-023
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-024-01:
+        hash: sha256:147671f052e55f0cc45bfd993a1a0f192fb44a7e1b587f5f2032c0c368588165
+        reqs:
+            - REQ-SCHEMA-024
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-024-02:
+        hash: sha256:a15a2b1388e252371c108a6e0441436501b9401847b64be64cf8de061e7c3d71
+        reqs:
+            - REQ-SCHEMA-024
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-025-01:
+        hash: sha256:6c43d945d5985ecba7232125dd13868d57f1e54bd7822f08fc68ba263c17fc96
+        reqs:
+            - REQ-SCHEMA-025
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Security: duplicate JSON member names in instances are rejected before validation so downstream evaluators never observe divergent values.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-026-01:
+        hash: sha256:e4a9616229abeb9dd1fb4eed536bc687af4897c5d0824531dbe50f9bcaf539c1
+        reqs:
+            - REQ-SCHEMA-026
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: New JSON Schema generation, compilation, and validation behavior for WP-L2-02.
+        human:
+            status: pending
+    SCHEMA-030-01:
+        hash: sha256:c3912449bb8fe01b540d6cb90d4b6c6bebb4c2f2f40cd1879d48fc9e556f82e1
+        reqs:
+            - REQ-SCHEMA-030
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-030-02:
+        hash: sha256:45b9409ef7a653d5128f6dd36918a747604bf5425a3339f5870eaf941224b6aa
+        reqs:
+            - REQ-SCHEMA-030
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-031-01:
+        hash: sha256:a05071b8cf5897405d3e7b7fa8ebd344a6355933d2cf79df472308a81e882482
+        reqs:
+            - REQ-SCHEMA-031
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-032-01:
+        hash: sha256:2650810b8d028c0020bb9c4f9d1ce5ec38c214304a2ad407c7816be470d1f919
+        reqs:
+            - REQ-SCHEMA-032
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-033-01:
+        hash: sha256:e4eb4df194ecf879952d48a9c27d02e12ee6d0c728b991a01b99af88c5396e4f
+        reqs:
+            - REQ-SCHEMA-033
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-034-01:
+        hash: sha256:02a86d6827d9aa6e2d93f76005c414ab1bb9c1cb54ad55c7c9a605990b394682
+        reqs:
+            - REQ-SCHEMA-034
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Determinism and durability: RFC 8785 canonical JSON produces identical bytes for flow content addressing and byte-by-byte replay comparison.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-035-01:
+        hash: sha256:dfa8fa57c2b00b5ecde41498aee2b4b705d51e90c8937b9a1f5f76b6df1d58ba
+        reqs:
+            - REQ-SCHEMA-035
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-036-01:
+        hash: sha256:90f3120561265ac9d10b984543ebe630a01fb1083af83cd0d370c49e2d942f7d
+        reqs:
+            - REQ-SCHEMA-036
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-037-01:
+        hash: sha256:0609c16160cd57885046b74e6a4fa14c1484ddad22dbaff90029c676412c94d1
+        reqs:
+            - REQ-SCHEMA-037
+        tier: P0
+        author: claude-code:spec-author:5120f5
+        reviewer: antigravity:spec-reviewer:30dc9b
+        approved_at: "2026-11-17"
+        note: 'Data integrity and determinism: canonicalization rejects precision-changing or overflowing numbers, duplicate member names, and unpaired surrogate escapes.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/4

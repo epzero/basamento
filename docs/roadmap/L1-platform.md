@@ -32,6 +32,7 @@ koanf; URL-selected implementations; plain-constructor wiring for `embedded` and
 Depends: WP-L1-01, WP-L1-04.
 Owns: `platform/credentials`.
 The vault (ADR-0004): named secrets per tenant, envelope-encrypted in SQL, `cred://` references resolved inside steps, write-only API, audit on use; external stores behind the same port.
+The first producer of `platform.Audit` (`Record(ctx, AuditEvent) error`) and the owner of its SQL implementation: an append-only audit table with tenant-scoped reads. An event carries time, tenant, principal, action, resource and outcome, and optionally the run id, step and reason; never a secret value.
 
 ### WP-L1-07 — Telemetry
 Depends: WP-L1-01.
