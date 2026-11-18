@@ -9,11 +9,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/fileblob"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 )
 
 type faultBucket struct {
@@ -61,7 +63,7 @@ func openFileStore(t *testing.T) (*Store, bucketBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &Store{bucket: b, clock: core.SystemClock{}}
+	st := &Store{bucket: b, clock: coretest.NewFakeClock(time.Unix(1700000000, 0))}
 	return st, b, dir
 }
 

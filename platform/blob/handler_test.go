@@ -70,10 +70,13 @@ func TestHandlerNosniffAndContentLength(t *testing.T) {
 	}
 }
 
+// testProxiedURLExp is a fixed unix expiry for handler/sign tests (no wall clock).
+const testProxiedURLExp = int64(1794842100) // 2026-11-16T10:15:00Z
+
 func TestHandlerRejectsRequestWithoutSignKey(t *testing.T) {
 	t.Parallel()
 	hex := strings.TrimPrefix(ContentKeyOf([]byte("hello")), "sha256:")
-	exp := time.Now().Add(time.Hour).Unix()
+	exp := testProxiedURLExp
 	sig := signRead(nil, "acme", hex, exp)
 	h := &URLHandler{Store: &Store{}}
 	req := httptest.NewRequest(http.MethodGet, "/acme/"+hex+"?exp="+strconv.FormatInt(exp, 10)+"&sig="+sig, nil)
@@ -95,7 +98,7 @@ func TestHandlerCopyFailureAborts(t *testing.T) {
 				panicked = errors.Is(r.(error), http.ErrAbortHandler)
 			}
 		}()
-		h := &URLHandler{Store: &Store{clock: core.SystemClock{}}}
+		h := &URLHandler{Store: &Store{clock: coretest.NewFakeClock(time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC))}}
 		h.respondBody(rec, req, &failReader{n: 1}, 10, "text/plain")
 	}()
 	if !panicked {
