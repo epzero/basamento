@@ -6,6 +6,4 @@
 // expressions are type-checked against the state schema at compile time;
 // evaluation cost is limited; comprehensions over maps iterate in sorted key
 // order so results never depend on Go map ordering.
-//
-// Status: planned (WP-L2-01).
 package expr
