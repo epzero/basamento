@@ -78,7 +78,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Idempotency and cost safety: deduplicating accepted message_id values prevents duplicate turns and duplicate model calls.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-005-02:
         hash: sha256:366ff7f02e9a6232967e23144509e0579ec57fad09f31f5aa54a06cb87cd51b6
         reqs:
@@ -89,7 +92,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Idempotency and cost safety: deduplicating accepted message_id values prevents duplicate turns and duplicate model calls.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-005-03:
         hash: sha256:959142a63d76f81ce7620b8d8ede3c681df7a94edf4e447bb520af475f0a43f4
         reqs:
@@ -255,7 +261,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability and data integrity: conversation history prior to a ContinueAsNew checkpoint is preserved for later turns.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-013-01:
         hash: sha256:d062e9cc8523730f3d6d6f0515de1caa97c294475fc6b55ca448e5fa9fd16b9a
         reqs:
@@ -300,7 +309,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-014-02:
         hash: sha256:891f89e4d508ffdfd7133f8c1abe4d0dbfb3cf2c7ae902fcf991c0447b7de2ef
         reqs:
@@ -311,7 +323,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-014-03:
         hash: sha256:ec43aae58d7a5a63c5da2f46768d7493b12d87a743beddc65d6d2bbd2f031865
         reqs:
@@ -322,7 +337,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-014-04:
         hash: sha256:429a2555392086ba9d1cab075ecd396140fb63fd199deab781e0dfeb846dc8ce
         reqs:
@@ -333,7 +351,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Durability: ContinueAsNew checkpointing bounds coordinator history at turn boundaries, counts only coordinator calls, and respects runtime capability.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-016-01:
         hash: sha256:0f64a562d0f470836c0a01b511de26d88a08907f67922bf607eb474bda32fb85
         reqs:
@@ -344,7 +365,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-016-02:
         hash: sha256:9b3ddea3281cd8f4e6fa617d8cf2fb5091c21bee1f1dd079d3a250a3c9d58f1e
         reqs:
@@ -355,7 +379,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-016-03:
         hash: sha256:3c0cc0518329a67928c673faa399f3d1e41062a1a0e30c89e98c8c718f2e029b
         reqs:
@@ -366,7 +393,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-017-01:
         hash: sha256:e1cf43c1bc0210820f1cfc3a36dc11e63c334dd99633513fc7392d4471d4b568
         reqs:
@@ -377,7 +407,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-018-01:
         hash: sha256:2d917c5a2cd5ff80dce6d94b9b40c0e0fcdc365fcebf2d98966c1babbc87934a
         reqs:
@@ -388,7 +421,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-018-02:
         hash: sha256:186e35e1d2d9bd2752b6b33805587feadb553f58d42197eb5a7ff8cf3cecce25
         reqs:
@@ -399,7 +435,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-018-03:
         hash: sha256:6ff228c455d8c71d266b12be9d454e3690a9a0d09b2c1d87a0519cebd7b1cc0d
         reqs:
@@ -410,7 +449,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: tenant and user isolation boundaries for conversation runs, history reads, sends, and cancellations.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/16
     CONV-019-01:
         hash: sha256:90b2887b436c1dff2af521b1dd900a2f590e7bd0adc0fe2ca14466fb880b9a5d
         reqs:
