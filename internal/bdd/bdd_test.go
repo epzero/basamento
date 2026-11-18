@@ -16,23 +16,34 @@ const defaultTags = "~@planned && ~@live && ~@eval && ~@journey && ~@slow && ~@q
 
 // TestFeatures runs every scenario under specs/ in strict mode: undefined or
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
+// BDD_BUS_BACKEND selects the bus implementation: fake (default), embedded, or cloud.
 func TestFeatures(t *testing.T) {
-	tags := defaultTags
-	if extra := os.Getenv("BDD_TAGS"); extra != "" {
-		tags = extra
+	backends := []string{"fake", "embedded", "cloud"}
+	if one := os.Getenv("BDD_BUS_BACKEND"); one != "" {
+		backends = []string{one}
 	}
-	suite := godog.TestSuite{
-		Name:                "basamento",
-		ScenarioInitializer: steps.Initialize,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    []string{"../../specs"},
-			Tags:     tags,
-			Strict:   true,
-			TestingT: t,
-		},
-	}
-	if code := suite.Run(); code != 0 {
-		t.Fatalf("godog exited with status %d", code)
+	for _, backend := range backends {
+		backend := backend
+		t.Run("bus-backend="+backend, func(t *testing.T) {
+			t.Setenv("BDD_BUS_BACKEND", backend)
+			tags := defaultTags
+			if extra := os.Getenv("BDD_TAGS"); extra != "" {
+				tags = extra
+			}
+			suite := godog.TestSuite{
+				Name:                "basamento",
+				ScenarioInitializer: steps.Initialize,
+				Options: &godog.Options{
+					Format:   "pretty",
+					Paths:    []string{"../../specs"},
+					Tags:     tags,
+					Strict:   true,
+					TestingT: t,
+				},
+			}
+			if code := suite.Run(); code != 0 {
+				t.Fatalf("godog exited with status %d", code)
+			}
+		})
 	}
 }
