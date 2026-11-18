@@ -107,7 +107,7 @@ sequenceDiagram
   P->>Q: an invocation for the pool (class, tenant, units)
   W->>P: Lease: free units, warm models, time left
   P-->>W: the next invocation in order that fits
-  W->>P: Starting, Started, Events, Finish (files through scoped URLs, ADR-0013)
+  W->>P: Starting, Started, Events, Finish (files through scoped URLs)
   W->>P: Heartbeat
   P-->>W: cancel these, drain, new expiry
 ```

@@ -63,6 +63,7 @@ without a `@profile` tag against fileblob in a temporary directory and against
 G3). No scenario in the gate reaches a live bucket; gs and azblob are proven
 by the `@live` scenario nightly.
 
+
 ## Uploads (WP-L1-08)
 
 Uploads stage first and commit second (ADR-0013): the client never names a
@@ -89,150 +90,178 @@ type UploadOptions struct {
 // Upload is one staging slot.
 type Upload struct {
 	URL        string    // where the client PUTs the body
-	StagingKey string    // opaque, single use, refused once committed
+	StagingKey string    // opaque; one commit, then spent
 	Expires    time.Time // now + TTL, from core.Clock
 }
 ```
 
-`Blob` also gains, outside the two methods, one embedding the profile's own
-handler needs to see. An interface value built by `platform/blob` offers it
-when its profile serves proxied URLs:
+`platform/blob` also exports a handler type for the embedded profile:
 
 ```go
 // UploadHandler answers a request to a proxied upload URL. It implements
 // http.Handler; kit serve mounts it next to the proxied blob URL handler.
-// It is present only in the embedded profile.
-UploadHandler() http.Handler
+// Only the embedded store offers one: only its URLs are proxied.
+type UploadHandler http.Handler
 ```
 
-Wiring keeps that out of `platform.Blob` itself so the cloud store answers a
-proxied request as it would answer a request the platform has no credentials
-for: refused, no body stored.
+The cloud store implements `platform.Blob` without it, because its URLs are
+the provider's. The constructor of the embedded store returns both the store
+and its `UploadHandler`. `http.Handler` is not added to `platform.Blob`, so
+the cloud store needs no stub for a request it never receives.
 
-### Staging keys and staging objects
+### Staging keys and staged objects
 
 - A staging key is opaque to the client and made of characters that need no
   escaping in a path segment: 32 random bytes from `crypto/rand` in unpadded
   base64url (43 characters), prefixed with `stage_`:
   `stage_<43 base64url chars>`. It is random, never derived from content, the
-  options or the tenant, so two uploads never share one (REQ-BLOB-022), and
-  neither does the same upload started twice.
+  options or the tenant, so two uploads never share one, across tenants too
+  (REQ-BLOB-021, REQ-BLOB-036), and neither does the same upload started
+  twice.
 - A value that does not match `^stage_[A-Za-z0-9_-]{43}$` is not a staging
   key: `Commit` rejects it with `invalid_argument` before any storage call and
-  leaves the store untouched (REQ-BLOB-033).
+  leaves the store untouched (REQ-BLOB-041).
 - **Staging object key:** `<tenant id>/stage/<staging key>`. It is one path
   segment after the tenant's directory, so no tenant can name another's
   staging object, and it cannot collide with a content key, which is 64 hex
-  digits (REQ-BLOB-029). There is no cross-tenant lookup, exactly as for
-  content keys (REQ-BLOB-010).
-- **Marker:** committing a staging key writes, in the same bucket, the
-  **commit record** `<tenant id>/stage/<staging key>.committed`, with an empty
-  body, after the content key exists and before the staging object is deleted.
-  A staging key with a commit record is spent: `Commit` answers `not_found`
-  for it (REQ-BLOB-031), and no upload URL writes to it again (REQ-BLOB-024).
-  The record's expiry is the one bound at `StartUpload`, so the sweep removes
-  it and deleted content can be committed again under its key, as `Put` does
-  after a deletion.
-- The bound options live only in the upload URL (embedded) or the presigned
-  URL (cloud); `Commit` needs them from the slot, so the embedded store keeps
-  them in memory (keyed by tenant and staging key, with the expiry) for the
-  slots it issued, and the cloud store passes the content type to the
-  provider's `Copy` and relies on the presigned PUT for size and type. A slot
-  the embedded store no longer knows is `not_found`.
+  digits. There is no cross-tenant lookup, exactly as for content keys
+  (REQ-BLOB-010); a commit under a tenant that did not start the upload is
+  `not_found` and touches neither tenant's staging object (REQ-BLOB-035).
+- **Slot metadata:** `<tenant id>/stage/<staging key>.slot`, an object whose
+  body is the bound options as JSON (`max`, `content_type`, `expires`). Both
+  profiles write it in `StartUpload` before they sign or presign the URL, and
+  `Commit` reads it: the bounds and the expiry are never kept in memory or
+  read from the URL, so they survive a restart of the embedded store and a
+  replica that did not issue the URL.
+- **Commit record:** `<tenant id>/stage/<staging key>.committed`, with an
+  empty body, written after the content key exists and before the staging
+  object is deleted. A staging key with a commit record is spent: `Commit`
+  answers `not_found` for it (REQ-BLOB-039), and a proxied upload URL for it
+  answers 403 (REQ-BLOB-026). The record keeps the slot's expiry.
 
 ### Commit
 
+A commit is the authoritative check of the bounds in both profiles. A
+presigned PUT cannot enforce the size (`MaxSize`), cannot answer 413 or 415
+with an empty body, and a commit cannot revoke it; the provider enforces the
+expiry and the signature, and may or may not enforce the content type header
+(S3 signs it, GCS and Azure leave it open). The scenarios of a commit failure (a staged object over the maximum size or of another content
+type, nothing stored, the key spent) run in both profiles and carry no
+`@profile` tag.
+
 Under the tenant of `ctx`, in this order, with no fallback to another tenant:
 
-1. no tenant in `ctx` → `invalid_argument` (REQ-BLOB-034); a malformed
-   staging key → `invalid_argument` (REQ-BLOB-033);
-2. a commit record, an unknown slot or `now >= Expires` → `not_found`
-   (REQ-BLOB-025, REQ-BLOB-030, REQ-BLOB-031);
-3. `Get` of the staging object; a miss → `not_found`; a content type other
-   than the bound one → `invalid_argument` (REQ-BLOB-028, REQ-BLOB-032);
-4. stream the object through a `sha256` hasher and an `io.LimitReader` of
+1. no tenant in `ctx` → `invalid_argument` (REQ-BLOB-042); a malformed
+   staging key → `invalid_argument` (REQ-BLOB-041);
+2. no slot metadata, a commit record, or `now >= expires` → `not_found`
+   (REQ-BLOB-028, REQ-BLOB-037, REQ-BLOB-038, REQ-BLOB-039);
+3. `Get` of the staging object; a miss → `not_found` (REQ-BLOB-038);
+4. its content type other than the bound one → `invalid_argument`
+   (REQ-BLOB-034);
+5. stream the object through a `sha256` hasher and an `io.LimitReader` of
    `MaxSize+1` bytes: one more byte than the bound → `invalid_argument`
-   (REQ-BLOB-027, REQ-BLOB-032);
-5. `Put(ctx, "sha256:"+hex, <a reopening reader of the staged object>,
+   (REQ-BLOB-033);
+6. `Put(ctx, "sha256:"+hex, <a reopening reader of the staged object>,
    bound content type)`: WP-L1-02's write, so an existing blob keeps its
-   content type (REQ-BLOB-005);
-6. write the commit record; `Delete` the staging object; return the content
-   key (REQ-BLOB-021).
+   content type (REQ-BLOB-005, REQ-BLOB-043);
+7. write the commit record; `Delete` the staged object and the slot metadata;
+   return the content key (REQ-BLOB-029).
 
-A failure at any step after 1 deletes the staging object and writes the
-commit record, in that order, so a failed commit is spent and leaves nothing
-readable (REQ-BLOB-032). Step 5 aborts before writing anything when its
-reader fails, as `Put` does (REQ-BLOB-009). A store error is mapped to
-`unavailable`; the staging object is kept then, so the client may retry
-`Commit` until its TTL.
+A `not_found` or `invalid_argument` at steps 2 to 5 deletes the staging object
+and writes the commit record, in that order, so a failed commit is spent and
+leaves nothing readable (REQ-BLOB-040). Step 6 aborts before writing anything
+when its reader fails, as `Put` does (REQ-BLOB-009). A store error is mapped
+to `unavailable`; the staging object and the slot metadata are kept then, so
+the client may retry `Commit` until the expiry. `Platform/blob`'s conformance
+tests build an over-sized or mis-typed staged object with the store's own
+conformance writer, so the test double stays in the test package.
 
 ### Embedded signer
 
-The proxied upload URL is served by `platform/blob` and signed with the same
-signing key as the proxied blob URLs:
+The proxied upload URL is served by the embedded store's `UploadHandler` and
+signed with the same signing key as the proxied blob URLs:
 
-`<base URL>/blob/upload/<tenant>/<staging key>?exp=<unix>&max=<bytes>&ct=<type>&sig=<signature>`
+`<base URL>/blob/upload/<tenant>/<staging key>?exp=<unix>[&max=<bytes>][&ct=<type>]&sig=<signature>`
 
-- The read URL's `<signature>` is `HMAC-SHA256(key, tenant, key, exp)`. The
-  upload URL's is `HMAC-SHA256(key, "upload", tenant, staging key, exp, max,
-  content type)`: the same key, the same hex encoding, the same `exp` rule
-  (valid while now < exp), and a field list with a distinct first component so
-  neither URL's signature is valid on the other kind. `ct` is the content
-  type percent-encoded.
-- The upload handler checks, in this order: the signature in constant time →
-  403; the expiry against the injected `core.Clock` → 403; `Content-Length`
-  over `max` (or absent) → 413; `Content-Type` other than the signed one →
-  415; a staging key the store does not know for this tenant → 404; a body
-  over `max` while it streams (a chunked request) → 413 with nothing stored;
-  otherwise it writes the body to the staging object and answers 201.
+- The upload URL's signature is `HMAC-SHA256(key, "upload", tenant, staging
+  key, exp, max, content type)`, where `max` and `ct` are the values given or
+  empty: the same key, the same hex encoding, the same `exp` rule (valid while
+  now < exp) as the read URL, whose signature is `HMAC-SHA256(key, tenant,
+  key, exp)`. The distinct first component makes neither URL's signature valid
+  on the other kind of URL or on another staging key (REQ-BLOB-023). `ct` is
+  the content type percent-encoded; the handler takes the bounds from the slot
+  metadata and only checks that an explicit `max` or `ct` equals them.
+- The handler checks, in this order: the signature in constant time → 403;
+  the expiry against the injected `core.Clock` → 403; no slot metadata, a
+  commit record, an expired slot, or a staging key the tenant did not start →
+  403; `Content-Length` over the bound `MaxSize` → 413; `Content-Type` other
+  than the bound one → 415; a body over `MaxSize` while it streams (a chunked
+  request, so no `Content-Length`) → 413 with nothing stored; otherwise it
+  writes the body to the staging object and answers 201 with an empty body.
   Every refusal returns an empty body and stores nothing.
-- A URL is single use because its staging key is: once the key is committed,
-  or its slot has expired, the handler answers 403, as it does for a key that
-  does not exist. A replayed PUT to a live, uncommitted URL replaces the
-  staged object; only the last body before `Commit` matters.
+- A proxied upload URL writes while its signature is valid, its slot has not
+  expired and its staging key is neither committed nor spent (REQ-BLOB-024).
+  A replayed PUT to such a URL replaces the staged object, so a client can
+  retry an interrupted upload; only the last body before `Commit` counts
+  (REQ-BLOB-025). A committed or spent key answers 403 (REQ-BLOB-026): the
+  "single use" is one commit per staging key.
 
 ### Cloud presign
 
-`StartUpload` on the S3, GCS or Azure store opens the bucket through
-`gocloud.dev/blob` and calls `bucket.SignedURL(<tenant>/stage/<staging key>,
-&blob.SignedURLOptions{Method: "PUT", Expiry: TTL, ContentType: o.ContentType})`;
-the size bound is a `Content-Length` condition on the presigned PUT
-(`WithConditions` with `IfNotExists()` on S3). The provider enforces expiry,
-signature, size and type; `Commit` enforces them again, as it does for the
-embedded profile.
+`StartUpload` on the S3, GCS or Azure store writes the slot metadata and opens
+the bucket through `gocloud.dev/blob`, then calls
+`bucket.SignedURL(<tenant>/stage/<staging key>,
+&blob.SignedURLRequest{Method: http.MethodPut, Expiry: o.TTL, ContentType:
+o.ContentType})`: the provider enforces the expiry and the signature, and
+signs the content type. No condition on the size is set (`IfNotExists()` is dropped: it
+expresses existence, not a bound). The size is enforced by `Commit` only, and
+the bucket lifecycle rule below expires abandoned slots.
 
 ### Expiry sweep
 
-- **Embedded:** expired staging objects and commit records are swept on open
-  and then at most once per maximum TTL interval, from the `core.Clock`,
-  never a `time.Sleep` or the wall clock: `<tenant>/stage/` is listed, and
-  every object whose bound expiry is at or before now is deleted
-  (REQ-BLOB-026). The in-memory slots are dropped with them.
-- **Cloud:** a bucket lifecycle rule on the staging prefix expires objects
-  after 7 days, the maximum TTL; `Commit` refuses a late key anyway.
+- **Embedded, REQ-BLOB-030:** expired staged objects, slot metadata and commit
+  records are swept on open and then at most once per maximum TTL interval,
+  from the `core.Clock`, never a `time.Sleep` or the wall clock. Each
+  tenant's `<tenant>/stage/` is listed once per sweep, and every staging key
+  whose slot metadata says its expiry is at or before now loses its staged
+  object, its slot metadata and its commit record; a staged object or record
+  whose slot metadata is already gone is removed too. Once its commit record
+  is swept, a spent key is only an unknown key: `Commit` still answers
+  `not_found` for it (REQ-BLOB-037).
+- **Cloud:** the sweep is the bucket's lifecycle rule on the staging prefix,
+  which expires every object there after 7 days, the maximum TTL. The
+  embedded sweep is not part of the cloud store; `Commit` refuses a late key
+  from the slot metadata even before the rule acts. A key whose slot metadata
+  the rule removed is an unknown key: `not_found`.
 
 ### Errors
 
-| Situation | `StartUpload` | `Commit` | Upload URL (embedded) |
+| Situation | `StartUpload` | `Commit` | Proxied upload URL |
 | --- | --- | --- | --- |
 | no tenant in `ctx` | `invalid_argument` | `invalid_argument` | — |
 | bad option: `MaxSize <= 0`, a content type that is not one `type/subtype`, `TTL <= 0` or `> max` | `invalid_argument` | — | — |
-| malformed staging key | — | `invalid_argument` | 403 |
-| unknown, other tenant's, expired or committed staging key | — | `not_found` | 403 |
+| a key that is not a staging key | — | `invalid_argument` | 403 |
+| a staging key no upload of the tenant issued, of another tenant, with no staged object, expired, committed or spent | — | `not_found` | 403 |
 | bad signature or expired URL | — | — | 403 |
-| body over `MaxSize` | — | `invalid_argument` | 413 |
-| wrong content type | — | `invalid_argument` | 415 |
-| staging object missing | — | `not_found` | 404 |
+| body over `MaxSize` | — | — | 413 (embedded; the cloud PUT is not checked, and `Commit` refuses the object) |
+| body of another content type | — | — | 415 (embedded; S3 refuses the cloud PUT, and `Commit` refuses the object where the provider does not) |
+| staged object over `MaxSize` | — | `invalid_argument` | — |
+| staged object of another content type | — | `invalid_argument` | — |
 | store or provider fails | `unavailable` | `unavailable` | 503 |
 | success | `Upload` | content key | 201, empty body |
 
-There is no `conflict`, and no hash mismatch: a client cannot name a hash, so
-`Commit` has nothing to compare it with (ADR-0013).
+Every refusal of a proxied upload URL has an empty body. The two staged-object
+rows are checked in both profiles by `Commit`; the two body rows are
+URL-level and therefore `@profile:embedded`. There is no `conflict` and no
+hash mismatch: a client cannot name a hash, so `Commit` has nothing to compare
+it with (ADR-0013).
 
 ### Conformance
 
 `uploads.feature` runs, like `storage.feature`, against fileblob and against
 `s3blob` on the in-process S3 simulator for every scenario without
-`@profile`. Tampering, expiry and tenant substitution are
-`@profile:embedded`, as for read URLs; the cloud profile's enforcement of them
-is the provider's and is proven by an `@live` nightly run.
+`@profile`: the start, the commit, its bounds, its tenancy and its failures.
+The URL-level behaviour (signature, tampering, tenant substitution, expiry of
+the URL, a replay, the refusal of a missing or spent key, 413 and 415) and the
+sweep are `@profile:embedded`, as for read URLs; the cloud profile's URL is
+the provider's, and the nightly `@live` run proves it.

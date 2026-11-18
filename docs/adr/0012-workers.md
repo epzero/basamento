@@ -78,7 +78,7 @@ naming the worker and the lease it is about:
 | `Lease` | A long poll: "I have this much free, these models are warm, I will run for this much longer". Returns invocations, or nothing after a while. |
 | `Starting`, `Started` | Sent before the worker calls its provider, and after, with the provider's handle (§7). |
 | `Events` | Partial output, in batches. |
-| `Finish` | The result. Files went to blob storage through scoped URLs before it (ADR-0013). |
+| `Finish` | The result. Files went to blob storage through scoped URLs before it. |
 | `Release` | Gives a lease back: unused, or "not before" a time (the vendor's rate limit). |
 | `Heartbeat` | Keeps the worker present and its leases alive. The answer carries what the platform wants: cancel these invocations, drain, new expiry. |
 | `Leave` | A clean exit. |
