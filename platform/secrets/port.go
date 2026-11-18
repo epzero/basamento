@@ -14,6 +14,11 @@ type Port struct {
 	opts options
 }
 
+// Close closes the underlying gocloud keeper.
+func (p *Port) Close() error {
+	return p.ks.Close()
+}
+
 // Encrypt wraps plaintext with the master key.
 func (p *Port) Encrypt(ctx context.Context, plaintext []byte) ([]byte, error) {
 	ct, err := p.ks.encryptValue(ctx, plaintext)
