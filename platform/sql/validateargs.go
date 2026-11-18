@@ -55,7 +55,7 @@ func walkArgForNUL(a any, depth int, seen map[uintptr]bool) error {
 	if !rv.IsValid() {
 		return nil
 	}
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return nil
 		}
