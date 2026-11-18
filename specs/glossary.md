@@ -67,6 +67,10 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Schema set** | The closed collection of JSON Schemas, each under its id, that a schema may refer to. Nothing outside it is ever fetched. |
+| **Instance location** | Where a value sits inside a JSON document, as a JSON Pointer (`/reviewers/1`); the whole document is the empty pointer `""`. |
+| **Violation** | One way an instance fails a schema: its instance location and the schema keyword that failed. |
+| **Canonical form** | The RFC 8785 bytes of a JSON value: the same for every text with the same value. |
 | **Tool** | A named operation an agent or a flow's `tool` node may call: its name, description and input JSON Schema, and a run with arguments that satisfy the schema. A call is one step that runs once. |
 | **Allowlist** | The tools one caller was given. A call to any other tool is refused. |
 | **MCP server** | An external service that lists tools with their schemas and runs them when called; the platform reaches it through an MCP client. A **simulated MCP server** stands in for it in the gate. |
