@@ -867,7 +867,14 @@ func assertNoDataKeyLeaks(ctx context.Context, tenant string) error {
 	if len(plain) == 0 {
 		return fmt.Errorf("no data key material recorded for unwrap")
 	}
-	for _, b := range [][]byte{plain} {
+	blobs, err := secrets.DataKeyMaterialBytes(plain)
+	if err != nil {
+		return err
+	}
+	if len(blobs) == 0 {
+		return fmt.Errorf("no data key material bytes parsed from keyset")
+	}
+	for _, b := range blobs {
 		if len(b) > 0 && bytes.Contains(rec.Wrapped, b) {
 			return fmt.Errorf("wrapped keyset contains data key bytes")
 		}
@@ -1228,7 +1235,14 @@ func logLacksKeyMaterial(ctx context.Context, tenant, mk string) error {
 	if len(plain) == 0 {
 		return fmt.Errorf("no data key material to search logs for")
 	}
-	for _, b := range [][]byte{plain} {
+	blobs, err := secrets.DataKeyMaterialBytes(plain)
+	if err != nil {
+		return err
+	}
+	if len(blobs) == 0 {
+		return fmt.Errorf("no data key material bytes parsed from keyset")
+	}
+	for _, b := range blobs {
 		if len(b) > 0 && strings.Contains(text, string(b)) {
 			return fmt.Errorf("log/error contains data key bytes")
 		}

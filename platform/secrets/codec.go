@@ -12,10 +12,10 @@ import (
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
+// cacheEntry holds a decoded keyset; every store write bumps revision.
 type cacheEntry struct {
-	handle      *keyset.Handle
-	revision    uint64
-	masterKeyID string
+	handle   *keyset.Handle
+	revision uint64
 }
 
 // Codec encrypts and decrypts payloads with tenant data keys (WP-L1-04).
@@ -152,7 +152,7 @@ func (c *Codec) decodeHandle(ctx context.Context, tenant string, keyID uint32) (
 		return nil, errInvalidArgument(msgPayloadCannotDecrypt)
 	}
 	if cached {
-		if ent.revision == rec.Revision && ent.masterKeyID == rec.MasterKeyID {
+		if ent.revision == rec.Revision {
 			return nil, errInvalidArgument(msgPayloadCannotDecrypt)
 		}
 		h, err := c.unwrapAndCache(ctx, tenant, rec)
@@ -206,7 +206,7 @@ func (c *Codec) keysetForEncode(ctx context.Context, tenant string) (*keyset.Han
 	}
 	if found {
 		ent, ok := c.cacheEntry(tenant)
-		if ok && ent.revision == rec.Revision && ent.masterKeyID == rec.MasterKeyID {
+		if ok && ent.revision == rec.Revision {
 			return ent.handle, nil
 		}
 		return c.unwrapAndCache(ctx, tenant, rec)
@@ -243,10 +243,10 @@ func (c *Codec) createKeyset(ctx context.Context, tenant string) (*keyset.Handle
 		if err != nil {
 			return nil, err
 		}
-		c.setCache(tenant, cacheEntry{handle: uh, revision: rec.Revision, masterKeyID: rec.MasterKeyID})
+		c.setCache(tenant, cacheEntry{handle: uh, revision: rec.Revision})
 		return uh, nil
 	}
-	c.setCache(tenant, cacheEntry{handle: h, revision: wrapped.Revision, masterKeyID: wrapped.MasterKeyID})
+	c.setCache(tenant, cacheEntry{handle: h, revision: wrapped.Revision})
 	return h, nil
 }
 
@@ -256,7 +256,7 @@ func (c *Codec) unwrapAndCache(ctx context.Context, tenant string, rec StoredKey
 	if err != nil {
 		return nil, err
 	}
-	c.setCache(tenant, cacheEntry{handle: h, revision: rec.Revision, masterKeyID: rec.MasterKeyID})
+	c.setCache(tenant, cacheEntry{handle: h, revision: rec.Revision})
 	return h, nil
 }
 
@@ -306,7 +306,7 @@ func (c *Codec) RotateDataKey(ctx context.Context) error {
 	if err := c.store.CompareAndSwap(ctx, tenant, rec.Revision, wrapped); err != nil {
 		return err
 	}
-	c.setCache(tenant, cacheEntry{handle: rotated, revision: wrapped.Revision, masterKeyID: wrapped.MasterKeyID})
+	c.setCache(tenant, cacheEntry{handle: rotated, revision: wrapped.Revision})
 	return nil
 }
 
@@ -450,7 +450,7 @@ func (c *Codec) keysetReadOnly(ctx context.Context, tenant string) (*keyset.Hand
 		return nil, errNotFound(msgTenantNoKeyset)
 	}
 	ent, ok := c.cacheEntry(tenant)
-	if ok && ent.revision == rec.Revision && ent.masterKeyID == rec.MasterKeyID {
+	if ok && ent.revision == rec.Revision {
 		return ent.handle, nil
 	}
 	return c.unwrapAndCache(ctx, tenant, rec)
