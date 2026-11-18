@@ -366,6 +366,19 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	sc.Step(`^the assembly fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		return expectCode(world(ctx).Prompt.lastErr, code)
+	})
+	sc.Step(`^the error does not contain "([^"]*)"$`, func(ctx context.Context, fragment string) error {
+		err := world(ctx).Prompt.lastErr
+		if err == nil {
+			return fmt.Errorf("no error to inspect")
+		}
+		if strings.Contains(err.Error(), fragment) {
+			return fmt.Errorf("error %q contains forbidden fragment %q", err.Error(), fragment)
+		}
+		return nil
+	})
 	sc.Step(`^the assembly fails with code "([^"]*)" naming input "([^"]*)"$`, func(ctx context.Context, code, name string) error {
 		if err := expectCode(world(ctx).Prompt.lastErr, code); err != nil {
 			return err
@@ -541,7 +554,7 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		_, err := world(ctx).Prompt.regOrNew().Resolve(ref)
 		return err
 	})
-	sc.Step(`^the history segment holds (\d+) entries, each wrapped once with source "([^"]*)"$`, historyWrapped)
+	sc.Step(`^the history segment holds (\d+) entr(?:y|ies), each wrapped once with source "([^"]*)"$`, historyWrapped)
 	sc.Step(`^segment "([^"]*)" holds (\d+) value wrapped with source "([^"]*)"$`, func(ctx context.Context, name string, n int, source string) error {
 		part, err := findPart(ctx, name)
 		if err != nil {

@@ -6,7 +6,7 @@
 // Each history entry role is a short ASCII token matching
 // ^[A-Za-z][A-Za-z0-9_-]{0,31}$ (for example user or assistant). The
 // assembler rejects any other role with invalid_argument and does not echo
-// the value. Roles are written before wrapped entry text in model-facing
+// the rejected role. Roles are written before wrapped entry text in model-facing
 // output, so they are validated; wrapped text follows REQ-PROMPT-014 and
 // REQ-PROMPT-015.
 //
