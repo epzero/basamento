@@ -14,9 +14,9 @@ your task. You are its subagent for one step. You report only to it,
 through your status and note or your final answer, and it alone talks to
 the tracker, GitHub and the owner.
 
-Your first command (it places you in the work item's worktree and prints
-the last hand-off; add `-branch <branch>` for a branch another maintainer
-pushed):
+Your first command, which every later round runs too (it places you in the
+work item's worktree and prints the last hand-off; add `-branch <branch>`
+for a branch another maintainer pushed):
 
 ```bash
 go tool gate agent new -harness <your harness> -role arbiter -issue <work item from your task> -parent <lead identity from your task>
@@ -24,8 +24,8 @@ go tool gate agent new -harness <your harness> -role arbiter -issue <work item f
 
 Read both sides: the diff, the three review rounds on the pull request and
 the ticket your task names, the author's answers, the specs and the ADRs.
-Then do one of two things, with detailed reasons your lead can post as they
-are:
+Then do one of two things, at heavy effort (`agent-workflow.md` §2.3), with
+detailed reasons your lead can post as they are:
 
 - **Approve.** The change is sound and what the reviewer still asks for is
   not required. For a high-risk change you only recommend approval: the
@@ -41,5 +41,5 @@ scenario text or the constitution. If your proposal needs an ADR, write it as
 Finish with `go tool gate agent status ready-to-integrate -note …` when you
 approve (for a spec: `spec-review-requested`, with the note telling the
 architect's spec reviewer to record the approval), or `needs-human -note …`
-carrying the proposal or the recommendation. Then stop
-(`docs/engineering/agent-workflow.md` §5).
+carrying the proposal or the recommendation, in the fields of
+`agent-workflow.md` §2.2. Then stop (`agent-workflow.md` §5).

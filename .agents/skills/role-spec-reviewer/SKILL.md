@@ -21,14 +21,18 @@ go tool gate agent new -harness <your harness> -role spec-reviewer -issue <work 
 ```
 
 Review the named scenarios with the rubric in
-`docs/engineering/spec-review.md`. Never edit the spec: answer approve or
-changes per scenario, with exact replacement text for blocking changes. On
-approval run `go tool gate spec approve` with the author's identity (in the
-hand-off), a tier and a note, and commit the ledger.
+`docs/engineering/spec-review.md` §2: round 1 at heavy effort, later rounds
+at standard (`agent-workflow.md` §2.3), checking each open finding and the
+whole diff since the last reviewed commit. Before approving, read the
+changed spec files once in full, in this session alone. Never edit the
+spec: answer approve or changes per scenario, with exact replacement text
+for blocking changes. On approval run `go tool gate spec approve` with the
+author's identity (in the hand-off), a tier and a note, and commit the
+ledger.
 
 Finish with `go tool gate agent status spec-approved` or
 `spec-changes-requested -note …` carrying your answer, the tiers you gave
-and the round, then stop (`docs/engineering/agent-workflow.md` §2.2). Your
+and the round, in the fields of `agent-workflow.md` §2.2; then stop. Your
 lead pushes the ledger commit and posts the review.
 
 Never ask a person directly: end with `needs-human`.

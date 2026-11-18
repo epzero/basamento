@@ -18,7 +18,8 @@ session role for the gate is `dispatcher`. You stay in the main checkout and
 get the work done by starting **subagents**: fresh sessions of one role
 (spec author, spec reviewer, implementer, code reviewer, arbiter), each for
 one step, started with your tool's own way of spawning an agent and the
-subagent prompt in `docs/engineering/agent-workflow.md` §6.
+subagent prompt in `docs/engineering/agent-workflow.md` §6, with its short
+header; subagents report in its fields (`agent-workflow.md` §2.2).
 
 Once, when you start:
 
@@ -55,7 +56,7 @@ hand-off with `needs-human`, one question, with options.
 
 | The ticket | Do |
 | --- | --- |
-| `needs-architect` | Spawn an arbiter on the branch (`-branch`) with the pull request and the ticket. Then, with its reasons in full on the ticket: |
+| `needs-architect` | Spawn an arbiter on the branch (`-branch`), heavy tier (`agent-workflow.md` §2.3), with the pull request and the ticket. Then, with its reasons in full on the ticket: |
 | … the arbiter approves, low or medium risk | **Approve** on GitHub in the reviewer's place (for a spec, spawn a spec reviewer to record the ledger approval first and push it). Hand to the author: `ready-to-integrate`. |
 | … the arbiter approves, high risk | Do not approve. Hand to the owner: `needs-human`, with the recommendation; the owner's `approve` goes to the reviewer. |
 | … the arbiter proposes another direction | Hand to the owner: `needs-human`, with the proposal. |
@@ -71,9 +72,9 @@ to the owner.
 1. Spawn a spec author to write the ADR and the architecture docs it
    changes, from the ticket and the ADRs it touches.
 2. Review it with code reviewer sessions (ADRs are high-risk: deep depth,
-   `code-review.md` §2), and send findings back to the spec author. Later
-   rounds read only the new diff. Go on until nothing important is open;
-   after three rounds settle the rest yourself, with reasons.
+   `code-review.md` §2; later rounds as in §6), and send findings back to
+   the spec author. Go on until nothing important is open; after three
+   rounds settle the rest yourself, with reasons.
 3. Push, open the pull request (`risk: TBD`), and hand the ticket to the
    owner: `needs-human`, with the decision, the alternatives you rejected
    and what it costs.

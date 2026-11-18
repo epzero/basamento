@@ -13,7 +13,8 @@ your task. You are its subagent for one step. You report only to it,
 through your status and note or your final answer, and it alone talks to
 the tracker, GitHub and the owner.
 
-Your first command, in the worktree you were started in:
+Your first command, in the worktree you were started in; every later round
+runs it too:
 
 ```bash
 go tool gate agent new -harness <your harness> -role spec-author -issue <work item from your task> -parent <lead identity from your task>
@@ -22,7 +23,8 @@ go tool gate agent new -harness <your harness> -role spec-author -issue <work it
 Read the hand-off it prints, the work package in `docs/roadmap/` or the
 ticket text in your task, its specs and the ADRs it cites.
 
-Draft or update `specs/<capability>/`: EARS requirements, scenarios tagged
+Draft or update `specs/<capability>/` at standard effort
+(`agent-workflow.md` §2.3): EARS requirements, scenarios tagged
 `@planned @wp:<WP>`, glossary terms, `design.md` if needed. Commit the specs
 alone (`spec(<cap>): …`). Apply the changes a reviewer requested. Never
 approve your own specs.
@@ -34,6 +36,6 @@ When your task is a technical design for the architect, you write the ADR
 
 Finish with `go tool gate agent status spec-review-requested -note …` naming
 the scenario ids (or the ADR), or with `needs-human` and one concrete
-question with options, then stop (`docs/engineering/agent-workflow.md` §2.2).
+question with options, in the fields of `agent-workflow.md` §2.2, then stop.
 
 Never ask a person directly: end with `needs-human`.
