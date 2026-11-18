@@ -44,7 +44,6 @@ type kvEntry struct {
 }
 
 type sub struct {
-	id      int
 	subject string
 	after   uint64
 	ch      chan platform.Message
@@ -53,8 +52,6 @@ type sub struct {
 	bufCap  int
 	ended   bool
 }
-
-var subID int
 
 // NewFake builds a fake bus and KV. Limits follow bus.Options when nonzero.
 func NewFake(clock core.Clock, opts bus.Options) *Fake {
@@ -74,12 +71,12 @@ func NewFake(clock core.Clock, opts bus.Options) *Fake {
 	}
 }
 
-// SubscribeWithBuffer is for BDD drivers that need a larger channel than the
-// configured overflow cap (slow-subscriber scenarios).
+// SubscribeWithBuffer opens a subscription with explicit channel and overflow caps.
 func (f *Fake) SubscribeWithBuffer(ctx context.Context, subject string, after uint64, chanBuf, overflowCap int) (<-chan platform.Message, error) {
 	return f.subscribe(ctx, subject, after, chanBuf, overflowCap)
 }
 
+// Stop simulates bus unavailability without destroying state.
 func (f *Fake) Stop() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -87,6 +84,7 @@ func (f *Fake) Stop() {
 	f.endAllSubs()
 }
 
+// Close stops the fake and ends every subscription.
 func (f *Fake) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -139,6 +137,7 @@ func (f *Fake) lastSeqLocked(subject string) uint64 {
 	return floor
 }
 
+// Publish stores a message and delivers it to active subscribers of the subject.
 func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -174,33 +173,42 @@ func (f *Fake) deliverToSubLocked(s *sub, msg platform.Message) {
 	default:
 	}
 	if len(s.ch) >= s.bufCap {
-		s.endLocked()
+		s.endLocked(f)
 		return
 	}
 	select {
 	case s.ch <- msg:
 	default:
-		s.endLocked()
+		s.endLocked(f)
 	}
 }
 
-func (s *sub) endLocked() {
+func (s *sub) endLocked(f *Fake) {
 	if s.ended {
 		return
 	}
 	s.ended = true
 	s.cancel()
 	close(s.ch)
+	f.removeSub(s)
 }
 
-func (f *Fake) endAllSubs() {
-	for _, s := range f.subs {
-		if !s.ended {
-			s.endLocked()
+func (f *Fake) removeSub(s *sub) {
+	for i, x := range f.subs {
+		if x == s {
+			f.subs = append(f.subs[:i], f.subs[i+1:]...)
+			return
 		}
 	}
 }
 
+func (f *Fake) endAllSubs() {
+	for len(f.subs) > 0 {
+		f.subs[0].endLocked(f)
+	}
+}
+
+// Subscribe opens a subject subscription after the given bus sequence.
 func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-chan platform.Message, error) {
 	return f.subscribe(ctx, subject, after, f.bufSize, f.bufSize)
 }
@@ -218,10 +226,8 @@ func (f *Fake) subscribe(ctx context.Context, subject string, after uint64, chan
 		f.mu.Unlock()
 		return nil, core.NewError(core.CodeNotFound, "purged", map[string]any{"purged_through": floor})
 	}
-	subID++
 	subCtx, cancel := context.WithCancel(ctx)
 	s := &sub{
-		id:      subID,
 		subject: subject,
 		after:   after,
 		ch:      make(chan platform.Message, chanBuf),
@@ -241,13 +247,14 @@ func (f *Fake) subscribe(ctx context.Context, subject string, after uint64, chan
 		<-subCtx.Done()
 		f.mu.Lock()
 		if !s.ended {
-			s.endLocked()
+			s.endLocked(f)
 		}
 		f.mu.Unlock()
 	}()
 	return s.ch, nil
 }
 
+// LastSeq returns the highest bus sequence assigned on the subject.
 func (f *Fake) LastSeq(ctx context.Context, subject string) (uint64, error) {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -261,6 +268,7 @@ func (f *Fake) LastSeq(ctx context.Context, subject string) (uint64, error) {
 	return f.lastSeqLocked(subject), nil
 }
 
+// Purge drops retained messages up to the current last sequence on the subject.
 func (f *Fake) Purge(ctx context.Context, subject string) error {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -303,6 +311,7 @@ func entryExpired(clock core.Clock, e kvEntry) bool {
 	return !e.deadline.IsZero() && !clock.Now().Before(e.deadline)
 }
 
+// Get reads the latest value and revision of a KV key.
 func (f *Fake) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -320,6 +329,7 @@ func (f *Fake) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	return append([]byte(nil), e.value...), e.rev, nil
 }
 
+// Put stores or overwrites a KV entry.
 func (f *Fake) Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error) {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -335,14 +345,12 @@ func (f *Fake) Put(ctx context.Context, key string, value []byte, ttl time.Durat
 	defer f.mu.Unlock()
 	f.kvRevSeq++
 	rev := f.kvRevSeq
-	var deadline time.Time
-	if ttl > 0 {
-		deadline = f.clock.Now().Add(ttl)
-	}
+	deadline := bus.KVDeadlineFromTTL(f.clock.Now(), ttl)
 	f.kv[key] = kvEntry{value: append([]byte(nil), value...), rev: rev, deadline: deadline}
 	return rev, nil
 }
 
+// CompareAndSwap updates a key when revision is zero (create) or matches.
 func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error) {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
@@ -356,10 +364,7 @@ func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, rev
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var deadline time.Time
-	if ttl > 0 {
-		deadline = f.clock.Now().Add(ttl)
-	}
+	deadline := bus.KVDeadlineFromTTL(f.clock.Now(), ttl)
 	if revision == 0 {
 		if _, ok := f.kvGetLocked(key); ok {
 			return 0, core.NewError(core.CodeConflict, "key exists", nil)
@@ -396,6 +401,7 @@ func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, rev
 	return rev, nil
 }
 
+// Delete removes a KV key.
 func (f *Fake) Delete(ctx context.Context, key string) error {
 	_ = ctx
 	if err := f.unavailable(); err != nil {
