@@ -285,8 +285,7 @@ func renderSegment(seg Segment, idx map[string]Input, inputs, trusted map[string
 			untrusted[name] = true
 		}
 	}
-	text := Substitute(seg.Text, sub)
-	wrapped := collectWrappedRegions(text, sub, untrusted)
+	text, wrapped := substitute(seg.Text, sub, untrusted)
 	return AssembledPart{Name: seg.Name, Kind: seg.Kind, Text: text, ContentSize: size, Wrapped: wrapped}, size, nil
 }
 

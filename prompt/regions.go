@@ -63,28 +63,6 @@ func shiftDelimiterRecords(recs []DelimiterRecord, shift int) []DelimiterRecord 
 	return out
 }
 
-func collectWrappedRegions(text string, sub map[string]string, untrusted map[string]bool) []DelimiterRecord {
-	var out []DelimiterRecord
-	for name, val := range sub {
-		if !untrusted[name] {
-			continue
-		}
-		start := 0
-		for {
-			idx := strings.Index(text[start:], val)
-			if idx < 0 {
-				break
-			}
-			abs := start + idx
-			if rec, ok := delimiterRecordInWrapped(val, abs); ok {
-				out = append(out, rec)
-			}
-			start = abs + len(val)
-		}
-	}
-	return out
-}
-
 func hasLookAlikeIn(text string, from, to int) bool {
 	if from > to {
 		from, to = to, from

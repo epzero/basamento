@@ -54,6 +54,51 @@ func TestLintAssembledFixedTextDelimiterUnrecorded(t *testing.T) {
 	}
 }
 
+func TestLintAssembledIdenticalWrapInTrustedText(t *testing.T) {
+	t.Helper()
+	w := WrapUntrusted("doc", "hi")
+	cases := []struct {
+		name   string
+		inputs []Input
+		text   string
+		values map[string]string
+	}{
+		{
+			name:   "trusted input",
+			inputs: []Input{{Name: "echo", Trust: TrustTrusted}, {Name: "doc"}},
+			text:   `{{echo}}{{doc}}`,
+			values: map[string]string{"echo": w, "doc": "hi"},
+		},
+		{
+			name:   "fixed text",
+			inputs: []Input{{Name: "doc"}},
+			text:   w + `{{doc}}`,
+			values: map[string]string{"doc": "hi"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewRegistry()
+			tpl := &Template{
+				ID: "forge", Version: "1",
+				Inputs:   tc.inputs,
+				Segments: []Segment{{Name: "context", Kind: KindDynamic, Budget: 500, Text: tc.text}},
+			}
+			if _, err := reg.Register(tpl); err != nil {
+				t.Fatal(err)
+			}
+			a, err := reg.Assemble("forge@1", tc.values, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := LintAssembled(a)
+			if len(f) == 0 || f[0].Rule != "unpaired_delimiter" {
+				t.Fatalf("unrecorded pair in trusted text: %+v", f)
+			}
+		})
+	}
+}
+
 func TestLintAssembledHandBuiltNoRecords(t *testing.T) {
 	t.Helper()
 	w := WrapUntrusted("doc", "x")

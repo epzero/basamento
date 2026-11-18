@@ -25,11 +25,20 @@ func VariablesInText(text string) []string {
 
 // Substitute replaces {{name}} placeholders in one left-to-right pass; values are not rescanned.
 func Substitute(text string, values map[string]string) string {
+	out, _ := substitute(text, values, nil)
+	return out
+}
+
+// substitute is Substitute plus the delimiter records for the names in wrapped.
+// The record is taken at the write site, so it names a pair this substitution
+// wrote and never one that happens to appear elsewhere in the text.
+func substitute(text string, values map[string]string, wrapped map[string]bool) (string, []DelimiterRecord) {
 	if len(text) == 0 {
-		return ""
+		return "", nil
 	}
 	var out strings.Builder
 	out.Grow(len(text))
+	var records []DelimiterRecord
 	i := 0
 	for i < len(text) {
 		if i+1 < len(text) && text[i] == '{' && text[i+1] == '{' {
@@ -39,7 +48,13 @@ func Substitute(text string, values map[string]string) string {
 				name := rest[:end]
 				if varRef.MatchString("{{" + name + "}}") {
 					if val, ok := values[name]; ok {
+						start := out.Len()
 						out.WriteString(val)
+						if wrapped[name] {
+							if rec, ok := delimiterRecordInWrapped(val, start); ok {
+								records = append(records, rec)
+							}
+						}
 						i += 2 + end + 2
 						continue
 					}
@@ -49,7 +64,7 @@ func Substitute(text string, values map[string]string) string {
 		out.WriteByte(text[i])
 		i++
 	}
-	return out.String()
+	return out.String(), records
 }
 
 // CheckDeclaredVars returns the first variable used in segments but not declared.
