@@ -16,12 +16,18 @@ func publicURLID(raw string) (string, error) {
 		return "", errInvalidArgument("localsecrets uses a key fingerprint, not a URL")
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	if err != nil || u.Scheme == "" {
+		return "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
+	}
+	if u.Host == "" && u.Path == "" {
 		return "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
 	}
 	u.User = nil
-	u.RawQuery = ""
 	u.Fragment = ""
-	out := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}
+	if u.RawQuery != "" {
+		q := u.Query()
+		u.RawQuery = q.Encode()
+	}
+	out := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawQuery: u.RawQuery}
 	return out.String(), nil
 }

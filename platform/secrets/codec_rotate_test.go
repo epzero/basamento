@@ -9,19 +9,26 @@ import (
 )
 
 type failAfterWrapKey struct {
-	id         string
-	wraps      int
-	failAfter  int
-	wrappedIDs []string
+	id        string
+	wraps     int
+	failAfter int
 }
 
 func (f *failAfterWrapKey) MasterKeyID() string { return f.id }
 
+func (f *failAfterWrapKey) Close() error { return nil }
+
 func (f *failAfterWrapKey) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
+	if tenant == canaryTenant {
+		inner, err := FrameBoundPlaintext(tenant, plaintext)
+		if err != nil {
+			return nil, err
+		}
+		return append([]byte("wrap:"), inner...), nil
+	}
 	f.wraps++
-	f.wrappedIDs = append(f.wrappedIDs, tenant)
 	if f.wraps > f.failAfter {
-		return nil, errUnavailable("test")
+		return nil, errUnavailableRetry("test")
 	}
 	inner, err := FrameBoundPlaintext(tenant, plaintext)
 	if err != nil {
@@ -41,12 +48,12 @@ type memKeysetStore struct {
 	data map[string]StoredKeyset
 }
 
-func (m *memKeysetStore) Get(tenant string) (StoredKeyset, bool, error) {
+func (m *memKeysetStore) Get(_ context.Context, tenant string) (StoredKeyset, bool, error) {
 	r, ok := m.data[tenant]
 	return r, ok, nil
 }
 
-func (m *memKeysetStore) CreateIfAbsent(tenant string, record StoredKeyset) (bool, error) {
+func (m *memKeysetStore) CreateIfAbsent(_ context.Context, tenant string, record StoredKeyset) (bool, error) {
 	if _, ok := m.data[tenant]; ok {
 		return false, nil
 	}
@@ -54,18 +61,18 @@ func (m *memKeysetStore) CreateIfAbsent(tenant string, record StoredKeyset) (boo
 	return true, nil
 }
 
-func (m *memKeysetStore) CompareAndSwap(tenant string, expectRevision uint64, record StoredKeyset) error {
+func (m *memKeysetStore) CompareAndSwap(_ context.Context, tenant string, expect uint64, record StoredKeyset) error {
 	old, ok := m.data[tenant]
-	if !ok || old.Revision != expectRevision {
-		return errInvalidArgument("conflict")
+	if !ok || old.Revision != expect {
+		return errConflict(msgKeysetRevisionConflict)
 	}
 	m.data[tenant] = record
 	return nil
 }
 
-func (m *memKeysetStore) Count() (int, error) { return len(m.data), nil }
+func (m *memKeysetStore) Count(context.Context) (int, error) { return len(m.data), nil }
 
-func (m *memKeysetStore) Tenants() ([]string, error) {
+func (m *memKeysetStore) Tenants(context.Context) ([]string, error) {
 	out := make([]string, 0, len(m.data))
 	for k := range m.data {
 		out = append(out, k)
@@ -73,17 +80,16 @@ func (m *memKeysetStore) Tenants() ([]string, error) {
 	return out, nil
 }
 
-func TestRotateMasterKeyRegistersNewKeyBeforePartialFailure(t *testing.T) {
+func TestRotateMasterKeyFailsBeforeAnyRecordWrapped(t *testing.T) {
 	t.Parallel()
 	ctx := core.WithTenant(context.Background(), "acme")
 	store := &memKeysetStore{data: map[string]StoredKeyset{}}
 	old := &failAfterWrapKey{id: "mk-1", failAfter: 99}
-	mid := &failAfterWrapKey{id: "mk-2", failAfter: 1}
+	mid := &failAfterWrapKey{id: "mk-2", failAfter: 0}
 	c, err := NewCodec(store, []KeyService{old})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.data
 	h, err := newDataKeyset()
 	if err != nil {
 		t.Fatal(err)
@@ -100,16 +106,15 @@ func TestRotateMasterKeyRegistersNewKeyBeforePartialFailure(t *testing.T) {
 	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("rotate err=%v", err)
 	}
-	c.invalidate("acme")
-	c.invalidate("globex")
-	p := Payload{Metadata: map[string][]byte{"encoding": []byte("json/plain")}, Data: []byte("x")}
+	if mid.wraps != 1 {
+		t.Fatalf("expected one failed rewrap attempt, wraps=%d", mid.wraps)
+	}
 	for _, tenant := range []string{"acme", "globex"} {
-		enc, err := c.Encode(core.WithTenant(ctx, core.TenantID(tenant)), p)
-		if err != nil {
-			t.Fatalf("%s encode: %v", tenant, err)
+		if store.data[tenant].MasterKeyID != "mk-1" {
+			t.Fatalf("%s record changed", tenant)
 		}
-		if _, err := c.Decode(core.WithTenant(ctx, core.TenantID(tenant)), enc); err != nil {
-			t.Fatalf("%s decode: %v", tenant, err)
-		}
+	}
+	if c.snapshotKeys()[0].MasterKeyID() != "mk-1" {
+		t.Fatal("master list not restored")
 	}
 }
