@@ -11,6 +11,15 @@ Status: contract **Implemented** (`runtime/runtime.go`); runtimes **Planned**
 - **`Runtime`**: the control plane: register the flow host and steps,
   `Start`, `Resolve` (gates), `Cancel`, `Describe`, `List`, `Serve`.
 
+The tenant of a `Runtime` call comes from its context (`core.TenantFrom`),
+never from the request, as with `AuditEvent.Tenant` in `platform/platform.go`.
+`StartRequest`, `RunRef` and `RunQuery` carry a `core.TenantID` that must be
+empty or equal to the context tenant; a Runtime rejects a different one, and a
+call whose context carries no tenant, with code `invalid_argument`. The field
+never overrides the context. A Runtime always fills the tenant on the run refs
+it returns (`Start`, `RunStatus.Ref`). `specs/runtime/design.md` §The request
+tenant follows the context has the rest of the isolation rules.
+
 There is exactly one flow entrypoint, a `FlowHost(dc, flowRef, input)`,
 provided by `flow/host` and registered with each runtime at the composition
 root (ADR-0011). It loads the IR by hash, runs `flow.Machine`, turns commands
