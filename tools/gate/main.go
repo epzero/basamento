@@ -4,10 +4,10 @@
 //	gate agent whoami | list | release [-instance <id>]
 //	gate agent status <status> [-note <text>] [-issue <id>]   # how this session ended; the next one reads it
 //	gate wp [-state ready] [-json]   # every work package: done, in-progress, ready or blocked
-//	gate docs [-write]       # generated diagrams match layering.yaml and the roadmap
+//	gate docs [-write]       # generated diagrams, CODEOWNERS and specs/README.md statuses
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
-//	gate hygiene [-base <ref>] # test determinism, prod test-hook isolation, spec/code separation
+//	gate hygiene [-base <ref>] # test determinism and production isolation; with -base <ref> also spec/code separation
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
 //	gate spec trace [-json]   # requirement → scenario matrix
