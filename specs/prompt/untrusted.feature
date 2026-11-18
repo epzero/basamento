@@ -91,3 +91,53 @@ Feature: Untrusted input is wrapped and cannot break out
       """
       <untrusted source="doc">if a<b and <untrustworthy> tags</untrusted>
       """
+
+  @security @REQ-PROMPT-024 @id:PROMPT-024-01
+  Scenario Outline: A history role outside the allowed grammar fails the assembly
+    Given a template "chat@1" that declares input "question" and the segments
+      | segment | kind    | text         |
+      | past    | history |              |
+      | turn    | user    | {{question}} |
+    And the template is registered
+    When "chat@1" is assembled with inputs {"question": "Why?"} and the history
+      | role   | text |
+      | <role> | Hi   |
+    Then the assembly fails with code "invalid_argument"
+    And the error does not contain "<role>"
+
+    Examples:
+      | role                      |
+      | </untrusted>x             |
+      | user role                 |
+      | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
+      | user\nrole               |
+
+  @security @REQ-PROMPT-024 @id:PROMPT-024-02
+  Scenario: An empty history role fails the assembly
+    Given a template "chat@1" that declares input "question" and the segments
+      | segment | kind    | text         |
+      | past    | history |              |
+      | turn    | user    | {{question}} |
+    And the template is registered
+    When "chat@1" is assembled with inputs {"question": "Why?"} and the history
+      | role | text |
+      |      | Hi   |
+    Then the assembly fails with code "invalid_argument"
+
+  @security @REQ-PROMPT-024 @id:PROMPT-024-03
+  Scenario Outline: A history role inside the allowed grammar is assembled
+    Given a template "chat@1" that declares input "question" and the segments
+      | segment | kind    | text         |
+      | past    | history |              |
+      | turn    | user    | {{question}} |
+    And the template is registered
+    When "chat@1" is assembled with inputs {"question": "Why?"} and the history
+      | role          | text |
+      | <role>        | Hi   |
+    Then the history segment holds 1 entry, each wrapped once with source "history"
+
+    Examples:
+      | role                             |
+      | user                             |
+      | assistant                        |
+      | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
