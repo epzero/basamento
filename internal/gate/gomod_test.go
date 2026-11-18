@@ -46,6 +46,12 @@ func TestPatchOnlyGoModBump(t *testing.T) {
 			t.Fatal("expected high")
 		}
 	})
+	t.Run("space-indented toolchain line", func(t *testing.T) {
+		head := strings.Replace(baseMod, "go 1.26.10", "go 1.26.11", 1) + "  toolchain go1.26.11\n"
+		if PatchOnlyGoModBump([]byte(baseMod), []byte(head)) {
+			t.Fatal("expected high")
+		}
+	})
 	t.Run("require path containing toolchain", func(t *testing.T) {
 		head := strings.Replace(baseMod, "go 1.26.10", "go 1.26.11", 1) + "require github.com/foo/toolchain/pkg v1.0.0\n"
 		if PatchOnlyGoModBump([]byte(baseMod), []byte(head)) {

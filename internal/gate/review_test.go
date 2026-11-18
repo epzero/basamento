@@ -59,6 +59,9 @@ func TestPlanReviewGoModTiers(t *testing.T) {
 		{"indented toolchain", "go.mod", func(_ string) string {
 			return strings.Replace(mod, "go 1.26.10", "go 1.26.11", 1) + "\ttoolchain go1.26.11\n"
 		}, "high"},
+		{"space-indented toolchain", "go.mod", func(_ string) string {
+			return strings.Replace(mod, "go 1.26.10", "go 1.26.11", 1) + "  toolchain go1.26.11\n"
+		}, "high"},
 		{"comment-only", "go.mod", func(_ string) string {
 			return mod + "// note\n"
 		}, "high"},
