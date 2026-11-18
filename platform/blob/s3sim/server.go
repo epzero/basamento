@@ -28,7 +28,7 @@ func Start() *Server {
 	}
 	endpoint := fmt.Sprintf("http://127.0.0.1:%s", port)
 	bucket := "conformance"
-	url := fmt.Sprintf("s3://%s?region=us-east-1&endpoint=%s&disable_https=true&use_path_style=true&awssdk=v2", bucket, endpoint)
+	url := fmt.Sprintf("s3://%s?region=us-east-1&endpoint=%s&disable_https=true&use_path_style=true", bucket, endpoint)
 	return &Server{URL: url, Bucket: bucket, Endpoint: endpoint, srv: ts}
 }
 

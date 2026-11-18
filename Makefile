@@ -53,10 +53,8 @@ vuln:
 	$(call tool,govulncheck,govulncheck ./...)
 
 # Dependencies must stay compatible with Apache-2.0 (no GPL, AGPL, SSPL, ...).
-# jmespath (aws-sdk) is Apache-2.0; the module tree has no LICENSE file for go-licenses.
-LICENSES_CMD := GOROOT=$$($(GO) env GOROOT) go-licenses check ./... --disallowed_types=forbidden,restricted --ignore github.com/epzero/basamento --ignore github.com/jmespath/go-jmespath
 licenses:
-	$(call tool,go-licenses,$(LICENSES_CMD))
+	$(call tool,go-licenses,GOROOT=$$($(GO) env GOROOT) go-licenses check ./... --disallowed_types=forbidden,restricted)
 
 buf:
 	$(call tool,buf,cd contracts && buf lint)
