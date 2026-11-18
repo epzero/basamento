@@ -9,7 +9,7 @@ with embedded and cloud implementations), ADR-0005 (the bus under streaming).
 | --- | --- |
 | `platform` (`platform.go`) | The `Bus` and `KV` ports and `Message`. The changes in §2 are made there. |
 | `platform/bus` | The embedded implementation (`nats-server` in-process, JetStream file storage under the data directory) and the cloud implementation (`nats.go` against a NATS cluster). One JetStream code path serves both; they differ in how the connection is made. |
-| `platform/bus/bustest` | The in-process fake. Test-only (constitution 11): imported from `_test.go` files and `internal/bdd` only. |
+| `internal/bdd/bustest` | The in-process fake. Test-only (constitution 11): imported from `internal/bdd` only; production layers cannot import `internal/bdd` (see layering). |
 
 Selecting an implementation by URL (`nats-embedded://…` or `nats://…`) is
 wiring, specified with `kit serve` (WP-L1-05), not here.
@@ -38,7 +38,7 @@ implementation (`docs/engineering/agent-workflow.md` §4), noting the touch to
   holder can renew (REQ-BUS-020). `revision = 0` means *create*
   (REQ-BUS-017); `ttl = 0` means no expiry. `Put` keeps its TTL.
 - The subscription ends by closing its channel: on cancellation of `ctx`
-  (REQ-BUS-009, REQ-BUS-027) and when the buffer overflows (REQ-BUS-010). The
+  (REQ-BUS-009) and when the buffer overflows (REQ-BUS-010). The
   subscriber resumes with `Subscribe` after the last bus sequence it received.
 
 ## 3. Bus sequences and purges
@@ -105,13 +105,14 @@ system clock in production):
   cannot decode, for example one written by another client. Reads, swaps and
   creates of that key fail with `internal` before any expiry or revision check.
   A put over the key replaces the record, so a later read succeeds.
-- **Cancellation and deadlines** (REQ-BUS-027) are checked on every call of
-  `Publish`, `LastSeq`, `Purge`, the setup of `Subscribe` and every KV call: a
-  context that is already cancelled or past its deadline fails the call before
-  the store does anything, and a context that ends while a call waits on the
-  server fails that call the same way. When the context of an open
-  subscription ends, the subscription ends by closing its channel; it is not
-  an error of the call that opened it.
+- **Cancellation and deadlines** (REQ-BUS-027, REQ-BUS-028) are checked on
+  every call of `Publish`, `LastSeq`, `Purge`, the setup of `Subscribe` and
+  every KV call, after the readiness check of REQ-BUS-013 and before the call's
+  own store operation: a context that is already cancelled or past its deadline
+  fails the call with `cancelled` or `timeout` and stores nothing, and a context
+  that ends while a call waits on the server fails that call the same way. When
+  the context of an open subscription ends, the subscription ends by closing
+  its channel (REQ-BUS-009); it is not an error of the call that opened it.
 
 ## 7. How the scenarios run
 
@@ -127,17 +128,19 @@ system clock in production):
   checks that it is the next message delivered.
 - Time moves only through the fake clock (`core/coretest`).
 - The corrupt-record scenario (BUS-026-01) runs against the embedded and the
-  cloud implementations, which keep the KV entries in a JetStream bucket,
-  and not against the fake, whose store holds decoded entries and cannot hold
-  a foreign record. The driver writes the foreign record into the bucket
-  named in §1 (`KIT_KV`) through a test-only helper of
-  `platform/bus/bustest` that connects to the same server and writes the
-  value under the key through `nats.go` and JetStream directly, as any other
-  client of the bucket would. The value is shorter than a KV record header,
+  cloud implementations, which keep the KV entries in a JetStream bucket, and
+  not against the fake, whose store holds decoded entries and cannot hold a
+  foreign record. The driver writes the foreign record into the `KIT_KV` data
+  bucket through a test-only helper of `internal/bdd/bustest` that connects to
+  the same server and writes the value under the key through `nats.go` and
+  JetStream directly, as any other client of the bucket would. A fresh bucket
+  per scenario puts the record it writes at revision 1, which the swap step
+  uses. The value is shorter than the eight-byte deadline header of a record,
   so the store cannot decode it.
-- The cancellation and deadline scenarios (BUS-027-01 and BUS-027-02) pass a
-  context that is already cancelled, or whose deadline is set to a time
-  before the frozen clock, to the driver; neither needs real time. The
+- The cancellation and deadline scenarios (BUS-027-01 and BUS-028-01) pass a
+  context that is already cancelled, or one whose deadline is the Unix epoch
+  and therefore always past, to the driver; neither reads the wall clock nor
+  needs real time. The
   driver asserts that nothing was stored by reading `cursor.r1` and replaying
   `run.r1.deltas` from the start with an uncancelled context: the read fails
   with `not_found` and the replay receives no message.

@@ -93,5 +93,8 @@ If a caller swaps a KV entry at the revision of an entry that has expired, then 
 ### REQ-BUS-026 — A corrupt KV record
 If a KeyValue entry stored under a key cannot be decoded as a KV entry, then every read, swap or create of that key shall fail with code `internal`, and the error shall carry neither the key, the value nor any text from the server, so a caller never reads it as `not_found` or `unavailable`.
 
-### REQ-BUS-027 — Cancellation and deadlines
-If the context of a call is cancelled, then the bus or KV store shall fail the call with code `cancelled`. If the context of a call has passed its deadline, then the bus or KV store shall fail the call with code `timeout`. A live subscription whose context is cancelled in this way shall end by closing its channel, as it does when the subscriber cancels it (REQ-BUS-009, REQ-BUS-010).
+### REQ-BUS-027 — A cancelled call
+If the context of a call is cancelled while the server can be reached, then the bus or KV store shall fail the call with code `cancelled` without storing a message or changing an entry.
+
+### REQ-BUS-028 — A call past its deadline
+If the context of a call has passed its deadline while the server can be reached, then the bus or KV store shall fail the call with code `timeout` without storing a message or changing an entry.
