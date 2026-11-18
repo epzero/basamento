@@ -45,7 +45,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-003-02:
         hash: sha256:ef86dfa3c77c850245c33a59099ad34d7ebcb9f5ce4252d72af569165b30b2ea
         reqs:
@@ -56,7 +59,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-003-03:
         hash: sha256:c64eadd6a9f6b76af129fa15f3fb28d5a3156cf6589c0b218bf33eb3e6fcc55a
         reqs:
@@ -67,7 +73,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Durability: a resumed run never re-executes a completed tool call (side effects run once).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-004-01:
         hash: sha256:e14770c11d6cb1c8952c5dc3de84ff71ff8ec0fa1ab5e7384ed56f1f9000eccc
         reqs:
@@ -122,7 +131,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-008-02:
         hash: sha256:5d274d047e6acabcd8018a34da4033f90421d827495706dea51686ead66ec7c9
         reqs:
@@ -133,7 +145,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-009-01:
         hash: sha256:decf0f526d201f1e6c073b0cf9890694c6c390d7d993cf666b52cb3a4ec9f311
         reqs:
@@ -166,7 +181,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: allowlist refusal never runs the tool and refused calls leak nothing to the model.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-012-01:
         hash: sha256:963916250154b8ff61c6b158835eab2215e4fa304a1dafb8ddba31a736b54df3
         reqs:
@@ -245,7 +263,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: MCP credential resolved at call, secret never in events, history, errors or logs.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-018-01:
         hash: sha256:9255224c8d81df427cc864f885ed95366fe7f5d822be20390e02476e7dd56058
         reqs:
@@ -256,7 +277,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: sandbox isolates host files, env, metadata service and network.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-018-02:
         hash: sha256:ebbfb3437363d84555a0c23d441148d909c021c772ebfe2ba3872fcc7a7bb63c
         reqs:
@@ -267,7 +291,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Security: sandbox isolates host files, env, metadata service and network.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/13
     TOOL-019-01:
         hash: sha256:cd522b4b12b885b15adbce499930065187ba6da85d25604075670c8408945483
         reqs:
