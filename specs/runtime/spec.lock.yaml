@@ -624,6 +624,18 @@ scenarios:
         note: New temporal runtime behavior.
         human:
             status: pending
+    RT-040-01:
+        hash: sha256:5e4190c7904ad9def24a1705496ff005e0f4da473667ce806087b0aa2345209c
+        reqs:
+            - REQ-RT-040
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: starting a run on temporal without a context tenant must fail with invalid_argument even when StartRequest names a tenant, before any step or history.'
+        human:
+            status: pending
     RT-041-01:
         hash: sha256:f22eb06e5145e56ddd7220d0afa692c50dc9f8e5456955018d72ef924bf90a81
         reqs:
@@ -644,5 +656,313 @@ scenarios:
         reviewer: antigravity:spec-reviewer:ed2ce7
         approved_at: "2026-11-18"
         note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-042-01:
+        hash: sha256:9483e9588cf5b6ba57e9cc14845077a22006f1f5642c11faec8e0077eb52faa1
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-02:
+        hash: sha256:a24f9915d770633d90080e80328afe92df7aec46ad41b6208f20d9011d6a3334
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-03:
+        hash: sha256:8b357805d719584df2cf27bdbab6233dd2b483eba0ca41027b07d350033034f9
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-04:
+        hash: sha256:05edcfc1633292138e987563308fecb681c06398150f00187df4adeb655efadd
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-05:
+        hash: sha256:808c1cc4c89574dfa203754e553d7a1bafd77a80c9655271fb67faf9c51efe5e
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-06:
+        hash: sha256:6c0c0b6ec1a7a7b896508297c9a480bc679b4ff13e31ce4146c5a87678ff2ded
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-07:
+        hash: sha256:2cc82474e2925a70d6fbe24ac4138c8611bea6286ad772111fea25b101161b58
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-08:
+        hash: sha256:462504e3632392024c7e23876b48e5c6f5f74ff56a862dccb84df045f0ca646e
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-09:
+        hash: sha256:29facc6367219a53eed047338687104b3c1195ca4a2b403b18744e78453ec210
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-10:
+        hash: sha256:87a715c54e1803060d6134aaedb1c09ffc1062e1d7ac49bfa10e84bc2469f4e5
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-11:
+        hash: sha256:b1228b658035019ed4c71023448959d19878aa07865c7f49b84b4644f71a935a
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-042-12:
+        hash: sha256:22a9704dc0e51268aaea12b473f98af83e1719544b82898945979af106b45234
+        reqs:
+            - REQ-RT-042
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: tenant fields on Start, Describe, Cancel, Resolve, and List cannot override or bypass core.TenantFrom(ctx); mismatches fail with invalid_argument before touching runs.'
+        human:
+            status: pending
+    RT-043-01:
+        hash: sha256:c7e98d664c9c3cca8b6346a03d85e58ead951d18402b5baeecca745e2aae9140
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-043-02:
+        hash: sha256:343119748a69b382b8d3b333de0a3f3297edcc5ede21b15f60dbdaf39032b15d
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-043-03:
+        hash: sha256:f86150f220ff03b98bee72574951230873a48396ee3fce4b2282da25e30c6318
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-043-04:
+        hash: sha256:58796cc69c46db2c0ea1e7639e2772aaec2e1c9775a52253234529de8531db2c
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-043-05:
+        hash: sha256:f47921eb590808aed430ea78693808395f211196b9add495336917922a77bf60
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-043-06:
+        hash: sha256:1246ebd3e8af450217cd79d7e5c66ccdfc9eb9fcbc228ee62dd79ab7da800de6
+        reqs:
+            - REQ-RT-043
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: RunRef values returned from Start, Describe, and List must carry the run''s own tenant from context, never an empty or caller-supplied field.'
+        human:
+            status: pending
+    RT-044-01:
+        hash: sha256:de0445f92c6de3b38bef5d5e43556e1feff3f77d67dd4f18312dc4c562208f13
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-044-02:
+        hash: sha256:026babb3b74f7df4490fbed5efbf227d49d34938449629c257068a4d2b9fc21c
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-044-03:
+        hash: sha256:4173b7f6b0e2bcd1aa3819194d3ad9e00dc0b41b15776840a6e4392c075b5c67
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-044-04:
+        hash: sha256:a3cde12ae2b5d408f5ead81601effd079ab79b558e945dbbc4ca4368889d90a5
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-044-05:
+        hash: sha256:014e37d98be28b37eef14c3650fe67bad0a4fdda624292b96e6a3b58c1fbf871
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-044-06:
+        hash: sha256:80f8dd35287f41f1c78f2b14ec6de67a156823b62f54fff6b435805a43843d42
+        reqs:
+            - REQ-RT-044
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: local runtime must fail closed with invalid_argument when context has no tenant across Start, Describe, Cancel, Resolve, and List, even with a named field.'
+        human:
+            status: pending
+    RT-045-01:
+        hash: sha256:da93196902b6c8797e4c84706e1ad5321bdb579287e39d3c7c951f033db09da2
+        reqs:
+            - REQ-RT-045
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: temporal runtime must fail closed with invalid_argument when context has no tenant on List, Describe, Cancel, and Resolve, even with a named field.'
+        human:
+            status: pending
+    RT-045-02:
+        hash: sha256:4f2e1fb28f3813736745822d917459950a76079786677b49f0916fdb051f0f2b
+        reqs:
+            - REQ-RT-045
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: temporal runtime must fail closed with invalid_argument when context has no tenant on List, Describe, Cancel, and Resolve, even with a named field.'
+        human:
+            status: pending
+    RT-045-03:
+        hash: sha256:11a597c3968278343e1052021753c097821c2862ef2cba8091c2f3fb8b39e2bf
+        reqs:
+            - REQ-RT-045
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: temporal runtime must fail closed with invalid_argument when context has no tenant on List, Describe, Cancel, and Resolve, even with a named field.'
+        human:
+            status: pending
+    RT-045-04:
+        hash: sha256:933f619494af6ec4c50df348ca4d7e850a80bce0d74e823985e294491b5e9bab
+        reqs:
+            - REQ-RT-045
+        tier: P0
+        author: claude-code:spec-author:27a2dc
+        reviewer: antigravity:spec-reviewer:c4b3d4
+        approved_at: "2026-11-18"
+        note: 'Security: temporal runtime must fail closed with invalid_argument when context has no tenant on List, Describe, Cancel, and Resolve, even with a named field.'
         human:
             status: pending
