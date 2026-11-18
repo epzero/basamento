@@ -41,11 +41,16 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 		return nil, formatMappingParseErr(src, err)
 	}
 	if name, blocked := scanBanned(query); blocked {
+		if name == "unsupported construct" {
+			return nil, mappingCompileErr(src, name)
+		}
 		return nil, mappingCompileErr(src, fmt.Sprintf(`undeclared reference "%s"`, name))
 	}
 	code, err := gojq.Compile(query,
-		gojq.WithVariables(varNames),
-		gojq.WithEnvironLoader(func() []string { return nil }),
+		append([]gojq.CompilerOption{
+			gojq.WithVariables(varNames),
+			gojq.WithEnvironLoader(func() []string { return nil }),
+		}, blockedBuiltinCompilerOptions()...)...,
 	)
 	if err != nil {
 		return nil, mappingCompileErr(src, err.Error())
@@ -270,30 +275,34 @@ func normalizeMappingOutputWalk(v any, w *jsonWalk) (any, error) {
 }
 
 func scanBanned(query *gojq.Query) (string, bool) {
-	if query == nil {
-		return "", false
-	}
-	if len(query.Imports) > 0 {
-		im := query.Imports[0]
-		if im.ImportPath != "" {
-			return "import", true
-		}
-		return "include", true
-	}
-	for _, fd := range query.FuncDefs {
-		if n, ok := scanBannedQuery(fd.Body); ok {
-			return n, true
-		}
-	}
-	return scanBannedQuery(query)
+	return scanBannedAST(query)
 }
 
 var bannedNames = map[string]bool{
 	"now": true, "localtime": true, "strflocaltime": true,
 	"env": true, "$ENV": true,
-	"input": true, "inputs": true, "input_filename": true,
+	"input": true, "inputs": true, "input_filename": true, "input_line_number": true,
 	"debug": true, "stderr": true, "halt": true, "halt_error": true,
-	"import": true, "include": true, "modulemeta": true,
+	"import": true, "include": true, "modulemeta": true, "get_search_list": true,
+}
+
+// blockedBuiltinCompilerOptions registers impure builtins to return errors at runtime
+// if static analysis misses a call (second layer; compile-time scan remains primary).
+func blockedBuiltinCompilerOptions() []gojq.CompilerOption {
+	names := []string{
+		"now", "localtime", "strflocaltime", "env",
+		"input", "inputs", "input_filename", "input_line_number",
+		"debug", "stderr", "halt", "halt_error", "get_search_list",
+	}
+	opts := make([]gojq.CompilerOption, 0, len(names))
+	block := func(_ any, _ []any) any {
+		return fmt.Errorf("undeclared reference")
+	}
+	for _, n := range names {
+		name := n
+		opts = append(opts, gojq.WithFunction(name, 0, 30, block))
+	}
+	return opts
 }
 
 func normalizeMappingVars(vars map[string]any) (map[string]any, error) {
