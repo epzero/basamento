@@ -10,22 +10,22 @@ import (
 )
 
 type liveSubscription struct {
-	ch         chan platform.Message
-	bufCap     int
-	mu         sync.Mutex
-	ended      bool
-	cc         jetstream.ConsumeContext
-	cancel     context.CancelFunc
-	onEnd      func()
-	cancelOnce sync.Once
+	ch            chan platform.Message
+	replayThrough uint64
+	mu            sync.Mutex
+	ended         bool
+	cc            jetstream.ConsumeContext
+	cancel        context.CancelFunc
+	onEnd         func()
+	cancelOnce    sync.Once
 }
 
-func newLiveSubscription(buf int, cancel context.CancelFunc, onEnd func()) *liveSubscription {
+func newLiveSubscription(buf int, replayThrough uint64, cancel context.CancelFunc, onEnd func()) *liveSubscription {
 	return &liveSubscription{
-		ch:     make(chan platform.Message, buf),
-		bufCap: buf,
-		cancel: cancel,
-		onEnd:  onEnd,
+		ch:            make(chan platform.Message, buf),
+		replayThrough: replayThrough,
+		cancel:        cancel,
+		onEnd:         onEnd,
 	}
 }
 
@@ -41,9 +41,33 @@ func (s *liveSubscription) attach(cc jetstream.ConsumeContext) {
 	s.cc = cc
 }
 
-// deliver attempts a non-blocking send. A full buffer ends the subscription
-// after already-buffered messages without delivering msg (REQ-BUS-010).
-func (s *liveSubscription) deliver(msg platform.Message) {
+// deliver routes replay with back-pressure and live without blocking the publisher.
+func (s *liveSubscription) deliver(ctx context.Context, msg platform.Message) {
+	if msg.Seq > 0 && msg.Seq <= s.replayThrough {
+		s.deliverReplay(ctx, msg)
+		return
+	}
+	s.deliverLive(ctx, msg)
+}
+
+func (s *liveSubscription) deliverReplay(ctx context.Context, msg platform.Message) {
+	s.mu.Lock()
+	if s.ended {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	select {
+	case s.ch <- msg:
+	case <-ctx.Done():
+	}
+}
+
+// deliverLive drops the message when ctx is already done, then non-blocks or ends on overflow.
+func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message) {
+	if ctx.Err() != nil {
+		return
+	}
 	s.mu.Lock()
 	if s.ended {
 		s.mu.Unlock()

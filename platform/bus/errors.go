@@ -34,6 +34,18 @@ func messageTooLarge() error {
 	return core.NewError(core.CodeInvalidArgument, "message too large", nil)
 }
 
+func valueTooLarge() error {
+	return core.NewError(core.CodeInvalidArgument, "kv value too large", nil)
+}
+
+func plaintextCredential() error {
+	return core.NewError(core.CodeInvalidArgument, "plaintext credential requires loopback or tls", nil)
+}
+
+func clusterPayloadTooSmall() error {
+	return core.NewError(core.CodeInvalidArgument, "cluster max_payload too small for bus", nil)
+}
+
 func unavailable() error {
 	return core.NewError(core.CodeUnavailable, "bus unavailable", nil)
 }
@@ -82,6 +94,9 @@ func mapConnErr(err error) error {
 	}
 	if errors.Is(err, nats.ErrMaxPayload) {
 		return messageTooLarge()
+	}
+	if errors.Is(err, jetstream.ErrInvalidKey) || errors.Is(err, nats.ErrBadSubject) {
+		return invalidKey()
 	}
 	var api *jetstream.APIError
 	if errors.As(err, &api) && uint16(api.ErrorCode) == jsAPIStreamMessageExceedsMaximum {

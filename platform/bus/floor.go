@@ -35,7 +35,10 @@ func raisePurgeFloor(ctx context.Context, meta jetstream.KeyValue, subject strin
 			}
 			return mapConnErr(err)
 		}
-		cur := parseUint64(ent.Value())
+		cur, err := parseUint64(ent.Value())
+		if err != nil {
+			return core.NewError(core.CodeInternal, "purge floor corrupt", nil)
+		}
 		if want <= cur {
 			return nil
 		}
@@ -58,7 +61,11 @@ func purgeFloor(ctx context.Context, meta jetstream.KeyValue, subject string) (u
 		}
 		return 0, mapConnErr(err)
 	}
-	return parseUint64(ent.Value()), nil
+	v, err := parseUint64(ent.Value())
+	if err != nil {
+		return 0, core.NewError(core.CodeInternal, "purge floor corrupt", nil)
+	}
+	return v, nil
 }
 
 func lastSeqForSubject(ctx context.Context, str jetstream.Stream, meta jetstream.KeyValue, logicalSubject string) (uint64, error) {

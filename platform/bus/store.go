@@ -92,8 +92,15 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		return nil, err
 	}
 	limit := opts.MaxMessageSize
-	if mp := nc.MaxPayload(); mp > 0 && int(mp) < limit {
-		limit = int(mp)
+	minPayload := opts.MaxMessageSize + deadlineSize
+	if mp := nc.MaxPayload(); mp > 0 {
+		if int(mp) < minPayload {
+			nc.Close()
+			return nil, clusterPayloadTooSmall()
+		}
+		if int(mp) < limit {
+			limit = int(mp)
+		}
 	}
 	if closeSrv == nil {
 		closeSrv = func() {}
@@ -154,6 +161,13 @@ func (s *Store) unregisterLive(l *liveSubscription) {
 	s.liveMu.Unlock()
 }
 
+// ForceDisconnect closes the client connection while keeping store state (unreachable server).
+func (s *Store) ForceDisconnect() {
+	if s.nc != nil {
+		s.nc.Close()
+	}
+}
+
 func (s *Store) ready() error {
 	if s.closed.Load() {
 		return unavailable()
@@ -170,13 +184,6 @@ func uint64Bytes(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
 	return b
-}
-
-func parseUint64(b []byte) uint64 {
-	if len(b) < 8 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(b)
 }
 
 // Publish implements platform.Bus.
@@ -244,7 +251,12 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 	}
 	subCtx, cancel := context.WithCancel(ctx)
 	var live *liveSubscription
-	live = newLiveSubscription(s.subBuf, cancel, func() { s.unregisterLive(live) })
+	replayThrough, err := lastSeqForSubject(ctx, s.stream, s.meta, subject)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	live = newLiveSubscription(s.subBuf, replayThrough, cancel, func() { s.unregisterLive(live) })
 	if err := s.tryRegisterLive(live); err != nil {
 		cancel()
 		return nil, err
@@ -254,22 +266,29 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		live.end()
 		return nil, err
 	}
-	if after > 0 && after < floor {
+	if err := subscribePurged(after, floor); err != nil {
 		live.end()
-		return nil, purged(floor)
+		return nil, err
 	}
 	start := after + 1
-	if after == 0 {
-		start = 1
-	}
 	cons, err := s.js.OrderedConsumer(ctx, streamName, jetstream.OrderedConsumerConfig{
-		FilterSubjects: []string{wireSubject(subject)},
-		DeliverPolicy:  jetstream.DeliverByStartSequencePolicy,
-		OptStartSeq:    start,
+		FilterSubjects:    []string{wireSubject(subject)},
+		DeliverPolicy:     jetstream.DeliverByStartSequencePolicy,
+		OptStartSeq:       start,
+		InactiveThreshold: 3 * time.Second,
 	})
 	if err != nil {
 		live.end()
 		return nil, mapConnErr(err)
+	}
+	floor, err = purgeFloor(ctx, s.meta, subject)
+	if err != nil {
+		live.end()
+		return nil, err
+	}
+	if err := subscribePurged(after, floor); err != nil {
+		live.end()
+		return nil, err
 	}
 	replayAfter := after
 	var cc jetstream.ConsumeContext
@@ -284,12 +303,7 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 			return
 		}
 		m := platform.Message{Subject: logicalSubject(msg.Subject()), Seq: seq, Data: append([]byte(nil), msg.Data()...)}
-		select {
-		case <-subCtx.Done():
-			return
-		default:
-		}
-		live.deliver(m)
+		live.deliver(subCtx, m)
 	})
 	if err != nil {
 		live.end()
@@ -336,6 +350,9 @@ func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Dura
 	if !ValidKey(key) {
 		return 0, invalidKey()
 	}
+	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+		return 0, err
+	}
 	if ttl < 0 {
 		return 0, invalidTTL()
 	}
@@ -354,6 +371,9 @@ func (s *Store) CompareAndSwap(ctx context.Context, key string, value []byte, re
 	}
 	if !ValidKey(key) {
 		return 0, invalidKey()
+	}
+	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+		return 0, err
 	}
 	if ttl < 0 {
 		return 0, invalidTTL()
