@@ -38,8 +38,8 @@ implementation (`docs/engineering/agent-workflow.md` §4), noting the touch to
   holder can renew (REQ-BUS-020). `revision = 0` means *create*
   (REQ-BUS-017); `ttl = 0` means no expiry. `Put` keeps its TTL.
 - The subscription ends by closing its channel: on cancellation of `ctx`
-  (REQ-BUS-009) and when the buffer overflows (REQ-BUS-010). The subscriber
-  resumes with `Subscribe` after the last bus sequence it received.
+  (REQ-BUS-009, REQ-BUS-027) and when the buffer overflows (REQ-BUS-010). The
+  subscriber resumes with `Subscribe` after the last bus sequence it received.
 
 ## 3. Bus sequences and purges
 
@@ -94,6 +94,24 @@ system clock in production):
 | Replay from below the purge floor | `not_found`, detail `purged_through` |
 | Swap at a revision that is not current; create on an existing entry | `conflict` |
 | Server unreachable or connection not established | `unavailable`, returned at once: publishes are not buffered while disconnected |
+| The context of the call is cancelled | `cancelled` |
+| The context of the call has passed its deadline | `timeout` |
+| A KeyValue entry cannot be decoded as a KV entry | `internal`, with no key, value or server text in the error |
+
+- **A message too large for the server** (JetStream API error 10054, or the
+  client's maximum payload) is a size limit like any other:
+  `invalid_argument` (REQ-BUS-011).
+- **A corrupt KV record** (REQ-BUS-026) is a record under a key that the store
+  cannot decode, for example one written by another client. Reads, swaps and
+  creates of that key fail with `internal` before any expiry or revision check.
+  A put over the key replaces the record, so a later read succeeds.
+- **Cancellation and deadlines** (REQ-BUS-027) are checked on every call of
+  `Publish`, `LastSeq`, `Purge`, the setup of `Subscribe` and every KV call: a
+  context that is already cancelled or past its deadline fails the call before
+  the store does anything, and a context that ends while a call waits on the
+  server fails that call the same way. When the context of an open
+  subscription ends, the subscription ends by closing its channel; it is not
+  an error of the call that opened it.
 
 ## 7. How the scenarios run
 
@@ -108,3 +126,18 @@ system clock in production):
   sleeps: after the expected messages, the driver publishes a sentinel and
   checks that it is the next message delivered.
 - Time moves only through the fake clock (`core/coretest`).
+- The corrupt-record scenario (BUS-026-01) runs against the embedded and the
+  cloud implementations, which keep the KV entries in a JetStream bucket,
+  and not against the fake, whose store holds decoded entries and cannot hold
+  a foreign record. The driver writes the foreign record into the bucket
+  named in §1 (`KIT_KV`) through a test-only helper of
+  `platform/bus/bustest` that connects to the same server and writes the
+  value under the key through `nats.go` and JetStream directly, as any other
+  client of the bucket would. The value is shorter than a KV record header,
+  so the store cannot decode it.
+- The cancellation and deadline scenarios (BUS-027-01 and BUS-027-02) pass a
+  context that is already cancelled, or whose deadline is set to a time
+  before the frozen clock, to the driver; neither needs real time. The
+  driver asserts that nothing was stored by reading `cursor.r1` and replaying
+  `run.r1.deltas` from the start with an uncancelled context: the read fails
+  with `not_found` and the replay receives no message.
