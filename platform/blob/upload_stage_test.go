@@ -175,13 +175,17 @@ func TestSpendFailedCommitSurfacesStoreError(t *testing.T) {
 	}
 	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
 	_, err = st.Commit(ctx, up.StagingKey)
-	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
-		t.Fatalf("got %v", err)
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("spend with delete fault: got %v", err)
 	}
 	f.failDeleteStage = false
 	f.failWriteCommit = true
-	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
-	_, err = st.Commit(ctx, up.StagingKey)
+	up2, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 1024, ContentType: "text/plain", TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = writeStagedObjectForTest(ctx, st, "acme", up2.StagingKey, []byte("hello"), "text/markdown")
+	_, err = st.Commit(ctx, up2.StagingKey)
 	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("write commit record: %v", err)
 	}

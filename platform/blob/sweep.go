@@ -79,7 +79,8 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 				return nil
 			}
 			if err := s.sweepSlot(ctx, core.TenantID(tenant), stageKey); err != nil {
-				return err
+				joined = append(joined, err)
+				return nil
 			}
 			return nil
 		})

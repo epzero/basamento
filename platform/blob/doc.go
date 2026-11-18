@@ -12,6 +12,12 @@
 // prior staged object in place. The lock does not span cloud replicas: two
 // commits on different hosts may return the same content key.
 //
+// Commit spends a slot by writing a commit record after the content blob is stored.
+// If that write fails, Commit returns unavailable and the slot stays open for an
+// idempotent retry. After the record is durable, Commit returns the content key
+// even when deleting the staged object fails; expiry sweep removes leftover staging
+// objects, commit records and metadata together.
+//
 // Expired embedded slots are swept lazily: after signature-verified handler or
 // store calls, at most once per maximum URL lifetime, with a one-minute retry
 // after a failed list. Sweeps list each tenant's stage/ prefix only and ignore

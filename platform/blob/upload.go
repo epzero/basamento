@@ -86,7 +86,12 @@ func (s *Store) signedProxiedUpload(tid core.TenantID, stageKey string, o platfo
 	return fmt.Sprintf("%s/upload/%s/%s?exp=%d&max=%d&ct=%s&sig=%s", base, tid, stageKey, exp, o.MaxSize, ct, sig), nil
 }
 
-// Commit implements platform.Blob.
+// Commit implements platform.Blob. After the content blob is stored, it writes the
+// commit record (which spends the slot) and then deletes the staged object. A failure
+// to write the commit record returns unavailable and leaves the slot open so a retry
+// can re-read the staged object and Put the same content again. Once the commit record
+// is written, Commit succeeds with the content key even if deleting the staged object
+// fails; the record prevents reuse and sweepSlot removes leftover staging keys at expiry.
 func (s *Store) Commit(ctx context.Context, stagingKey string) (string, error) {
 	tid, err := s.tenantOK(ctx)
 	if err != nil {
@@ -219,9 +224,6 @@ func (s *Store) commitRecordExists(ctx context.Context, tid core.TenantID, stage
 }
 
 func (s *Store) spendFailedCommit(ctx context.Context, tid core.TenantID, stageKey, stagePath string) error {
-	if err := s.bucket.Delete(ctx, stagePath); err != nil && !isNotFoundBucketErr(err) {
-		return mapError(err)
-	}
 	cp, err := commitRecordPath(tid, stageKey)
 	if err != nil {
 		return err
@@ -229,6 +231,8 @@ func (s *Store) spendFailedCommit(ctx context.Context, tid core.TenantID, stageK
 	if err := s.bucket.WriteAll(ctx, cp, nil, nil); err != nil {
 		return mapError(err)
 	}
+	// Best-effort: slot is spent once the record exists (same as finishSuccessfulCommit).
+	_ = s.bucket.Delete(ctx, stagePath)
 	return nil
 }
 
@@ -240,8 +244,8 @@ func (s *Store) finishSuccessfulCommit(ctx context.Context, tid core.TenantID, s
 	if err := s.bucket.WriteAll(ctx, cp, nil, nil); err != nil {
 		return mapError(err)
 	}
-	if err := s.bucket.Delete(ctx, stagePath); err != nil && !isNotFoundBucketErr(err) {
-		return mapError(err)
-	}
+	// Best-effort: the slot is spent once the record exists; nothing reads the staged object again.
+	// sweepSlot deletes the staged object, commit record and metadata when the slot expires.
+	_ = s.bucket.Delete(ctx, stagePath)
 	return nil
 }
