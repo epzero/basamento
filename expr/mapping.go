@@ -69,7 +69,7 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 	}
 	normIn, err := normalizeMappingInput(input)
 	if err != nil {
-		return nil, mappingEvalErr(mappingDepthCause(err))
+		return nil, mappingEvalErr("mapping evaluation failed")
 	}
 	input = normIn
 	ctx := newStepContext(m.stepLimit)
@@ -95,7 +95,7 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 		if count == 1 {
 			first, err = normalizeMappingOutput(v)
 			if err != nil {
-				return nil, mappingEvalErr(mappingDepthCause(err))
+				return nil, mappingEvalErr("mapping evaluation failed")
 			}
 			continue
 		}
@@ -116,13 +116,6 @@ func formatMappingParseErr(src string, err error) error {
 		return mappingCompileErr(src, fmt.Sprintf("parse error at offset %d", pe.Offset))
 	}
 	return mappingCompileErr(src, err.Error())
-}
-
-func mappingDepthCause(err error) string {
-	if isJSONDepthErr(err) {
-		return "mapping evaluation failed"
-	}
-	return "mapping evaluation failed"
 }
 
 func normalizeMappingInput(v any) (any, error) {
