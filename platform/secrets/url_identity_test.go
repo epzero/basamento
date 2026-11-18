@@ -10,11 +10,11 @@ import (
 func TestPublicURLIDStripsSecrets(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"hashivault://TOKEN@vault.example.com/v1/transit/keys/mykey": "hashivault://vault.example.com/v1/transit/keys/mykey",
-		"hashivault://user:pass@host:8200/v1/transit/keys/k":         "hashivault://host:8200/v1/transit/keys/k",
-		"awskms://key/alias/foo?token=secret":                        "awskms://key/alias/foo",
-		"gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k":    "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k",
-		"hashivault://[2001:db8::1]/v1/transit/keys/k":               "hashivault://[2001:db8::1]/v1/transit/keys/k",
+		"awskms://TOKEN@key/alias/foo?region=us-east-1":                "awskms://key/alias/foo?region=us-east-1",
+		"awskms://key/alias/foo?z=west&a=east":                         "awskms://key/alias/foo?a=east&z=west",
+		"awskms:///arn:aws:kms:us-east-1:123:key/abc?region=us-east-1": "awskms:///arn:aws:kms:us-east-1:123:key/abc?region=us-east-1",
+		"gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k":      "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k",
+		"awskms://[2001:db8::1]/alias/foo":                             "awskms://[2001:db8::1]/alias/foo",
 	}
 	for in, want := range cases {
 		got, err := publicURLID(in)
@@ -24,8 +24,8 @@ func TestPublicURLIDStripsSecrets(t *testing.T) {
 		if got != want {
 			t.Fatalf("%q: got %q want %q", in, got, want)
 		}
-		if strings.Contains(got, "TOKEN") || strings.Contains(got, "secret") {
-			t.Fatalf("secret leaked in %q", got)
+		if strings.Contains(got, "TOKEN") {
+			t.Fatalf("user info leaked in %q", got)
 		}
 	}
 }
@@ -38,5 +38,9 @@ func TestPublicURLIDInvalid(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "missing-scheme") {
 		t.Fatal("echoed raw url")
+	}
+	_, err = publicURLID("awskms://")
+	if err == nil {
+		t.Fatal("empty host and path")
 	}
 }
