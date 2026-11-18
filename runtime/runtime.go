@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"math/rand/v2"
 	"time"
+
+	"github.com/epzero/basamento/core"
 )
 
 // DurableContext is everything flow code may do. Every method is replay-safe:
@@ -103,18 +105,35 @@ type StepDefaults struct {
 type FlowHost func(dc DurableContext, flow FlowRef, input json.RawMessage) (json.RawMessage, error)
 
 // StartRequest starts a run.
+//
+// The tenant comes from ctx with core.TenantFrom, as for AuditEvent.Tenant in
+// platform/platform.go: TenantID must be empty or equal to it, and a Runtime
+// rejects a different one, or a call with no context tenant, with code
+// invalid_argument rather than trust the request over the context
+// (REQ-RT-040, REQ-RT-042, REQ-RT-044). The field never overrides the context.
 type StartRequest struct {
 	Flow           FlowRef
 	Input          json.RawMessage
 	RunID          string // optional; generated when empty
 	IdempotencyKey string // a second Start with the same key returns the same run
-	TenantID       string
+	// TenantID must be empty or the context's tenant, never a different one.
+	TenantID core.TenantID
 }
 
-// RunRef identifies a run.
+// RunRef identifies a run, as Start returns it and as it is passed to
+// Resolve, Cancel and Describe.
+//
+// The tenant comes from ctx with core.TenantFrom, as for AuditEvent.Tenant in
+// platform/platform.go: TenantID must be empty or equal to it, and a Runtime
+// rejects a different one, or a call with no context tenant, with code
+// invalid_argument before the same-tenant lookup (REQ-RT-042, REQ-RT-044,
+// REQ-RT-045). The field never overrides the context, so a ref naming another
+// tenant's run cannot reach it. A Runtime sets TenantID on the refs it
+// returns, in Start and in RunStatus.Ref (REQ-RT-043).
 type RunRef struct {
-	RunID    string
-	TenantID string
+	RunID string
+	// TenantID must be empty or the context's tenant, never a different one.
+	TenantID core.TenantID
 }
 
 // RunStatus is a run's observable state.
@@ -126,8 +145,16 @@ type RunStatus struct {
 }
 
 // RunQuery filters List.
+//
+// The tenant comes from ctx with core.TenantFrom, as for AuditEvent.Tenant in
+// platform/platform.go: TenantID must be empty or equal to it, and a Runtime
+// rejects a different one, or a call with no context tenant, with code
+// invalid_argument (REQ-RT-042, REQ-RT-044, REQ-RT-045). The field never
+// overrides the context: List returns only the context tenant's runs
+// (REQ-RT-026).
 type RunQuery struct {
-	TenantID string
+	// TenantID must be empty or the context's tenant, never a different one.
+	TenantID core.TenantID
 	Flow     string
 	State    string
 	Limit    int
