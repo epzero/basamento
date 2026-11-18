@@ -217,6 +217,104 @@ func TestReleaseAfterASquashMerge(t *testing.T) {
 	}
 }
 
+func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L4-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, author.Worktree, "v1.txt")
+	mustGit(t, author.Worktree, "push", "-q", "-u", "origin", author.Branch)
+	if _, err := SetStatus(author.Worktree, "", "spec-changes-requested", "fix tier"); err != nil {
+		t.Fatal(err)
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", author.Branch)
+	commitFile(t, other, "v2.txt")
+	mustGit(t, other, "push", "-q", "origin", author.Branch)
+
+	author2, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L4-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if author2.Worktree != author.Worktree {
+		t.Fatalf("should reuse the issue worktree")
+	}
+	if _, err := os.Stat(filepath.Join(author2.Worktree, "v2.txt")); err != nil {
+		t.Fatalf("worktree should fast-forward to origin: %v", err)
+	}
+}
+
+func TestContinueBranchFastForwardsWhenBranchExists(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L4-03-abc123"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "spec.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	first, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L4-03", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(first.Worktree, "spec.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, other, "round2.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+
+	second, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L4-03", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Worktree != first.Worktree {
+		t.Fatalf("round 2 should reuse the branch worktree")
+	}
+	if _, err := os.Stat(filepath.Join(second.Worktree, "round2.txt")); err != nil {
+		t.Fatalf("stale worktree must fast-forward: %v", err)
+	}
+}
+
+func TestContinueBranchRefusesDiverged(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L4-04-div"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "base.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	first, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L4-04", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, first.Worktree, "local-only.txt")
+	commitFile(t, other, "remote.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L4-04", Branch: branch}); err == nil {
+		t.Fatal("diverged branch must be refused")
+	}
+}
+
 func TestContinueABranchFromAnotherClone(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")

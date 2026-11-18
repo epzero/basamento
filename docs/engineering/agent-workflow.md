@@ -30,7 +30,11 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
 - **One branch per change.** The first session gets a new worktree and
   branch from `main`. Every later session and review round runs `gate agent
   new` with the same `-issue`, which places it in that worktree to take its
-  turn on the branch.
+  turn on the branch. When the branch was pushed and `origin` has newer
+  commits, the command `git fetch`es and fast-forwards only; it refuses if the
+  local branch diverged or has unpushed commits `origin` lacks (never reset,
+  never discard commits). With no `origin` or nothing on `origin` for that
+  branch yet, the checkout is left as-is.
 - **Code reviewers get a detached snapshot** of that branch, so several can
   run in parallel and none commits.
 - **Leads stay in the main checkout**, as do sessions started with

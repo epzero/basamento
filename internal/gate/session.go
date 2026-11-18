@@ -121,6 +121,39 @@ func inLinkedWorktree(dir string) (bool, error) {
 
 // issueWorktree returns the latest working (non-reviewer) session of an issue
 // whose worktree is not exclude.
+// fastForwardBranch fetches origin/<branch> and fast-forwards the checkout at dir.
+// It refuses when the local branch has diverged or has unpushed commits origin lacks.
+func fastForwardBranch(dir, branch string) error {
+	if _, err := git(dir, "remote", "get-url", "origin"); err != nil {
+		return nil // no origin: local-only worktrees need no sync
+	}
+	if _, err := git(dir, "fetch", "origin", branch); err != nil {
+		return err
+	}
+	head, err := git(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	remote, err := git(dir, "rev-parse", "--verify", "origin/"+branch)
+	if err != nil {
+		return nil // branch not on origin yet
+	}
+	if head == remote {
+		return nil
+	}
+	if _, err := git(dir, "merge-base", "--is-ancestor", head, remote); err != nil {
+		return fmt.Errorf("branch %s cannot fast-forward to origin/%s (local commits or diverged history)", branch, branch)
+	}
+	abbref, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || abbref != branch {
+		return fmt.Errorf("worktree must be on %s to fast-forward (on %s)", branch, abbref)
+	}
+	if _, err := git(dir, "merge", "--ff-only", "origin/"+branch); err != nil {
+		return fmt.Errorf("branch %s cannot fast-forward to origin/%s: %w", branch, branch, err)
+	}
+	return nil
+}
+
 func issueWorktree(dir, issue, exclude string) (Session, bool, error) {
 	sessions, err := ListSessions(dir, "")
 	if err != nil {
@@ -186,6 +219,11 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		case ok:
 			s.Worktree, s.Branch = prev.Worktree, prev.Branch
 			s.Previous = &Handoff{Identity: prev.Identity, Status: prev.Status, Note: prev.Note}
+			if id.Role != RoleCodeReviewer {
+				if err := fastForwardBranch(s.Worktree, s.Branch); err != nil {
+					return Session{}, err
+				}
+			}
 			return s, writeSession(s)
 		}
 	}
@@ -238,10 +276,25 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		if _, err := git(top, "checkout", "-q", branch); err != nil {
 			return Session{}, err
 		}
+		if err := fastForwardBranch(top, branch); err != nil {
+			return Session{}, err
+		}
 		return s, writeSession(s)
 	}
 	s.Worktree = filepath.Join(filepath.Dir(top), filepath.Base(top)+"-worktrees", branch)
 	if _, err := git(top, "worktree", "add", s.Worktree, branch); err != nil {
+		if _, statErr := os.Stat(s.Worktree); statErr != nil {
+			return Session{}, err
+		}
+		if cur, readErr := readSession(s.Worktree); readErr == nil && cur.Branch == branch {
+			s.Previous = &Handoff{Identity: cur.Identity, Status: cur.Status, Note: cur.Note}
+		}
+		if err := fastForwardBranch(s.Worktree, branch); err != nil {
+			return Session{}, err
+		}
+		return s, writeSession(s)
+	}
+	if err := fastForwardBranch(s.Worktree, branch); err != nil {
 		return Session{}, err
 	}
 	return s, writeSession(s)
