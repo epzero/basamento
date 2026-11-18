@@ -62,3 +62,5 @@ the same change that first uses it.
 | **Key service** | What holds the master key, selected by URL: `localsecrets://` in the embedded profile, a KMS or Vault Transit in the cloud one. The gate uses a **simulated key service**. |
 | **Data key**, **keyset** | A tenant's keyset is its data keys, one of them **primary**, stored only wrapped by the master key. New payloads use the primary data key; earlier ones still decrypt. |
 | **Payload codec** | Encrypts each payload a runtime records in history with the tenant's primary data key, and decrypts it on the way back. |
+| **SQL store** | The SQL port of the platform: a SQLite file in the embedded profile, Postgres in the cloud profile, opened by URL. Its repositories are scoped to the tenant of each call. |
+| **Migration**, **migration set**, **schema version** | A numbered schema change embedded in the binary; the ordered migrations a SQL store applies on open; the number of the last migration applied to a database. |
