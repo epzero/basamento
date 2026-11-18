@@ -11,6 +11,23 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+type trackedReader struct {
+	inner io.Reader
+	err   error
+}
+
+func (t *trackedReader) Read(p []byte) (int, error) {
+	n, err := t.inner.Read(p)
+	if err != nil && err != io.EOF {
+		t.err = err
+	}
+	return n, err
+}
+
+func (t *trackedReader) readFailed() bool {
+	return t.err != nil
+}
+
 func (s *Store) putExisting(ctx context.Context, tid core.TenantID, key string, r io.Reader) error {
 	want, err := HexOf(key)
 	if err != nil {
@@ -51,8 +68,9 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 		return mapError(err)
 	}
 
+	trk := &trackedReader{inner: r}
 	h := sha256.New()
-	tr := io.TeeReader(r, h)
+	tr := io.TeeReader(trk, h)
 	_, copyErr := io.Copy(w, tr)
 	got := hex.EncodeToString(h.Sum(nil))
 	hashOK := got == want
@@ -66,7 +84,10 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 		if !hashOK {
 			return core.NewError(core.CodeInvalidArgument, "content does not match content key", nil)
 		}
-		return core.NewError(core.CodeInvalidArgument, "write source failed", nil)
+		if trk.readFailed() {
+			return core.NewError(core.CodeInvalidArgument, "write source failed", nil)
+		}
+		return mapError(copyErr)
 	}
 
 	mp, err := metaPath(tid, key)

@@ -136,6 +136,12 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 }
 
 func registerBlob(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		if world(ctx).Blob.backend == "s3" {
+			_, _ = fmt.Fprintln(os.Stderr, "blob-conformance backend=s3")
+		}
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		w := world(ctx).Blob
 		if w.s3 != nil {

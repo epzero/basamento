@@ -188,6 +188,12 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
+	hex, err := HexOf(key)
+	if err != nil {
+		return err
+	}
+	unlock := s.putLocks.lock(string(tid) + "/" + hex)
+	defer unlock()
 	path, err := objectPath(tid, key)
 	if err != nil {
 		return err

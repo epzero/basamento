@@ -5,11 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/epzero/basamento/platform/blob"
-	"github.com/epzero/basamento/platform/blob/conformance"
 )
 
 // TestS3Matrix runs blob scenarios that are not @profile:embedded against the S3 simulator.
@@ -18,31 +14,27 @@ func TestS3Matrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := conformance.ExpectedBlobMatrixScenarios(root)
+	want, err := expectedBlobMatrixScenarios(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want < 1 {
 		t.Fatalf("expected at least 1 blob matrix scenario, got %d", want)
 	}
-	tags := blob.GateScenarioTags + " && ~@profile:embedded"
 	cmd := exec.Command("go", "test", "-race", "-v", "-count=1", "-run", "TestFeatures", "./internal/bdd/")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"BLOB_CONFORMANCE_BACKEND=s3",
-		"BDD_TAGS="+tags,
+		"BDD_PATHS=specs/blob",
+		"BDD_TAGS_AND=~@profile:embedded",
 	)
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {
 		t.Fatalf("s3 conformance: %v\n%s", err, text)
 	}
-	got, passed, err := conformance.ParseGodogSummary(text)
-	if err != nil {
-		t.Fatalf("parse summary: %v\n%s", err, text)
-	}
-	if got != passed || got < want {
-		t.Fatalf("godog ran %d scenarios (%d passed), want at least %d all passing", got, passed, want)
+	if err := verifyS3MatrixOutput(text, want); err != nil {
+		t.Fatalf("%v\n%s", err, text)
 	}
 }
 
@@ -60,15 +52,5 @@ func findModuleRoot() (string, error) {
 			return "", fmt.Errorf("no go.mod")
 		}
 		dir = parent
-	}
-}
-
-func TestParseGodogSummaryRejectsEmptySelection(t *testing.T) {
-	t.Parallel()
-	_, _, err := conformance.ParseGodogSummary(strings.TrimSpace(`
-	testing: warning: no tests to run
-	`))
-	if err == nil {
-		t.Fatal("want error when summary missing")
 	}
 }
