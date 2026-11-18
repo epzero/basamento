@@ -219,6 +219,24 @@ func memberNamesInOrder(raw []byte) ([]string, error) {
 	return names, nil
 }
 
+// compareViolationRuns checks that exactly three validation runs match want.
+func compareViolationRuns(runs [][]schema.Violation, want []schema.Violation) error {
+	if len(runs) != 3 {
+		return fmt.Errorf("expected 3 validation runs, got %d", len(runs))
+	}
+	for ri, got := range runs {
+		if len(got) != len(want) {
+			return fmt.Errorf("run %d: got %+v", ri, got)
+		}
+		for i := range want {
+			if got[i].Location != want[i].Location || got[i].Keyword != want[i].Keyword {
+				return fmt.Errorf("run %d index %d: %+v", ri, i, got[i])
+			}
+		}
+	}
+	return nil
+}
+
 func tableViolations(table *godog.Table) []schema.Violation {
 	var out []schema.Violation
 	for i, row := range table.Rows {

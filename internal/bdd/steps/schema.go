@@ -284,7 +284,6 @@ func registerSchema(sc *godog.ScenarioContext) {
 			return err
 		}
 		w.encodedJSON = b
-		w.texts["struct_value"] = b
 		return nil
 	})
 	sc.Step(`^the schema generated from "([^"]*)" accepts the encoded value$`, func(ctx context.Context, typeName string) error {
@@ -345,6 +344,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		}
 		w.httpProbe = probe
 		w.expectURL = baseURL + "/" + name
+		// Body is only scenario context; compile must not fetch it over the network.
 		_ = doc
 		return nil
 	})
@@ -460,22 +460,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^each validation lists exactly these violations, in this order:$`, func(ctx context.Context, table *godog.Table) error {
-		want := tableViolations(table)
-		runs := schemaCtx(ctx).lastViolRuns
-		if len(runs) == 0 {
-			runs = [][]schema.Violation{schemaCtx(ctx).lastViol}
-		}
-		for ri, got := range runs {
-			if len(got) != len(want) {
-				return fmt.Errorf("run %d: got %+v", ri, got)
-			}
-			for i := range want {
-				if got[i].Location != want[i].Location || got[i].Keyword != want[i].Keyword {
-					return fmt.Errorf("run %d index %d: %+v", ri, i, got[i])
-				}
-			}
-		}
-		return nil
+		return compareViolationRuns(schemaCtx(ctx).lastViolRuns, tableViolations(table))
 	})
 	sc.Step(`^the instance is (accepted|rejected)$`, func(ctx context.Context, verdict string) error {
 		err := schemaCtx(ctx).lastErr
