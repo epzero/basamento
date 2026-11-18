@@ -24,7 +24,7 @@ func withSQLiteMigrateFileLock(ctx context.Context, dbPath string, fn func() err
 		return fn()
 	}
 	lockPath := dbPath + ".migrate.lock"
-	fd, err := syscall.Open(lockPath, syscall.O_RDWR|syscall.O_CREAT|syscall.O_NOFOLLOW, 0o600)
+	fd, err := syscall.Open(lockPath, syscall.O_RDWR|syscall.O_CREAT|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
 		return mapExecErr(openLockErr(err))
 	}

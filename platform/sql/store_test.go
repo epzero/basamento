@@ -19,6 +19,20 @@ func testExecCommand(t *testing.T, name string, arg ...string) *exec.Cmd {
 	return exec.Command(name, arg...)
 }
 
+func TestSQLiteNestedDataDirCreated(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	path := filepath.Join(dir, "nested", "deep", "kit.db")
+	store, err := Open(ctx, "sqlite:///"+path, emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLiteFileMode0600(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
@@ -123,7 +137,7 @@ func TestSchemaVersionAfterCloseMapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.DB().Close()
+	_ = store.db.Close()
 	_, err = store.SchemaVersion(ctx)
 	if err == nil {
 		t.Fatal("expected error")
@@ -148,7 +162,7 @@ func TestParsedURLRedactedOnStore(t *testing.T) {
 	if store.ParsedURLRedacted() == "" {
 		t.Fatal("expected redacted url")
 	}
-	if store.DB() == nil {
+	if store.db == nil {
 		t.Fatal("DB handle")
 	}
 }

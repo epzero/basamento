@@ -3,8 +3,6 @@ package sql
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,12 +32,7 @@ func Open(ctx context.Context, rawURL string, migrations fs.FS) (*Store, error) 
 	}
 	if err := migrateDB(ctx, db, p.dialect, migrations, p.sqlitePath); err != nil {
 		_ = db.Close()
-		mapped := mapExecErr(err)
-		var pe *core.Error
-		if errors.As(mapped, &pe) {
-			return nil, mapped
-		}
-		return nil, wrapOpenErr(p, err)
+		return nil, mapExecErr(err)
 	}
 	if p.dialect == dialectSQLite {
 		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
@@ -66,7 +59,7 @@ func openDB(ctx context.Context, p parsedURL) (*sql.DB, error) {
 				return nil, err
 			}
 		}
-		dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)", p.sqlitePath)
+		dsn := sqliteDSN(p.sqlitePath)
 		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			return nil, err
@@ -90,25 +83,16 @@ func openDB(ctx context.Context, p parsedURL) (*sql.DB, error) {
 
 func ensureSQLiteDataDir(dbPath string) error {
 	dir := filepath.Dir(dbPath)
-	if _, err := os.Stat(dir); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	return os.Mkdir(dir, 0o700)
+	return os.MkdirAll(dir, 0o700)
 }
 
 func ensureSQLiteDBFile(dbPath string) error {
 	if _, err := os.Stat(dbPath); err == nil {
-		return os.Chmod(dbPath, 0o600)
+		return chmodSQLiteDBFile(dbPath)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	return f.Close()
+	return createSQLiteDBFile(dbPath)
 }
 
 // Close releases the database.
@@ -161,9 +145,6 @@ func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Exe
 	err = mapExecErr(sqlTx.Commit())
 	return err
 }
-
-// DB exposes the database handle for conformance tests that need raw access.
-func (s *Store) DB() *sql.DB { return s.db }
 
 // ParsedURLRedacted returns the store URL with secrets removed for safe logging.
 func (s *Store) ParsedURLRedacted() string { return redactURL(s.url.raw) }
