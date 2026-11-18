@@ -241,6 +241,9 @@ func (c *Codec) invalidate(tenant string) {
 
 // RotateDataKey adds a new primary data key for tenant.
 func (c *Codec) RotateDataKey(ctx context.Context, tenant string) error {
+	if err := ValidateTenant(tenant); err != nil {
+		return err
+	}
 	rec, found, err := c.store.Get(tenant)
 	if err != nil {
 		return err
@@ -278,6 +281,9 @@ func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error
 		return err
 	}
 	for _, tenant := range tenants {
+		if err := ValidateTenant(tenant); err != nil {
+			return err
+		}
 		rec, _, err := c.store.Get(tenant)
 		if err != nil {
 			return err
@@ -318,6 +324,9 @@ func (c *Codec) prependMasterKey(ks KeyService) {
 
 // PrimaryDataKeyID returns the decimal primary key id for tenant after load.
 func (c *Codec) PrimaryDataKeyID(ctx context.Context, tenant string) (string, error) {
+	if err := ValidateTenant(tenant); err != nil {
+		return "", err
+	}
 	h, err := c.loadCached(ctx, tenant, true)
 	if err != nil {
 		return "", err
@@ -328,6 +337,9 @@ func (c *Codec) PrimaryDataKeyID(ctx context.Context, tenant string) (string, er
 
 // DataKeyCount returns how many enabled data keys the tenant keyset holds.
 func (c *Codec) DataKeyCount(ctx context.Context, tenant string) (int, error) {
+	if err := ValidateTenant(tenant); err != nil {
+		return 0, err
+	}
 	h, err := c.loadCached(ctx, tenant, true)
 	if err != nil {
 		return 0, err
