@@ -105,10 +105,11 @@ nothing is coerced from strings.
 - **Time zones**: timestamp getters that take a zone name use the IANA
   database embedded in the binary (`time/tzdata`), never the host's.
 - **Map iteration** (REQ-EXPR-021): the keys of a map sort `bool` < `int` <
-  `uint` < `double` < `string`, and `bool` and `string` keys sort by value.
-  Within `double`, keys sort numerically with `NaN`s after every number, and
-  two bit-identical `NaN` keys tie-break deterministically (for example by
-  encoded value). This governs `map`, `filter`, `all`, `exists`,
+  `uint` < `double` < `string`, and keys of one kind sort by value: `false`
+  before `true`, `int` and `uint` numerically, `string` by Unicode code
+  point. Within `double`, keys sort numerically with `NaN`s after every
+  number, and two bit-identical `NaN` keys tie-break deterministically (for
+  example by encoded value). This governs `map`, `filter`, `all`, `exists`,
   `exists_one` and two-variable comprehensions, making them independent of
   Go map order, including which error an evaluation reports first. A custom
   type adapter that returns a sorted map for every native map, and an AST
@@ -159,9 +160,12 @@ nothing is coerced from strings.
 - **Output limit** (REQ-EXPR-020): default **1 048 576 bytes** (1 MiB, the
   largest message the bus accepts, `specs/bus/design.md` §5), the size of
   the value in RFC 8785 canonical JSON (`core/schema`, REQ-SCHEMA-030), set
-  per mapping with `WithOutputLimit`. The limit bounds the memory a mapping
-  holds: each value it builds is refused before an over-limit result is
-  allocated, not measured afterwards.
+  per mapping with `WithOutputLimit`. The limit bounds a mapping's output,
+  not every allocation: a bounded operator or string function refuses a
+  result it can size from its operands before allocating it, an array or
+  object is measured once its entries are collected, and a value built by
+  an operation below that no bounded function sees is measured when it
+  yields. The last two may allocate more than the limit before the failure.
 
   gojq offers no runtime hook that sees every intermediate value an
   expression builds, and its `WithFunction` and `WithIterFunction` options
@@ -179,7 +183,17 @@ nothing is coerced from strings.
       `OpSub`), which gojq compiles to `_multiply`, `_add` and `_subtract`,
       becomes one call to a bounded function with one argument per operand,
       so the bounded function sees the left value before it is combined with
-      the right;
+      the right; a chain longer than gojq's thirty-argument limit for a
+      custom function becomes nested calls, each over at most thirty
+      operands;
+    - an update assignment (`OpUpdateAdd`, `OpUpdateSub`, `OpUpdateMul`)
+      becomes `(r) as $__value | (l |= . op $__value)` before that rule
+      runs: gojq otherwise compiles it to an internal `_add` or `_multiply`
+      call, and `r` is evaluated against the input in both forms; `$__value`
+      stands for a variable name the mapping does not use;
+    - a call to an internal operator function by name (`_add`, `_subtract`,
+      `_multiply`) is rejected like a banned function, since it reaches the
+      same code the bounded operators replace;
     - array construction `[f]` becomes the bounded function for arrays, which
       measures the array `f` builds: entries it collects follow the step
       limit, and an array over the limit fails there;
@@ -187,43 +201,57 @@ nothing is coerced from strings.
     - the calls `join`, `implode`, `@base64` and `@base64d` become bounded
       functions.
 
-    Each bounded function computes the RFC 8785 size of its result from its
-    operands without allocating the result: numbers by arithmetic, a
-    repeated string as its length times the count, `join` as the sum of its
-    parts plus separators. It fails with the cause `output over the output
-    limit` when that size is over the limit, and otherwise computes the value
-    from the operands it has already checked. The operator cases call gojq's
-    own operator function.
+    Each bounded function computes the RFC 8785 size of the value it would
+    build, from its operands' contents and the punctuation the result adds,
+    without allocating the result: a string counts its bytes as
+    REQ-SCHEMA-032 encodes them (escapes included) and its two quotes once,
+    `*` repeats them the given number of times, `join` adds the bytes its
+    parts and separators contribute, and a number counts its shortest
+    round-trip decimal form. The size is the result's, not the sum of the
+    operands' encoded sizes: `("x" * 1020) + "yy"` has 1024 bytes, not
+    1026. It fails with the cause `output over the output limit` when that
+    size is over the limit, and otherwise computes the value from the
+    operands it has already checked. The operator cases call gojq's own
+    operator function.
   - **Every yielded value.** Each value a mapping yields, top-level or inside
     an array or object being built, has its RFC 8785 size walked and fails
-    the same way when it is over the limit. The walk gives up after visiting
-    the limit's number of nodes (an array of `null`s costs one byte per
-    node), so it is linear in the limit.
+    the same way when it is over the limit. The walk fails once it has
+    visited more than the limit's number of nodes, since every node
+    contributes at least one byte; it is linear in the limit.
   - **Bounded input and output.** Before entering gojq, the input and the
     variables are validated against the node and size bounds; each top-level
     result is measured again in RFC 8785 canonical bytes.
 
   The bounded functions are registered under names that lex as bare `_`
   followed by the `(` of their call, a shape the jq grammar gives no other
-  meaning. Registrations are one per arity and lexically targeted, so a user
-  function of the same name is never called instead.
+  meaning. Registrations are one per arity, and the walk rejects a definition
+  or parameter of the same name like a banned one, so a user function of the
+  same name is never called instead.
 
-  Two kinds of operation build a large value before any bounded function
-  sees it, because gojq implements them inside the virtual machine:
+  Three kinds of operation still build a value before any bounded function
+  sees it, because gojq implements them inside the virtual machine or in
+  code the rewrite does not name:
   - a container whose entries are collected by `f` in `[f]` or produced by
     `reduce`, `foreach` or an object's value queries follows the step limit,
     not the output limit: `[range(100000)] | .[0]` builds 100 000 entries,
     and the bounded function for arrays runs only after the last entry;
   - the builtins written in gojq's own language, such as `add`/`add(f)`,
-    `while`, `until`, `repeat` and `last`, compose their values with the
-    internal `+` after compilation. Their intermediate values are not
-    measured; the first value they return, and every value yielded inside a
-    rewritten array or object, is.
+    `map`, `while`, `until`, `repeat`, `last`, `splits` and `split`, and
+    the operators those definitions inline for `sub`, `gsub`, `splits` and
+    `split`, build their results with the internal `+`, `[...]` or `{...}`
+    after compilation. Their intermediate values are not measured; the
+    first value they return, and every value yielded inside a rewritten
+    array or object, is;
+  - `@json`, `tostring`, `format(...)`, `explode` and the `@` formats the
+    rewrite does not name serialize or expand their operand in Go in one
+    call. The whole result is allocated before the yield measures it, so the
+    result can exceed the limit before the failure.
 
-  Together these keep a mapping within a constant factor of the limit in
-  memory rather than guaranteeing it. Bounding these cases as well needs a
-  gojq that exposes its internal `+` and array construction to the library
-  or limits construction itself.
+  Together these mean the output limit does not bound a mapping's memory:
+  the gaps allocate in proportion to the step limit, the input and the
+  values already measured. Bounding them by the output limit needs a gojq
+  that exposes its internal `+`, its array and object construction and its
+  encoders to the library, or limits construction itself.
 
   **gojq dependency.** gojq's unexported operator function behind `+` and
   `-` (with its exact `*big.Int` arithmetic) is reached through a
@@ -232,7 +260,7 @@ nothing is coerced from strings.
   silently the bound; `go.sum` and the version pin move together with it.
 
   Stopping is deterministic: the same mapping fails at the same operation
-  or value every time, without allocating an over-limit value.
+  or yield every time.
 - **Outputs**: the evaluator takes at most two values from the iterator. One
   is the result; none or two is an error (REQ-EXPR-014).
 - **Numbers**: inputs keep integers exact (`json.Number` converted to `int`
