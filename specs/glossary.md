@@ -66,6 +66,10 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Durable event log** | The per-run, ordered record of a run's durable events (`seq`), written in the same transaction as the state change that records them. |
+| **Outbox** | The durable event log, read as work to relay: each entry is an event pending publication to the bus until it is marked relayed. |
+| **Relay** | The component that publishes a run's outbox entries to the bus in `seq` order and marks them relayed after the bus accepts them. |
+| **Event envelope** | What the bus carries for a durable event: run id, `seq`, event type, schema version (`v`) and data. A consumer recognises a repeated event by run id and `seq`. |
 | **Inspector** | The run inspector, a web UI that reads runs through the API: the runs a person may see, a run's events, its open gates and the recordings attached to it. |
 | **Account** | A person's login in the inspector, identified by a username (`"ana"`). |
 | **Recording** | The rrweb DOM recording of a browser session, replayed in the inspector. |
