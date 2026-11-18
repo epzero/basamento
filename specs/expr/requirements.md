@@ -80,19 +80,25 @@ If a mapping cannot be parsed, then the mapping compiler shall reject it with co
 If a mapping's output exceeds its output limit, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the output limit.
 
 ### REQ-EXPR-021 — Map key order
-When an expression iterates over, sorts or lists a map by key, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and shall order keys that are all `double` numerically, with `-0` before `+0` and a NaN after every other number.
+When an expression iterates over a map, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and within `double` numerically with any NaN after every other number.
 
 ### REQ-EXPR-022 — Map keys of no order
 If a map in an expression holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key` when it iterates over that map, and shall not skip that key's entry.
 
-### REQ-EXPR-023 — Reserved names
-If a mapping calls, defines or declares as a parameter a function named `now`, `localtime`, `strflocaltime`, `env`, `input`, `inputs`, `input_filename`, `input_line_number`, `debug`, `stderr`, `halt`, `halt_error`, `modulemeta` or `get_search_list`, then the mapping compiler shall reject it with code `invalid_argument` and say that the name is reserved, naming the function.
+### REQ-EXPR-023 — Map values of no order
+If a map in an expression is passed on without iterating over it and holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key`.
 
-### REQ-EXPR-024 — Reserved variables
+### REQ-EXPR-024 — Map construction without a key
+If a map in an expression holds an entry whose key is not a value, such as `{[1, 2]: 'a'}`, then the expression evaluator shall fail with code `invalid_argument` and the cause `no such key` when it builds or reads that map, and shall not drop the entry.
+
+### REQ-EXPR-025 — Reserved names
+If a mapping calls, defines or declares as a parameter a function with a reserved name, one of defines or declares as a parameter a function named `now`, `localtime`, `strflocaltime`, `env`, `input`, `inputs`, `input_filename`, `input_line_number`, `debug`, `stderr`, `halt`, `halt_error`, `modulemeta` or `get_search_list`, then the mapping compiler shall reject it with code `invalid_argument` and say that the name is reserved, naming the function.
+
+### REQ-EXPR-026 — Reserved variables
 If a mapping uses the variable `$ENV`, `$__loc__` or `$__prog_args`, including in the shorthand `{$ENV}`, then the mapping compiler shall reject it with code `invalid_argument`, naming the variable.
 
-### REQ-EXPR-025 — Reserved names as data
+### REQ-EXPR-027 — Reserved names as data
 When a mapping uses a reserved name as a field name, an object key, a key string or a string value, the mapping compiler shall accept it, and the mapping evaluator shall read or produce it as data.
 
-### REQ-EXPR-026 — Imports and includes
-If a mapping imports or includes another module, in the form `import "path" as name; …` or `include "path"; …`, then the mapping compiler shall reject it with code `invalid_argument`, naming `import` or `include`.
+### REQ-EXPR-028 — Imports and includes
+If a mapping imports or includes another module or data file, in the form `import "path" as name; …`, `import "path" as $name; …` or `include "path"; …` (with or without metadata or a body), then the mapping compiler shall reject it with code `invalid_argument`, naming `import` or `include`.

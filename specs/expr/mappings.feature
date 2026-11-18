@@ -128,11 +128,15 @@ Feature: JSON mappings
     And the error names the output limit 1024
 
     Examples:
-      | mapping                     |
-      | "x" * 1025                  |
-      | "x" * 1000000000            |
-      | ("x" * 1023) + "yy"         |
-      | [range(1032)]               |
+      | mapping                                          |
+      | "x" * 1025                                       |
+      | "x" * 1023                                       |
+      | "x" * 1000000000                                 |
+      | ("x" * 1023) + "yy"                              |
+      | reduce range(30) as $i ("x"; . + .)              |
+      | [range(1032)]                                    |
+      | [range(100000)]                                  |
+      | [range(100001)] \| .[0]                          |
 
   @REQ-EXPR-020 @id:EXPR-020-02
   Scenario Outline: A mapping whose output is within its output limit succeeds
@@ -142,10 +146,10 @@ Feature: JSON mappings
 
     Examples:
       | mapping                                 | length |
-      | "x" * 1024                              | 1026   |
-      | ("x" * 1022) + "yy"                     | 1026   |
-      | [range(256)]                            | 741    |
-      | {a: ("x" * 500), b: ("y" * 500)}        | 1019   |
+      | "x" * 1022                              | 1024   |
+      | ("x" * 1020) + "yy"                     | 1024   |
+      | [range(256)]                            | 915    |
+      | {a: ("x" * 500), b: ("y" * 500)}        | 1015   |
 
   @REQ-EXPR-020 @id:EXPR-020-03
   Scenario: The default output limit stops a value of 2 GiB
@@ -154,7 +158,7 @@ Feature: JSON mappings
     Then evaluation fails with code "invalid_argument"
     And the error names the output limit 1048576
 
-  @REQ-EXPR-023 @id:EXPR-023-01 @security
+  @REQ-EXPR-025 @id:EXPR-025-01 @security
   Scenario Outline: A mapping that calls, defines or takes a reserved name as a parameter is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -163,8 +167,11 @@ Feature: JSON mappings
     Examples:
       | mapping                                  | name            |
       | def now: 1; now                          | now             |
+      | def halt: 1; . \| halt                   | halt            |
+      | def env: 1; . \| env                   | env             |
       | def env: 1; env                          | env             |
       | def f(env): env; f(1)                    | env             |
+      | def f(env): 1; f(2) \| env               | env             |
       | def f: def g: now; g; f                  | now             |
       | {entries: (def inputs: 1; inputs)}       | inputs          |
       | def f(input): {"in": input}; f(1)        | input           |
@@ -178,7 +185,7 @@ Feature: JSON mappings
       | def f: modulemeta; f                     | modulemeta      |
       | get_search_list                          | get_search_list |
 
-  @REQ-EXPR-024 @id:EXPR-024-01 @security
+  @REQ-EXPR-026 @id:EXPR-026-01 @security
   Scenario Outline: A mapping that uses a reserved variable is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -194,7 +201,7 @@ Feature: JSON mappings
       | def f: $__loc__; f  | $__loc__       |
       | [.a, $ENV]          | $ENV           |
 
-  @REQ-EXPR-025 @id:EXPR-025-01
+  @REQ-EXPR-027 @id:EXPR-027-01
   Scenario Outline: Reserved names used as data are allowed
     Given the mapping "<mapping>"
     When the mapping is evaluated on <input>
@@ -211,7 +218,7 @@ Feature: JSON mappings
       | getpath(["env"]) | {"env": true}               | true                        |
       | has("halt")      | {"halt": 1}                 | true                        |
 
-  @REQ-EXPR-026 @id:EXPR-026-01 @security
+  @REQ-EXPR-028 @id:EXPR-028-01 @security
   Scenario Outline: A mapping that imports or includes a module is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -219,5 +226,6 @@ Feature: JSON mappings
 
     Examples:
       | mapping                  | name    |
-      | include "lib"            | include |
+      | include "lib";           | include |
+      | import "lib" as lib; .   | import  |
       | import "lib" as $lib; .  | import  |
