@@ -238,3 +238,176 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    FLOW-027-01:
+        hash: sha256:7999127d4e68b386fa5c3a7f13bfc4014f005cfa5d63b848df43d26292c16cee
+        reqs:
+            - REQ-FLOW-027
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Run durability and determinism: an in-progress run stays pinned to the flow definition hash it started with when newer versions are registered.'
+        human:
+            status: pending
+    FLOW-028-01:
+        hash: sha256:f12b6481baec4368806d0f5d7963e83fcef24970605bab6b2c50ddad40f6e74e
+        reqs:
+            - REQ-FLOW-028
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-029-01:
+        hash: sha256:8a6e660eee096d5d4c33aaa3ee36705e08afc7bfe279d11da79eec3be5202871
+        reqs:
+            - REQ-FLOW-029
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-030-01:
+        hash: sha256:1f520c00cc264de93ed9101ce15473b47a83ec0d293a24916e03dd160f231188
+        reqs:
+            - REQ-FLOW-030
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-031-01:
+        hash: sha256:ef8e6cad2ac750ccf59c6f47ef2548f780f6f184cc14878c63e588bd3b8aee93
+        reqs:
+            - REQ-FLOW-031
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-031-02:
+        hash: sha256:d106416cbcc8ffe896d45d53397f1c1a58d85624ba08e0b027c7056f8e0f85bd
+        reqs:
+            - REQ-FLOW-031
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-032-01:
+        hash: sha256:384772752dad549714e5d9eb6927c5856008755ee4916ddf36895efbbc20c832
+        reqs:
+            - REQ-FLOW-032
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-033-01:
+        hash: sha256:8e2d62cde3eab4e998fcb81dd9e9b7826ce82c6b15c1979f47bfa20b1fdc3461
+        reqs:
+            - REQ-FLOW-033
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-01:
+        hash: sha256:0759a861438e7a36be5310cf68d52e89fcd1151091358ef54d66efb85f12416f
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-02:
+        hash: sha256:d615268f9b84318335d39e9a0ec9316f49f023f2c821c4271ea2fdcb52f0de82
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-03:
+        hash: sha256:87f9a20b500eb85f9a495edce941dbf1ac46dfaee48d435f2e920ba54571478d
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-04:
+        hash: sha256:a74e047b34cf3649d84ae372ea523f7447cb7a5642cf6250dcb559ae073d0605
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-035-05:
+        hash: sha256:6ba76a7e26904aa8845f79eee06200fb53277e52a20480a91d0240201ab358b5
+        reqs:
+            - REQ-FLOW-035
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-036-01:
+        hash: sha256:2070d2e3db08ffb4ce8550e0aed6e540b5368507adb7cad46382cc0b3e764cf5
+        reqs:
+            - REQ-FLOW-036
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-037-01:
+        hash: sha256:78a05859f74b769032b979742bc51e26b952558b961cb188c1cc691851742443
+        reqs:
+            - REQ-FLOW-037
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Replay durability and determinism: replaying a recorded history reproduces the exact durable calls in order without re-executing completed steps.'
+        human:
+            status: pending
+    FLOW-038-01:
+        hash: sha256:e4d9cf880b62268db1e088be95056eab8cf03c0d6b8b160bd5b1dca707b734a3
+        reqs:
+            - REQ-FLOW-038
+        tier: P2
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        human:
+            status: pending
+    FLOW-044-01:
+        hash: sha256:eef986ed27018c2f648508004acea388b497c96a75d649c41198093462022bcc
+        reqs:
+            - REQ-FLOW-044
+        tier: P0
+        author: claude-code:spec-author:d6348b
+        reviewer: antigravity:spec-reviewer:29a5d6
+        approved_at: "2026-11-18"
+        note: 'Superstep scheduling determinism: starting all durable calls in a superstep in command order before waiting prevents blocking or reordering parallel operations.'
+        human:
+            status: pending
