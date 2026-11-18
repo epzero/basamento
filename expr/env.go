@@ -2,6 +2,7 @@ package expr
 
 import (
 	"fmt"
+	"strings"
 
 	_ "time/tzdata"
 
@@ -54,7 +55,8 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 	e.registry = reg
 	celOpts := []cel.EnvOption{
 		cel.CustomTypeAdapter(adapter),
-		cel.CustomTypeProvider(reg),
+		cel.CustomTypeProvider(newSortedTypeProvider(reg)),
+		cel.Lib(deterministicTimestampLib{}),
 		cel.OptionalTypes(),
 		ext.Strings(ext.StringsLocale("en_US")),
 		ext.Strings(),
@@ -103,29 +105,27 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		}
 	}
 	fields := make(map[string]fieldMeta)
-	for pname, pschema := range props {
-		pm, ok := pschema.(map[string]any)
+	visiting := map[string]bool{}
+	if st != nil && st.rootDef != "" {
+		visiting[st.rootDef] = true
+	}
+	for _, pname := range sortedStringKeys(props) {
+		pm, ok := props[pname].(map[string]any)
 		if !ok {
 			continue
 		}
-		visiting := map[string]bool{}
-		if st != nil && st.rootDef != "" {
-			visiting[st.rootDef] = true
-		}
 		t, objName, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
 		if err != nil {
-			return nil, err
+			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
 		if objName != "" {
-			objSchema := pm
-			if typ, _ := pm["type"].(string); typ == "array" {
-				if items, ok := pm["items"].(map[string]any); ok {
-					objSchema = items
-				}
+			objSchema, err := objectSchemaForBuild(pm, st)
+			if err != nil {
+				return nil, exprErr(err.Error(), map[string]any{"variable": typeName})
 			}
 			if _, err := e.buildObjectType(objSchema, objName, st, adapter); err != nil {
-				return nil, err
+				return nil, exprErr(fmt.Sprintf("schema %q: %s", objName, err.Error()), map[string]any{"variable": typeName})
 			}
 		}
 	}
@@ -133,7 +133,27 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 	e.objects[typeName] = obj
 	if err := e.registry.RegisterType(obj); err != nil {
 		delete(e.objects, typeName)
-		return nil, fmt.Errorf("register object type %q: %w", typeName, err)
+		return nil, exprErr(fmt.Sprintf("register object type %q: %s", typeName, err.Error()), map[string]any{"variable": typeName})
 	}
 	return obj, nil
+}
+
+func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, error) {
+	if ref, ok := pm["$ref"].(string); ok {
+		if !strings.HasPrefix(ref, "#/$defs/") {
+			return nil, fmt.Errorf("external reference %q", ref)
+		}
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		def, ok := st.defs[name]
+		if !ok {
+			return nil, fmt.Errorf("missing definition for reference %q", ref)
+		}
+		return def, nil
+	}
+	if typ, _ := pm["type"].(string); typ == "array" {
+		if items, ok := pm["items"].(map[string]any); ok {
+			return objectSchemaForBuild(items, st)
+		}
+	}
+	return pm, nil
 }
