@@ -15,6 +15,18 @@
 // Audit has no URL: it is backed by the SQL store configured by SQL, shared
 // by every producer.
 //
+// Bus and KV ignore core.TenantFrom. Subjects and keys carry no tenant; the
+// exact string is the isolation boundary. Layers above these ports must bind
+// that string to an already authorized run or tenant and must never forward a
+// client-chosen subject or key (Purge and Delete included).
+//
+// A malformed subject is empty, has whitespace, a wildcard token ('*' or '>'),
+// or is not one or more dot-separated tokens of letters, digits, '-', and '_'
+// with no empty token. A malformed key is empty, has whitespace or a wildcard,
+// starts or ends with '.', or is not made of letters, digits, '-', '_', '/',
+// '=', and '.'. Every Bus and KV method rejects a malformed subject or key
+// with code invalid_argument before touching storage.
+//
 // Status: contract only (WP-L1-*).
 package platform
 
@@ -50,10 +62,10 @@ type Message struct {
 // (ADR-0005).
 type Bus interface {
 	// Publish stores data on subject and returns its bus sequence, greater than
-	// every earlier sequence on that subject. An oversize payload or an empty or
-	// malformed subject is rejected with code invalid_argument and nothing is
-	// stored. When the server cannot be reached, it fails at once with code
-	// unavailable and does not buffer the publish while disconnected.
+	// every earlier sequence on that subject. An oversize payload or a malformed
+	// subject fails with code invalid_argument and nothing is stored. When the
+	// server cannot be reached, it fails at once with code unavailable and does
+	// not buffer the publish while disconnected.
 	Publish(ctx context.Context, subject string, data []byte) (uint64, error)
 	// Subscribe delivers every retained message on subject with bus sequence
 	// greater than after, then each later publish, in sequence order and each
@@ -69,21 +81,19 @@ type Bus interface {
 	// buffered messages without blocking publishers or other subscribers.
 	// Cancellation of ctx ends the subscription; in both cases the receive
 	// channel closes and the caller may open a new Subscribe from the last
-	// sequence it received. An empty or malformed subject is rejected with code
-	// invalid_argument. When the server cannot be reached, it fails at once with
-	// code unavailable.
+	// sequence it received. A malformed subject fails with code invalid_argument.
+	// When the server cannot be reached, it fails at once with code unavailable.
 	Subscribe(ctx context.Context, subject string, after uint64) (<-chan Message, error)
 	// LastSeq returns the highest bus sequence ever assigned on subject, or zero
 	// if none was ever published, whether or not those messages were later
-	// purged. An empty or malformed subject is rejected with code
-	// invalid_argument. When the server cannot be reached, it fails at once with
-	// code unavailable.
+	// purged. A malformed subject fails with code invalid_argument. When the
+	// server cannot be reached, it fails at once with code unavailable.
 	LastSeq(ctx context.Context, subject string) (uint64, error)
 	// Purge drops every retained message on subject. Later publishes keep
 	// receiving greater sequences than any assigned before. The purge floor
-	// advances so a replay from below it is refused (see Subscribe). An empty or
-	// malformed subject is rejected with code invalid_argument. When the server
-	// cannot be reached, it fails at once with code unavailable.
+	// advances so a replay from below it is refused (see Subscribe). A malformed
+	// subject fails with code invalid_argument. When the server cannot be
+	// reached, it fails at once with code unavailable.
 	Purge(ctx context.Context, subject string) error
 }
 
@@ -91,31 +101,33 @@ type Bus interface {
 // cursors, presence). Expiry is decided against the clock the implementation
 // was constructed with, not the host wall clock alone.
 type KV interface {
-	// Get returns the latest value and revision for key. A missing key or one
-	// past its TTL is reported with code not_found. An empty or malformed key is
-	// rejected with code invalid_argument. When the server cannot be reached,
-	// it fails at once with code unavailable.
+	// Get returns the latest value and revision for key. A missing or expired
+	// entry is reported with code not_found. A malformed key fails with code
+	// invalid_argument. When the server cannot be reached, it fails at once with
+	// code unavailable.
 	Get(ctx context.Context, key string) ([]byte, uint64, error)
 	// Put stores value under key with an optional lease. A ttl of zero means no
 	// expiry. It returns a revision greater than every earlier revision of that
-	// key. An empty or malformed key or a negative ttl is rejected with code
+	// key. A malformed key or a negative ttl fails with code invalid_argument.
+	// When the server cannot be reached, it fails at once with code unavailable.
+	Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error)
+	// CompareAndSwap replaces value when revision is the current revision of an
+	// unexpired entry and returns a greater revision. Revision zero means create:
+	// it stores only when the key has no unexpired entry (missing, deleted, or
+	// expired counts as absent); an unexpired entry makes it fail with code
+	// conflict without changing the entry. A non-zero revision when the key has no
+	// unexpired entry fails with code conflict and leaves the key absent. A
+	// non-zero revision that is not the current revision of an unexpired entry
+	// fails with code conflict and leaves the entry unchanged. Swapping at the
+	// revision of an expired entry fails with code conflict. A ttl of zero means
+	// no expiry; a non-zero ttl sets a new deadline from the time of the swap. A
+	// malformed key or a negative ttl fails with code invalid_argument. When the
+	// server cannot be reached, it fails at once with code unavailable.
+	CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error)
+	// Delete removes key. Deleting a missing, expired, or already absent key
+	// succeeds and leaves the key absent. A malformed key fails with code
 	// invalid_argument. When the server cannot be reached, it fails at once with
 	// code unavailable.
-	Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error)
-	// CompareAndSwap updates key when revision is its current revision and
-	// returns a greater revision. Revision zero means create: it stores value
-	// only when the key has no entry (including an expired one treated as
-	// absent); an existing unexpired entry makes it fail with code conflict
-	// without changing the entry. A ttl of zero means no expiry; a non-zero ttl
-	// starts a new deadline from the time of the swap so a holder can renew.
-	// Swapping at the revision of an entry that has expired fails with code
-	// conflict. An empty or malformed key or a negative ttl is rejected with
-	// code invalid_argument. When the server cannot be reached, it fails at
-	// once with code unavailable.
-	CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error)
-	// Delete removes key. Deleting a key with no entry succeeds and leaves it
-	// absent. An empty or malformed key is rejected with code invalid_argument.
-	// When the server cannot be reached, it fails at once with code unavailable.
 	Delete(ctx context.Context, key string) error
 }
 
