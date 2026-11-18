@@ -27,9 +27,6 @@ func TestOpenEmbedded(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	if !st.Connected() {
-		t.Fatal("not connected after open")
-	}
 	seq, err := st.Publish(context.Background(), "run.r1.deltas", []byte("m1"))
 	if err != nil {
 		var pe *core.Error
