@@ -10,7 +10,7 @@ Feature: The codegen loop
 
   Background:
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And the preset is version "v1" with a repair guard of 3 visits and 5000 milli-points
+    And the preset is version "v1" with a repair guard of 3 visits and 5000 milli-points and a self-review guard of 3 visits
     And "codegen.bootstrap" uses the scripted model and the simulated sandbox and git host
 
   @REQ-PRESET-001 @id:PRESET-001-01
@@ -25,7 +25,7 @@ Feature: The codegen loop
   Scenario: A completed stage leaves a checkpoint
     Given a bootstrap brief whose plan has 2 modules and plans and implements them and verifies once
     When a bootstrap run of brief "invoices" is started
-    Then the run has checkpoints for stages "plan", "implement", "verify" and "self-review" and not "commit"
+    Then the run has checkpoints for stages "plan", "implement", "verify", "self-review" and "commit" and not "repair"
 
   @REQ-PRESET-004 @id:PRESET-004-01
   Scenario: One implement step per planned module, in plan order
@@ -82,8 +82,8 @@ Feature: The codegen loop
     Then the stage log is ["plan", "implement", "verify", "self-review", "repair", "verify", "self-review", "commit"]
     And the repair stage's first run received the finding of the first self-review
 
-  @REQ-PRESET-009 @cost @id:PRESET-009-02
-  Scenario: The visit limit ends a self-review that never raises no findings
+  @REQ-PRESET-020 @cost @id:PRESET-020-01
+  Scenario: The visit limit ends a self-review whose findings never clear
     Given a bootstrap brief whose plan has 1 module "store" and plans, implements and verifies it
     And the self-review reports 1 finding every time
     When a bootstrap run of brief "invoices" is started
@@ -95,17 +95,17 @@ Feature: The codegen loop
   @REQ-PRESET-010 @id:PRESET-010-01
   Scenario: A bootstrap run that passes its tests and self-review makes one commit, the first of a new repository
     Given a bootstrap brief whose plan has 1 module "store" and plans and implements it and verifies with 1 failing, then 0 failing, tests
-    And a bootstrap run of brief "invoices" is started
+    When a bootstrap run of brief "invoices" is started
     Then the run completes
     And the git host recorded 1 commit, on a new repository's default branch, with the workspace the last verification tested
 
   @REQ-PRESET-011 @id:PRESET-011-01
   Scenario: No writer is called before the commit stage
     Given a bootstrap brief whose plan has 1 module "store" and plans, implements and verifies it
-    And a bootstrap run of brief "invoices" is holding before stage "self-review"
-    When the hold before stage "self-review" is released
+    And a bootstrap run of brief "invoices" is holding before stage "commit"
+    Then the git host recorded 0 commits and 0 writer calls
+    When the hold before stage "commit" is released
     Then the git host recorded 1 commit at stage "commit"
-    And the git host recorded 0 writer calls at any earlier stage
 
   @REQ-PRESET-014 @id:PRESET-014-01
   Scenario: A run that saw two versions uses the first
@@ -128,7 +128,7 @@ Feature: The codegen loop
     And a bootstrap run of brief "invoices" is stopped after stage "<stage>"
     When the run resumes and completes
     Then the stage log is ["plan", "implement", "verify", "self-review", "commit"]
-    And the model made 3 plan and implement requests and 0 repair requests in both attempts together
+    And the model made 3 plan and implement requests, 1 self-review request and 0 repair requests in both attempts together
     And the sandbox made 1 call in both attempts together
     And the git host recorded 1 commit in both attempts together
 

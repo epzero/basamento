@@ -42,8 +42,8 @@ If the repair stage reaches its visit limit or its cost limit, then the codegen 
 ### REQ-PRESET-008 — Passing verification goes to the author's self-review
 When the plan's tests pass in the `verify` stage, the codegen flow shall run the `self-review` stage, in which no person decides and no reviewer session is started.
 
-### REQ-PRESET-009 — Self-review findings go back to repair or end the run
-If the `self-review` stage raises findings, then the codegen flow shall run the repair stage with those findings, and if it raises none, then the codegen flow shall commit. A `self-review` stage that has raised findings and has reached its visit limit shall end the run in the `failed` state with code `budget_exceeded`.
+### REQ-PRESET-009 — Self-review findings go back to repair
+If the `self-review` stage raises findings, then the codegen flow shall run the repair stage with those findings.
 
 ### REQ-PRESET-010 — A bootstrap run commits once
 When the plan's tests pass and the `self-review` stage raises no findings, the codegen flow shall commit the workspace of the last `verify` stage once, as the only commit on a new repository's default branch for a bootstrap run.
@@ -74,3 +74,6 @@ Where a new version of the preset compiles and does not regress its predecessor 
 
 ### REQ-PRESET-019 — Generated code quality is measured, not asserted
 The preset's `@eval` suite shall score the plans, prompts and generated code on recorded fixtures against the thresholds in `eval.feature`.
+
+### REQ-PRESET-020 — The self-review guard bounds the loop
+If the `self-review` stage reaches its visit limit, then the codegen flow shall end the run in the `failed` state with code `budget_exceeded`, naming the limit reached.

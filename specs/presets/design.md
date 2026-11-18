@@ -55,7 +55,7 @@ preset does not use it.
 | `implement` | `map` over `plan.modules`, `max_parallel` 0 (one at a time), node `implement_module` (`agent` with `output_schema: workspace`) | 004 |
 | `verify` | One `tool` node per plan test, in plan order, on the workspace the last stage returned | 005 |
 | `repair` | `agent` node `repair` with `guard: {max_visits: 3, cost_mpts: 5000}`; it receives the failing tests or the self-review findings; an edge back to `verify` | 006, 007, 009 |
-| `self-review` | `agent` node `reviewer` with `output_schema: findings` and its own `guard: {max_visits: 3}`; one edge to `commit`, taken when it raises no findings, one to `repair` | 008, 009, 012 |
+| `self-review` | `agent` node `reviewer` with `output_schema: findings` and its own `guard: {max_visits: 3}`; one edge to `commit`, taken when it raises no findings, one to `repair` | 008, 009, 012, 020 |
 | `commit` | One `tool` node, the only writer the flow calls | 010–013 |
 
 The `reviewer` agent returns a list of findings. It is a stage of the run,
@@ -122,9 +122,9 @@ propose(v2) ─► compile ─┬─ fails ─► rejected invalid_argument, no 
 
   Rejected proposals stay recorded, so the reason stays readable later.
 - Version review is a second preset flow, `codegen.version`, separate from
-  the two run flows and never composed into them. It uses the same gate
-  payload schema (`approved | rejected`) and the same no-write-before-the-gate
-  discipline, and it is not a stage of a run.
+  the two run flows and never composed into them. It uses a gate node with
+  payload schema `decision: approved | rejected` and records no accepted
+  version before the gate is resolved, and it is not a stage of a run.
 
 ## 3. Simulation in the gate
 

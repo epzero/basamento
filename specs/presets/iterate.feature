@@ -6,7 +6,7 @@ Feature: Codegen iteration
 
   Background:
     Given the clock is frozen at "2026-11-17T09:00:00Z"
-    And the preset is version "v1" with a repair guard of 3 visits and 5000 milli-points
+    And the preset is version "v1" with a repair guard of 3 visits and 5000 milli-points and a self-review guard of 3 visits
     And "codegen.iterate" uses the scripted model and the simulated sandbox and git host
 
   @REQ-PRESET-012 @id:PRESET-012-01
@@ -19,7 +19,7 @@ Feature: Codegen iteration
     And branch "release/v1" is still at its 3rd commit
     And a person was asked for no decision and no reviewer session was started
 
-  @REQ-PRESET-012 @id:PRESET-012-02
+  @REQ-PRESET-012 @REQ-PRESET-020 @cost @id:PRESET-012-02
   Scenario: An iteration whose self-review findings never clear opens no branch
     Given repository "acme/app" has 3 commits on default branch "main" and a branch "release/v1" at its 3rd commit
     And a change request whose plan has 1 module "parser" and plans, implements and verifies it

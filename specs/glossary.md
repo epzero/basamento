@@ -64,4 +64,4 @@ the same change that first uses it.
 | **Sandbox** | An isolated workspace in which a codegen run writes modules and runs the plan's tests; nothing it writes reaches a repository. A **simulated sandbox** is its deterministic stand-in in the gate. |
 | **Git host** | The remote a codegen run reads a repository from and commits to, behind the repository's own port. A **simulated git host** is its deterministic stand-in in the gate, recording commits, branches and writer calls. |
 | **Review gate** | A `gate` node where a person approves or rejects a proposal. The preset uses it only for a new preset version, never in a codegen run, which commits without one. |
-| **Self-review** | The `self-review` codegen stage, in which an agent reviews the workspace for findings before the commit; findings go back to repair. It starts no reviewer session and asks no person. |
+| **Self-review** | The `self-review` codegen stage, in which an agent reviews the workspace for findings before the commit under a visit limit (the **self-review guard**); findings go back to repair. It starts no reviewer session and asks no person. |
