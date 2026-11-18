@@ -65,6 +65,11 @@ func storeItemCall(ctx context.Context, tenant, key string) error {
 }
 
 func storeViolatingConstraint(ctx context.Context, tenant, key, rule string) error {
+	switch rule {
+	case "not-null", "check":
+	default:
+		return fmt.Errorf("unknown constraint rule %q", rule)
+	}
 	w := world(ctx).SQL
 	if w.repo == nil {
 		if err := ensureOpenStore(ctx, 3); err != nil {
@@ -105,7 +110,9 @@ func writeWhileRefused(ctx context.Context, tenant, refusal string) error {
 // and turns the store's busy timeout off, so the next write fails at once with
 // SQLITE_BUSY (or SQLITE_LOCKED) instead of waiting for the timeout. A busy
 // refusal holds an immediate transaction; a locked one holds an exclusive
-// lock, so the two examples use different lock modes on the same real file.
+// lock. The store runs the database in WAL mode, where SQLite treats EXCLUSIVE
+// and IMMEDIATE alike, so both refusals reach the SQLITE_BUSY mapping; the
+// SQLITE_LOCKED mapping is covered by TestSQLiteLockedMapping in platform/sql.
 func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld, refusal string) (func(), error) {
 	begin := ""
 	switch refusal {

@@ -74,7 +74,9 @@ func (r *SampleRepo) StoreItem(ctx context.Context, key string, opts StoreOption
 
 // StoreItemViolatingConstraint inserts an item that breaks the named sample
 // constraint: "not-null" stores NULL in the required column, and "check"
-// stores a tag the check rule rejects. Anything else is invalid_argument.
+// stores a tag the check rule rejects. Any other rule is a step bug, not a
+// database outcome, so it returns an internal error rather than an
+// invalid_argument the scenario could mistake for the violation under test.
 func (r *SampleRepo) StoreItemViolatingConstraint(ctx context.Context, key, rule string) error {
 	tenant, err := r.requireTenant(ctx)
 	if err != nil {
@@ -87,7 +89,7 @@ func (r *SampleRepo) StoreItemViolatingConstraint(ctx context.Context, key, rule
 	case "check":
 		tag = "bad"
 	default:
-		return core.NewError(core.CodeInvalidArgument, "sql: unknown constraint rule", nil)
+		return fmt.Errorf("sqltest: unknown constraint rule %q", rule)
 	}
 	id := fmt.Sprintf("item-%s-%s", tenant, key)
 	_, err = r.store.Execer().Exec(ctx,

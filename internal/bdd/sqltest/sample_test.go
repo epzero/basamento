@@ -30,6 +30,31 @@ func TestListHoldingItem(t *testing.T) {
 	}
 }
 
+func TestStoreItemViolatingConstraintRules(t *testing.T) {
+	dir := t.TempDir()
+	mig, err := sqltest.MigrationsThrough(3, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := psql.Open(context.Background(), "sqlite:///"+filepath.Join(dir, "kit.db"), mig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	repo := sqltest.NewSampleRepo(s)
+	ctx := core.WithTenant(context.Background(), "acme")
+
+	for _, rule := range []string{"not-null", "check"} {
+		err := repo.StoreItemViolatingConstraint(ctx, "k-"+rule, rule)
+		if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+			t.Fatalf("%s: got %v, want invalid_argument", rule, err)
+		}
+	}
+	if err := repo.StoreItemViolatingConstraint(ctx, "k-other", "primary-key"); core.CodeOf(err) == core.CodeInvalidArgument {
+		t.Fatalf("unknown rule passed as invalid_argument: %v", err)
+	}
+}
+
 func TestConcurrentOpen(t *testing.T) {
 	dir := t.TempDir()
 	raw := "sqlite:///" + filepath.Join(dir, "kit.db")
