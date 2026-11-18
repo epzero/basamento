@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -231,41 +230,6 @@ func tableViolations(table *godog.Table) []schema.Violation {
 	return out
 }
 
-func applyValueSpec(v reflect.Value, spec string) error {
-	spec = strings.TrimSpace(spec)
-	if strings.Contains(spec, " and ") {
-		for _, part := range strings.Split(spec, " and ") {
-			if err := applyValueSpec(v, strings.TrimSpace(part)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	parts := strings.SplitN(spec, " ", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("bad value spec %q", spec)
-	}
-	field := parts[0]
-	valSpec := parts[1]
-	f := v.FieldByName(strings.Title(field[:1]) + field[1:])
-	if !f.IsValid() {
-		// try exported name match
-		for i := 0; i < v.NumField(); i++ {
-			sf := v.Type().Field(i)
-			tag := sf.Tag.Get("json")
-			tagName, _, _ := strings.Cut(tag, ",")
-			if tagName == field {
-				f = v.Field(i)
-				break
-			}
-		}
-	}
-	if !f.IsValid() {
-		return fmt.Errorf("no field for %q", field)
-	}
-	return setFieldFromSpec(f, valSpec)
-}
-
 func setFieldFromSpec(f reflect.Value, spec string) error {
 	spec = strings.TrimSpace(spec)
 	switch f.Kind() {
@@ -326,12 +290,12 @@ func setFieldFromSpec(f reflect.Value, spec string) error {
 	return nil
 }
 
-func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
+func parseSchemaObject(raw json.RawMessage) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("parse schema: %w", err)
 	}
-	return b
+	return m, nil
 }
 
 func rejectFromErr(err error, loc, kw string) error {
@@ -353,13 +317,4 @@ func compileGenerated(w *schemaWorld, alias string) (*schema.Compiled, error) {
 		return nil, fmt.Errorf("no generated schema")
 	}
 	return schema.Compile(sch.Raw)
-}
-
-func sortedTypeNames(w *schemaWorld) []string {
-	var names []string
-	for k := range w.types {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	return names
 }

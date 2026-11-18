@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,19 +20,22 @@ import (
 )
 
 type schemaWorld struct {
-	texts      map[string][]byte
-	canonical  map[string][]byte
-	schemas    map[string]json.RawMessage
-	compiled   *schema.Compiled
-	set        *schema.Set
-	types      map[string]reflect.Type
-	generated  map[string]*schema.Schema
-	lastErr    error
-	lastViol   []schema.Violation
-	httpServer *httptest.Server
-	httpReqs   int
-	fileURI    string
-	expectURL  string
+	texts        map[string][]byte
+	canonical    map[string][]byte
+	schemas      map[string]json.RawMessage
+	compiled     *schema.Compiled
+	set          *schema.Set
+	types        map[string]reflect.Type
+	generated    map[string]*schema.Schema
+	lastErr      error
+	lastViol     []schema.Violation
+	lastViolRuns [][]schema.Violation
+	structVal    any
+	encodedJSON  []byte
+	httpServer   *httptest.Server
+	httpReqs     int
+	fileURI      string
+	expectURL    string
 }
 
 func newSchemaWorld() *schemaWorld {
@@ -164,9 +168,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 	sc.Step(`^a schema is generated from "([^"]*)"$`, func(ctx context.Context, name string) error {
 		return generateSchema(ctx, name, name)
 	})
-	sc.Step(`^a schema is generated from "([^"]*)" as "([^"]*)"$`, func(ctx context.Context, name, alias string) error {
-		return generateSchema(ctx, name, alias)
-	})
+	sc.Step(`^a schema is generated from "([^"]*)" as "([^"]*)"$`, generateSchema)
 
 	sc.Step(`^the schema has exactly the properties (.+)$`, assertProperties)
 	sc.Step(`^the schema requires exactly the properties (.+)$`, assertRequired)
@@ -254,7 +256,8 @@ func registerSchema(sc *godog.ScenarioContext) {
 		v := reflect.New(t).Elem()
 		spec = strings.TrimSpace(spec)
 		if spec == "the zero value" {
-			schemaCtx(ctx).texts["struct_value"] = mustJSON(v.Interface())
+			schemaCtx(ctx).structVal = v.Interface()
+			schemaCtx(ctx).encodedJSON = nil
 			return nil
 		}
 		for _, part := range splitValueSpec(spec) {
@@ -262,12 +265,36 @@ func registerSchema(sc *godog.ScenarioContext) {
 				return err
 			}
 		}
-		schemaCtx(ctx).texts["struct_value"] = mustJSON(v.Interface())
+		schemaCtx(ctx).structVal = v.Interface()
+		schemaCtx(ctx).encodedJSON = nil
 		return nil
 	})
-	sc.Step(`^the value is encoded with encoding/json$`, func(context.Context) error { return nil })
+	sc.Step(`^the value is encoded with encoding/json$`, func(ctx context.Context) error {
+		w := schemaCtx(ctx)
+		if w.structVal == nil {
+			return fmt.Errorf("no struct value")
+		}
+		b, err := json.Marshal(w.structVal)
+		if err != nil {
+			return err
+		}
+		w.encodedJSON = b
+		w.texts["struct_value"] = b
+		return nil
+	})
 	sc.Step(`^the schema generated from "([^"]*)" accepts the encoded value$`, func(ctx context.Context, typeName string) error {
-		sch, err := schema.ForType(schemaCtx(ctx).types[typeName])
+		w := schemaCtx(ctx)
+		if w.encodedJSON == nil {
+			return fmt.Errorf("value not encoded with encoding/json")
+		}
+		expect, err := json.Marshal(w.structVal)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(w.encodedJSON, expect) {
+			return fmt.Errorf("encoded bytes differ from encoding/json")
+		}
+		sch, err := schema.ForType(w.types[typeName])
 		if err != nil {
 			return err
 		}
@@ -275,7 +302,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		return c.Validate(schemaCtx(ctx).texts["struct_value"])
+		return c.Validate(w.encodedJSON)
 	})
 
 	sc.Step(`^the schema:$`, func(ctx context.Context, doc *godog.DocString) error {
@@ -393,10 +420,13 @@ func registerSchema(sc *godog.ScenarioContext) {
 
 	sc.Step(`^the instance (.+) is validated$`, validateInstance)
 	sc.Step(`^the instance (.+) is validated 3 times$`, func(ctx context.Context, inst string) error {
+		w := schemaCtx(ctx)
+		w.lastViolRuns = nil
 		for range 3 {
 			if err := validateInstance(ctx, inst); err != nil {
 				return err
 			}
+			w.lastViolRuns = append(w.lastViolRuns, append([]schema.Violation(nil), w.lastViol...))
 		}
 		return nil
 	})
@@ -415,13 +445,18 @@ func registerSchema(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^each validation lists exactly these violations, in this order:$`, func(ctx context.Context, table *godog.Table) error {
 		want := tableViolations(table)
-		got := schemaCtx(ctx).lastViol
-		if len(got) != len(want) {
-			return fmt.Errorf("got %+v", got)
+		runs := schemaCtx(ctx).lastViolRuns
+		if len(runs) == 0 {
+			runs = [][]schema.Violation{schemaCtx(ctx).lastViol}
 		}
-		for i := range want {
-			if got[i].Location != want[i].Location || got[i].Keyword != want[i].Keyword {
-				return fmt.Errorf("index %d: %+v", i, got[i])
+		for ri, got := range runs {
+			if len(got) != len(want) {
+				return fmt.Errorf("run %d: got %+v", ri, got)
+			}
+			for i := range want {
+				if got[i].Location != want[i].Location || got[i].Keyword != want[i].Keyword {
+					return fmt.Errorf("run %d index %d: %+v", ri, i, got[i])
+				}
 			}
 		}
 		return nil
@@ -483,7 +518,7 @@ func validateInstance(ctx context.Context, inst string) error {
 
 func assertProperties(ctx context.Context, list string) error {
 	sch := schemaCtx(ctx).generated[firstGenKey(schemaCtx(ctx))]
-	m, err := schema.ParseSchemaObject(sch.Raw)
+	m, err := parseSchemaObject(sch.Raw)
 	if err != nil {
 		return err
 	}
@@ -500,7 +535,7 @@ func assertProperties(ctx context.Context, list string) error {
 
 func assertRequired(ctx context.Context, list string) error {
 	sch := schemaCtx(ctx).generated[firstGenKey(schemaCtx(ctx))]
-	m, err := schema.ParseSchemaObject(sch.Raw)
+	m, err := parseSchemaObject(sch.Raw)
 	if err != nil {
 		return err
 	}
@@ -520,7 +555,7 @@ func assertRequired(ctx context.Context, list string) error {
 
 func assertDescription(ctx context.Context, prop, desc string) error {
 	sch := schemaCtx(ctx).generated[firstGenKey(schemaCtx(ctx))]
-	m, err := schema.ParseSchemaObject(sch.Raw)
+	m, err := parseSchemaObject(sch.Raw)
 	if err != nil {
 		return err
 	}
