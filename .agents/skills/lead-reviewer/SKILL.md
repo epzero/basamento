@@ -58,7 +58,8 @@ hand-off with `needs-human`, one question, with options.
 | The ticket | Do |
 | --- | --- |
 | `code-review-requested` | Review the pull request, below. |
-| `spec-review-requested` | Spawn a spec reviewer on the branch (`-branch`). Changes: post **Request changes** with its replacement text, hand back `spec-changes-requested`. Approved: push its ledger commit, **Approve**, hand back `spec-approved`. For P0 and P1 scenarios open one acceptance ticket for the owner listing ids, tiers and notes. |
+| `spec-review-requested` | Spawn a spec reviewer on the branch (`-branch`). Changes: post **Request changes** with its replacement text, hand back `spec-changes-requested`. Approved: push its ledger commit. For P0 and P1 scenarios, either hand the ticket to the owner (`needs-human`) for inline acceptance before GitHub **Approve**, or **Approve**, hand back `spec-approved`, and open one acceptance ticket for the owner listing ids, tiers and notes. |
+| The owner answered inline spec acceptance (`accept` / `reject` in the latest comment) | On `accept`: record `go tool gate spec human -id … -status accepted -note "<link>"` on the spec branch, push, check CI is green, **Approve** on GitHub, and hand back `spec-approved`. On `reject`: hand back `spec-changes-requested` with the owner's reason. |
 | `owner-approved`, or the owner's `approve` in the latest comment (a high-risk change, a technical design) | Check that the pull request is still at the commit the owner was shown and that CI is green. Set the risk label if it is still `TBD`. **Approve** with a link to the owner's comment. Hand the ticket to the author: `ready-to-integrate`. For a design you do not review again. If commits were added since, hand it back to the owner and say what changed. |
 | An outside pull request appeared | `agent-workflow.md` §7.6. |
 

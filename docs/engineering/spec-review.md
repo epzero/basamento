@@ -94,10 +94,12 @@ scenarios:
 ## 6. Human review
 
 `go tool gate spec queue` lists pending scenarios, P0 first, with their notes.
-The owner answers on the acceptance ticket the reviewer opened
-(`agent-workflow.md` §5) and the designer's lead records the outcome in a
-pull request. When no personal login is given, `-by` defaults to `epzero`
-(`human:epzero`); the note links the answer, which is the proof:
+The owner answers either inline on the spec ticket before merge or on a
+separate acceptance ticket the reviewer opened (`agent-workflow.md` §5).
+The reviewer (inline) or designer (separate ticket) records the outcome on
+the spec branch or in a follow-up pull request. When no personal login is
+given, `-by` defaults to `epzero` (`human:epzero`); the note links the
+answer, which is the proof:
 
 ```bash
 go tool gate spec human -id STRM-003-01 -status accepted -note "<link to the answer>"

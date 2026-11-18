@@ -64,7 +64,7 @@ Unassigned tickets are yours too: assign them to yourself when you start.
 | Your spec author recorded `spec-review-requested` | Push, open the spec pull request (specs only, `risk: TBD`), hand to the reviewer: `spec-review-requested`, *In Review*. |
 | `spec-changes-requested` | Spawn the spec author with the requested text; push; hand back with the round. |
 | `spec-approved` | Check the approval is on the latest commit and CI is green, merge. Then hand the ticket to the developer (`ready-to-implement`, *Todo*), or set it *Done* when nothing is left to build. |
-| The owner answered an acceptance ticket | Record each answer with `go tool gate spec human -id … -status … -by owner -note "<link>"` in a pull request, hand it to the reviewer. A rejection is also a spec change: open a ticket for it. |
+| The owner answered a separate acceptance ticket | Record each answer with `go tool gate spec human -id … -status … -note "<link>"` (defaulting `-by` to `epzero`) in a pull request, hand it to the reviewer. A rejection is also a spec change: open a ticket for it. |
 | The owner answered a question of yours | Go on from the answer. |
 
 ## Triage
