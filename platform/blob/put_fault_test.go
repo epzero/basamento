@@ -104,7 +104,7 @@ func TestPutMetaFailureRetryRepairsContentType(t *testing.T) {
 	if err := st.Put(ctx, key, strings.NewReader("hello"), "text/plain"); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	ct, err := st.ContentType(ctx, "acme", key)
+	ct, err := st.ContentType(ctx, key)
 	if err != nil || ct != "text/plain" {
 		t.Fatalf("content type %q err=%v", ct, err)
 	}
@@ -141,13 +141,13 @@ func TestPutConcurrentSameKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(path, string(filepath.Separator)+".part"+string(filepath.Separator)) && !d.IsDir() {
+		if strings.HasSuffix(path, ".tmp") && !d.IsDir() {
 			parts++
 		}
 		return nil
 	})
 	if parts != 0 {
-		t.Fatalf("leftover staging files: %d", parts)
+		t.Fatalf("leftover tmp files: %d", parts)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestPutConcurrentFirstContentTypeWins(t *testing.T) {
 	if err := st.Put(ctx, key, strings.NewReader("same"), "text/markdown"); err != nil {
 		t.Fatal(err)
 	}
-	ct, err := st.ContentType(ctx, "acme", key)
+	ct, err := st.ContentType(ctx, key)
 	if err != nil || ct != "text/plain" {
 		t.Fatalf("want first ctype, got %q err=%v", ct, err)
 	}

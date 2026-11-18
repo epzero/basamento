@@ -21,7 +21,6 @@ type Store struct {
 	baseURL  string
 	signKey  []byte
 	putLocks keyedMu
-	stageSeq uint64
 }
 
 // Close releases the underlying bucket.
@@ -40,7 +39,11 @@ func (s *Store) tenantOK(ctx context.Context) (core.TenantID, error) {
 	return tid, nil
 }
 
-func (s *Store) contentLength(ctx context.Context, tid core.TenantID, key string) (int64, error) {
+func (s *Store) contentLength(ctx context.Context, key string) (int64, error) {
+	tid, err := s.tenantOK(ctx)
+	if err != nil {
+		return 0, err
+	}
 	path, err := objectPath(tid, key)
 	if err != nil {
 		return 0, err
@@ -52,8 +55,13 @@ func (s *Store) contentLength(ctx context.Context, tid core.TenantID, key string
 	return attrs.Size, nil
 }
 
-// ContentType returns the stored content type for key under tid, or "" if unset.
-func (s *Store) ContentType(ctx context.Context, tid core.TenantID, key string) (string, error) {
+// ContentType returns the stored content type for key, or "" if unset.
+// Tenancy is taken from ctx, never from an argument.
+func (s *Store) ContentType(ctx context.Context, key string) (string, error) {
+	tid, err := s.tenantOK(ctx)
+	if err != nil {
+		return "", err
+	}
 	mp, err := metaPath(tid, key)
 	if err != nil {
 		return "", err
@@ -73,12 +81,9 @@ func (s *Store) ContentType(ctx context.Context, tid core.TenantID, key string) 
 	return string(b), nil
 }
 
-func serveContentType(stored, objectType string) string {
+func serveContentType(stored string) string {
 	if stored != "" {
 		return stored
-	}
-	if objectType != "" {
-		return objectType
 	}
 	return "application/octet-stream"
 }
@@ -102,7 +107,18 @@ func (s *Store) checkKey(key string) error {
 	return nil
 }
 
-// Put implements platform.Blob.
+// Put stores content under a content key. The tenant comes from ctx.
+// It returns not_found only via other methods; on a hash mismatch it returns
+// invalid_argument. For an existing object the first content type wins.
+//
+// New keys stream once to the final object path, hashing as they go. On copy
+// error, cancellation or hash mismatch the writer context is cancelled before
+// Close and nothing is deleted. After a matching hash the sidecar is written,
+// then Close commits the object. Two replicas writing the same new key commit
+// identical bytes (content-addressed); the in-process keyed lock enforces first
+// content type per process. On S3, cancelling a multipart upload may leave
+// parts at the provider; operators should use an AbortIncompleteMultipartUpload
+// lifecycle rule.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, contentType string) error {
 	if err := s.checkKey(key); err != nil {
 		return err
@@ -127,7 +143,7 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, contentType st
 	return s.putNew(ctx, tid, key, r, contentType)
 }
 
-// Get implements platform.Blob.
+// Get returns a reader for key. The tenant comes from ctx; a missing object is not_found.
 func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	if err := s.checkKey(key); err != nil {
 		return nil, err
@@ -147,7 +163,7 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return r, nil
 }
 
-// Exists implements platform.Blob.
+// Exists reports whether key is stored for the tenant in ctx.
 func (s *Store) Exists(ctx context.Context, key string) (bool, error) {
 	if err := s.checkKey(key); err != nil {
 		return false, err
@@ -163,7 +179,7 @@ func (s *Store) Exists(ctx context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
-// Delete implements platform.Blob.
+// Delete removes key for the tenant in ctx; a missing object is not_found.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := s.checkKey(key); err != nil {
 		return err
@@ -188,11 +204,11 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	_ = s.bucket.Delete(ctx, mp) // meta may be absent for legacy rows
+	_ = s.bucket.Delete(ctx, mp)
 	return nil
 }
 
-// SignedURL implements platform.Blob.
+// SignedURL returns a proxied or presigned read URL for key (tenant from ctx).
 func (s *Store) SignedURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	if err := s.checkKey(key); err != nil {
 		return "", err
