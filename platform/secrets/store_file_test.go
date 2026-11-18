@@ -1,6 +1,7 @@
 package secrets_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,32 +19,32 @@ func TestFileStoreCreateComparePersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := secrets.StoredKeyset{Wrapped: []byte("w"), MasterKeyID: "mk", Revision: 1}
-	ok, err := s.CreateIfAbsent("acme", rec)
+	ok, err := s.CreateIfAbsent(context.Background(), "acme", rec)
 	if err != nil || !ok {
 		t.Fatalf("create ok=%v err=%v", ok, err)
 	}
-	ok, err = s.CreateIfAbsent("acme", rec)
+	ok, err = s.CreateIfAbsent(context.Background(), "acme", rec)
 	if err != nil || ok {
 		t.Fatalf("dup ok=%v err=%v", ok, err)
 	}
-	got, found, err := s.Get("acme")
+	got, found, err := s.Get(context.Background(), "acme")
 	if err != nil || !found || got.Revision != 1 {
 		t.Fatalf("get %+v found=%v err=%v", got, found, err)
 	}
 	rec2 := rec
 	rec2.Revision = 2
 	rec2.Wrapped = []byte("w2")
-	if err := s.CompareAndSwap("acme", 1, rec2); err != nil {
+	if err := s.CompareAndSwap(context.Background(), "acme", 1, rec2); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CompareAndSwap("acme", 1, rec); core.CodeOf(err) != core.CodeInvalidArgument {
+	if err := s.CompareAndSwap(context.Background(), "acme", 1, rec); core.CodeOf(err) != core.CodeConflict {
 		t.Fatalf("cas conflict err=%v", err)
 	}
 	s2, err := secrets.NewFileStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, found, err = s2.Get("acme")
+	got, found, err = s2.Get(context.Background(), "acme")
 	if err != nil || !found || got.Revision != 2 {
 		t.Fatalf("reopen %+v", got)
 	}
@@ -58,7 +59,7 @@ func TestFileStoreAtomicNotTorn(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := secrets.StoredKeyset{Wrapped: []byte("wrap"), MasterKeyID: "mk", Revision: 1}
-	if _, err := s.CreateIfAbsent("t1", rec); err != nil {
+	if _, err := s.CreateIfAbsent(context.Background(), "t1", rec); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(dir)
@@ -91,7 +92,7 @@ func TestFileStoreCorruptFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := secrets.StoredKeyset{Wrapped: []byte("w"), MasterKeyID: "mk", Revision: 1}
-	if _, err := s.CreateIfAbsent("acme", rec); err != nil {
+	if _, err := s.CreateIfAbsent(context.Background(), "acme", rec); err != nil {
 		t.Fatal(err)
 	}
 	p, err := storePath(dir, "acme")
@@ -101,7 +102,7 @@ func TestFileStoreCorruptFailsClosed(t *testing.T) {
 	if err := os.WriteFile(p, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = s.Get("acme")
+	_, _, err = s.Get(context.Background(), "acme")
 	if err == nil {
 		t.Fatal("expected error on corrupt file")
 	}
@@ -117,12 +118,12 @@ func TestFileStoreHostileTenantIDs(t *testing.T) {
 	rec := secrets.StoredKeyset{Wrapped: []byte("w"), MasterKeyID: "mk", Revision: 1}
 	hostile := []string{"../escape", "/", "a\x00b", strings.Repeat("x", 600)}
 	for _, id := range hostile {
-		if _, err := s.CreateIfAbsent(id, rec); err == nil {
+		if _, err := s.CreateIfAbsent(context.Background(), id, rec); err == nil {
 			t.Fatalf("allowed %q", id)
 		}
 	}
 	// Legitimate tenant still works and stays inside dir.
-	if _, err := s.CreateIfAbsent("acme", rec); err != nil {
+	if _, err := s.CreateIfAbsent(context.Background(), "acme", rec); err != nil {
 		t.Fatal(err)
 	}
 	p, err := storePath(dir, "acme")

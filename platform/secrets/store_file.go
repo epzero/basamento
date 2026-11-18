@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,19 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 )
-
-// linkOrRename links temp to final when hard links work; otherwise renames.
-var linkOrRename = func(tempPath, finalPath string) error {
-	if err := os.Link(tempPath, finalPath); err != nil {
-		if errors.Is(err, syscall.ENOSYS) || errors.Is(err, syscall.ENOTSUP) {
-			return os.Rename(tempPath, finalPath)
-		}
-		return err
-	}
-	return os.Remove(tempPath)
-}
 
 // FileStore persists wrapped keysets as one JSON file per tenant.
 //
@@ -70,7 +59,10 @@ func (s *FileStore) path(tenant string) (string, error) {
 	return filepath.Join(s.dir, name), nil
 }
 
-func (s *FileStore) Get(tenant string) (StoredKeyset, bool, error) {
+func (s *FileStore) Get(ctx context.Context, tenant string) (StoredKeyset, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return StoredKeyset{}, false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.path(tenant)
@@ -91,7 +83,10 @@ func (s *FileStore) Get(tenant string) (StoredKeyset, bool, error) {
 	return onDisk.StoredKeyset, true, nil
 }
 
-func (s *FileStore) CreateIfAbsent(tenant string, record StoredKeyset) (bool, error) {
+func (s *FileStore) CreateIfAbsent(ctx context.Context, tenant string, record StoredKeyset) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.path(tenant)
@@ -103,24 +98,13 @@ func (s *FileStore) CreateIfAbsent(tenant string, record StoredKeyset) (bool, er
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	tmp, err := s.writeTempRecord(tenant, record)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = os.Remove(tmp) }()
-	if err := linkOrRename(tmp, p); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	if err := syncDir(s.dir); err != nil {
-		return false, err
-	}
-	return true, nil
+	return s.writeRecordLocked(p, tenant, record, false)
 }
 
-func (s *FileStore) CompareAndSwap(tenant string, expectRevision uint64, record StoredKeyset) error {
+func (s *FileStore) CompareAndSwap(ctx context.Context, tenant string, expectRevision uint64, record StoredKeyset) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.path(tenant)
@@ -129,7 +113,7 @@ func (s *FileStore) CompareAndSwap(tenant string, expectRevision uint64, record 
 	}
 	cur, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
-		return errInvalidArgument("keyset revision conflict")
+		return errConflict(msgKeysetRevisionConflict)
 	}
 	if err != nil {
 		return err
@@ -139,17 +123,21 @@ func (s *FileStore) CompareAndSwap(tenant string, expectRevision uint64, record 
 		return fmt.Errorf("corrupt keyset record: %w", err)
 	}
 	if old.Revision != expectRevision {
-		return errInvalidArgument("keyset revision conflict")
+		return errConflict(msgKeysetRevisionConflict)
 	}
-	return writeRecordAtomic(p, tenant, record)
+	_, err = s.writeRecordLocked(p, tenant, record, true)
+	return err
 }
 
-func (s *FileStore) Count() (int, error) {
-	ents, err := s.Tenants()
+func (s *FileStore) Count(ctx context.Context) (int, error) {
+	ents, err := s.Tenants(ctx)
 	return len(ents), err
 }
 
-func (s *FileStore) Tenants() ([]string, error) {
+func (s *FileStore) Tenants(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, err := os.ReadDir(s.dir)
@@ -181,65 +169,59 @@ type fileKeysetRecord struct {
 	StoredKeyset
 }
 
-func (s *FileStore) writeTempRecord(tenant string, record StoredKeyset) (string, error) {
+func (s *FileStore) writeRecordLocked(path, tenant string, record StoredKeyset, replace bool) (bool, error) {
 	b, err := json.Marshal(fileKeysetRecord{Tenant: tenant, StoredKeyset: record})
 	if err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp(s.dir, ".keyset-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	name := f.Name()
-	if err := f.Chmod(0o600); err != nil {
-		_ = f.Close()
-		return "", err
-	}
-	if _, err := f.Write(b); err != nil {
-		_ = f.Close()
-		return "", err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		return "", err
-	}
-	return name, nil
-}
-
-func writeRecordAtomic(path string, tenant string, record StoredKeyset) error {
-	b, err := json.Marshal(fileKeysetRecord{Tenant: tenant, StoredKeyset: record})
-	if err != nil {
-		return err
+		return false, err
 	}
 	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, ".keyset-*.tmp")
 	if err != nil {
-		return err
+		return false, err
 	}
 	tmp := f.Name()
 	defer func() { _ = os.Remove(tmp) }()
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return err
+		return false, err
 	}
 	if _, err := f.Write(b); err != nil {
 		_ = f.Close()
-		return err
+		return false, err
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return err
+		return false, err
 	}
 	if err := f.Close(); err != nil {
-		return err
+		return false, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
+	if replace {
+		if err := os.Rename(tmp, path); err != nil {
+			return false, err
+		}
+		if err := syncDir(dir); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
-	return syncDir(dir)
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return false, nil
+			}
+			return false, err
+		}
+	} else {
+		_ = os.Remove(tmp)
+	}
+	if err := syncDir(dir); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func syncDir(dir string) error {
