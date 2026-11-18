@@ -21,3 +21,12 @@ func subscribePurged(after, floor uint64) error {
 	}
 	return nil
 }
+
+// floorAfterConsumer re-reads the purge floor after the ordered consumer exists (REQ-BUS-008).
+func floorAfterConsumer(after uint64, readFloor func() (uint64, error)) error {
+	floor, err := readFloor()
+	if err != nil {
+		return err
+	}
+	return subscribePurged(after, floor)
+}
