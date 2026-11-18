@@ -126,7 +126,8 @@ ADR-0012 §10, constitution §7–8).
 
 - **The tenant comes from the context, only.** Callers set it with
   `core.WithTenant` and read it with `core.TenantFrom`, which reports a nil
-  or empty context as tenantless. A port that needs a tenant fails closed
+  context, no id, or an id outside the tenant id grammar (`REQ-CORE-005`) as
+  tenantless. A port that needs a tenant fails closed
   with `invalid_argument` when there is none; nothing falls back to an empty
   or default tenant.
 - **Credentials.** The vault stores named secrets per tenant, reached only by

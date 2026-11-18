@@ -1,7 +1,9 @@
-# Core: identifiers
+# Core: identifiers and tenant context
 
-Status: **Implemented** (`core/ids.go`). Design: ULIDs with cryptographic entropy,
-monotonic within a millisecond in one process; fakes in `core/coretest` are test-only.
+Identifiers: **Implemented** (`core/ids.go`). Design: ULIDs with cryptographic
+entropy, monotonic within a millisecond in one process; fakes in `core/coretest`
+are test-only. Tenant context: **Implemented** (`core/tenant.go`), design
+[`design.md`](design.md).
 
 ### REQ-CORE-001 — Unique across restarts
 The id generator shall issue identifiers that are unique across process restarts.
@@ -14,3 +16,11 @@ The id generator shall format each identifier as its kind, an underscore and 26 
 
 ### REQ-CORE-004 — Invalid kinds
 If a requested kind is not 1–16 lowercase letters or digits starting with a letter, then the id generator shall reject the request with code `invalid_argument`.
+
+## Tenant context
+
+### REQ-CORE-005 — Tenant id grammar
+When a context carries an id that is non-empty, at most 128 bytes, valid UTF-8, free of control characters from U+0000 to U+001F and U+007F, neither "." nor "..", free of "/" and "\", and neither begins nor ends with a Unicode `White_Space` character, the tenant context shall report that id unchanged.
+
+### REQ-CORE-006 — Invalid tenant ids are absent
+If a context carries no id, or carries an id that fails any condition of REQ-CORE-005, then the tenant context shall report no tenant.
