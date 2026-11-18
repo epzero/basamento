@@ -28,7 +28,7 @@ func TestRegistryConcurrentUse(t *testing.T) {
 				return
 			}
 			if _, err := reg.Assemble("greeting@"+ver, map[string]string{}, nil); err != nil {
-				// static-only template, no inputs
+				t.Error(err)
 			}
 		}(i)
 	}
