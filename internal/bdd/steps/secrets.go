@@ -867,7 +867,7 @@ func assertNoDataKeyLeaks(ctx context.Context, tenant string) error {
 	if len(plain) == 0 {
 		return fmt.Errorf("no data key material recorded for unwrap")
 	}
-	blobs, err := secrets.DataKeyMaterialBytes(plain)
+	blobs, err := dataKeyMaterialBytes(plain)
 	if err != nil {
 		return err
 	}
@@ -1235,7 +1235,7 @@ func logLacksKeyMaterial(ctx context.Context, tenant, mk string) error {
 	if len(plain) == 0 {
 		return fmt.Errorf("no data key material to search logs for")
 	}
-	blobs, err := secrets.DataKeyMaterialBytes(plain)
+	blobs, err := dataKeyMaterialBytes(plain)
 	if err != nil {
 		return err
 	}

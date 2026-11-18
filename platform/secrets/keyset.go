@@ -8,7 +8,6 @@ import (
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
 	"github.com/tink-crypto/tink-go/v2/keyset"
 	tinkpb "github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
-	"google.golang.org/protobuf/proto"
 )
 
 func newDataKeyset() (*keyset.Handle, error) {
@@ -86,25 +85,6 @@ func keyStatusEnabled(h *keyset.Handle, id uint32) bool {
 
 func handleHasKey(h *keyset.Handle, id uint32) bool {
 	return keyStatusEnabled(h, id)
-}
-
-// DataKeyMaterialBytes returns each key_data.value from a cleartext keyset serialization.
-func DataKeyMaterialBytes(plain []byte) ([][]byte, error) {
-	ks := &tinkpb.Keyset{}
-	if err := proto.Unmarshal(plain, ks); err != nil {
-		return nil, err
-	}
-	var out [][]byte
-	for _, k := range ks.GetKey() {
-		if kd := k.GetKeyData(); kd != nil {
-			v := kd.GetValue()
-			if len(v) == 0 {
-				continue
-			}
-			out = append(out, append([]byte(nil), v...))
-		}
-	}
-	return out, nil
 }
 
 func parseDataKeyID(idBytes []byte) (uint32, error) {
