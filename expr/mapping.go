@@ -29,11 +29,14 @@ type Mapping struct {
 	stepLimit uint64
 }
 
-// CompileMapping parses and validates a jq mapping.
+// CompileMapping parses and validates a jq mapping. Names of banned jq builtins
+// (clock, environment, and input functions) are reserved: a mapping must not
+// call them or use those names in definitions or parameters, even when a call
+// would resolve to the program's own definition.
 func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapping, error) {
 	for _, v := range varNames {
 		if v == "$ENV" {
-			return nil, mappingCompileErr(src, `undeclared reference "$ENV"`)
+			return nil, mappingCompileErr(src, mappingReservedNameDetail("$ENV"))
 		}
 	}
 	query, err := gojq.Parse(src)
@@ -44,7 +47,7 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 		if name == "unsupported construct" {
 			return nil, mappingCompileErr(src, name)
 		}
-		return nil, mappingCompileErr(src, fmt.Sprintf(`undeclared reference "%s"`, name))
+		return nil, mappingCompileErr(src, mappingReservedNameDetail(name))
 	}
 	code, err := gojq.Compile(query,
 		append([]gojq.CompilerOption{
@@ -276,6 +279,13 @@ func normalizeMappingOutputWalk(v any, w *jsonWalk) (any, error) {
 
 func scanBanned(query *gojq.Query) (string, bool) {
 	return scanBannedAST(query)
+}
+
+func mappingReservedNameDetail(name string) string {
+	return fmt.Sprintf(
+		`reserved name %q names a clock, environment, or input builtin; mappings may not call or define it`,
+		name,
+	)
 }
 
 var bannedNames = map[string]bool{
