@@ -1181,7 +1181,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-070-01:
         hash: sha256:1e1d59e06d6ea28b5cca762630299b92bc8cd07d52939af85fd9ef1b8a820560
         reqs:
@@ -1192,7 +1195,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: rate-rule condition matching and deterministic first-match precedence determine per-million rates.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-071-01:
         hash: sha256:35127adfe5a1b72cf51489779c23aad5e9afa018d3bec62ba4448eb44c005b07
         reqs:
@@ -1203,7 +1209,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-071-02:
         hash: sha256:0678aa93ea7deeb12892805bafbc45cd88f2db264d00a53e99ddd8c4d00e3a20
         reqs:
@@ -1214,7 +1223,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-071-03:
         hash: sha256:4a53f44419e334e517b15980a6425af84555ce1cb47852a0260b56fe310266f7
         reqs:
@@ -1225,7 +1237,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: price layer precedence (tenant override over deployment override over shipped snapshot).'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-072-01:
         hash: sha256:59aded521c98d38d31883ec1fbcc4fa904a0c5de8fd17870e8b4c8fb4b2f055e
         reqs:
@@ -1236,7 +1251,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-072-02:
         hash: sha256:2b7a43e89baed71ceee18df07a6a5e2cc8e7e6457037b601bfbca19ba0aabab2
         reqs:
@@ -1247,7 +1265,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Tenant isolation and cost safety: tenant price overrides never leak to another tenant or tenantless calls.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-073-01:
         hash: sha256:4b00e6db8abd80dc422c6923885c69915477d5a59270c09e3f254df2edd1b787
         reqs:
@@ -1258,7 +1279,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-073-02:
         hash: sha256:fa062c2b4d67915433c3e72c34a449ce81bce57468b735dcc5a2b103720517ce
         reqs:
@@ -1269,7 +1293,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-073-03:
         hash: sha256:b732b46698143c61ee4b15fd0204670668c5789fe1150526e3ba78ded5a9f8ab
         reqs:
@@ -1280,7 +1307,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: missing price entry or non-matching override rules fail with unsupported without falling through to lower layers.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-074-01:
         hash: sha256:7a18075d5cd5021f93edb32125d88a6fef8896751c901f2690eacd405e6bd493
         reqs:
@@ -1291,7 +1321,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-075-01:
         hash: sha256:092c743e7afef969693551c6876a1be3babeabd4801c8cd0cb9bc4f3b549cdb7
         reqs:
@@ -1303,7 +1336,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-075-02:
         hash: sha256:856662c048fd997e92dd227a301aa6d78063bc39b3c62b125ea75bd44783614e
         reqs:
@@ -1316,7 +1352,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-076-01:
         hash: sha256:aea698cc8adef6317f19607afce4c561b4c3a15949db64d899149a796fad2b88
         reqs:
@@ -1327,7 +1366,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-076-02:
         hash: sha256:61539c1103ec59aeab93169db7690437c7c625a438afbeec6f334da4323b678b
         reqs:
@@ -1338,7 +1380,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: whole milli-point rounding (half up) at exact 0.5 boundary and below.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-077-01:
         hash: sha256:22d48708a87e27b8af26de510576d6a353c8c8504d43946cfd0bae17cd42c88a
         reqs:
@@ -1349,7 +1394,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: pre-start reservation estimate from counted input tokens, output limit, and call parameters.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-078-01:
         hash: sha256:5bb7c51abf40a77ff2894fdc4a9082c0bf3e743b418c3a0e67b74cea953f0c1b
         reqs:
@@ -1360,7 +1408,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-078-02:
         hash: sha256:efbcfaea5c0436cc4e884c9fec4fff1aa5be7269e6fd69dae2e916eb5b0c8bd3
         reqs:
@@ -1371,7 +1422,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety and determinism: started calls pin their start-time price entry and recorded start time through settlement.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-080-01:
         hash: sha256:192f83c608aa73bae7fb1e55acf7c02e1089ec922e89af0d5bd56fc61c6c90ea
         reqs:
@@ -1382,7 +1436,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-081-01:
         hash: sha256:f8168fba16af546f8b797c21c9da180281121e65dc25b690d4ae58d02c5ba8ee
         reqs:
@@ -1393,7 +1450,10 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
     MODEL-082-01:
         hash: sha256:0187f183d2385ffe9810c3b48aafd1610ac7705aebea26757e39aeed1a5017af
         reqs:
@@ -1404,4 +1464,7 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Cost safety: default token formula pricing per million tokens with rates.cached (including 0), input-rate fallback when absent, single-counted reasoning, and invalid_argument when cached > input.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/20
