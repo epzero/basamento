@@ -264,6 +264,7 @@ func registerSecrets(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
+		applySecretsLogger(w, c, nil)
 		w.codec2 = c
 		return nil
 	})
@@ -380,6 +381,7 @@ func newPayloadCodec(ctx context.Context, mk string) error {
 	if err != nil {
 		return err
 	}
+	applySecretsLogger(sw, c, nil)
 	sw.codec = c
 	sw.unwrapAtRestart = sw.sim.unwrapTotal()
 	return nil
@@ -395,9 +397,30 @@ func newPayloadCodecWithPrev(ctx context.Context, cur, prev string) error {
 	if err != nil {
 		return err
 	}
+	applySecretsLogger(sw, c, nil)
 	sw.codec = c
 	sw.unwrapAtRestart = sw.sim.unwrapTotal()
 	return nil
+}
+
+func secretsOpts(sw *secretsWorld) []secrets.Option {
+	if sw.logHandler == nil {
+		return nil
+	}
+	return []secrets.Option{secrets.WithLogger(slog.New(sw.logHandler))}
+}
+
+func applySecretsLogger(sw *secretsWorld, c *secrets.Codec, p *secrets.Port) {
+	if sw.logHandler == nil {
+		return
+	}
+	l := slog.New(sw.logHandler)
+	if c != nil {
+		c.SetLogger(l)
+	}
+	if p != nil {
+		p.SetLogger(l)
+	}
 }
 
 func payloadGiven(ctx context.Context, name, enc, data string) error {
@@ -972,10 +995,11 @@ func assertDataKeyCount(ctx context.Context, tenant string, n int) error {
 
 func openSecretsURL(ctx context.Context, raw string) error {
 	sw := secretsW(ctx)
-	p, err := secrets.OpenURL(ctx, raw)
+	p, err := secrets.OpenURL(ctx, raw, secretsOpts(sw)...)
 	sw.lastErr = err
 	sw.lastOp = "open"
 	if err == nil {
+		applySecretsLogger(sw, nil, p)
 		sw.port = p
 		sw.portURL = raw
 	}
@@ -1056,7 +1080,10 @@ func captureLog(ctx context.Context) error {
 	sw.logBuf = &bytes.Buffer{}
 	h := slog.NewTextHandler(sw.logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	sw.logHandler = h
-	slog.SetDefault(slog.New(h))
+	applySecretsLogger(sw, sw.codec, sw.port)
+	if sw.codec2 != nil {
+		sw.codec2.SetLogger(slog.New(h))
+	}
 	return nil
 }
 
