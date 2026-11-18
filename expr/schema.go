@@ -59,23 +59,60 @@ func parseSchema(raw json.RawMessage, varName string) (*schemaType, error) {
 }
 
 func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
-	if !strings.HasPrefix(ref, "#/$defs/") {
-		return nil, fmt.Errorf("external reference %q", ref)
-	}
-	name := strings.TrimPrefix(ref, "#/$defs/")
-	def, ok := st.defs[name]
-	if !ok {
-		return nil, fmt.Errorf("missing definition for reference %q", ref)
-	}
-	child := &schemaType{schema: def, defs: st.defs}
-	t, objName, err := child.mapSchema(def, varName+"."+name)
+	def, names, err := defRefChain(ref, st.defs)
 	if err != nil {
 		return nil, err
 	}
+	visiting := make(map[string]bool, len(names))
+	for _, n := range names {
+		visiting[n] = true
+	}
+	child := &schemaType{schema: def, defs: st.defs}
+	t, objName, err := child.mapSchemaVisit(def, varName+"."+names[0], visiting)
+	if err != nil {
+		return nil, err
+	}
+	child.rootDef = names[len(names)-1]
+	if objName != "" {
+		doc, defName, err := objectSchemaForBuild(def, child)
+		if err != nil {
+			return nil, err
+		}
+		child.schema = doc
+		if defName != "" {
+			child.rootDef = defName
+		}
+	}
 	child.celType = t
 	child.typeName = objName
-	child.rootDef = name
 	return child, nil
+}
+
+// defRefChain follows a #/$defs reference chain and returns the final
+// document with the definition names it passed through.
+func defRefChain(ref string, defs map[string]map[string]any) (map[string]any, []string, error) {
+	var names []string
+	seen := map[string]bool{}
+	for {
+		if !strings.HasPrefix(ref, "#/$defs/") {
+			return nil, nil, fmt.Errorf("external reference %q", ref)
+		}
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		if seen[name] {
+			return nil, nil, fmt.Errorf("cyclic reference %q", ref)
+		}
+		def, ok := defs[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing definition for reference %q", ref)
+		}
+		seen[name] = true
+		names = append(names, name)
+		next, ok := def["$ref"].(string)
+		if !ok {
+			return def, names, nil
+		}
+		ref = next
+	}
 }
 
 func (st *schemaType) mapSchema(s map[string]any, path string) (*cel.Type, string, error) {
@@ -160,13 +197,13 @@ func (st *schemaType) primitiveOrCompositeVisit(t string, s map[string]any, path
 		}
 		return cel.ListType(cel.DynType), "", nil
 	case "object":
-		return st.objectType(s, path)
+		return st.objectType(s, path, visiting)
 	default:
 		return cel.DynType, "", nil
 	}
 }
 
-func (st *schemaType) objectType(s map[string]any, path string) (*cel.Type, string, error) {
+func (st *schemaType) objectType(s map[string]any, path string, visiting map[string]bool) (*cel.Type, string, error) {
 	_, hasProps := s["properties"].(map[string]any)
 	_, hasAP := s["additionalProperties"]
 	if hasProps {
@@ -177,7 +214,7 @@ func (st *schemaType) objectType(s map[string]any, path string) (*cel.Type, stri
 		ap := s["additionalProperties"]
 		switch apv := ap.(type) {
 		case map[string]any:
-			elem, _, err := st.mapSchemaVisit(apv, path+"*", nil)
+			elem, _, err := st.mapSchemaVisit(apv, path+"*", visiting)
 			if err != nil {
 				return nil, "", err
 			}

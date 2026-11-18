@@ -2,7 +2,6 @@ package expr
 
 import (
 	"fmt"
-	"strings"
 
 	_ "time/tzdata"
 
@@ -88,10 +87,18 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 }
 
 func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
-	return e.buildObjectType(st.schema, st.typeName, st, adapter)
+	visiting := map[string]bool{}
+	if st.rootDef != "" {
+		visiting[st.rootDef] = true
+	}
+	return e.buildObjectType(st.schema, st.typeName, st, adapter, visiting)
 }
 
-func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
+// buildObjectType registers the object type for doc. visiting holds the $defs
+// names that are being built by an enclosing call: a reference back to one of
+// them maps to dyn at that point (design.md §2), so recursive definitions
+// terminate instead of expanding without end.
+func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
 	if obj := e.objects[typeName]; obj != nil {
 		return obj, nil
 	}
@@ -105,10 +112,6 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		}
 	}
 	fields := make(map[string]fieldMeta)
-	visiting := map[string]bool{}
-	if st != nil && st.rootDef != "" {
-		visiting[st.rootDef] = true
-	}
 	for _, pname := range sortedStringKeys(props) {
 		pm, ok := props[pname].(map[string]any)
 		if !ok {
@@ -120,11 +123,19 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
 		if objName != "" {
-			objSchema, err := objectSchemaForBuild(pm, st)
+			objSchema, defName, err := objectSchemaForBuild(pm, st)
 			if err != nil {
 				return nil, exprErr(err.Error(), map[string]any{"variable": typeName})
 			}
-			if _, err := e.buildObjectType(objSchema, objName, st, adapter); err != nil {
+			if defName != "" && visiting[defName] {
+				continue
+			}
+			next := visiting
+			if defName != "" {
+				next = cloneVisiting(visiting)
+				next[defName] = true
+			}
+			if _, err := e.buildObjectType(objSchema, objName, st, adapter, next); err != nil {
 				return nil, exprErr(fmt.Sprintf("schema %q: %s", objName, err.Error()), map[string]any{"variable": typeName})
 			}
 		}
@@ -138,22 +149,43 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 	return obj, nil
 }
 
-func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, error) {
-	if ref, ok := pm["$ref"].(string); ok {
-		if !strings.HasPrefix(ref, "#/$defs/") {
-			return nil, fmt.Errorf("external reference %q", ref)
-		}
-		name := strings.TrimPrefix(ref, "#/$defs/")
-		def, ok := st.defs[name]
-		if !ok {
-			return nil, fmt.Errorf("missing definition for reference %q", ref)
-		}
-		return def, nil
+func cloneVisiting(visiting map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(visiting)+1)
+	for name := range visiting {
+		out[name] = true
 	}
-	if typ, _ := pm["type"].(string); typ == "array" {
-		if items, ok := pm["items"].(map[string]any); ok {
-			return objectSchemaForBuild(items, st)
+	return out
+}
+
+// objectSchemaForBuild follows $ref chains and array items to the schema
+// document that declares an object type, and returns the $defs name it came
+// from so callers can track recursion.
+func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, string, error) {
+	seen := map[string]bool{}
+	doc, defName := pm, ""
+	for {
+		if ref, ok := doc["$ref"].(string); ok {
+			resolved, names, err := defRefChain(ref, st.defs)
+			if err != nil {
+				return nil, "", err
+			}
+			for _, name := range names {
+				if seen[name] {
+					return nil, "", fmt.Errorf("cyclic reference %q", ref)
+				}
+				seen[name] = true
+			}
+			doc, defName = resolved, names[len(names)-1]
+			continue
 		}
+		if typ, _ := doc["type"].(string); typ == "array" {
+			items, ok := doc["items"].(map[string]any)
+			if !ok {
+				return doc, defName, nil
+			}
+			doc = items
+			continue
+		}
+		return doc, defName, nil
 	}
-	return pm, nil
 }
