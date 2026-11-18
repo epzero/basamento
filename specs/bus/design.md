@@ -133,7 +133,11 @@ system clock in production):
   foreign record. The driver writes the foreign record into the `KIT_KV` data
   bucket through a test-only helper of `internal/bdd/bustest` that connects to
   the same server and writes the value under the key through `nats.go` and
-  JetStream directly, as any other client of the bucket would. A fresh bucket
+  JetStream directly, as any other client of the bucket would. The embedded
+  server has no network listener, so for the embedded implementation the
+  helper connects through the server's in-process connection
+  (`nats.InProcessServer`); for the cloud implementation it dials the
+  server's `nats://` URL. A fresh bucket
   per scenario puts the record it writes at revision 1, which the swap step
   uses. The value is shorter than the eight-byte deadline header of a record,
   so the store cannot decode it.
