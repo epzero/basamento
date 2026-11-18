@@ -17,8 +17,6 @@ type KeysetStore interface {
 	CompareAndSwap(tenant string, expectRevision uint64, record StoredKeyset) error
 	// Count returns how many tenants have a stored keyset.
 	Count() (int, error)
-	// Replace overwrites the record for tenant (test and admin paths).
-	Replace(tenant string, record StoredKeyset) error
 	// Tenants lists tenants with a stored keyset.
 	Tenants() ([]string, error)
 }

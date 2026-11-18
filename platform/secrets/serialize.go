@@ -128,12 +128,6 @@ func parseMapEntry(entry []byte) (string, []byte, error) {
 	return key, val, nil
 }
 
-// MarshalInnerForTest exports inner serialization for unit tests.
-func MarshalInnerForTest(p Payload) ([]byte, error) { return marshalInner(p) }
-
-// UnmarshalInnerForTest exports inner parsing for unit tests.
-func UnmarshalInnerForTest(b []byte) (Payload, error) { return unmarshalInner(b) }
-
 func payloadAssocData(tenant string, keyID string) []byte {
 	// basamento.payload.v1, zero, tenant, zero, key id (design §3).
 	out := make([]byte, 0, len("basamento.payload.v1")+1+len(tenant)+1+len(keyID))
