@@ -27,7 +27,9 @@ patch is at least **1.26.11**.
 | **CI install (line job)** | The nightly **line** job alone uses **`go-version`** set to the release line named by `go.mod` (for example `1.26`), **`check-latest: true`**, and **does not** use `go-version-file`. |
 | **Nightly line job behavior** | After `make tools`, runs `govulncheck ./...`. The workflow fails on any finding or on a Go install failure — no `continue-on-error` and no suppressed exit status. |
 | **Local** | Default **`GOTOOLCHAIN=auto`**: an older installed Go downloads the patch `go.mod` requires (`README.md`). |
-| **Patch bumps** | A security patch is a coordinated bump of every `go.mod` `go` line. Each change touches high-tier paths (`go.mod`, `.github/**`). |
+| **Patch bumps** | A security patch is a coordinated bump of every `go.mod` `go` line and the `README.md` minimum-Go line. CI reads the version from `go.mod`, so the bump touches no workflow file; it is the case **`Review tier of a bump`** treats as **medium**. |
+| **Review tier of a bump** | A change to a `go.mod` file whose only difference from the base is the **patch number** of the `go` directive (`go 1.26.N` → `go 1.26.M` with `M > N`, same release line; no `toolchain` line; no other line added, removed or changed) is **medium** tier. Every other change to a `go.mod` file stays **high** (dependency, minor-line move, downgrade, `toolchain` line, any other directive). The gate evaluates the rule on the base-to-head diff of each `go.mod` file, reading **`review.yaml` from the base branch** like every other tier rule, so a change cannot weaken its own review. A change that also touches any high-tier path is **high** as a whole. |
+| **Same `go` line** | Because the owner no longer approves every patch bump, **`make gate`** fails if any `go.mod` in the repository names a different `go` directive than the others. |
 
 #### Alternatives considered (toolchain)
 
@@ -38,21 +40,23 @@ patch is at least **1.26.11**.
 | Pin Go through a container image or vendoring the toolchain | Extra moving parts; fights the pure-Go single-binary setup without reproducibility beyond what `go.mod` gives. |
 | Move to the next Go release line now | A line jump belongs in its own decision when dependencies and stdlib require it. |
 | Float every CI job on `check-latest` | Only the line job may float; pinned jobs must match the patch in `go.mod`. |
+| Keep every `go.mod` change high | The owner would see every move; rejected by the owner — a security patch would wait for the owner on every release while the checks above already bound a patch bump. |
+| Make `go.mod` medium by path | A new dependency or a minor-line move must stay high, and a path glob cannot tell them apart. |
 
 ## Consequences
 
 **Cost.** The nightly Go-line job may fail when a new stdlib advisory appears
 before `go.mod` is bumped — that failure is signal, not noise.
 
-**Pins and approval.** The `go` line changes only in high-tier paths
-(`.github/**`, `go.mod`). The owner approves every move of that pin.
+**Pins and approval.** A minor-line move, a dependency, or any other
+`go.mod` change is **high** tier and needs the owner's approval before merge. A
+patch-only bump of the `go` directive is **medium** tier: the reviewer's
+approval alone, bounded by this ADR's checks (same `go` line in every module,
+`GOTOOLCHAIN=local` and `go-version-file` in CI, `govulncheck` on every gate
+run and nightly on the newest patch on the release line).
 
 **Revert.** Roll back `go 1.26.11`, `go-version-file`, `GOTOOLCHAIN=local` and
 the nightly line job together.
-
-**Owner option (separate decision).** Whether a patch-only bump of the `go`
-line alone could be reviewed at **medium** tier would require changing
-`review.yaml`; this ADR does not propose that edit.
 
 **Implementation changes these files:**
 
@@ -64,4 +68,11 @@ line alone could be reviewed at **medium** tier would require changing
 | `.github/workflows/gate.yml` | Every job: `GOTOOLCHAIN=local`. `go-version-file: go.mod`. |
 | `.github/workflows/nightly.yml` | Every job: `GOTOOLCHAIN=local`. **flake-hunt**, **slow-lanes** and **release-readiness**: `go-version-file: go.mod`. New **line** job: `go-version` on the release line (for example `1.26`) with `check-latest: true`, `govulncheck ./...`, hard fail. |
 | `.github/workflows/embedded.yml` | Every job: `GOTOOLCHAIN=local`; `go-version-file: go.mod`. |
-| `docs/engineering/qa-gate.md` | Go-version paragraph; nightly line job for govulncheck. |
+| `review.yaml` | Rule for a patch-only `go` bump; regenerate `.github/CODEOWNERS` with `go tool gate docs -write` when generator output changes. |
+| `internal/gate/review.go` and its test | Evaluate the rule on the base-to-head diff of each `go.mod` file so `go tool gate review plan` reports **medium** for a patch-only bump and **high** for everything else; table-driven cases: patch-only bump in both modules, patch bump plus a dependency change, minor-line move, downgrade, added `toolchain` line, comment-only or whitespace-only change. |
+| `internal/gate` | Static check that every `go.mod` names the same `go` line, with test. |
+| `docs/engineering/code-review.md` | Section 3 tier rules and the high-tier `go.mod` entry: except a patch-only `go` bump. |
+| `docs/engineering/qa-gate.md` | Go-version paragraph; nightly line job for `govulncheck`; the same-`go`-line static check. |
+
+The implementation of this tier rule is itself a high-tier change and is
+reviewed as usual.
