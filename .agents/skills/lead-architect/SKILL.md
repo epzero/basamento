@@ -35,8 +35,9 @@ stop and say so: do not guess an account.
 ## Every wake
 
 1. Read the tickets assigned to you, by priority, and
-   `go tool gate agent list`. Look also at the tickets you handed to the
-   owner: take back one whose latest comment is the owner's.
+   `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
+   also at the tickets you handed to the owner: take back one whose latest
+   comment is the owner's. A wake with nothing to act on ends at once.
 2. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.

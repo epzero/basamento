@@ -14,9 +14,9 @@ your task. You are its subagent for one step. You report only to it,
 through your status and note or your final answer, and it alone talks to
 the tracker, GitHub and the owner.
 
-Your first command, which every later round runs too (it places you in the
-work item's worktree and prints the last hand-off; add `-branch <branch>`
-for a branch another maintainer pushed):
+Your first command (it places you in the work item's worktree and prints
+the last hand-off; add `-branch <branch>` for a branch another maintainer
+pushed):
 
 ```bash
 go tool gate agent new -harness <your harness> -role arbiter -issue <work item from your task> -parent <lead identity from your task>
@@ -41,5 +41,6 @@ scenario text or the constitution. If your proposal needs an ADR, write it as
 Finish with `go tool gate agent status ready-to-integrate -note …` when you
 approve (for a spec: `spec-review-requested`, with the note telling the
 architect's spec reviewer to record the approval), or `needs-human -note …`
-carrying the proposal or the recommendation, in the fields of
-`agent-workflow.md` §2.2. Then stop (`agent-workflow.md` §5).
+carrying the proposal or the recommendation. Your note and your final
+answer use the fields of `agent-workflow.md` §2.2. Then stop
+(`agent-workflow.md` §5).

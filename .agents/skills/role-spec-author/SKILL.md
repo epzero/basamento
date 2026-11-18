@@ -36,6 +36,7 @@ When your task is a technical design for the architect, you write the ADR
 
 Finish with `go tool gate agent status spec-review-requested -note …` naming
 the scenario ids (or the ADR), or with `needs-human` and one concrete
-question with options, in the fields of `agent-workflow.md` §2.2, then stop.
+question with options. Your note and your final answer use the fields of
+`agent-workflow.md` §2.2; then stop.
 
 Never ask a person directly: end with `needs-human`.

@@ -36,8 +36,9 @@ Before you finish, run `make gate BASE=main`.
 
 Finish with `go tool gate agent status code-review-requested -note …` listing
 the scenario ids made active, the gate summary, how you tested, your answer
-to each finding and how to revert, in the fields of `agent-workflow.md` §2.2;
-or with `needs-human` and one concrete question with options. Then stop.
+to each finding and how to revert, or with `needs-human` and one concrete
+question with options. Your note and your final answer use the fields of
+`agent-workflow.md` §2.2. Then stop.
 Your lead runs the review and opens the pull request; you do neither.
 
 Never ask a person directly: end with `needs-human`.
