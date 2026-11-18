@@ -58,7 +58,7 @@ the same change that first uses it.
 | **Budget** | The most a run may spend, in milli-points. A browser session's budget also limits steps and time. |
 | **Reservation** | Estimated cost held against a budget before a paid call; settled to a charge or released after. |
 | **Asset** | An output file stored in blob storage under its content hash, with the model, parameter hash, seed and cost that produced it. |
-| **Tenant** | The isolation boundary for data and spend. The embedded profile has one tenant. It travels in the context (`core.TenantFrom`); an empty id means no tenant. |
+| **Tenant** | The isolation boundary for data and spend. The embedded profile has one tenant. It travels in the context (`core.TenantFrom`); an absent, empty or otherwise invalid id means no tenant (`REQ-CORE-005`, `REQ-CORE-006`). |
 | **Project** | A container of flows, runs and assets inside a tenant; roles are granted per project. |
 | **Principal** | An authenticated user or service token acting within a tenant. |
 | **Worker token** | A token issued to an external service for one session (such as a browser session), limited to that session's resources and a fixed expiry. A **pool token** instead lets a worker join one pool, and a **join token** admits one launched worker. |
