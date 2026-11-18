@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-05 @level:component
+@wp:WP-L3-05 @level:component
 Feature: Versioned prompt templates
   A prompt template is registered under an id and a version, never changes
   afterwards, and is assembled only from the inputs it declares.
