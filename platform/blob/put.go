@@ -81,13 +81,15 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 		if ctx.Err() != nil {
 			return core.NewError(core.CodeCancelled, "write cancelled", nil)
 		}
+		if copyErr != nil {
+			if trk.readFailed() {
+				return core.NewError(core.CodeInvalidArgument, "write source failed", nil)
+			}
+			return mapError(copyErr)
+		}
 		if !hashOK {
 			return core.NewError(core.CodeInvalidArgument, "content does not match content key", nil)
 		}
-		if trk.readFailed() {
-			return core.NewError(core.CodeInvalidArgument, "write source failed", nil)
-		}
-		return mapError(copyErr)
 	}
 
 	mp, err := metaPath(tid, key)
