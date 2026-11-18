@@ -14,3 +14,8 @@ Tool port, allowlists, MCP client (`modelcontextprotocol/go-sdk`), sandbox port.
 Depends: WP-L7-01, WP-L6-02.
 Owns: `agent/conversation`.
 Coordinator run per conversation with a child run per turn; queue, steer and cancel (ADR-0007).
+
+### WP-L7-04 — Conversations on a durable runtime
+Depends: WP-L7-03, WP-L5-03.
+Owns: no new package; only scenarios in `specs/conversations` and their steps.
+Proves that a conversation on the `temporal` runtime, served by the embedded Temporal server, resumes the turn it was in when the process stops, with every user and model message delivered exactly once and no duplicate.

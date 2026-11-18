@@ -152,6 +152,34 @@ restate it. A conversation crash-resume scenario on Temporal (queued and
 steering messages surviving a restart) is a tracked follow-up for a later work
 package that depends on both WP-L7-03 and the Temporal runtime.
 
+That work package is WP-L7-04 (`crash-resume.feature`, `REQ-CONV-022`). It
+adds no package and changes nothing above: the coordinator and the turn are
+already written against `runtime.Runtime`, and the runtime replays a restarted
+run from the Temporal history (`REQ-RT-002`, `REQ-FLOW-037`). What the turn
+record has to get right is that the model message the turn was writing is
+recorded and streamed **once** even if the model call or the recording step
+runs again after the restart: the message is identified by its turn and
+position in it, and recording a completed stream for a message already in
+`messages` is a no-op, the same guarantee `handled` gives user messages
+(REQ-CONV-005). A replay of the turn that calls the model call's step again
+therefore cannot append a second model message, and a client reattaching after
+the restart sees the message once (`specs/streaming`, `REQ-STRM-002`).
+
+### Harness (WP-L7-04)
+
+The scenario is `@level:system`: it runs the built `kit` binary serving the
+`embedded` profile against the embedded Temporal server of WP-L5-03, whose
+SQLite database lives in the `data.dir` the scenario chooses. The steps need
+an **embedded Temporal server restart**: the harness sends `SIGTERM` to the
+process, waits for it to exit, starts the same binary against the same data
+directory, and waits for the server's `ready` line before it continues
+(`specs/config/design.md` §6 for the process; `specs/runtime/embedded.feature`
+for the embedded profile). The restart must run no Temporal test server: the
+server is the embedded one, on the pinned version, and its file-backed SQLite
+is what makes the run survive. The scripted model is a recorded simulator, not
+a vendor call, and the gate makes no live call (`bdd-convention.md` §5). The
+steps go in `internal/bdd/steps/conversation.go` next to WP-L7-03's steps.
+
 ## Open questions
 
 1. **Interrupted turns in subsequent turn history (`REQ-CONV-012`, `CONV-012-02`, `CONV-013-03`):** `ADR-0007` specifies that `cancel` keeps the partial message marked `interrupted`, and `REQ-STRM-005` records interrupted partial messages, but `ADR-0007` does not explicitly say whether failed and cancelled turns' user and interrupted model messages are passed to subsequent turns' child runs. This spec includes both `failed` and `cancelled` turns (with partial model messages marked `interrupted`) in the history later turns see so follow-up turns and retries have context. Confirm whether both should be included, only `failed`, or neither.

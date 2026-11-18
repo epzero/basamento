@@ -65,3 +65,6 @@ While no turn is running, if a user message arrives marked `steer`, then the con
 
 ### REQ-CONV-021 — Cancelling a turn with no turn running is refused
 While no turn is running, if a user message arrives marked `cancel`, then the conversation coordinator shall refuse it with code `conflict`.
+
+### REQ-CONV-022 — A conversation on a durable runtime resumes its turn after a crash
+Where a conversation runs on the `temporal` runtime, when the process running it stops mid-turn and restarts, the conversation coordinator shall resume that turn, and the conversation's history and every client attached to it shall hold every user message and model message exactly once, with no lost and no duplicated message.
