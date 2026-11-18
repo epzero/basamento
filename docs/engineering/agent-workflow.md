@@ -80,10 +80,10 @@ rest of its work moves on.
    `go tool gate agent list`. For each ticket, read the latest hand-off
    comment and do the next step: spawn a subagent, act on GitHub, or hand
    the ticket on. Its playbook (§6) lists the cases.
-3. **Subagents do one step each** (write specs, implement, review one lens,
-   fix findings), record their status and stop. They never watch or wait. The
-   next step is a new session on the same branch. Several work items run at
-   once, up to the width the lead was given, never two whose owned
+3. **Subagents do one step each** (write specs, implement, review assigned
+   lenses, fix findings), record their status and stop. They never watch or
+   wait. The next step is a new session on the same branch. Several work items
+   run at once, up to the width the lead was given, never two whose owned
    directories overlap (§4).
 4. **Idle** when every ticket assigned to it is handed on and its subagents
    have stopped. It then waits for the next trigger.
@@ -138,7 +138,7 @@ definition's frontmatter), not a rule of this document.
 | --- | --- |
 | **heavy** | Round-1 spec review; code-review lenses at high and medium risk; the arbiter |
 | **standard** | Spec authoring and implementation; round-2+ re-reviews of specs and code; code-review lenses at low risk; finding verifiers at high risk |
-| **light** | Finding verifiers at low and medium risk; mechanical steps (a rebase without conflicts, a lock or doc regeneration); lead ticks with nothing to do |
+| **light** | Finding verifiers at medium risk; mechanical steps (a rebase without conflicts, a lock or doc regeneration); lead ticks with nothing to do |
 
 A re-review stays at standard, not light: its narrower scope is what makes it
 cheaper (`code-review.md` §6, `spec-review.md` §2).
@@ -352,8 +352,8 @@ is <lead identity>. (Add -branch <branch> to your first command when the
 branch was pushed by another maintainer.)
 Why you were started: <new work package | write the specs | review the specs
 | implement the approved specs | fix these findings: … | the owner answered:
-"<answer>" | resolve the rebase conflict | review lens <lens>, base <base>,
-from <commit> | verify finding <text>>.
+"<answer>" | resolve the rebase conflict | review lenses <lenses>, base <base>,
+from <commit> | verify findings <list>>.
 Do this one step, record your status and stop. Never ask a person directly:
 end with needs-human.
 ```
@@ -415,7 +415,7 @@ its author approved.
 | --- | --- | --- |
 | 1. Take | developer | Takes a ticket assigned to it. With none left, runs `go tool gate wp -state ready`, opens a ticket for a ready work package that has none and assigns it to itself. A work package whose scenarios are missing or not approved goes to the designer first (§7.3). |
 | 2. Implement | developer | An implementer session in a new worktree, until `make gate BASE=main` passes and it records `code-review-requested`. |
-| 3. Self-review | developer | The code review of `code-review.md`, by code reviewer sessions at the depth of the change's tier, before anyone else sees it. Findings go back to the implementer; later rounds check each open finding and the whole diff since the last reviewed commit (`code-review.md` §6). After three rounds the lead reads what is still open itself and settles each finding: fixed, or dropped with a reason. |
+| 3. Self-review | developer | The self-review of `code-review.md` §1 to §4 before anyone else sees the change (up to two rounds; findings go back to the implementer, and the lead settles anything still open after round 2). |
 | 4. Open | developer | Pushes the branch and opens the pull request (§7.1), with what the self-review found and how it was settled. Hands the ticket to the reviewer. |
 | 5. Review | reviewer | Reads the change on GitHub; checks the branch out in a worktree only when it needs the code around it. Sets the risk (§5). Posts one review for the round: each important finding as a thread on its line and **Request changes**, or **Approve**. Hands the ticket back. |
 | 6. Answer | developer | Fixes or answers every thread and hands the ticket back; the reviewer resolves what is settled and checks each open finding and the whole diff since the last reviewed commit. After a third round without approval the reviewer hands it to the architect (§5). |

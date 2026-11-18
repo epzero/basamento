@@ -11,17 +11,18 @@ Most review happens before anyone else looks, on the author's machine.
 
 - The implementer runs `make gate BASE=main` and shows the evidence: the
   commands it ran and their output, not a claim that it is done.
-- The author's lead then runs this review (§2 to §4) with its own code
-  reviewer sessions, using the tier's finders, and sends the surviving
-  findings back to the implementer. It uses at most one verifier per
-  finding: one at high and medium risk, none at low, as the low row in §2
-  says (§4). The reviewer's own review re-checks every change, at full
-  depth for high risk, so a finding wrongly dropped here gets a second,
-  stronger check before merge. From the second round on the review is
-  incremental (§6): each open finding, and the whole diff since the last
-  reviewed commit.
-- After **three rounds** the lead stops spawning: it reads what is still
-  open itself and settles each finding, fixed or dropped with a reason.
+- The author's lead then runs this review (§2 to §4) using the self-review
+  finders (§3) and the self-review verifier rule (§4), and sends the surviving
+  findings back to the implementer. The reviewer's own review re-checks every
+  code change independently, at full depth for high risk, so a finding missed
+  or wrongly dropped here gets a second, stronger check before merge.
+  (Technical designs are not re-reviewed on the pull request, so the architect
+  runs full deep depth for up to three rounds, `agent-workflow.md` §7.4.)
+- If round 1 raised important findings, round 2 is incremental (§6): each open
+  finding, and the whole diff since the last reviewed commit. After **two
+  rounds** the lead stops spawning code reviewers: it reads what is still open
+  itself and settles each finding, fixed or dropped with a reason. (Any fix
+  applied while settling is checked by the reviewer's round 1.)
 - Only then is the pull request opened. Its description says what the
   self-review found and how each finding was settled, so the reviewer does
   not raise it again.
@@ -34,7 +35,7 @@ may read a low-risk change itself and uses code reviewer sessions for the
 rest. It reads the change on GitHub and checks the branch out only when it
 needs the code around the diff. **It does not run the gate or the test
 suite: CI does**, and a pull request with a red `gate` goes back unread. A
-verifier may still run one command to prove a finding.
+verifier may still run one command per finding to prove it.
 
 ## 2. Plan the review
 
@@ -64,13 +65,11 @@ ordinary package, a new dependency), never lower it.
 
 | Tier | Typical paths | Depth | Person |
 | --- | --- | --- | --- |
-| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep: five finders, three verifiers per finding in the reviewer's review (at most one in the self-review, §1), a separate security pass | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
-| **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard: four finders, one verifier per finding | No |
-| **low** | Other docs | Quick: one finder, no verifier (in the self-review too) | No |
+| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep (§3–§4); consolidated in the developer's self-review (§1) | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
+| **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard (§3–§4); consolidated in the developer's self-review (§1) | No |
+| **low** | Other docs | Quick (§3–§4), no verifier | No |
 
-Each session's effort follows `agent-workflow.md` §2.3: finders are heavy at
-high and medium risk and standard at low risk; verifiers are standard at high
-risk and light at low and medium risk; a round-2+ re-review stays standard.
+Each session's effort follows `agent-workflow.md` §2.3.
 
 An agent's approval never counts as a person's. Medium changes need no
 person because people here are scarce; the revert rate (§7) is the guardrail,
@@ -79,38 +78,60 @@ and medium moves to a person's review if it rises.
 ## 3. Find
 
 Finders are code reviewer subagents spawned by a lead (`agent-workflow.md` §2),
-each with one lens, all working in parallel on the same diff and the work
-package's stated intent:
+each assigned one lens or a lens group, all working in parallel on the same
+diff and the work package's stated intent:
 
 1. **Spec and contract:** does the change solve its problem, do what its
    scenarios say, and nothing an approved scenario, ADR or contract forbids?
    For a bug fix, does it fix the root cause?
 2. **Correctness:** logic, error paths, boundaries, concurrency, resource leaks.
 3. **Determinism and durability:** flow code, retries, idempotency, replay.
-4. **Security:** secrets, tenancy, untrusted input, permissions.
+4. **Security:** secrets, tenancy, untrusted input, permissions, and
+   adversarial abuse paths.
 5. **Simplicity and guidelines:** `coding-guidelines.md`, needless code, stale
    comments and docs, and lines in `AGENTS.md` or docs the change makes untrue.
 
-Standard depth uses lenses 1–4; quick depth uses lens 1; deep depth uses all
-five. Every finder reads the applicable `REVIEW.md` files. A finding names the
-file and line, the problem, a concrete failure scenario, and a proposed fix.
-When the problem is a class of bug, the finding says so and lists every
-instance, so the author fixes them all at once.
+Round-1 finder groups by tier:
+
+| Tier | Reviewer's review (and architect's design review, `agent-workflow.md` §7.4) | Developer's self-review (§1) |
+| --- | --- | --- |
+| **high** | 4 finders: `1+5`, `2`, `3`, `4` | 3 finders: `1+5`, `2+3`, `4` |
+| **medium** | 2 finders: `1`, `2–4` (split `2` and `3–4` when >1,000 non-generated changed lines) | 1 finder: `1–4` |
+| **low** | 1 finder: `1` (or the reviewer's lead reads the diff itself, §1) | 1 finder: `1` |
+
+Every finder reads the applicable `REVIEW.md` files. A finding names the file
+and line, the problem, a concrete failure scenario, and a proposed fix. When
+the problem is a class of bug, the finding says so and lists every instance,
+so the author fixes them all at once.
 
 ## 4. Verify
 
-Each finding goes to separate **verifier** sessions that did not produce it.
-A verifier confirms a finding only with evidence:
+Findings go in batches to separate **verifier** sessions that did not produce
+them: up to **five** findings per `standard`-effort batch, and up to **three**
+per `light`-effort batch. A verifier checks each finding in its batch
+independently, returns an explicit `confirmed` (with evidence) or `rejected`
+(with reason) verdict for **every** finding ID in the batch, and confirms a
+finding only with evidence:
 - a failing test or command;
 - a scenario it breaks;
 - or a code path it can cite step by step.
 
-A finding survives when a majority of its verifiers confirm it: two of three
-in the reviewer's deep review, one of one at standard depth and for the one
-verifier the self-review gives it at high and medium risk. At low risk
-neither review uses a verifier. Unconfirmed findings and findings
-only about style, formatting or optional cleanup are dropped without being
-reported, which keeps noise out of the author's way.
+If a verifier report omits any finding ID from its batch, the lead treats that
+ID as unverified and re-runs it rather than dropping it.
+
+Survival rules:
+
+| Review | Verifier rule |
+| --- | --- |
+| **Deep** (high risk — reviewer's PR review and architect's design review) | Pass 1 checks each batch. A finding confirmed by an **executed failing test or command** survives immediately. Every other finding goes to a second independent verifier (batched, **blind** to pass-1 verdicts); findings where both agree are settled (2-of-2 confirm survives, 2-of-2 reject drops), and only disagreements go to a third blind verifier (2-of-3 majority). |
+| **Standard** (medium risk — reviewer's PR review) | One verifier pass per batch; findings confirmed with evidence survive. |
+| **Developer's self-review** (high and medium risk) | One verifier pass per batch; findings confirmed with evidence survive. |
+| **Quick** (low risk — either review) | No verifier. |
+
+New findings raised in a round-2+ re-review (§6) follow the same tier rule.
+Once verification finishes, unconfirmed findings — and, in every review,
+findings only about style, formatting or optional cleanup — are dropped without
+being reported, which keeps noise out of the author's way.
 
 ## 5. Report
 
