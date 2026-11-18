@@ -42,8 +42,7 @@ func (s *stubConsume) stopCount() int {
 }
 
 func TestLiveSubscriptionEndOnce(t *testing.T) {
-	const n = 3
-	for iter := 0; iter < n; iter++ {
+	for iter := 0; iter < 20; iter++ {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithCancel(context.Background())
@@ -56,26 +55,32 @@ func TestLiveSubscriptionEndOnce(t *testing.T) {
 			live := newLiveSubscription(2, subCancel, nil)
 			cc := newStubConsume()
 			msg := platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("x")}
+			live.attach(cc)
 			live.deliver(msg)
 			live.deliver(msg)
 			live.deliver(msg) // overflow
 			<-ctx.Done()
-			live.end(cc)
-			live.end(cc)
+			live.end()
+			live.end()
 			if cc.stopCount() != 1 {
 				t.Fatalf("stops=%d", cc.stopCount())
 			}
 			if cancels != 1 {
 				t.Fatalf("cancels=%d", cancels)
 			}
-			ch := live.messages()
-			for {
-				_, ok := <-ch
-				if !ok {
-					break
-				}
+			for range live.messages() {
 			}
 		})
+	}
+}
+
+func TestLiveEndBeforeAttach(t *testing.T) {
+	cc := newStubConsume()
+	live := newLiveSubscription(2, func() {}, nil)
+	live.end()
+	live.attach(cc)
+	if cc.stopCount() != 1 {
+		t.Fatalf("stops=%d", cc.stopCount())
 	}
 }
 
