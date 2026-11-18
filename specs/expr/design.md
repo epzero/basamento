@@ -39,6 +39,8 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
   - `unordered key` (a map key whose kind has no place in the order of §4)
   - `output over the output limit` (a mapping output over its output limit,
     §5)
+  - `mapping construction` (a mapping that builds a list or an object with
+    more entries than its output limit allows, §5)
 - A compiled `Program` or `Mapping` is immutable and safe for concurrent use.
 - `expr` imports only `core` (`layering.yaml`). It reads schemas as JSON, so
   it does not need `core/schema` (§2).
@@ -104,26 +106,30 @@ nothing is coerced from strings.
   variable (`run.now` in flows, `at` in price rules) and record it.
 - **Time zones**: timestamp getters that take a zone name use the IANA
   database embedded in the binary (`time/tzdata`), never the host's.
-- **Map iteration**: every map an expression sees, bound from a variable,
-  written as a literal or built during evaluation, iterates its keys in
-  ascending order as REQ-EXPR-021 orders them: keys of one kind sort by value
-  (strings by Unicode code point); keys of different kinds sort `bool` <
-  `int` < `uint` < `double` < `string`. A map whose keys are all `double` is
-  listed numerically, NaNs after every number, −0 before +0, and NaNs of one
-  bit pattern in a fixed order among themselves, so the order is total. Any
-  operation that orders a map's keys, `keys`, `toSortedList`, `sort`, uses the
-  same order. This makes `map`, `filter`, `all`, `exists`, `exists_one` and
-  two-variable comprehensions independent of Go map order, including which
-  error an evaluation reports first. A custom type adapter that returns a
-  sorted map for every native map is one way to do it.
-- **Keys of no order** (REQ-EXPR-022): a map key with any other CEL type,
-  such as a timestamp, a duration or a list, has no place in that order. An
-  evaluation that iterates over such a map fails with the cause
-  `unordered key`; it never falls back to Go map order and never drops the
-  entry. The error does not name the key or its value, which may be a
-  credential a mapping has resolved. A map that holds a key of no order
-  fails only when an evaluation iterates over it; the same value does
-  nothing when it is only passed on without its keys being visited.
+- **Map iteration** (REQ-EXPR-021): the keys of a map sort `bool` < `int` <
+  `uint` < `double` < `string`, and `bool` and `string` keys sort by value.
+  Within `double`, keys sort numerically with `NaN`s after every number, and
+  two bit-identical `NaN` keys tie-break deterministically (for example by
+  encoded value). This governs `map`, `filter`, `all`, `exists`,
+  `exists_one` and two-variable comprehensions, making them independent of
+  Go map order, including which error an evaluation reports first. A custom
+  type adapter that returns a sorted map for every native map, and an AST
+  or evaluation decorator for map literals, is one way to do it.
+- **Keys of no order** (REQ-EXPR-022, REQ-EXPR-023): a map key with any
+  other CEL type, such as a timestamp, a duration or a list, has no place in
+  that order. An evaluation that iterates over such a map fails with the
+  cause `unordered key`; it never falls back to Go map order and never drops
+  the entry. The same cause fails an evaluation that passes such a map on,
+  because a map with non-string keys has no JSON form (§3). The error does
+  not name the key or its value, which may be a credential a mapping has
+  resolved.
+- **Keys that are not values** (REQ-EXPR-024): CEL builds a map literal
+  before anything can iterate it, and an entry such as `{[1, 2]: 'a'}` goes
+  in without error, while the map is not equal to itself. The adapter keeps
+  every entry it cannot order instead of dropping it, and building or
+  reading such a map fails with the cause `no such key`. An evaluation that
+  reads one key of the map and never needs the entry, as with `exists`,
+  succeeds.
 - **Cost**: cel-go's runtime cost tracking, with a limit per environment,
   default **1 000 000**. Cost is counted in cel-go's units, which do not
   depend on time or machine, so the same evaluation fails at the same point
@@ -158,53 +164,84 @@ nothing is coerced from strings.
   channel closes after the limit's number of checks bounds evaluation
   deterministically, by instructions rather than by time. The evaluator
   reports the step limit, not a context error.
-- **Output limit** (REQ-EXPR-020): default **1 048 576 bytes**, the size of
-  the value's compact JSON encoding, set per mapping with `WithOutputLimit`
-  and counted on every value the mapping builds, not only on its final
-  output.
+- **Output limit** (REQ-EXPR-020): default **1 048 576 bytes** (1 MiB, the
+  largest message the bus accepts, `specs/bus/design.md` §5), the size of
+  the value in RFC 8785 canonical JSON (`core/schema`, REQ-SCHEMA-030), set
+  per mapping with `WithOutputLimit`. The limit bounds the memory a mapping
+  holds: each value it builds is refused before an over-limit result is
+  allocated, not measured afterwards.
 
-  The limit is a bound on memory: one mapping evaluates on behalf of the
-  whole server, so a value it builds to a large size must be refused before
-  it is allocated. Measuring the final output after the mapping has built it
-  would break that bound, and the step limit does not stand in for it: a
-  mapping such as `"x" * 2147483647` builds its value in a single step.
+  gojq offers no runtime hook that sees every intermediate value an
+  expression builds, and its `WithFunction` and `WithIterFunction` options
+  only define functions not already in gojq's built-in internal table
+  (`*` compiles to `_multiply`, and `+` to `_add`, before custom functions
+  are looked up). Counting only the top-level results on the iterator is
+  also not enough: `"x" * 2147483647` and `reduce range(30) as $i ("x"; . + .)`
+  build gigabyte values inside the virtual machine before any result is
+  yielded. The evaluator therefore enforces the limit in three layers:
 
-  gojq offers no hook that sees every value an expression builds. Its
-  `WithFunction` and `WithIterFunction` options register a custom function,
-  and the compiler resolves builtins and operators before custom functions:
-  `*`, `+` and `[]` construction are internal instructions, never callable
-  names. The evaluator therefore bounds what a mapping builds in two ways:
+  - **AST rewriting before compilation.** After parsing and before
+    `gojq.Compile`, the walk that rejects banned names also rewrites the
+    `*gojq.Query` AST:
+    - each left-associative chain of operator queries (`OpMul`, `OpAdd`,
+      `OpSub`), which gojq compiles to `_multiply`, `_add` and `_subtract`,
+      becomes one call to a bounded function with one argument per operand,
+      so the bounded function sees the left value before it is combined with
+      the right;
+    - array construction `[f]` becomes the bounded function for arrays, which
+      measures the array `f` builds: entries it collects follow the step
+      limit, and an array over the limit fails there;
+    - object construction `{…}` becomes the bounded function for objects;
+    - the calls `join`, `implode`, `@base64` and `@base64d` become bounded
+      functions.
 
-  - **Every value the mapping yields.** Each message the gojq iterator
-    returns, including every intermediate value of `limit`, `range`, `first`,
-    `foreach`, `reduce` and a function's own results, is counted: its size in
-    the canonical form of REQ-SCHEMA-030 (RFC 8785 bytes) while it is
-    converted to a gojq value, a walk that gives up once it has visited more
-    than the limit's number of nodes, as a deeply nested array would. The
-    conversion frees each node as it counts it. The messages are counted as a
-    running total, and the mapping stops with the cause `output over the
-    output limit` when the total exceeds the limit. gojq keeps no value a
-    mapping builds that does not reach this iterator, so a mapping whose
-    value stays within the limit is counted completely; the counting is
-    linear in the value and deterministic.
-  - **A single step that allocates without limit.** Only one gojq operation
-    allocates a value from a count rather than from values it already holds:
-    string repetition, `s * n`. The compiler resolves it through the internal
-    function `_repeat_string`, and `WithIterFunction` replaces that entry
-    with a function that refuses a repeated length over the limit before it
-    allocates; where a gojq upgrade compiles the operator to a different
-    function, the mapping's compilation fails cleanly rather than batching
-    the repetition unchecked. Adding
-    strings (`+`, `implode`, `join`, the encoders) and building arrays and
-    objects allocate from operands that are already counted, so their result
-    is at most the sum of the operands' sizes, which the message count bounds
-    on the next yield.
+    Each bounded function computes the RFC 8785 size of its result from its
+    operands without allocating the result: numbers by arithmetic, a
+    repeated string as its length times the count, `join` as the sum of its
+    parts plus separators. It fails with the cause `output over the output
+    limit` when that size is over the limit, and otherwise computes the value
+    from the operands it has already checked. The operator cases call gojq's
+    own operator function.
+  - **Every yielded value.** Each value a mapping yields, top-level or inside
+    an array or object being built, has its RFC 8785 size walked and fails
+    the same way when it is over the limit. The walk gives up after visiting
+    the limit's number of nodes (an array of `null`s costs one byte per
+    node), so it is linear in the limit.
+  - **Bounded input and output.** Before entering gojq, the input and the
+    variables are validated against the node and size bounds; each top-level
+    result is measured again in RFC 8785 canonical bytes.
 
-  A value that gojq builds but backtracks out of, such as `"x" * 2000 | empty`,
-  is never yielded and so is not counted: the bound holds the memory a
-  mapping keeps, not every byte it touches. Stopping is deterministic: the
-  same mapping fails at the same message, or at the same repetition, every
-  time.
+  The bounded functions are registered under names that lex as bare `_`
+  followed by the `(` of their call, a shape the jq grammar gives no other
+  meaning. Registrations are one per arity and lexically targeted, so a user
+  function of the same name is never called instead.
+
+  Two kinds of operation build a large value before any bounded function
+  sees it, because gojq implements them inside the virtual machine:
+  - a container whose entries are collected by `f` in `[f]` or produced by
+    `reduce`, `foreach` or an object's value queries follows the step limit,
+    not the output limit: `[range(100000)] | .[0]` builds 100 000 entries,
+    and the bounded function for arrays runs only after the last entry;
+  - the builtins written in gojq's own language, such as `add`/`add(f)`,
+    `while`, `until`, `repeat` and `last`, compose their values with the
+    internal `+` after compilation. Their intermediate values are not
+    measured; the first value they return, and every value yielded inside a
+    rewritten array or object, is.
+
+  Together these keep a mapping within a constant factor of the limit in
+  memory rather than guaranteeing it. Bounding these cases as well needs a
+  gojq that exposes its internal `+` and array construction to the library
+  or limits construction itself.
+
+  **gojq dependency.** gojq's unexported operator function behind `+`,
+  `-` and `*` (with its exact `*big.Int` arithmetic and its refusal of a
+  repetition of 2³¹ bytes or more) is reached through a `//go:linkname`
+  declaration into gojq v0.12.20, the version `go.mod` pins. A gojq upgrade
+  that moves or renames it fails the build, not silently the bound;
+  `go.sum` and the version pin move together with it.
+
+  Stopping is deterministic: the same mapping fails at the same operation
+  or value every time, without allocating an over-limit value.
 - **Outputs**: the evaluator takes at most two values from the iterator. One
   is the result; none or two is an error (REQ-EXPR-014).
 - **Numbers**: inputs keep integers exact (`json.Number` converted to `int`

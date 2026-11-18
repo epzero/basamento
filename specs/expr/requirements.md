@@ -80,7 +80,13 @@ If a mapping cannot be parsed, then the mapping compiler shall reject it with co
 If a mapping's output exceeds its output limit, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the output limit.
 
 ### REQ-EXPR-021 — Map key order
-When an expression iterates over, sorts or lists a map by key, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and shall order keys that are all `double` numerically, with `-0` before `+0` and a NaN after every other number.
+When an expression iterates over a map, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and within `double` numerically with any NaN after every other number.
 
 ### REQ-EXPR-022 — Map keys of no order
 If a map in an expression holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key` when it iterates over that map, and shall not skip that key's entry.
+
+### REQ-EXPR-023 — Map values of no order
+If a map in an expression is passed on without iterating over it and holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key`.
+
+### REQ-EXPR-024 — Map construction without a key
+If a map in an expression holds an entry whose key is not a value, such as `{[1, 2]: 'a'}`, then the expression evaluator shall fail with code `invalid_argument` and the cause `no such key` when it builds or reads that map, and shall not drop the entry.

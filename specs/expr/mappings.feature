@@ -128,11 +128,15 @@ Feature: JSON mappings
     And the error names the output limit 1024
 
     Examples:
-      | mapping                     |
-      | "x" * 1025                  |
-      | "x" * 1000000000            |
-      | ("x" * 1023) + "yy"         |
-      | [range(1032)]               |
+      | mapping                                          |
+      | "x" * 1025                                       |
+      | "x" * 1023                                       |
+      | "x" * 1000000000                                 |
+      | ("x" * 1023) + "yy"                              |
+      | reduce range(30) as $i ("x"; . + .)              |
+      | [range(1032)]                                    |
+      | [range(100000)]                                  |
+      | [range(100001)] \| .[0]                          |
 
   @REQ-EXPR-020 @id:EXPR-020-02
   Scenario Outline: A mapping whose output is within its output limit succeeds
@@ -142,10 +146,10 @@ Feature: JSON mappings
 
     Examples:
       | mapping                                 | length |
-      | "x" * 1024                              | 1026   |
-      | ("x" * 1022) + "yy"                     | 1026   |
-      | [range(256)]                            | 741    |
-      | {a: ("x" * 500), b: ("y" * 500)}        | 1019   |
+      | "x" * 1022                              | 1024   |
+      | ("x" * 1020) + "yy"                     | 1024   |
+      | [range(256)]                            | 915    |
+      | {a: ("x" * 500), b: ("y" * 500)}        | 1015   |
 
   @REQ-EXPR-020 @id:EXPR-020-03
   Scenario: The default output limit stops a value of 2 GiB
