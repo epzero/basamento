@@ -270,7 +270,7 @@ Feature: The local runtime
   @planned @wp:WP-L5-01 @security @REQ-RT-042 @id:RT-042-01
   Scenario: Starting a run for another tenant than the context's is rejected with invalid_argument
     Given a flow calls step "render" that returns {"ok": true}
-    When a run of "render" is started with context tenant "acme" and request tenant "globex"
+    When run "r1" of "render" is started with context tenant "acme" and request tenant "globex"
     Then starting the run fails with code "invalid_argument"
     And step "render" was executed 0 times
     And tenant "acme" has no run with id "r1"
@@ -306,22 +306,33 @@ Feature: The local runtime
     Then listing runs fails with code "invalid_argument"
 
   @planned @wp:WP-L5-01 @security @REQ-RT-042 @id:RT-042-06
-  Scenario: Starting a run with no tenant in the request uses the context tenant
-    Given a flow calls step "render" that returns {"ok": true}
-    When a run of "render" is started with context tenant "acme" and an empty request tenant
+  Scenario Outline: Starting a run with an empty or matching request tenant uses the context tenant
+    Given flow "review" waits at gate "approve"
+    When run "r1" of "review" is started with context tenant "acme" and request tenant "<tenant>"
     Then tenant "acme" describes run "r1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
 
   @planned @wp:WP-L5-01 @security @REQ-RT-043 @id:RT-043-01
   Scenario: The run reference a start returns carries the run's tenant
     Given a flow calls step "render" that returns {"ok": true}
-    When a run of "render" is started with context tenant "acme" and an empty request tenant
+    When run "r1" of "render" is started with context tenant "acme" and an empty request tenant
     Then the run reference the start returned is run "r1" of tenant "acme"
 
   @planned @wp:WP-L5-01 @security @REQ-RT-043 @id:RT-043-02
   Scenario: Describing a run returns a run reference carrying that run's tenant
     Given tenant "globex" has run "shared-1" waiting at gate "approve"
-    When tenant "globex" describes run "shared-1"
+    When run "shared-1" is described with context tenant "globex" and an empty reference tenant
     Then the run reference the description returned is run "shared-1" of tenant "globex"
+
+  @planned @wp:WP-L5-01 @security @REQ-RT-043 @id:RT-043-03
+  Scenario: Listing runs returns run references carrying each run's tenant
+    Given tenant "globex" has run "shared-1" of flow "review" waiting at gate "approve"
+    When runs of flow "review" are listed with context tenant "globex" and an empty query tenant
+    Then tenant "globex" lists 1 run for tenant "globex" with run id "shared-1"
 
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-01
   Scenario: Starting a run without a tenant in the context is rejected with invalid_argument
@@ -333,32 +344,53 @@ Feature: The local runtime
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-02
   Scenario: Starting a run without a tenant in the context is rejected even when the request names one
     Given a flow calls step "render" that returns {"ok": true}
-    When a run of "render" is started without a context tenant and with request tenant "acme"
+    When run "r1" of "render" is started without a context tenant and with request tenant "acme"
     Then starting the run fails with code "invalid_argument"
     And step "render" was executed 0 times
     And tenant "acme" has no run with id "r1"
 
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-03
-  Scenario: Describing a run without a tenant in the context is rejected with invalid_argument
-    Given a run "shared-1" of a flow "review" exists on the local runtime
-    When run "shared-1" is described without a context tenant
-    Then describing run "shared-1" without a context tenant fails with code "invalid_argument"
+  Scenario Outline: Describing a run without a tenant in the context is rejected with invalid_argument
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    When run "shared-1" is described without a context tenant and with reference tenant "<tenant>"
+    Then describing run "shared-1" fails with code "invalid_argument"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
 
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-04
-  Scenario: Cancelling a run without a tenant in the context is rejected with invalid_argument
-    Given a run "shared-1" of a flow "review" exists on the local runtime
-    When run "shared-1" is cancelled without a context tenant
+  Scenario Outline: Cancelling a run without a tenant in the context is rejected with invalid_argument
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    When run "shared-1" is cancelled without a context tenant and with reference tenant "<tenant>"
     Then cancelling run "shared-1" fails with code "invalid_argument"
-    And run "shared-1" is described with context tenant "acme" as "running"
+    And tenant "acme" describes run "shared-1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
 
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-05
-  Scenario: Resolving a gate without a tenant in the context is rejected with invalid_argument
-    Given a run "shared-1" of a flow "review" exists on the local runtime
-    When gate "approve" of run "shared-1" is resolved without a context tenant and with payload {"approved": true}
+  Scenario Outline: Resolving a gate without a tenant in the context is rejected with invalid_argument
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    When gate "approve" of run "shared-1" is resolved without a context tenant, reference tenant "<tenant>" and payload {"approved": true}
     Then resolving the gate fails with code "invalid_argument"
+    And tenant "acme" describes run "shared-1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
 
   @planned @wp:WP-L5-01 @security @REQ-RT-044 @id:RT-044-06
-  Scenario: Listing runs without a tenant in the context is rejected with invalid_argument
-    Given a run "shared-1" of a flow "review" exists on the local runtime
-    When runs of flow "review" are listed without a context tenant
+  Scenario Outline: Listing runs without a tenant in the context is rejected with invalid_argument
+    Given tenant "acme" has run "shared-1" of flow "review" waiting at gate "approve"
+    When runs of flow "review" are listed without a context tenant and with query tenant "<tenant>"
     Then listing runs fails with code "invalid_argument"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |

@@ -15,10 +15,10 @@ Where the profile is `embedded`, the system shall run the Temporal server in-pro
 When a recorded run history is replayed against the current flow code, the runtime shall reproduce the recorded commands or report a determinism violation naming the first divergent event.
 
 ### REQ-RT-042 — The request tenant is the context tenant
-If a start request, a run reference or a list query names a tenant that differs from the tenant of the context the call is made with, then the runtime shall reject the call with code `invalid_argument`, starting no run, changing no run and returning no run.
+If a start request, a run reference or a list query carries a non-empty tenant that differs from the calling context's tenant, then the runtime shall reject the call with code `invalid_argument`, starting no run, changing no run and returning no run.
 
 ### REQ-RT-043 — Returned run references carry the run's tenant
-When the runtime returns a run reference from a start or a run description, the runtime shall return the run's own tenant in it.
+When the runtime returns a run reference from a start, a run description or a run listing, the runtime shall return the run's own tenant in it.
 
 ## Local runtime
 
@@ -104,8 +104,8 @@ claim-check and encryption, and `Checkpoint` as ContinueAsNew
 Every requirement below binds the `temporal` runtime. The embedded server is
 WP-L5-03 and the conformance suite WP-L5-04.
 
-### REQ-RT-045 — Tenant required on every call on the temporal runtime
-If a describe, cancel, gate resolution or list call reaches the temporal runtime without a tenant in its context, then the temporal runtime shall reject the call with code `invalid_argument`, starting no run, changing no run and returning no run.
+### REQ-RT-045 — Tenant required on describe, cancel, gate resolution and list on the temporal runtime
+If a describe, cancel, gate resolution or list call reaches the temporal runtime without a tenant in its context, then the temporal runtime shall reject the call with code `invalid_argument`, changing no run and returning no run.
 
 ### REQ-RT-039 — Temporal runtime capabilities
 The temporal runtime shall report capabilities `durable`, `sync_gate_updates`, `continue_as_new` and `polyglot_queues` as true.

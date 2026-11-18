@@ -169,7 +169,114 @@ Feature: The Temporal runtime
     And step "fetch" was executed 0 times
     And the Temporal test server holds no run history for that start
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-01
-  Scenario: Listing runs without a tenant in the context is rejected with invalid_argument
-    When runs of flow "review" are listed on the temporal runtime without a context tenant
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-08
+  Scenario: Describing a run for another tenant than the context's is rejected on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    And the request names a run reference of tenant "globex" to run "shared-1"
+    When run "shared-1" is described on the temporal runtime with context tenant "acme"
+    Then describing run "shared-1" fails with code "invalid_argument"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-09
+  Scenario: Cancelling a run for another tenant than the context's is rejected on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    And the request names a run reference of tenant "globex" to run "shared-1"
+    When run "shared-1" is cancelled on the temporal runtime with context tenant "acme"
+    Then cancelling run "shared-1" fails with code "invalid_argument"
+    And tenant "globex" describes run "shared-1" as "running"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-10
+  Scenario: Resolving a gate for another tenant than the context's is rejected on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    And the request names a run reference of tenant "globex" to run "shared-1"
+    When gate "approve" of run "shared-1" is resolved on the temporal runtime with context tenant "acme" and payload {"approved": true}
+    Then resolving the gate fails with code "invalid_argument"
+    And tenant "globex" describes run "shared-1" as "running"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-11
+  Scenario: Listing runs for another tenant than the context's is rejected on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When runs of flow "review" are listed on the temporal runtime for request tenant "globex" with context tenant "acme"
     Then listing runs fails with code "invalid_argument"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-12
+  Scenario Outline: Starting a run with an empty or matching request tenant uses the context tenant on the temporal runtime
+    Given flow "review" waits at gate "approve"
+    When run "r1" of "review" is started on the temporal runtime with context tenant "acme" and request tenant "<tenant>"
+    Then tenant "acme" describes run "r1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-04
+  Scenario: The run reference a start returns carries the run's tenant on the temporal runtime
+    Given a flow calls step "render" that returns {"ok": true}
+    When run "r1" of "render" is started on the temporal runtime with context tenant "acme" and an empty request tenant
+    Then the run reference the start returned is run "r1" of tenant "acme"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-05
+  Scenario: Describing a run returns a run reference carrying that run's tenant on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When run "shared-1" is described on the temporal runtime with context tenant "globex" and an empty reference tenant
+    Then the run reference the description returned is run "shared-1" of tenant "globex"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-06
+  Scenario: Listing runs returns run references carrying each run's tenant on the temporal runtime
+    Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When runs of flow "review" are listed on the temporal runtime with context tenant "globex" and an empty query tenant
+    Then tenant "globex" lists 1 run for tenant "globex" with run id "shared-1"
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-040 @REQ-RT-042 @id:RT-040-01
+  Scenario: Starting a run without a tenant in the context is rejected on the temporal runtime even when the request names one
+    Given a flow calls step "fetch" that returns {"ok": true}
+    When run "r1" of "fetch" is started on the temporal runtime without a context tenant and with request tenant "acme"
+    Then starting the run fails with code "invalid_argument"
+    And step "fetch" was executed 0 times
+    And the Temporal test server holds no run history for that start
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-01
+  Scenario Outline: Listing runs without a tenant in the context is rejected on the temporal runtime
+    Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When runs of flow "review" are listed on the temporal runtime without a context tenant and with query tenant "<tenant>"
+    Then listing runs fails with code "invalid_argument"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-02
+  Scenario Outline: Describing a run without a tenant in the context is rejected on the temporal runtime
+    Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When run "shared-1" is described on the temporal runtime without a context tenant and with reference tenant "<tenant>"
+    Then describing run "shared-1" fails with code "invalid_argument"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-03
+  Scenario Outline: Cancelling a run without a tenant in the context is rejected on the temporal runtime
+    Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When run "shared-1" is cancelled on the temporal runtime without a context tenant and with reference tenant "<tenant>"
+    Then cancelling run "shared-1" fails with code "invalid_argument"
+    And tenant "acme" describes run "shared-1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
+
+  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-04
+  Scenario Outline: Resolving a gate without a tenant in the context is rejected on the temporal runtime
+    Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
+    When gate "approve" of run "shared-1" is resolved on the temporal runtime without a context tenant, reference tenant "<tenant>" and payload {"approved": true}
+    Then resolving the gate fails with code "invalid_argument"
+    And tenant "acme" describes run "shared-1" as "running"
+
+    Examples:
+      | tenant |
+      |        |
+      | acme   |
