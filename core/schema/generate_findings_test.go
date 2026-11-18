@@ -21,12 +21,11 @@ func TestForAnyRejected(t *testing.T) {
 
 func TestWalkInvalidUnexportedField(t *testing.T) {
 	type s struct {
-		X int `json:"x"`
-		y int `json:"y"`
+		X int
+		y int
 	}
-	_, err := ForType(reflect.TypeOf(s{}))
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
+	if _, ok := walkInvalidField(reflect.TypeOf(s{}), "", map[reflect.Type]bool{}); ok {
+		t.Fatal("unexported field should not block schema for exported fields")
 	}
 }
 
