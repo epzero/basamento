@@ -35,6 +35,9 @@ func compileSet(schemas map[string]json.RawMessage, rootID string) (*Compiled, e
 		if err := validateRefsClosed(id, raw, schemas); err != nil {
 			return nil, err
 		}
+		if _, err := decodeInstance(raw); err != nil {
+			return nil, invalidArgf("parse schema %s: %v", id, err)
+		}
 		doc, err := js.UnmarshalJSON(strings.NewReader(string(raw)))
 		if err != nil {
 			return nil, invalidArgf("parse schema %s: %v", id, err)

@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"unicode/utf16"
@@ -9,10 +11,10 @@ import (
 
 // decodeInstance parses JSON with UseNumber and rejects duplicate object keys.
 func decodeInstance(data []byte) (any, error) {
-	dec := json.NewDecoder(bytesReader(data))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var stack []string
-	v, err := decodeValue(dec, &stack)
+	v, err := decodeValue(dec, &stack, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -20,40 +22,46 @@ func decodeInstance(data []byte) (any, error) {
 		if err == nil {
 			return nil, invalidArg("trailing JSON", map[string]any{"location": ""})
 		}
-		return nil, invalidArgf("parse instance: %v", err)
+		return nil, wrapDecodeErr(err, "")
 	}
 	return v, nil
 }
 
-func decodeValue(dec *json.Decoder, stack *[]string) (any, error) {
+func decodeValue(dec *json.Decoder, stack *[]string, depth int) (any, error) {
+	if depth > maxNestingDepth {
+		return nil, invalidArg("nesting depth exceeded", map[string]any{"location": ptrJoin(*stack)})
+	}
 	tok, err := dec.Token()
 	if err != nil {
-		return nil, err
+		return nil, wrapDecodeErr(err, ptrJoin(*stack))
 	}
 	switch v := tok.(type) {
 	case json.Delim:
 		switch v {
 		case '{':
-			return decodeObject(dec, stack)
+			return decodeObject(dec, stack, depth+1)
 		case '[':
-			return decodeArray(dec, stack)
+			return decodeArray(dec, stack, depth+1)
 		default:
 			return nil, invalidArgf("unexpected delimiter %v", v)
 		}
 	case json.Number:
+		if err := validateJSONNumberString(string(v)); err != nil {
+			return nil, invalidArg("invalid number", map[string]any{"location": ptrJoin(*stack)})
+		}
 		return v, nil
 	default:
 		return v, nil
 	}
 }
 
-func decodeObject(dec *json.Decoder, stack *[]string) (map[string]any, error) {
+func decodeObject(dec *json.Decoder, stack *[]string, depth int) (map[string]any, error) {
 	seen := map[string]struct{}{}
 	out := map[string]any{}
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
-			return nil, err
+			return nil, wrapDecodeErr(err, ptrJoin(*stack))
 		}
 		key, ok := keyTok.(string)
 		if !ok {
@@ -65,7 +73,7 @@ func decodeObject(dec *json.Decoder, stack *[]string) (map[string]any, error) {
 		}
 		seen[key] = struct{}{}
 		*stack = append(*stack, key)
-		val, err := decodeValue(dec, stack)
+		val, err := decodeValue(dec, stack, depth)
 		*stack = (*stack)[:len(*stack)-1]
 		if err != nil {
 			return nil, err
@@ -73,17 +81,17 @@ func decodeObject(dec *json.Decoder, stack *[]string) (map[string]any, error) {
 		out[key] = val
 	}
 	if _, err := dec.Token(); err != nil {
-		return nil, err
+		return nil, wrapDecodeErr(err, ptrJoin(*stack))
 	}
 	return out, nil
 }
 
-func decodeArray(dec *json.Decoder, stack *[]string) ([]any, error) {
+func decodeArray(dec *json.Decoder, stack *[]string, depth int) ([]any, error) {
 	var out []any
 	i := 0
 	for dec.More() {
 		*stack = append(*stack, fmt.Sprint(i))
-		val, err := decodeValue(dec, stack)
+		val, err := decodeValue(dec, stack, depth)
 		*stack = (*stack)[:len(*stack)-1]
 		if err != nil {
 			return nil, err
@@ -92,9 +100,20 @@ func decodeArray(dec *json.Decoder, stack *[]string) ([]any, error) {
 		i++
 	}
 	if _, err := dec.Token(); err != nil {
-		return nil, err
+		return nil, wrapDecodeErr(err, ptrJoin(*stack))
 	}
 	return out, nil
+}
+
+func wrapDecodeErr(err error, loc string) error {
+	if errors.Is(err, io.EOF) {
+		return invalidArg("unexpected end of JSON", map[string]any{"location": loc})
+	}
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return invalidArgf("parse instance: %v", syn)
+	}
+	return invalidArgf("parse instance: %v", err)
 }
 
 func ptrJoin(parts []string) string {
@@ -122,22 +141,6 @@ func appendEscapedKey(b []byte, key string) []byte {
 		}
 	}
 	return b
-}
-
-func bytesReader(b []byte) *sliceReader { return &sliceReader{b: b} }
-
-type sliceReader struct {
-	b []byte
-	i int
-}
-
-func (r *sliceReader) Read(p []byte) (int, error) {
-	if r.i >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.i:])
-	r.i += n
-	return n, nil
 }
 
 // hasUnpairedSurrogate reports whether s contains an unpaired UTF-16 surrogate.
