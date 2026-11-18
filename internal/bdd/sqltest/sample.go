@@ -139,7 +139,10 @@ func (r *SampleRepo) ListItemKeys(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	order := psql.TextOrderClause(r.dialect, "key")
+	order, err := psql.TextOrderClause(r.dialect, "key")
+	if err != nil {
+		return nil, err
+	}
 	q := fmt.Sprintf(`SELECT key FROM items WHERE tenant_id = ? ORDER BY %s`, order)
 	rows, err := r.store.Execer().Query(ctx, q, string(tenant))
 	if err != nil {

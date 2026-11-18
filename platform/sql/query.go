@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/epzero/basamento/core"
 )
@@ -48,14 +50,13 @@ func rewritePostgresPlaceholders(q string) (string, error) {
 			b.WriteString(q[i:j])
 			i = j
 		case q[i] == '/' && i+1 < len(q) && q[i+1] == '*':
-			j := i + 2
-			for j+1 < len(q) && (q[j] != '*' || q[j+1] != '/') {
-				j++
-			}
-			if j+1 < len(q) {
-				j += 2
-			} else {
-				j = len(q)
+			j := skipBlockCommentPostgres(q, i)
+			b.WriteString(q[i:j])
+			i = j
+		case q[i] == 'E' && i+1 < len(q) && q[i+1] == '\'':
+			j, err := skipPostgresEscapeString(q, i+1)
+			if err != nil {
+				return "", err
 			}
 			b.WriteString(q[i:j])
 			i = j
@@ -112,15 +113,68 @@ func rewritePostgresPlaceholders(q string) (string, error) {
 	return b.String(), nil
 }
 
+func skipBlockCommentPostgres(q string, i int) int {
+	depth := 1
+	j := i + 2
+	for j < len(q) && depth > 0 {
+		if j+1 < len(q) && q[j] == '/' && q[j+1] == '*' {
+			depth++
+			j += 2
+			continue
+		}
+		if j+1 < len(q) && q[j] == '*' && q[j+1] == '/' {
+			depth--
+			j += 2
+			continue
+		}
+		j++
+	}
+	return j
+}
+
+func skipPostgresEscapeString(q string, i int) (int, error) {
+	if i >= len(q) || q[i] != '\'' {
+		return i, nil
+	}
+	j := i + 1
+	for j < len(q) {
+		if q[j] == '\\' && j+1 < len(q) {
+			j += 2
+			continue
+		}
+		if q[j] == '\'' {
+			j++
+			break
+		}
+		j++
+	}
+	return j, nil
+}
+
 func skipDollarQuoted(q string, i int) (delim string, end int, ok bool) {
 	if i >= len(q) || q[i] != '$' {
 		return "", i, false
 	}
 	j := i + 1
-	for j < len(q) && q[j] != '$' {
-		j++
+	for j < len(q) {
+		r := rune(q[j])
+		if r == '$' {
+			break
+		}
+		if j == i+1 {
+			if r == '_' || unicode.IsLetter(r) {
+				j++
+				continue
+			}
+			return "", i, false
+		}
+		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			j++
+			continue
+		}
+		return "", i, false
 	}
-	if j >= len(q) {
+	if j >= len(q) || q[j] != '$' {
 		return "", i, false
 	}
 	delim = q[i : j+1]
@@ -131,6 +185,8 @@ func skipDollarQuoted(q string, i int) (delim string, end int, ok bool) {
 	}
 	return delim, k + pos + len(delim), true
 }
+
+var sqlIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (e *Execer) runner() queryR {
 	if e.tx != nil {
@@ -215,9 +271,12 @@ func TruncateMicrosecond(t time.Time) time.Time {
 }
 
 // TextOrderClause returns an ORDER BY column expression with dialect collation (REQ-SQL-017).
-func TextOrderClause(dialectName, col string) string {
-	if dialectName == "postgres" {
-		return col + ` COLLATE "C"`
+func TextOrderClause(dialectName, col string) (string, error) {
+	if !sqlIdentRe.MatchString(col) {
+		return "", core.NewError(core.CodeInvalidArgument, "sql: invalid order column", nil)
 	}
-	return col + ` COLLATE BINARY`
+	if dialectName == "postgres" {
+		return col + ` COLLATE "C"`, nil
+	}
+	return col + ` COLLATE BINARY`, nil
 }

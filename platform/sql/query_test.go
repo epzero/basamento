@@ -109,6 +109,21 @@ func TestRewritePlaceholdersPostgres(t *testing.T) {
 			in:      "SELECT $1 FROM t",
 			wantErr: true,
 		},
+		{
+			name:    "invalid_dollar_tag_still_rewrites_bind",
+			in:      "SELECT $1notvalid$, ?",
+			wantErr: true,
+		},
+		{
+			name: "postgres_escape_string",
+			in:   `SELECT E'\\?' AS q, ? FROM t`,
+			want: `SELECT E'\\?' AS q, $1 FROM t`,
+		},
+		{
+			name: "nested_block_comment",
+			in:   "SELECT /* /* ? */ ? */ 1 WHERE x = ?",
+			want: "SELECT /* /* ? */ ? */ 1 WHERE x = $1",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,5 +142,22 @@ func TestRewritePlaceholdersPostgres(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTextOrderClauseRejectsInvalidIdent(t *testing.T) {
+	_, err := TextOrderClause("postgres", `key"; DROP TABLE items;--`)
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTextOrderClausePostgres(t *testing.T) {
+	got, err := TextOrderClause("postgres", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `key COLLATE "C"` {
+		t.Fatalf("got %q", got)
 	}
 }
