@@ -15,17 +15,23 @@ import (
 
 // Store is a tenant-scoped content store over one bucket.
 type Store struct {
-	bucket    bucketBackend
-	clock     core.Clock
-	maxTTL    time.Duration
-	embedded  bool
-	baseURL   string
-	signKey   []byte
-	putLocks  keyedMu
-	stageSeq  uint64
-	rand      io.Reader
-	lastSweep time.Time
-	sweepMu   sync.Mutex
+	bucket       bucketBackend
+	clock        core.Clock
+	maxTTL       time.Duration
+	embedded     bool
+	baseURL      string
+	signKey      []byte
+	putLocks     keyedMu
+	stageLocks   keyedMu // per (tenant, staging key); in-process only (see doc.go)
+	stageSeq     uint64
+	rand         io.Reader
+	lastSweep    time.Time
+	sweepRetryAt time.Time
+	sweepMu      sync.Mutex
+}
+
+func stageLockKey(tid core.TenantID, stageKey string) string {
+	return string(tid) + "/stage/" + stageKey
 }
 
 // Close releases the underlying bucket.

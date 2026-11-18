@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"gocloud.dev/blob"
+	"gocloud.dev/gcerrors"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 )
+
+const maxSlotMetaBytes = 4096
 
 // StartUpload implements platform.Blob.
 func (s *Store) StartUpload(ctx context.Context, o platform.UploadOptions) (platform.Upload, error) {
@@ -31,8 +34,7 @@ func (s *Store) StartUpload(ctx context.Context, o platform.UploadOptions) (plat
 	if err != nil {
 		return platform.Upload{}, core.NewError(core.CodeUnavailable, "upload unavailable", nil)
 	}
-	now := s.clock.Now()
-	expires := now.Add(o.TTL)
+	expires := s.clock.Now().Add(o.TTL).Truncate(time.Second)
 	meta := slotMeta{Max: o.MaxSize, ContentType: o.ContentType, Expires: expires.Unix()}
 	mp, err := slotMetaPath(tid, stageKey)
 	if err != nil {
@@ -66,7 +68,7 @@ func (s *Store) uploadURL(ctx context.Context, tid core.TenantID, stageKey strin
 	}
 	opts := &blob.SignedURLOptions{Method: http.MethodPut, Expiry: o.TTL, ContentType: o.ContentType}
 	u, err := s.bucket.SignedURL(ctx, sp, opts)
-	if err != nil {
+	if err != nil && o.ContentType != "" && gcerrors.Code(err) == gcerrors.Unimplemented {
 		opts.ContentType = ""
 		u, err = s.bucket.SignedURL(ctx, sp, opts)
 	}
@@ -94,6 +96,9 @@ func (s *Store) Commit(ctx context.Context, stagingKey string) (string, error) {
 		return "", core.NewError(core.CodeInvalidArgument, "malformed staging key", nil)
 	}
 	s.maybeSweep(ctx)
+	unlock := s.stageLocks.lock(stageLockKey(tid, stagingKey))
+	defer unlock()
+
 	meta, slotOK, err := s.readSlot(ctx, tid, stagingKey)
 	if err != nil {
 		return "", err
@@ -104,9 +109,11 @@ func (s *Store) Commit(ctx context.Context, stagingKey string) (string, error) {
 	if meta.expired(s.clock.Now()) {
 		return "", core.NewError(core.CodeNotFound, "staging key not found", nil)
 	}
-	if spent, err := s.commitRecordExists(ctx, tid, stagingKey); err != nil {
+	spent, err := s.commitRecordExists(ctx, tid, stagingKey)
+	if err != nil {
 		return "", err
-	} else if spent {
+	}
+	if spent {
 		return "", core.NewError(core.CodeNotFound, "staging key not found", nil)
 	}
 	stagePath, err := stageObjectPath(tid, stagingKey)
@@ -115,32 +122,31 @@ func (s *Store) Commit(ctx context.Context, stagingKey string) (string, error) {
 	}
 	r, err := s.bucket.NewReader(ctx, stagePath, nil)
 	if err != nil {
-		if gcerr := mapError(err); gcerr != nil && core.CodeOf(gcerr) == core.CodeNotFound {
+		if isNotFoundBucketErr(err) {
 			return "", core.NewError(core.CodeNotFound, "staging key not found", nil)
 		}
 		return "", mapError(err)
 	}
 	defer func() { _ = r.Close() }()
-	attrs, err := s.bucket.Attributes(ctx, stagePath)
-	if err != nil {
-		return "", mapError(err)
-	}
-	objCT := serveContentType("", attrs.ContentType)
+	objCT := serveContentType("", r.ContentType())
 	if objCT != meta.ContentType {
-		_ = s.spendFailedCommit(ctx, tid, stagingKey, stagePath)
+		if err := s.spendFailedCommit(ctx, tid, stagingKey, stagePath); err != nil {
+			return "", mapError(err)
+		}
 		return "", core.NewError(core.CodeInvalidArgument, "staged content type mismatch", nil)
 	}
 	h := sha256.New()
-	limited := io.LimitReader(r, meta.Max+1)
+	limited := io.LimitReader(r, readLimit(meta.Max))
 	n, err := io.Copy(h, limited)
 	if err != nil {
 		return "", mapCommitStoreErr(err)
 	}
 	if n > meta.Max {
-		_ = s.spendFailedCommit(ctx, tid, stagingKey, stagePath)
+		if err := s.spendFailedCommit(ctx, tid, stagingKey, stagePath); err != nil {
+			return "", mapError(err)
+		}
 		return "", core.NewError(core.CodeInvalidArgument, "staged object over maximum size", nil)
 	}
-	// Re-read for Put after size check consumed the reader.
 	r2, err := s.bucket.NewReader(ctx, stagePath, nil)
 	if err != nil {
 		return "", mapCommitStoreErr(err)
@@ -177,25 +183,25 @@ func (s *Store) readSlot(ctx context.Context, tid core.TenantID, stageKey string
 	if err != nil {
 		return slotMeta{}, false, err
 	}
-	ok, err := s.bucket.Exists(ctx, mp)
-	if err != nil {
-		return slotMeta{}, false, mapError(err)
-	}
-	if !ok {
-		return slotMeta{}, false, nil
-	}
 	rd, err := s.bucket.NewReader(ctx, mp, nil)
 	if err != nil {
+		if isNotFoundBucketErr(err) {
+			return slotMeta{}, false, nil
+		}
 		return slotMeta{}, false, mapError(err)
 	}
-	b, err := io.ReadAll(rd)
-	_ = rd.Close()
+	defer func() { _ = rd.Close() }()
+	lr := io.LimitReader(rd, maxSlotMetaBytes+1)
+	b, err := io.ReadAll(lr)
 	if err != nil {
 		return slotMeta{}, false, mapError(err)
+	}
+	if int64(len(b)) > maxSlotMetaBytes {
+		return slotMeta{}, false, core.NewError(core.CodeUnavailable, "corrupt staging slot", nil)
 	}
 	meta, err := decodeSlotMeta(b)
 	if err != nil {
-		return slotMeta{}, false, mapError(err)
+		return slotMeta{}, false, core.NewError(core.CodeUnavailable, "corrupt staging slot", nil)
 	}
 	return meta, true, nil
 }
@@ -205,18 +211,25 @@ func (s *Store) commitRecordExists(ctx context.Context, tid core.TenantID, stage
 	if err != nil {
 		return false, err
 	}
-	return s.bucket.Exists(ctx, cp)
+	ok, err := s.bucket.Exists(ctx, cp)
+	if err != nil {
+		return false, mapError(err)
+	}
+	return ok, nil
 }
 
 func (s *Store) spendFailedCommit(ctx context.Context, tid core.TenantID, stageKey, stagePath string) error {
-	if err := s.bucket.Delete(ctx, stagePath); err != nil && core.CodeOf(mapError(err)) != core.CodeNotFound {
+	if err := s.bucket.Delete(ctx, stagePath); err != nil && !isNotFoundBucketErr(err) {
 		return mapError(err)
 	}
 	cp, err := commitRecordPath(tid, stageKey)
 	if err != nil {
 		return err
 	}
-	return s.bucket.WriteAll(ctx, cp, nil, nil)
+	if err := s.bucket.WriteAll(ctx, cp, nil, nil); err != nil {
+		return mapError(err)
+	}
+	return nil
 }
 
 func (s *Store) finishSuccessfulCommit(ctx context.Context, tid core.TenantID, stageKey, stagePath string) error {
@@ -227,7 +240,7 @@ func (s *Store) finishSuccessfulCommit(ctx context.Context, tid core.TenantID, s
 	if err := s.bucket.WriteAll(ctx, cp, nil, nil); err != nil {
 		return mapError(err)
 	}
-	if err := s.bucket.Delete(ctx, stagePath); err != nil {
+	if err := s.bucket.Delete(ctx, stagePath); err != nil && !isNotFoundBucketErr(err) {
 		return mapError(err)
 	}
 	return nil

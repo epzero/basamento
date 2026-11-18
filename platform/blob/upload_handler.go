@@ -1,6 +1,7 @@
 package blob
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -37,7 +38,6 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	h.Store.maybeSweep(r.Context())
 	tenant, stageKey, ok := parseUploadPath(r.URL.Path)
 	if !ok {
 		w.WriteHeader(http.StatusForbidden)
@@ -75,6 +75,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	h.Store.maybeSweep(r.Context())
 	tid := core.TenantID(tenant)
 	meta, slotOK, err := h.Store.readSlot(r.Context(), tid, stageKey)
 	if err != nil {
@@ -113,9 +114,13 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if err := h.writeStaged(r, stagePath, meta.ContentType, max); err != nil {
+	if err := h.writeStaged(r.Context(), tid, stageKey, stagePath, meta.ContentType, max, r.Body); err != nil {
 		if errors.Is(err, errBodyTooLarge) {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		if errors.Is(err, errSlotRefused) {
+			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -124,34 +129,55 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-var errBodyTooLarge = core.NewError(core.CodeInvalidArgument, "body too large", nil)
+var (
+	errBodyTooLarge = core.NewError(core.CodeInvalidArgument, "body too large", nil)
+	errSlotRefused  = errors.New("staging slot refused")
+)
 
-func (h *UploadHandler) writeStaged(r *http.Request, stagePath, contentType string, max int64) error {
-	ctx := r.Context()
-	_ = h.Store.bucket.Delete(ctx, stagePath)
+// writeStaged reads the body without opening the staged object, then takes the
+// per-slot lock and publishes only while the slot is still open (REQ-BLOB-025,
+// REQ-BLOB-026). Bounded uploads buffer at most max+1 bytes in memory.
+func (h *UploadHandler) writeStaged(ctx context.Context, tid core.TenantID, stageKey, stagePath, contentType string, max int64, body io.Reader) error {
+	var buf bytes.Buffer
+	limited := io.LimitReader(body, readLimit(max))
+	n, err := io.Copy(&buf, limited)
+	if err != nil {
+		return mapError(err)
+	}
+	if n > max {
+		return errBodyTooLarge
+	}
+
+	unlock := h.Store.stageLocks.lock(stageLockKey(tid, stageKey))
+	defer unlock()
+
+	meta, ok, err := h.Store.readSlot(ctx, tid, stageKey)
+	if err != nil {
+		return err
+	}
+	if !ok || meta.expired(h.Store.clock.Now()) || meta.ContentType != contentType || meta.Max != max {
+		return errSlotRefused
+	}
+	spent, err := h.Store.commitRecordExists(ctx, tid, stageKey)
+	if err != nil {
+		return err
+	}
+	if spent {
+		return errSlotRefused
+	}
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w, err := h.Store.bucket.NewWriter(wctx, stagePath, &blob.WriterOptions{ContentType: contentType})
 	if err != nil {
-		return err
+		return mapError(err)
 	}
-	limited := io.LimitReader(r.Body, max+1)
-	n, err := io.Copy(w, limited)
-	if err != nil {
+	if _, err := io.Copy(w, &buf); err != nil {
 		cancel()
 		_ = w.Close()
-		_ = h.Store.bucket.Delete(ctx, stagePath)
-		return err
-	}
-	if n > max {
-		cancel()
-		_ = w.Close()
-		_ = h.Store.bucket.Delete(ctx, stagePath)
-		return errBodyTooLarge
+		return mapError(err)
 	}
 	if err := w.Close(); err != nil {
-		_ = h.Store.bucket.Delete(ctx, stagePath)
-		return err
+		return mapError(err)
 	}
 	return nil
 }
