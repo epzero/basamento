@@ -35,7 +35,7 @@ func escapeJSONPtrToken(tok string) string {
 	return strings.ReplaceAll(tok, "/", "~1")
 }
 
-// ErrLocation returns the instance or schema location from a platform error, if any.
+// ErrLocation returns the instance JSON Pointer from a platform error, if any.
 func ErrLocation(err error) string {
 	var pe *core.Error
 	if !errors.As(err, &pe) || pe.Details == nil {

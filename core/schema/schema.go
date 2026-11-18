@@ -26,6 +26,9 @@ func (s *Set) Add(id string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return invalidArg("empty schema", nil)
 	}
+	if s.schemas == nil {
+		s.schemas = map[string]json.RawMessage{}
+	}
 	s.schemas[id] = append(json.RawMessage(nil), raw...)
 	return nil
 }
