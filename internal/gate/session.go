@@ -39,6 +39,15 @@ type Handoff struct {
 	Note     string `json:"note,omitempty"`
 }
 
+// handoffFrom is the hand-off the next session should see from s: its own
+// status when set, otherwise the chain stored in Previous.
+func handoffFrom(s Session) *Handoff {
+	if s.Status != "" {
+		return &Handoff{Identity: s.Identity, Status: s.Status, Note: s.Note}
+	}
+	return s.Previous
+}
+
 // Statuses a session may end with (docs/engineering/agent-workflow.md §2.1).
 var statuses = []string{"spec-review-requested", "spec-changes-requested", "spec-approved",
 	"code-review-requested", "code-changes-requested", "ready-to-integrate", "needs-architect", "needs-human"}
@@ -257,7 +266,7 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 			return reviewSnapshot(top, linked, s, prev.Branch, id.Instance)
 		case ok:
 			s.Worktree, s.Branch = prev.Worktree, prev.Branch
-			s.Previous = &Handoff{Identity: prev.Identity, Status: prev.Status, Note: prev.Note}
+			s.Previous = handoffFrom(prev)
 			if err := fastForwardBranch(s.Worktree, s.Branch); err != nil {
 				return Session{}, err
 			}
@@ -268,7 +277,7 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 					return reviewSnapshot(top, false, s, cur.Branch, id.Instance)
 				}
 				s.Worktree, s.Branch = top, cur.Branch
-				s.Previous = &Handoff{Identity: cur.Identity, Status: cur.Status, Note: cur.Note}
+				s.Previous = handoffFrom(cur)
 				if err := fastForwardBranch(top, s.Branch); err != nil {
 					return Session{}, err
 				}
@@ -344,7 +353,7 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 			return Session{}, err
 		}
 		if cur, readErr := readSession(s.Worktree); readErr == nil && cur.Branch == branch {
-			s.Previous = &Handoff{Identity: cur.Identity, Status: cur.Status, Note: cur.Note}
+			s.Previous = handoffFrom(cur)
 		}
 		if err := fastForwardBranch(s.Worktree, branch); err != nil {
 			return Session{}, err

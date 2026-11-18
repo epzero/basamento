@@ -217,6 +217,34 @@ func TestReleaseAfterASquashMerge(t *testing.T) {
 	}
 }
 
+func TestHandoffChainsThroughIntermediateSession(t *testing.T) {
+	repo := gitRepo(t)
+	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L5-04"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetStatus(author.Worktree, "", "spec-review-requested", "review EXPR-099"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L5-04"}); err != nil {
+		t.Fatal(err)
+	}
+	impl, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L5-04"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := impl.Previous; p == nil || p.Identity != author.Identity || p.Note != "review EXPR-099" {
+		t.Fatalf("main checkout: want author hand-off, got %+v", p)
+	}
+	inside, err := NewSession(impl.Worktree, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L5-04"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := inside.Previous; p == nil || p.Note != "review EXPR-099" {
+		t.Fatalf("inside worktree: want author hand-off, got %+v", p)
+	}
+}
+
 func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
 	repo := gitRepo(t)
 	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L4-01"})
