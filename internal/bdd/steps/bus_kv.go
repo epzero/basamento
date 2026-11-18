@@ -68,7 +68,9 @@ func registerBusKV(sc *godog.ScenarioContext) {
 			w.lastErr = err
 			return nil
 		}
-		_, _, err := w.bus.Get(ctx, key)
+		readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		_, _, err := w.bus.Get(readCtx, key)
 		w.lastErr = err
 		return nil
 	})

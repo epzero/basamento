@@ -40,7 +40,11 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^the bus server is stopped$`, func(ctx context.Context) error {
-		world(ctx).Bus.stopServer()
+		w := world(ctx).Bus
+		if err := w.ensureOpen(ctx); err != nil {
+			return err
+		}
+		w.stopServer()
 		return nil
 	})
 
@@ -62,8 +66,11 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		for _, l := range labels {
+		for i, l := range labels {
 			if err := w.publish(ctx, subject, l, nil); err != nil {
+				return err
+			}
+			if err := w.paceReaders(ctx, i+1); err != nil {
 				return err
 			}
 		}
@@ -118,7 +125,7 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 				return err
 			}
 		}
-		return nil
+		return w.paceReaders(ctx, pubs*each)
 	})
 
 	sc.Step(`^the bus sequences of "([^"]*)", "([^"]*)" and "([^"]*)" strictly increase$`, func(ctx context.Context, a, b, c string) error {
@@ -200,6 +207,10 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 			return fmt.Errorf("no subscription")
 		}
 		sub.cancel()
+		_, ok := <-sub.ch
+		if ok {
+			return fmt.Errorf("channel open after cancel")
+		}
 		return nil
 	})
 
@@ -343,7 +354,7 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 		}
 		w := world(ctx).Bus
 		sub := w.subs["fast"]
-		if err := waitSubMsgs(ctx, sub, len(want)); err != nil {
+		if err := w.waitSubMsgs(ctx, sub, len(want)); err != nil {
 			return err
 		}
 		w.mu.Lock()
@@ -376,11 +387,12 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 			}
 		}
 		select {
-		case _, more := <-sub.ch:
-			if more {
+		case <-ctx.Done():
+			return ctx.Err()
+		case _, ok := <-sub.ch:
+			if ok {
 				return fmt.Errorf("slow still delivering")
 			}
-		default:
 		}
 		return nil
 	})
@@ -403,10 +415,10 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 	sc.Step(`^s1 and s2 each receive the same (\d+) messages in the same order$`, func(ctx context.Context, n int) error {
 		w := world(ctx).Bus
 		s1, s2 := w.subs["s1"], w.subs["s2"]
-		if err := waitSubMsgs(ctx, s1, n); err != nil {
+		if err := w.waitSubMsgs(ctx, s1, n); err != nil {
 			return err
 		}
-		if err := waitSubMsgs(ctx, s2, n); err != nil {
+		if err := w.waitSubMsgs(ctx, s2, n); err != nil {
 			return err
 		}
 		w.mu.Lock()
