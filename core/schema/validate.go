@@ -62,6 +62,29 @@ func flattenInstanceErrors(err *js.ValidationError) []Violation {
 				})
 			}
 			return
+		case *kind.FalseSchema:
+			out = append(out, Violation{
+				Location: instancePtr(e.InstanceLocation),
+				Keyword:  "false",
+				Message:  instanceViolationMessage("false"),
+			})
+			return
+		case *kind.Not:
+			out = append(out, Violation{
+				Location: instancePtr(e.InstanceLocation),
+				Keyword:  "not",
+				Message:  instanceViolationMessage("not"),
+			})
+			return
+		case *kind.DependentRequired:
+			for _, missing := range k.Missing {
+				out = append(out, Violation{
+					Location: ptrJoinTokens(append(e.InstanceLocation, missing)),
+					Keyword:  "dependentRequired",
+					Message:  fmt.Sprintf("missing property %q", missing),
+				})
+			}
+			return
 		default:
 			if len(e.Causes) > 0 {
 				for _, c := range e.Causes {
@@ -73,7 +96,7 @@ func flattenInstanceErrors(err *js.ValidationError) []Violation {
 			if e.ErrorKind != nil {
 				p := e.ErrorKind.KeywordPath()
 				if len(p) > 0 {
-					kw = p[len(p)-1]
+					kw = p[0]
 				}
 			}
 			if kw == "" {
@@ -147,7 +170,7 @@ func collectSchemaViolations(docURL string, err *js.ValidationError) []SchemaVio
 		if loc == "" {
 			loc = keywordPathToSchemaLoc(path)
 		}
-		kw := path[len(path)-1]
+		kw := path[0]
 		out = append(out, SchemaViolation{
 			SchemaLocation: loc,
 			Keyword:        kw,

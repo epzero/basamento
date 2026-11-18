@@ -72,4 +72,16 @@ func stripFormats(s *js.Schema, seen map[*js.Schema]struct{}) {
 	stripFormats(s.UnevaluatedItems, seen)
 	stripFormats(s.ContentSchema, seen)
 	stripFormats(s.Ref, seen)
+	stripFormats(s.RecursiveRef, seen)
+	if s.DynamicRef != nil {
+		stripFormats(s.DynamicRef.Ref, seen)
+	}
+	if ai, ok := s.AdditionalItems.(*js.Schema); ok {
+		stripFormats(ai, seen)
+	}
+	for _, dep := range s.Dependencies {
+		if sub, ok := dep.(*js.Schema); ok {
+			stripFormats(sub, seen)
+		}
+	}
 }
