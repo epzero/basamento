@@ -378,3 +378,27 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    EXPR-024-01:
+        hash: sha256:45f23123beb5777c55c2aa9b8784c0ff16cef1bf5e20e37059ca6928baab438a
+        reqs:
+            - REQ-EXPR-024
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'Security: $ENV, $__loc__ and $__prog_args expose the process environment, source paths and arguments, and using them would break replay determinism; refusing them is the guard that keeps a mapping pure.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-025-01:
+        hash: sha256:5e8786d98517130a3c3317c57446a7680a50b417c8e3267e125d16984bcea004
+        reqs:
+            - REQ-EXPR-025
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'New behavior: provider fields named like reserved builtins stay readable as data; no approved scenario text changed, so no tier above P2.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
