@@ -29,6 +29,13 @@ type testBucket struct {
 	data     map[string][]byte
 	failAt   int
 	failCode gcerrors.ErrorCode
+	onOp     func(op, key string)
+}
+
+func (b *testBucket) fireOp(op, key string) {
+	if b.onOp != nil {
+		b.onOp(op, key)
+	}
 }
 
 func newTestBucket(failAt int, code gcerrors.ErrorCode) *testBucket {
@@ -109,6 +116,7 @@ func (r *testReader) Attributes() *driver.ReaderAttributes { return &driver.Read
 func (r *testReader) As(any) bool { return false }
 
 func (b *testBucket) NewTypedWriter(ctx context.Context, key, contentType string, _ *driver.WriterOptions) (driver.Writer, error) {
+	b.fireOp("NewTypedWriter", key)
 	w := &testWriter{ctx: ctx, bucket: b, key: key}
 	if b.failAt > 0 {
 		return &failOnKWriter{ctx: ctx, inner: w, failAt: b.failAt, code: b.failCode}, nil
@@ -191,6 +199,7 @@ func (w *failOnKWriter) Close() error {
 }
 
 func (b *testBucket) Copy(_ context.Context, dst, src string, _ *driver.CopyOptions) error {
+	b.fireOp("Copy", dst)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	p, ok := b.data[src]
@@ -202,6 +211,7 @@ func (b *testBucket) Copy(_ context.Context, dst, src string, _ *driver.CopyOpti
 }
 
 func (b *testBucket) Delete(_ context.Context, key string, _ *driver.DeleteOptions) error {
+	b.fireOp("Delete", key)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, ok := b.data[key]; !ok {
@@ -217,13 +227,18 @@ func (b *testBucket) SignedURL(context.Context, string, *driver.SignedURLOptions
 
 func (b *testBucket) Close() error { return nil }
 
-func openStoreFailWriteAt(t *testing.T, failAt int, code gcerrors.ErrorCode) *Store {
+func openStoreWithTestBucket(t *testing.T, b *testBucket) *Store {
 	t.Helper()
-	drv := newTestBucket(failAt, code)
-	bkt := blob.NewBucket(drv)
+	bkt := blob.NewBucket(b)
 	st := &Store{bucket: bkt}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
+}
+
+func openStoreFailWriteAt(t *testing.T, failAt int, code gcerrors.ErrorCode) *Store {
+	t.Helper()
+	drv := newTestBucket(failAt, code)
+	return openStoreWithTestBucket(t, drv)
 }
 
 func openStoreBlockWriteUntilCancel(t *testing.T, failAt int) *Store {
@@ -241,6 +256,7 @@ type blockFailBucket struct {
 }
 
 func (b *blockFailBucket) NewTypedWriter(ctx context.Context, key, contentType string, _ *driver.WriterOptions) (driver.Writer, error) {
+	b.fireOp("NewTypedWriter", key)
 	w := &testWriter{ctx: ctx, bucket: b.testBucket, key: key}
 	return &failOnKWriter{ctx: ctx, inner: w, failAt: b.failAt, block: true}, nil
 }

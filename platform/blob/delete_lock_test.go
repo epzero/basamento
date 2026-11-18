@@ -10,6 +10,8 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// TestDeleteSerializesWithPut is a stress smoke test under random interleaving; it does not
+// reproduce the Delete/Put sidecar race (see TestPutDeleteHoldPerKeyLock).
 func TestDeleteSerializesWithPut(t *testing.T) {
 	t.Parallel()
 	st, _, dir := openFileStore(t)
