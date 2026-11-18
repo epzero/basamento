@@ -3,10 +3,8 @@ package schema
 import (
 	"bytes"
 	"math"
-	"math/big"
 	"sort"
 	"strconv"
-	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -29,6 +27,7 @@ type canonParser struct {
 	data  []byte
 	i     int
 	stack []string
+	depth int
 }
 
 func (p *canonParser) loc() string {
@@ -36,6 +35,9 @@ func (p *canonParser) loc() string {
 }
 
 func (p *canonParser) parseValue() ([]byte, error) {
+	if p.depth > maxNestingDepth {
+		return nil, invalidArg("nesting depth exceeded", map[string]any{"location": p.loc()})
+	}
 	p.skipSpace()
 	if p.i >= len(p.data) {
 		return nil, invalidArg("unexpected end of JSON", map[string]any{"location": p.loc()})
@@ -75,6 +77,8 @@ func (p *canonParser) parseObject() ([]byte, error) {
 	if p.data[p.i] != '{' {
 		return nil, invalidArgf("expected object at %s", p.loc())
 	}
+	p.depth++
+	defer func() { p.depth-- }()
 	p.i++
 	p.skipSpace()
 	if p.i < len(p.data) && p.data[p.i] == '}' {
@@ -148,6 +152,8 @@ func (p *canonParser) parseArray() ([]byte, error) {
 	if p.data[p.i] != '[' {
 		return nil, invalidArgf("expected array at %s", p.loc())
 	}
+	p.depth++
+	defer func() { p.depth-- }()
 	p.i++
 	p.skipSpace()
 	if p.i < len(p.data) && p.data[p.i] == ']' {
@@ -230,6 +236,9 @@ func (p *canonParser) decodeStringContent(raw string, out *[]rune) error {
 	i := 0
 	for i < len(raw) {
 		if raw[i] != '\\' {
+			if raw[i] < 0x20 {
+				return invalidArg("unescaped control character", map[string]any{"location": p.loc()})
+			}
 			r, size := utf8.DecodeRuneInString(raw[i:])
 			if r == utf8.RuneError && size == 1 {
 				return invalidArg("invalid UTF-8", map[string]any{"location": p.loc()})
@@ -361,13 +370,20 @@ func (p *canonParser) parseNumber() ([]byte, error) {
 	start := p.i
 	for p.i < len(p.data) {
 		c := p.data[p.i]
-		if (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E' {
+		if (c >= '0' && c <= '9') || c == '-' || c == '.' || c == 'e' || c == 'E' {
+			p.i++
+			continue
+		}
+		if c == '+' && p.i > start && (p.data[p.i-1] == 'e' || p.data[p.i-1] == 'E') {
 			p.i++
 			continue
 		}
 		break
 	}
 	text := string(p.data[start:p.i])
+	if err := validateJSONNumberString(text); err != nil {
+		return nil, invalidArg("invalid number", map[string]any{"location": p.loc()})
+	}
 	canonical, err := canonicalNumberText(text, p.loc())
 	if err != nil {
 		return nil, err
@@ -376,6 +392,9 @@ func (p *canonParser) parseNumber() ([]byte, error) {
 }
 
 func canonicalNumberText(text, loc string) (string, error) {
+	if !strictNumberSyntax(text) {
+		return "", invalidArg("invalid number", map[string]any{"location": loc})
+	}
 	f, err := strconv.ParseFloat(text, 64)
 	if err != nil || math.IsInf(f, 0) || math.IsNaN(f) {
 		return "", invalidArg("invalid number", map[string]any{"location": loc})
@@ -384,114 +403,6 @@ func canonicalNumberText(text, loc string) (string, error) {
 		return "", invalidArg("number is not an exact IEEE 754 double", map[string]any{"location": loc})
 	}
 	return ecmaNumber(f), nil
-}
-
-func losesFloatPrecision(text string, f float64) bool {
-	text = strings.TrimSpace(text)
-	if math.IsInf(f, 0) || math.IsNaN(f) {
-		return true
-	}
-	if text == ecmaNumber(f) {
-		return false
-	}
-	if strings.ContainsAny(text, "eE") {
-		bf, _, err := big.ParseFloat(text, 10, 256, big.ToNearestEven)
-		if err != nil {
-			return true
-		}
-		f64, _ := bf.Float64()
-		if f64 != f {
-			return true
-		}
-		bfCanon, _, err := big.ParseFloat(ecmaNumber(f), 10, 256, big.ToNearestEven)
-		if err != nil {
-			return true
-		}
-		return bf.Cmp(bfCanon) != 0
-	}
-	if strings.Contains(text, ".") {
-		if text == ecmaNumber(f) {
-			return false
-		}
-		rText, ok := new(big.Rat).SetString(text)
-		if !ok {
-			return true
-		}
-		rF := new(big.Rat).SetFloat64(f)
-		if rText.Cmp(rF) != 0 {
-			return true
-		}
-		tTrim := strings.TrimRight(strings.TrimRight(text, "0"), ".")
-		eTrim := strings.TrimRight(strings.TrimRight(ecmaNumber(f), "0"), ".")
-		return tTrim != eTrim
-	}
-	if isIntegerLiteral(text) {
-		bi, ok := new(big.Int).SetString(text, 10)
-		if !ok {
-			return true
-		}
-		if !bi.IsInt64() {
-			return true
-		}
-		if bi.Int64() != int64(f) {
-			return true
-		}
-		return false
-	}
-	rText, ok := new(big.Rat).SetString(text)
-	if !ok {
-		return true
-	}
-	rF := new(big.Rat).SetFloat64(f)
-	return rText.Cmp(rF) != 0
-}
-
-func isIntegerLiteral(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
-	}
-	if text[0] == '-' || text[0] == '+' {
-		text = text[1:]
-	}
-	if text == "" {
-		return false
-	}
-	for _, c := range text {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// ecmaNumber formats f as ECMAScript would after RFC 8785 shortest form rules.
-func ecmaNumber(f float64) string {
-	if math.Signbit(f) && f == 0 {
-		f = 0
-	}
-	if !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) && math.Abs(f) <= 9007199254740992 {
-		return strconv.FormatFloat(f, 'f', 0, 64)
-	}
-	abs := math.Abs(f)
-	if f != 0 && abs < 1 && abs >= 0.000001 {
-		s := strconv.FormatFloat(f, 'f', -1, 64)
-		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
-		return s
-	}
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	// ECMAScript uses lowercase e and includes + in positive exponents with 2+ digits.
-	if strings.ContainsAny(s, "eE") {
-		s = strings.Replace(s, "E", "e", 1)
-		parts := strings.SplitN(s, "e", 2)
-		exp, _ := strconv.Atoi(parts[1])
-		if exp > 0 {
-			s = parts[0] + "e+" + strconv.Itoa(exp)
-		} else {
-			s = parts[0] + "e" + strconv.Itoa(exp)
-		}
-	}
-	return s
 }
 
 func utf16Less(a, b string) bool {

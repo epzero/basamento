@@ -1,6 +1,9 @@
 package schema
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCanonicalizeWhitespaceAndSort(t *testing.T) {
 	in := []byte(`{
@@ -29,12 +32,21 @@ func TestCanonicalizeNumberShortest(t *testing.T) {
 }
 
 func TestCanonicalizeNumberExamples(t *testing.T) {
+	// RFC 8785 appendix B number examples.
 	cases := map[string]string{
-		"0.000001":         "0.000001",
-		"1E-7":             "1e-7",
-		"0.1":              "0.1",
-		"9007199254740992": "9007199254740992",
-		"-1.50":            "-1.5",
+		"0.000001":                      "0.000001",
+		"1E-7":                          "1e-7",
+		"1.0":                           "1",
+		"1.500":                         "1.5",
+		"2.22":                          "2.22",
+		"1e+1":                          "10",
+		"-0.0":                          "0",
+		"-0.0000000001":                 "-1e-10",
+		"0.0000000001":                  "1e-10",
+		"100000000000000000000":         "1e+20",
+		"9007199254740992":              "9007199254740992",
+		"-1.50":                         "-1.5",
+		"0.1":                           "0.1",
 	}
 	for in, want := range cases {
 		got, err := Canonicalize([]byte(in))
@@ -74,6 +86,42 @@ func TestCanonicalizePrefixNoPanic(t *testing.T) {
 				t.Fatalf("prefix %q: want error", doc[:i])
 			}
 		}()
+	}
+}
+
+func TestCanonicalizeAcceptsFixedDecimalForms(t *testing.T) {
+	for _, n := range []string{"10.0", "0.0", "-0.0", "0.10"} {
+		got, err := Canonicalize([]byte(n))
+		if err != nil {
+			t.Fatalf("%s: %v", n, err)
+		}
+		t.Logf("%s -> %s", n, got)
+	}
+}
+
+func TestCanonicalizeRejectsNonJSONNumberSyntax(t *testing.T) {
+	for _, n := range []string{"+1", "01"} {
+		_, err := Canonicalize([]byte(n))
+		if err == nil {
+			t.Fatalf("%s: want error", n)
+		}
+	}
+}
+
+func TestCanonicalizeScientificFixedBoundary(t *testing.T) {
+	got, err := Canonicalize([]byte(`1e16`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "10000000000000000" {
+		t.Fatalf("1e16 should be fixed notation, got %q", got)
+	}
+	got2, err := Canonicalize([]byte(`9007199254740994`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got2), "e") {
+		t.Fatalf("9007199254740994 should be fixed notation, got %q", got2)
 	}
 }
 
