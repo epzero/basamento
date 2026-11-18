@@ -14,6 +14,8 @@ type liveSubscription struct {
 	replayThrough uint64
 	mu            sync.Mutex
 	ended         bool
+	senders       sync.WaitGroup
+	done          chan struct{}
 	cc            jetstream.ConsumeContext
 	cancel        context.CancelFunc
 	onEnd         func()
@@ -24,6 +26,7 @@ func newLiveSubscription(buf int, replayThrough uint64, cancel context.CancelFun
 	return &liveSubscription{
 		ch:            make(chan platform.Message, buf),
 		replayThrough: replayThrough,
+		done:          make(chan struct{}),
 		cancel:        cancel,
 		onEnd:         onEnd,
 	}
@@ -56,10 +59,13 @@ func (s *liveSubscription) deliverReplay(ctx context.Context, msg platform.Messa
 		s.mu.Unlock()
 		return
 	}
+	s.senders.Add(1)
 	s.mu.Unlock()
+	defer s.senders.Done()
 	select {
 	case s.ch <- msg:
 	case <-ctx.Done():
+	case <-s.done:
 	}
 }
 
@@ -77,24 +83,27 @@ func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message
 	case s.ch <- msg:
 		s.mu.Unlock()
 	default:
-		s.ended = true
-		cc := s.cc
-		close(s.ch)
 		s.mu.Unlock()
-		s.finish(cc)
+		s.terminate()
 	}
 }
 
 func (s *liveSubscription) end() {
+	s.terminate()
+}
+
+func (s *liveSubscription) terminate() {
 	s.mu.Lock()
 	if s.ended {
 		s.mu.Unlock()
 		return
 	}
 	s.ended = true
+	close(s.done)
 	cc := s.cc
-	close(s.ch)
 	s.mu.Unlock()
+	s.senders.Wait()
+	close(s.ch)
 	s.finish(cc)
 }
 
