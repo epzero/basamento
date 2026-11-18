@@ -239,6 +239,33 @@ func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
 	}
 }
 
+func TestCodeReviewerInsideIssueWorktreeGetsSnapshot(t *testing.T) {
+	repo := gitRepo(t)
+	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L5-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, author.Worktree, "spec.txt")
+	cr, err := NewSession(author.Worktree, NewSessionRequest{Harness: "antigravity", Role: RoleCodeReviewer, Issue: "WP-L5-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cr.Branch != "" || cr.Reviews != author.Branch || cr.Worktree == author.Worktree {
+		t.Fatalf("reviewer inside issue worktree must get a detached snapshot: %+v", cr)
+	}
+	if _, err := os.Stat(filepath.Join(cr.Worktree, "spec.txt")); err != nil {
+		t.Fatalf("snapshot should contain branch commits: %v", err)
+	}
+	cur, err := readSession(author.Worktree)
+	if err != nil || cur.Branch != author.Branch || cur.Worktree != author.Worktree {
+		t.Fatalf("author worktree session must be unchanged: %+v, %v", cur, err)
+	}
+	abbref, err := git(author.Worktree, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || abbref != author.Branch {
+		t.Fatalf("author worktree must stay on branch %s, on %s", author.Branch, abbref)
+	}
+}
+
 func TestFastForwardSkipsUnpushedBranch(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")

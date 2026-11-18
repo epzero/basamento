@@ -241,20 +241,19 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		case ok:
 			s.Worktree, s.Branch = prev.Worktree, prev.Branch
 			s.Previous = &Handoff{Identity: prev.Identity, Status: prev.Status, Note: prev.Note}
-			if id.Role != RoleCodeReviewer {
-				if err := fastForwardBranch(s.Worktree, s.Branch); err != nil {
-					return Session{}, err
-				}
+			if err := fastForwardBranch(s.Worktree, s.Branch); err != nil {
+				return Session{}, err
 			}
 			return s, writeSession(s)
 		case linked:
 			if cur, err := readSession(top); err == nil && cur.Issue == r.Issue && cur.Branch != "" {
+				if id.Role == RoleCodeReviewer {
+					return reviewSnapshot(top, false, s, cur.Branch, id.Instance)
+				}
 				s.Worktree, s.Branch = top, cur.Branch
 				s.Previous = &Handoff{Identity: cur.Identity, Status: cur.Status, Note: cur.Note}
-				if id.Role != RoleCodeReviewer {
-					if err := fastForwardBranch(top, s.Branch); err != nil {
-						return Session{}, err
-					}
+				if err := fastForwardBranch(top, s.Branch); err != nil {
+					return Session{}, err
 				}
 				return s, writeSession(s)
 			}
