@@ -27,7 +27,11 @@ func (a *sortedAdapter) NativeToValue(value any) ref.Val {
 	case map[string]any:
 		return &sortedStringMap{adapter: a, data: v}
 	case map[any]any:
-		return a.inner.NativeToValue(v)
+		entries, err := nativeAnyMapEntries(a, v)
+		if err != nil {
+			return types.NewErrFromString(err.Error())
+		}
+		return newSortedAnyMap(a, entries)
 	default:
 		rv := reflect.ValueOf(value)
 		if rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String {
@@ -233,23 +237,80 @@ type sortedAnyMap struct {
 }
 
 func mapKeysEqual(a, b mapKey) bool {
-	if a.kind != b.kind {
-		return false
+	if a.kind == b.kind {
+		switch a.kind {
+		case keyBool:
+			return a.b == b.b
+		case keyInt:
+			return a.i == b.i
+		case keyUint:
+			return a.u == b.u
+		case keyDouble:
+			return a.d == b.d
+		case keyString:
+			return a.s == b.s
+		default:
+			return false
+		}
 	}
-	switch a.kind {
-	case keyBool:
-		return a.b == b.b
+	return mapKeysCrossEqual(a, b)
+}
+
+func mapKeysCrossEqual(a, b mapKey) bool {
+	ai, aok := mapKeyAsInt64(a)
+	bi, bok := mapKeyAsInt64(b)
+	if aok && bok {
+		return ai == bi
+	}
+	ad, adok := mapKeyAsDouble(a)
+	bd, bdok := mapKeyAsDouble(b)
+	if adok && bdok {
+		return ad == bd
+	}
+	return false
+}
+
+func mapKeyAsInt64(k mapKey) (int64, bool) {
+	switch k.kind {
 	case keyInt:
-		return a.i == b.i
+		return k.i, true
 	case keyUint:
-		return a.u == b.u
+		if k.u <= uint64(math.MaxInt64) {
+			return int64(k.u), true
+		}
+		return 0, false
 	case keyDouble:
-		return a.d == b.d
-	case keyString:
-		return a.s == b.s
+		i, ok := float64IntegralInt64(k.d)
+		return i, ok
 	default:
-		return false
+		return 0, false
 	}
+}
+
+func mapKeyAsDouble(k mapKey) (float64, bool) {
+	switch k.kind {
+	case keyDouble:
+		return k.d, true
+	case keyInt:
+		return float64(k.i), true
+	case keyUint:
+		return float64(k.u), true
+	default:
+		return 0, false
+	}
+}
+
+func nativeAnyMapEntries(a *sortedAdapter, m map[any]any) ([]sortedEntry, error) {
+	entries := make([]sortedEntry, 0, len(m))
+	for k, v := range m {
+		rv := a.NativeToValue(k)
+		mk, ok := classifyMapKey(rv)
+		if !ok {
+			return nil, fmt.Errorf("unsupported map key type")
+		}
+		entries = append(entries, sortedEntry{key: mk, val: a.NativeToValue(v)})
+	}
+	return entries, nil
 }
 
 func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMap {
@@ -286,8 +347,10 @@ func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntr
 }
 
 func (m *sortedAnyMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
-	if len(m.entries) == 0 {
-		return map[string]any{}, nil
+	if typeDesc == nil || typeDesc == reflect.TypeOf(map[string]any{}) || typeDesc.Kind() == reflect.Interface {
+		if len(m.entries) == 0 {
+			return map[string]any{}, nil
+		}
 	}
 	return nil, fmt.Errorf("type conversion error")
 }
@@ -297,22 +360,37 @@ func (m *sortedAnyMap) ConvertToType(typeVal ref.Type) ref.Val {
 }
 
 func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
-	ov, ok := other.(*sortedAnyMap)
-	if !ok {
-		return types.Bool(false)
-	}
-	if len(m.entries) != len(ov.entries) {
-		return types.Bool(false)
-	}
-	for i := range m.entries {
-		if !mapKeysEqual(m.entries[i].key, ov.entries[i].key) {
+	switch ov := other.(type) {
+	case *sortedStringMap:
+		if len(m.entries) != len(ov.data) {
 			return types.Bool(false)
 		}
-		if m.entries[i].val.Equal(ov.entries[i].val) != types.True {
+		for _, e := range m.entries {
+			if e.key.kind != keyString {
+				return types.Bool(false)
+			}
+			v, ok := ov.data[e.key.s]
+			if !ok || e.val.Equal(m.adapter.NativeToValue(v)) != types.True {
+				return types.Bool(false)
+			}
+		}
+		return types.Bool(true)
+	case *sortedAnyMap:
+		if len(m.entries) != len(ov.entries) {
 			return types.Bool(false)
 		}
+		for i := range m.entries {
+			if !mapKeysEqual(m.entries[i].key, ov.entries[i].key) {
+				return types.Bool(false)
+			}
+			if m.entries[i].val.Equal(ov.entries[i].val) != types.True {
+				return types.Bool(false)
+			}
+		}
+		return types.Bool(true)
+	default:
+		return types.Bool(false)
 	}
-	return types.Bool(true)
 }
 
 func (m *sortedAnyMap) Type() ref.Type {
@@ -332,7 +410,7 @@ func (m *sortedAnyMap) Find(key ref.Val) (ref.Val, bool) {
 		return types.NewErr("no such key"), false
 	}
 	for _, e := range m.entries {
-		if mapKeysEqual(e.key, mk) {
+		if mapKeysEqual(e.key, mk) || mapKeysCrossEqual(e.key, mk) {
 			return e.val, true
 		}
 	}
