@@ -51,6 +51,7 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 	}
 	adapter := newSortedAdapter(reg)
 	e.adapter = adapter
+	e.registry = reg
 	celOpts := []cel.EnvOption{
 		cel.CustomTypeAdapter(adapter),
 		cel.CustomTypeProvider(reg),
@@ -70,14 +71,9 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 		}
 		e.schemas[v.Name] = st
 		if st.typeName != "" {
-			obj, err := e.objectFromSchema(st, adapter)
-			if err != nil {
+			if _, err := e.objectFromSchema(st, adapter); err != nil {
 				return nil, err
 			}
-			if err := reg.RegisterType(obj); err != nil {
-				return nil, fmt.Errorf("register object type %q: %w", st.typeName, err)
-			}
-			e.objects[st.typeName] = obj
 		}
 		celOpts = append(celOpts, cel.Variable(v.Name, st.celType))
 	}
@@ -86,12 +82,17 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 		return nil, err
 	}
 	e.celEnv = celEnv
-	e.registry = reg
 	return e, nil
 }
 
 func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
-	doc := st.schema
+	return e.buildObjectType(st.schema, st.typeName, st, adapter)
+}
+
+func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
+	if obj := e.objects[typeName]; obj != nil {
+		return obj, nil
+	}
 	props, _ := doc["properties"].(map[string]any)
 	reqSet := map[string]bool{}
 	if req, ok := doc["required"].([]any); ok {
@@ -108,14 +109,31 @@ func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObj
 			continue
 		}
 		visiting := map[string]bool{}
-		if st.rootDef != "" {
+		if st != nil && st.rootDef != "" {
 			visiting[st.rootDef] = true
 		}
-		t, _, err := st.mapSchemaVisit(pm, st.typeName+"."+pname, visiting)
+		t, objName, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
 		if err != nil {
 			return nil, err
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
+		if objName != "" {
+			objSchema := pm
+			if typ, _ := pm["type"].(string); typ == "array" {
+				if items, ok := pm["items"].(map[string]any); ok {
+					objSchema = items
+				}
+			}
+			if _, err := e.buildObjectType(objSchema, objName, st, adapter); err != nil {
+				return nil, err
+			}
+		}
 	}
-	return &jsonObjectType{typeName: st.typeName, fields: fields, adapter: adapter}, nil
+	obj := &jsonObjectType{typeName: typeName, fields: fields, adapter: adapter, objects: e.objects}
+	e.objects[typeName] = obj
+	if err := e.registry.RegisterType(obj); err != nil {
+		delete(e.objects, typeName)
+		return nil, fmt.Errorf("register object type %q: %w", typeName, err)
+	}
+	return obj, nil
 }
