@@ -17,7 +17,7 @@ func LintTemplate(t *Template) []Finding {
 		if seg.Kind == KindStatic && len(VariablesInText(seg.Text)) > 0 {
 			out = append(out, Finding{Rule: "variable_in_static", Severity: "error", Segment: seg.Name})
 		}
-		if (seg.Kind == KindStatic || seg.Kind == KindSemiStatic) {
+		if seg.Kind == KindStatic || seg.Kind == KindSemiStatic {
 			for _, v := range VariablesInText(seg.Text) {
 				if inputTrust[v] != TrustTrusted {
 					out = append(out, Finding{Rule: "untrusted_in_cacheable", Severity: "error", Segment: seg.Name})
