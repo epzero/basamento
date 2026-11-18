@@ -269,7 +269,7 @@ func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
 
 func TestBranchNameValidation(t *testing.T) {
 	repo := gitRepo(t)
-	bad := []string{"main:refs/heads/x", "../../../tmp/x", "-evil", "a b", "ends.lock"}
+	bad := []string{"main:refs/heads/x", "feat/foo", "HEAD", "$(rm)", "-evil", "a b", "ends.lock", "../../../tmp/x"}
 	for _, b := range bad {
 		if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L5-03", Branch: b}); err == nil {
 			t.Fatalf("branch %q must be refused", b)
@@ -279,6 +279,12 @@ func TestBranchNameValidation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(repo), "repo-worktrees", "main:refs/heads/x")); err == nil {
 		t.Fatal("invalid branch must not create a worktree path")
+	}
+	good := []string{"WP-L5-03", "EP0-47-23761f", "main", "branch_name", "a1b2c3"}
+	for _, b := range good {
+		if err := validateBranchName(b); err != nil {
+			t.Fatalf("branch %q should be accepted: %v", b, err)
+		}
 	}
 }
 
@@ -435,6 +441,185 @@ func TestContinueBranchRefusesDiverged(t *testing.T) {
 		t.Fatal("diverged branch must be refused")
 	} else if !strings.Contains(err.Error(), "push your local commits") {
 		t.Fatalf("error must say what to do next: %v", err)
+	}
+}
+
+func TestCodeReviewerRound2SnapshotsPushedHead(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-01-aa0001"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "v1.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	cr1, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-01", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cr1.Worktree, "v1.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, other, "v2.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+
+	cr2, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-01", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cr2.Worktree, "v2.txt")); err != nil {
+		t.Fatalf("round-2 reviewer must snapshot origin head: %v", err)
+	}
+}
+
+func TestContinueBranchRejectsPlainDirectoryReuse(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-02-bb0002"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "x.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-02", Branch: branch}); err == nil {
+		t.Fatal("plain directory must not be reused as a worktree")
+	}
+}
+
+func TestContinueBranchRejectsWorktreeOnOtherBranch(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-03-cc0003"
+	otherBranch := "WP-L6-03-other"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "x.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+	mustGit(t, other, "checkout", "-q", "-b", otherBranch, "main")
+	mustGit(t, other, "push", "-q", "-u", "origin", otherBranch)
+
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	mustGit(t, repo, "worktree", "add", "-b", otherBranch, wt, "main")
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-03", Branch: branch}); err == nil {
+		t.Fatal("worktree on wrong branch must be refused")
+	}
+}
+
+func TestFastForwardRefusesDetachedAtSameSHA(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-04-dd0004"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "x.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	first, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L6-04", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, _ := git(first.Worktree, "rev-parse", "HEAD")
+	mustGit(t, first.Worktree, "checkout", "-q", "--detach", head)
+	commitFile(t, other, "y.txt")
+	mustGit(t, other, "push", "-q", "origin", branch)
+
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-04", Branch: branch}); err == nil {
+		t.Fatal("fast-forward must refuse when checkout is detached")
+	} else if !strings.Contains(err.Error(), "worktree must be on branch") {
+		t.Fatalf("expected branch checkout error, got %v", err)
+	}
+}
+
+func TestForceFetchUpdatesOriginTracking(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "WP-L6-05-ee0005"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "old.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-05", Branch: branch}); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, other, "checkout", "-q", branch)
+	mustGit(t, other, "reset", "-q", "--hard", "main")
+	commitFile(t, other, "rebased.txt")
+	mustGit(t, other, "push", "-q", "--force", "origin", branch)
+
+	// +refspec fetch must succeed; snapshot sees origin after a force-push without ff-resetting locals.
+	cr, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-05", Branch: branch})
+	if err != nil {
+		t.Fatalf("force-pushed origin must be fetchable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cr.Worktree, "rebased.txt")); err != nil {
+		t.Fatalf("reviewer snapshot should track force-pushed origin: %v", err)
+	}
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-05", Branch: branch}); err == nil {
+		t.Fatal("stale local branch after force-push must not fast-forward silently")
+	} else if !strings.Contains(err.Error(), "push your local commits") && !strings.Contains(err.Error(), "resolve the divergence") {
+		t.Fatalf("diverged local branch must refuse: %v", err)
+	}
+}
+
+func TestTagDoesNotShadowReviewSnapshot(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	branch := "v1release"
+	other := filepath.Join(t.TempDir(), "other")
+	mustGit(t, repo, "clone", "-q", remote, other)
+	mustGit(t, other, "checkout", "-q", "-b", branch)
+	commitFile(t, other, "on-branch.txt")
+	mustGit(t, other, "push", "-q", "-u", "origin", branch)
+	branchHead, _ := git(other, "rev-parse", "HEAD")
+	mustGit(t, other, "checkout", "-q", "main")
+	commitFile(t, other, "tagged.txt")
+	mustGit(t, other, "tag", branch)
+	tagSHA, _ := git(other, "rev-parse", branch)
+	if tagSHA == branchHead {
+		t.Fatal("tag and branch should differ for this test")
+	}
+
+	cr, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleCodeReviewer, Issue: "WP-L6-06", Branch: branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapSHA, _ := git(cr.Worktree, "rev-parse", "HEAD")
+	if snapSHA != branchHead {
+		t.Fatalf("snapshot should follow branch ref on origin, not tag %s", tagSHA)
 	}
 }
 
