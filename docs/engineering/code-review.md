@@ -13,9 +13,12 @@ Most review happens before anyone else looks, on the author's machine.
   commands it ran and their output, not a claim that it is done.
 - The author's lead then runs this review (§2 to §4) with its own code
   reviewer sessions, at the depth of the change's tier, and sends the
-  surviving findings back to the implementer. From the second round on the
-  review is incremental (§6): each open finding, and the whole diff since the
-  last reviewed commit.
+  surviving findings back to the implementer. The self-review uses the
+  tier's finders but one verifier per finding, at every tier (§4): the
+  reviewer's own review re-checks every change, at full depth for high risk,
+  so a finding wrongly dropped here gets a second, stronger check before
+  merge. From the second round on the review is incremental (§6): each open
+  finding, and the whole diff since the last reviewed commit.
 - After **three rounds** the lead stops spawning: it reads what is still
   open itself and settles each finding, fixed or dropped with a reason.
 - Only then is the pull request opened. Its description says what the
@@ -60,7 +63,7 @@ ordinary package, a new dependency), never lower it.
 
 | Tier | Typical paths | Depth | Person |
 | --- | --- | --- | --- |
-| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep: five finders, three verifiers per finding, a separate security pass | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
+| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep: five finders, three verifiers per finding in the reviewer's review (one in the self-review, §1), a separate security pass | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
 | **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard: four finders, one verifier per finding | No |
 | **low** | Other docs | Quick: one finder, no verifier | No |
 
@@ -102,7 +105,8 @@ A verifier confirms a finding only with evidence:
 - or a code path it can cite step by step.
 
 A finding survives when a majority of its verifiers confirm it: two of three
-at deep depth, one of one at standard depth. Unconfirmed findings and findings
+in the reviewer's deep review, one of one at standard depth and in every
+self-review. Unconfirmed findings and findings
 only about style, formatting or optional cleanup are dropped without being
 reported, which keeps noise out of the author's way.
 
