@@ -3,12 +3,14 @@ package prompt
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/epzero/basamento/core"
 )
 
-// Registry stores versioned templates.
+// Registry stores versioned templates. A Registry is safe for concurrent use.
 type Registry struct {
+	mu     sync.RWMutex
 	byRef  map[string]*Template
 	byHash map[string]string
 }
@@ -47,6 +49,8 @@ func (r *Registry) Register(t *Template) (*RegisterResult, error) {
 	if len(errs) > 0 {
 		return nil, lintRegisterError(errs)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if existing, ok := r.byRef[ref]; ok {
 		if TemplateContentHash(existing) == TemplateContentHash(t) {
 			return &RegisterResult{Warnings: warns}, nil
@@ -79,6 +83,8 @@ func (r *Registry) Resolve(ref string) (*Template, error) {
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "invalid template reference", nil)
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	key := id + "@" + ver
 	t, ok := r.byRef[key]
 	if !ok {
@@ -89,6 +95,8 @@ func (r *Registry) Resolve(ref string) (*Template, error) {
 
 // VersionCount returns how many versions are registered for id.
 func (r *Registry) VersionCount(id string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	n := 0
 	prefix := id + "@"
 	for k := range r.byRef {
