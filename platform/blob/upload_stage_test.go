@@ -54,7 +54,7 @@ func TestConcurrentCommitOneWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/plain"); err != nil {
+	if err := writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/plain"); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -129,7 +129,7 @@ func TestReplayPUTBlockedWhileCommit403(t *testing.T) {
 	if !ok {
 		t.Fatal("committed blob missing")
 	}
-	ok, _ = st.StagedObjectExists(ctx, "acme", up.StagingKey)
+	ok, _ = stagedObjectExistsForTest(ctx, st, "acme", up.StagingKey)
 	if ok {
 		t.Fatal("staged object remains")
 	}
@@ -173,14 +173,14 @@ func TestSpendFailedCommitSurfacesStoreError(t *testing.T) {
 	if err != nil || !ValidateStagingKey(up.StagingKey) {
 		t.Fatalf("start upload: %v key %q", err, up.StagingKey)
 	}
-	_ = WriteStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
+	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
 	_, err = st.Commit(ctx, up.StagingKey)
 	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("got %v", err)
 	}
 	f.failDeleteStage = false
 	f.failWriteCommit = true
-	_ = WriteStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
+	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
 	_, err = st.Commit(ctx, up.StagingKey)
 	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("write commit record: %v", err)
@@ -344,7 +344,7 @@ func TestHandlerMaxInt64EmptyBodyNotAccepted(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
-	if ok, _ := st.StagedObjectExists(ctx, "acme", up.StagingKey); !ok {
+	if ok, _ := stagedObjectExistsForTest(ctx, st, "acme", up.StagingKey); !ok {
 		t.Fatal("expected empty staged object")
 	}
 	key, err := st.Commit(ctx, up.StagingKey)
@@ -363,7 +363,7 @@ func TestCommitMaxInt64DoesNotTruncate(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := []byte("x")
-	if err := WriteStagedObjectForTest(ctx, st, "acme", up.StagingKey, body, "text/plain"); err != nil {
+	if err := writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, body, "text/plain"); err != nil {
 		t.Fatal(err)
 	}
 	key, err := st.Commit(ctx, up.StagingKey)
@@ -386,9 +386,9 @@ func TestSweepSlotKeepsMetadataWhenStageDeleteFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = WriteStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("x"), "text/plain")
+	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("x"), "text/plain")
 	clock.Advance(2 * time.Minute)
-	if err := st.SweepExpiredStagingSlots(ctx); err == nil {
+	if err := st.runSweep(ctx); err == nil {
 		t.Fatal("want sweep error")
 	}
 	mp, _ := slotMetaPath("acme", up.StagingKey)
@@ -500,7 +500,8 @@ func TestSweepListsStagePrefixOnly(t *testing.T) {
 	hex := ContentKeyOf([]byte("blob"))[len("sha256:"):]
 	_ = st.bucket.WriteAll(context.Background(), "acme/"+hex, []byte("blob"), nil)
 	clock.Advance(2 * time.Hour)
-	if err := st.SweepExpiredStagingSlots(ctx); err != nil {
+	clock.Advance(2 * time.Hour)
+	if err := st.runSweep(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if cb.prefixes < 1 {

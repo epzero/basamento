@@ -22,7 +22,7 @@ func TestSweepCorruptSlotDoesNotBlockExpired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = WriteStagedObjectForTest(ctx, st, "acme", expired.StagingKey, []byte("old"), "text/plain")
+	_ = writeStagedObjectForTest(ctx, st, "acme", expired.StagingKey, []byte("old"), "text/plain")
 	fresh, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 10, ContentType: "text/plain", TTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)
@@ -32,11 +32,11 @@ func TestSweepCorruptSlotDoesNotBlockExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
-	err = st.SweepExpiredStagingSlots(ctx)
+	err = st.runSweep(ctx)
 	if err == nil {
 		t.Fatal("want corrupt slot read error")
 	}
-	ok, _ := st.StagedObjectExists(ctx, "acme", expired.StagingKey)
+	ok, _ := stagedObjectExistsForTest(ctx, st, "acme", expired.StagingKey)
 	if ok {
 		t.Fatal("expired staging object should be swept")
 	}

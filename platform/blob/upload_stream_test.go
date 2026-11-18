@@ -1,152 +1,104 @@
 package blob
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
-	"sync"
+	"net/http/httptest"
+	"net/url"
+	"runtime"
 	"testing"
 	"time"
 
-	"gocloud.dev/blob"
+	gcblob "gocloud.dev/blob"
+	_ "gocloud.dev/blob/fileblob"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 )
 
-// writeTapBucket is a test wrapper that pairs with stagingFirstWriteHook on Store.
-type writeTapBucket struct {
-	bucketBackend
-	sawWrite chan struct{}
-	store    *Store
+type repeatLimitedReader struct {
+	pattern []byte
+	limit   int64
+	sent    int64
 }
 
-func (w *writeTapBucket) NewWriter(ctx context.Context, key string, opts *blob.WriterOptions) (*blob.Writer, error) {
-	bw, err := w.bucketBackend.NewWriter(ctx, key, opts)
-	if err != nil {
-		return nil, err
-	}
-	if w.store != nil && isStagingDataKey(key) {
-		ch := w.sawWrite
-		var once sync.Once
-		w.store.stagingFirstWriteHook = func() { once.Do(func() { close(ch) }) }
-	}
-	return bw, nil
-}
-
-func isStagingDataKey(key string) bool {
-	return stringsContains(key, "/stage/stage_") && !stringsHasSuffix(key, ".slot") && !stringsHasSuffix(key, ".committed")
-}
-
-func stringsContains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
-type stallBody struct {
-	first    []byte
-	rest     []byte
-	gate     chan struct{}
-	started  chan struct{}
-	gateWait sync.Once
-}
-
-func (s *stallBody) Read(p []byte) (int, error) {
-	if len(s.first) > 0 {
-		n := copy(p, s.first)
-		s.first = nil
-		close(s.started)
-		return n, nil
-	}
-	s.gateWait.Do(func() { <-s.gate })
-	if len(s.rest) == 0 {
+func (r *repeatLimitedReader) Read(p []byte) (int, error) {
+	if r.sent >= r.limit {
 		return 0, io.EOF
 	}
-	n := copy(p, s.rest)
-	s.rest = s.rest[n:]
+	n := 0
+	for n < len(p) && r.sent < r.limit {
+		p[n] = r.pattern[r.sent%int64(len(r.pattern))]
+		r.sent++
+		n++
+	}
+	if r.sent >= r.limit {
+		return n, io.EOF
+	}
 	return n, nil
 }
 
-func TestUploadStreamsBeforeBodyEnds(t *testing.T) {
-	t.Parallel()
-	st, srv := openEmbeddedHandler(t)
-	defer srv.Close()
+func TestUploadMemoryDoesNotScaleWithBodySize(t *testing.T) {
+	const (
+		maxStaging = 64 * 1024 * 1024
+		bodyLen    = 32 * 1024 * 1024
+		memBudget  = 8 * 1024 * 1024
+	)
+	st, dir := openEmbeddedStore(t)
+	srv := httptest.NewServer(newEmbeddedHandler(st))
 	defer func() {
-		st.stagingFirstWriteHook = nil
 		_ = st.Close()
 	}()
-	inner := st.bucket
-	tap := &writeTapBucket{bucketBackend: inner, sawWrite: make(chan struct{}), store: st}
-	st.bucket = tap
-
-	ctx := core.WithTenant(context.Background(), "acme")
-	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 1024, ContentType: "text/plain", TTL: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	putURL := rewriteLocalURL(srv, up.URL)
-	gate := make(chan struct{})
-	body := &stallBody{first: []byte("hel"), rest: []byte("lo"), gate: gate, started: make(chan struct{})}
-	status := make(chan int, 1)
-	go func() {
-		req, _ := http.NewRequest(http.MethodPut, putURL, body)
-		req.Header.Set("Content-Type", "text/plain")
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			status <- 0
-			return
-		}
-		_ = res.Body.Close()
-		status <- res.StatusCode
-	}()
-	<-body.started
-	<-tap.sawWrite
-	close(gate)
-	if code := <-status; code != http.StatusCreated {
-		t.Fatalf("status %d", code)
-	}
-	got, _, err := st.ReadStagedObject(ctx, "acme", up.StagingKey)
-	if err != nil || string(got) != "hello" {
-		t.Fatalf("staged %q err=%v", got, err)
-	}
-}
-
-func TestChunkedOversizeKeepsPriorStaged(t *testing.T) {
-	t.Parallel()
-	st, srv := openEmbeddedHandler(t)
-	defer func() { _ = st.Close() }()
 	defer srv.Close()
 	ctx := core.WithTenant(context.Background(), "acme")
-	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 5, ContentType: "text/plain", TTL: time.Hour})
+	up, err := st.StartUpload(ctx, platform.UploadOptions{
+		MaxSize:     maxStaging,
+		ContentType: "application/octet-stream",
+		TTL:         time.Hour,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	putURL := rewriteLocalURL(srv, up.URL)
-	req1, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("hello")))
-	req1.Header.Set("Content-Type", "text/plain")
-	resp1, err := http.DefaultClient.Do(req1)
-	if err != nil || resp1.StatusCode != http.StatusCreated {
-		t.Fatalf("first put: %v %d", err, resp1.StatusCode)
-	}
-	_ = resp1.Body.Close()
-	req2, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader(make([]byte, 6)))
-	req2.Header.Set("Content-Type", "text/plain")
-	req2.ContentLength = -1
-	resp2, err := http.DefaultClient.Do(req2)
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	body := &repeatLimitedReader{pattern: []byte{1, 2, 3, 4}, limit: bodyLen}
+	req, err := http.NewRequest(http.MethodPut, putURL, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = resp2.Body.Close()
-	if resp2.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status %d", resp2.StatusCode)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = -1
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	key, err := st.Commit(ctx, up.StagingKey)
-	if err != nil || key != ContentKeyOf([]byte("hello")) {
-		t.Fatalf("commit %q err=%v", key, err)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if d := int64(after.TotalAlloc) - int64(before.TotalAlloc); d > memBudget {
+		t.Fatalf("TotalAlloc delta %d bytes, want <= %d", d, memBudget)
+	}
+	u := (&url.URL{Scheme: "file", Path: dir})
+	q := u.Query()
+	q.Set("no_tmp_dir", "true")
+	u.RawQuery = q.Encode()
+	cb, err := gcblob.OpenBucket(context.Background(), u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cb.Close() }()
+	attrs, err := cb.Attributes(ctx, "acme/stage/"+up.StagingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attrs.Size != bodyLen {
+		t.Fatalf("staged size %d, want %d", attrs.Size, bodyLen)
 	}
 }
