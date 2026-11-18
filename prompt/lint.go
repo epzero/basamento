@@ -58,11 +58,26 @@ func stripVars(text string) string {
 func LintAssembled(a *Assembled) []Finding {
 	var out []Finding
 	for _, p := range a.Parts {
-		if hasUnpairedDelimiters(p.Text) {
+		if partHasUnpairedDelimiters(p) {
 			out = append(out, Finding{Rule: "unpaired_delimiter", Severity: "error", Segment: p.Name})
 		}
 	}
 	return out
+}
+
+func partHasUnpairedDelimiters(p AssembledPart) bool {
+	if hasUnpairedDelimiters(p.Text) {
+		return true
+	}
+	if p.Kind != KindHistory {
+		return false
+	}
+	for _, h := range p.History {
+		if hasUnpairedDelimiters(h.Text) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasUnpairedDelimiters(text string) bool {
