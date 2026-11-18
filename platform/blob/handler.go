@@ -16,7 +16,15 @@ type URLHandler struct {
 }
 
 func setProxiedHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+}
+
+func setProxiedOKHeaders(w http.ResponseWriter, hex, contentType string) {
+	setProxiedHeaders(w)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+hex+`"`)
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 }
 
 // ServeHTTP implements http.Handler.
@@ -53,7 +61,7 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
 	contentKey := key
-	ctype, err := h.Store.ContentType(ctx, core.TenantID(tenant), contentKey)
+	ctype, err := h.Store.ContentType(ctx, contentKey)
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -68,17 +76,17 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = obj.Close() }()
-	size, err := h.Store.contentLength(ctx, core.TenantID(tenant), contentKey)
+	size, err := h.Store.contentLength(ctx, contentKey)
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	serve := serveContentType(ctype, "")
-	h.respondBody(w, r, obj, size, serve)
+	serve := serveContentType(ctype)
+	h.respondBody(w, r, obj, size, serve, hex)
 }
 
-func (h *URLHandler) respondBody(w http.ResponseWriter, r *http.Request, body io.Reader, size int64, contentType string) {
-	w.Header().Set("Content-Type", contentType)
+func (h *URLHandler) respondBody(w http.ResponseWriter, r *http.Request, body io.Reader, size int64, contentType, hex string) {
+	setProxiedOKHeaders(w, hex, contentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodGet {
@@ -94,7 +102,10 @@ func parseURLPath(p string) (tenant, hex string, ok bool) {
 	if len(parts) != 2 {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	// The HTTP server has already applied path decoding once.
+	tenant = parts[0]
+	hex = parts[1]
+	return tenant, hex, true
 }
 
 // HandlerRoute returns the path prefix kit serve should mount.

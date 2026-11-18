@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,8 @@ func (s *Store) signedProxied(tid core.TenantID, key string, ttl time.Duration) 
 	exp := s.clock.Now().Add(ttl).Unix()
 	sig := signRead(s.signKey, string(tid), hex, exp)
 	base := strings.TrimRight(s.baseURL, "/")
-	return fmt.Sprintf("%s/%s/%s?exp=%d&sig=%s", base, tid, hex, exp, sig), nil
+	seg := url.PathEscape(string(tid))
+	return fmt.Sprintf("%s/%s/%s?exp=%d&sig=%s", base, seg, hex, exp, sig), nil
 }
 
 // signRead computes the proxied read URL HMAC (REQ-BLOB-016).
