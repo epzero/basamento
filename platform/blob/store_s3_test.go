@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/epzero/basamento/core"
-	"github.com/epzero/basamento/platform/blob/s3sim"
+	"github.com/epzero/basamento/internal/bdd/s3sim"
 )
 
 func TestPutHelloS3(t *testing.T) {

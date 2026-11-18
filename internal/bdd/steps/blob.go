@@ -22,9 +22,9 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/internal/bdd/s3sim"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/blob"
-	"github.com/epzero/basamento/platform/blob/s3sim"
 )
 
 type blobWorld struct {
