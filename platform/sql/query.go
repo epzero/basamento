@@ -11,9 +11,12 @@ import (
 )
 
 // Execer runs SQL with dialect-correct placeholders for either the pool or an
-// active transaction when created by Store.InTx. Postgres queries must use ?
-// for bind parameters only (not inside literals); rewrite maps each ? outside
-// literals, comments and dollar-quoted strings to $n in order.
+// active transaction when created by Store.InTx. Repository SQL uses ? on both
+// dialects; on Postgres each ? outside single- and double-quoted text, line and
+// block comments, and dollar-quoted bodies becomes $n in order. Authored $n
+// markers are rejected with invalid_argument. Any ? outside those regions is a
+// bind marker, so Postgres jsonb operators ?, ?|, and ?& cannot appear in SQL;
+// use jsonb_exists, jsonb_exists_any, and jsonb_exists_all instead.
 type Execer struct {
 	db      *sql.DB
 	tx      *sql.Tx
@@ -200,17 +203,6 @@ func (e *Execer) QueryRow(ctx context.Context, q string, args ...any) *Row {
 func ValidateText(s string) error {
 	if strings.ContainsRune(s, 0) {
 		return core.NewError(core.CodeInvalidArgument, "sql: text contains nul", nil)
-	}
-	return nil
-}
-
-func validateArgs(args []any) error {
-	for _, a := range args {
-		if s, ok := a.(string); ok {
-			if err := ValidateText(s); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }

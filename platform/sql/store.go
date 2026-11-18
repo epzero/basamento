@@ -34,9 +34,10 @@ func Open(ctx context.Context, rawURL string, migrations fs.FS) (*Store, error) 
 	}
 	if err := migrateDB(ctx, db, p.dialect, migrations, p.sqlitePath); err != nil {
 		_ = db.Close()
+		mapped := mapExecErr(err)
 		var pe *core.Error
-		if errors.As(err, &pe) {
-			return nil, err
+		if errors.As(mapped, &pe) {
+			return nil, mapped
 		}
 		return nil, wrapOpenErr(p, err)
 	}
@@ -115,7 +116,7 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	return s.db.Close()
+	return mapExecErr(s.db.Close())
 }
 
 // Execer returns the query layer for the store.
@@ -131,9 +132,12 @@ func (s *Store) Dialect() string {
 
 // InTx runs fn inside one transaction on this store. The transaction rolls back
 // when fn returns an error or panics, and commits only when fn returns nil.
-// Nested InTx on the same store returns invalid_argument immediately instead of blocking.
+// A nested InTx on the same store returns invalid_argument when fn passes the
+// ctx InTx injects into each InTx on that store; passing a different ctx will
+// not see the marker and can deadlock on SQLite (one connection). Different
+// stores may nest independently.
 func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Execer) error) (err error) {
-	if ctx.Value(txActiveKey{}) != nil {
+	if ctx.Value(txActiveKey{s}) != nil {
 		return core.NewError(core.CodeInvalidArgument, "sql: nested transaction", nil)
 	}
 	sqlTx, err := s.db.BeginTx(ctx, nil)
@@ -149,7 +153,7 @@ func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Exe
 			_ = sqlTx.Rollback()
 		}
 	}()
-	ctx = context.WithValue(ctx, txActiveKey{}, true)
+	ctx = context.WithValue(ctx, txActiveKey{s}, true)
 	exec := &Execer{db: s.db, tx: sqlTx, dialect: s.dialect}
 	if err = fn(ctx, exec); err != nil {
 		return err
