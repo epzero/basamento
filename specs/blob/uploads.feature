@@ -98,7 +98,8 @@ Feature: Blob upload URLs
     And tenant "globex" starts an upload of at most 1 MiB as "text/plain" with a lifetime of 15 minutes
     And a client with no credentials uploads "hello" as "text/plain" to the upload URL with its tenant replaced by "globex"
     Then the response has status 403 and an empty body
-    And tenant "acme" has no staged object under the staging key of the upload
+    And tenant "acme" has no staged object under the staging key of the first upload
+    And tenant "globex" has no staged object under the staging key of the first upload
 
   @REQ-BLOB-024 @profile:embedded @id:BLOB-024-01
   Scenario: A body of exactly the maximum size is accepted
