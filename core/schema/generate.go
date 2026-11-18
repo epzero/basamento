@@ -8,6 +8,11 @@ import (
 	gjschema "github.com/google/jsonschema-go/jsonschema"
 )
 
+var (
+	byteSliceReflectType  = reflect.TypeOf([]byte(nil))
+	rawMessageReflectType = reflect.TypeOf(json.RawMessage(nil))
+)
+
 // For generates a JSON Schema for T.
 func For[T any]() (*Schema, error) {
 	var z T
@@ -19,7 +24,7 @@ func ForType(t reflect.Type) (*Schema, error) {
 	if path, ok := invalidFieldPath(t); ok {
 		return nil, invalidArg("type has no JSON form", map[string]any{"field": path})
 	}
-	s, err := gjschema.ForType(t, &gjschema.ForOptions{})
+	s, err := gjschema.ForType(t, forOptions(t))
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}
@@ -46,8 +51,10 @@ func asInt(v any) (int, bool) {
 	}
 }
 
-// patchNullTypesInGeneratedSchema walks the generated schema and unions null
-// into slice and string-keyed map types only (not closed struct objects).
+// patchNullTypesInGeneratedSchema walks the generated schema tree and unions null
+// into slice types (except fixed-length [N]T arrays) and open string-keyed map
+// types (additionalProperties true or a schema object). Closed struct objects
+// and the root are never nullable; pointer fields keep generator-assigned null types.
 func patchNullTypesInGeneratedSchema(raw json.RawMessage) json.RawMessage {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -56,9 +63,74 @@ func patchNullTypesInGeneratedSchema(raw json.RawMessage) json.RawMessage {
 	patchSchemaValue(doc, true)
 	out, err := json.Marshal(doc)
 	if err != nil {
+		// Re-marshal can fail on unexpected library shapes; keep the raw schema.
 		return raw
 	}
 	return out
+}
+
+func forOptions(root reflect.Type) *gjschema.ForOptions {
+	ts := map[reflect.Type]*gjschema.Schema{
+		byteSliceReflectType:  byteSliceSchema(),
+		rawMessageReflectType: rawMessageSchema(),
+	}
+	collectAliasByteSliceTypes(root, ts)
+	return &gjschema.ForOptions{TypeSchemas: ts}
+}
+
+func byteSliceSchema() *gjschema.Schema {
+	return &gjschema.Schema{
+		Types:           []string{"null", "string"},
+		ContentEncoding: "base64",
+	}
+}
+
+// rawMessageSchema accepts any JSON value encoding/json may store in RawMessage.
+func rawMessageSchema() *gjschema.Schema {
+	return &gjschema.Schema{}
+}
+
+func collectAliasByteSliceTypes(t reflect.Type, ts map[reflect.Type]*gjschema.Schema) {
+	seen := map[reflect.Type]bool{}
+	var walk func(reflect.Type)
+	walk = func(typ reflect.Type) {
+		for typ.Kind() == reflect.Pointer {
+			typ = typ.Elem()
+		}
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+		if isByteSliceAlias(typ) {
+			ts[typ] = byteSliceSchema().CloneSchemas()
+		}
+		switch typ.Kind() {
+		case reflect.Struct:
+			for _, f := range reflect.VisibleFields(typ) {
+				if f.Anonymous {
+					continue
+				}
+				if jsonName(f) == "" {
+					continue
+				}
+				walk(f.Type)
+			}
+		case reflect.Slice, reflect.Array:
+			walk(typ.Elem())
+		case reflect.Map:
+			walk(typ.Key())
+			walk(typ.Elem())
+		}
+	}
+	walk(t)
+}
+
+func isByteSliceAlias(typ reflect.Type) bool {
+	if typ == byteSliceReflectType || typ == rawMessageReflectType {
+		return false
+	}
+	return typ.Kind() == reflect.Slice && typ.Elem().Kind() == reflect.Uint8 &&
+		typ.Elem().PkgPath() == "" && typ.Elem().Size() == 1
 }
 
 func patchSchemaValue(v any, isRoot bool) {
@@ -108,20 +180,40 @@ func patchTypeNullUnion(pm map[string]any) {
 			pm["type"] = []any{"null", "array"}
 		}
 	case "object":
-		if _, ok := pm["additionalProperties"].(map[string]any); ok {
+		if openMapObject(pm) {
 			pm["type"] = []any{"null", "object"}
 		}
 	}
 }
 
-func invalidFieldPath(t reflect.Type) (string, bool) {
-	return walkInvalidField(t, "")
+func openMapObject(pm map[string]any) bool {
+	ap, ok := pm["additionalProperties"]
+	if !ok {
+		return false
+	}
+	if ap == false {
+		return false
+	}
+	if ap == true {
+		return true
+	}
+	_, isSchema := ap.(map[string]any)
+	return isSchema
 }
 
-func walkInvalidField(t reflect.Type, prefix string) (string, bool) {
+func invalidFieldPath(t reflect.Type) (string, bool) {
+	seen := map[reflect.Type]bool{}
+	return walkInvalidField(t, "", seen)
+}
+
+func walkInvalidField(t reflect.Type, prefix string, seen map[reflect.Type]bool) (string, bool) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
+	if seen[t] {
+		return "", false
+	}
+	seen[t] = true
 	switch t.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Complex64, reflect.Complex128, reflect.UnsafePointer:
 		if prefix == "" {
@@ -140,12 +232,12 @@ func walkInvalidField(t reflect.Type, prefix string) (string, bool) {
 			if prefix != "" {
 				next = prefix + "." + f.Name
 			}
-			if p, ok := walkInvalidField(f.Type, next); ok {
+			if p, ok := walkInvalidField(f.Type, next, seen); ok {
 				return p, true
 			}
 		}
 	case reflect.Array, reflect.Slice:
-		if p, ok := walkInvalidField(t.Elem(), prefix); ok {
+		if p, ok := walkInvalidField(t.Elem(), prefix, seen); ok {
 			return p, true
 		}
 	case reflect.Map:
@@ -155,7 +247,7 @@ func walkInvalidField(t reflect.Type, prefix string) (string, bool) {
 			}
 			return prefix, true
 		}
-		if p, ok := walkInvalidField(t.Elem(), prefix); ok {
+		if p, ok := walkInvalidField(t.Elem(), prefix, seen); ok {
 			return p, true
 		}
 	}

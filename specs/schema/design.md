@@ -22,6 +22,11 @@ constraint scenarios state behavior through validation, so a library upgrade
 that changes how a generated schema expresses them but not what it accepts
 keeps the scenarios green.
 
+`[]byte` and named types whose underlying type is `[]byte` are generated as
+nullable strings with `contentEncoding` `base64`, matching `encoding/json`.
+`json.RawMessage` accepts any JSON value (including `null`). Fixed-length
+`[N]byte` arrays stay JSON arrays of integers.
+
 ## Interfaces the implementer follows
 
 Names are guidance; the behaviors are the contract.
