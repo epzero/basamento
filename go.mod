@@ -8,6 +8,7 @@ require (
 	github.com/cucumber/messages/go/v34 v34.2.0
 	github.com/nats-io/nats-server/v2 v2.11.15
 	github.com/nats-io/nats.go v1.49.0
+	github.com/nats-io/nuid v1.0.1
 	github.com/oklog/ulid/v2 v2.1.2
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -24,7 +25,6 @@ require (
 	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
 	github.com/nats-io/jwt/v2 v2.8.1 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
-	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
