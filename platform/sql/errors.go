@@ -96,6 +96,16 @@ func mapExecErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	var pe *core.Error
+	if errors.As(err, &pe) {
+		return pe
+	}
+	if errors.Is(err, context.Canceled) {
+		return &core.Error{Code: core.CodeCancelled, Message: "sql: cancelled", Cause: context.Canceled}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &core.Error{Code: core.CodeTimeout, Message: "sql: timeout", Cause: context.DeadlineExceeded}
+	}
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return core.NewError(core.CodeNotFound, "sql: not found", nil)
 	}

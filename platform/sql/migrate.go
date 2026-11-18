@@ -147,7 +147,7 @@ func isMissingTable(err error) bool {
 func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
 	ver, found, err := currentVersion(ctx, s.db, s.dialect)
 	if err != nil {
-		return 0, err
+		return 0, mapExecErr(err)
 	}
 	if !found {
 		return 0, nil

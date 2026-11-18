@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -88,6 +89,51 @@ func TestInTxNestedReturnsInvalidArgument(t *testing.T) {
 	})
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("nested InTx: %v", err)
+	}
+}
+
+func TestInTxNestedDifferentStoresAllowed(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	s1, err := Open(ctx, "sqlite:///"+filepath.Join(dir, "a.db"), emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s1.Close() }()
+	s2, err := Open(ctx, "sqlite:///"+filepath.Join(dir, "b.db"), emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close() }()
+	err = s1.InTx(ctx, func(ctx context.Context, e1 *Execer) error {
+		return s2.InTx(ctx, func(ctx context.Context, e2 *Execer) error {
+			_, err := e2.Exec(ctx, `SELECT 1`, nil)
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSchemaVersionAfterCloseMapped(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	store, err := Open(ctx, "sqlite:///"+filepath.Join(dir, "kit.db"), emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.DB().Close()
+	_, err = store.SchemaVersion(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if stringsContains(err.Error(), "database is closed") {
+		t.Fatalf("driver text leaked: %v", err)
+	}
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		t.Fatalf("got %T", err)
 	}
 }
 

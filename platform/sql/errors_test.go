@@ -1,8 +1,10 @@
 package sql
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -45,6 +47,28 @@ func TestMapExecErrNoRows(t *testing.T) {
 	mapped := mapExecErr(sql.ErrNoRows)
 	if core.CodeOf(mapped) != core.CodeNotFound {
 		t.Fatalf("got %v", mapped)
+	}
+}
+
+func TestMapExecErrContextMappedScrubbed(t *testing.T) {
+	wrapped := fmt.Errorf("secret-token: %w", context.Canceled)
+	mapped := mapExecErr(wrapped)
+	if strings.Contains(mapped.Error(), "secret-token") {
+		t.Fatalf("leaked: %v", mapped)
+	}
+	if !errors.Is(mapped, context.Canceled) {
+		t.Fatal("unwrap")
+	}
+	if core.CodeOf(mapped) != core.CodeCancelled {
+		t.Fatalf("code %s", core.CodeOf(mapped))
+	}
+	deadline := fmt.Errorf("pwd=%w", context.DeadlineExceeded)
+	mapped = mapExecErr(deadline)
+	if strings.Contains(mapped.Error(), "pwd") {
+		t.Fatal("leaked deadline wrap")
+	}
+	if core.CodeOf(mapped) != core.CodeTimeout {
+		t.Fatal(mapped)
 	}
 }
 

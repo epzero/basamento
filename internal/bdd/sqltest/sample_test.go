@@ -59,6 +59,22 @@ func TestConcurrentOpen(t *testing.T) {
 	}
 }
 
+func TestStoreItemRejectsNULInKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "t.db")
+	mig, _ := sqltest.MigrationsThrough(3, false)
+	s, err := psql.Open(context.Background(), "sqlite:///"+path, mig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	repo := sqltest.NewSampleRepo(s)
+	ctx := core.WithTenant(context.Background(), "acme")
+	if err := repo.StoreItem(ctx, "k\x00", sqltest.StoreOptions{}); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestConcurrentOpenWhileHeld(t *testing.T) {
 	dir := t.TempDir()
 	raw := "sqlite:///" + filepath.Join(dir, "kit.db")
