@@ -685,7 +685,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-043-02:
         hash: sha256:16d4fa0590937fd4401f771312528d2e90ae65e5f6943185714804a754a17873
         reqs:
@@ -696,7 +699,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-044-01:
         hash: sha256:5056b08dfdddbcb8110aef191500f08d9e864534b3de3f51d9f007c98ebb40ca
         reqs:
@@ -707,7 +713,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-044-02:
         hash: sha256:c6afe28d8785b2de78f9580f0eaca0e8a47f824879608117ac23e2aea795c71f
         reqs:
@@ -718,7 +727,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-044-03:
         hash: sha256:600fa02bbb8bd672704de93ce47e0cabb04472d219c8fd0d743f9d2845c070d3
         reqs:
@@ -729,7 +741,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-045-01:
         hash: sha256:d356b170c9d353b416a7454628b206cb714ea7576d38efde7fb906368009348a
         reqs:
@@ -740,7 +755,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-046-01:
         hash: sha256:249ab0eacb5330fd9b9e91e498f777a958d6b968a5be7389a3e0040c96052e59
         reqs:
@@ -762,7 +780,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-047-02:
         hash: sha256:295c9af2b468807b5bc0693b003c37da309d82f1905503e1bab0df9fd294ed99
         reqs:
@@ -773,7 +794,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-048-01:
         hash: sha256:07ad684ca8594099158fcf578594967f8d6509b790ec1d82a379d2cc0d199c85
         reqs:
@@ -784,7 +808,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-049-01:
         hash: sha256:59f5c0e0d120eb3396f160552f5f872a5a9a707f3790bef2383c85794937d051
         reqs:
@@ -817,7 +844,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-051-02:
         hash: sha256:51acd71a3f88e1ed91e564285ce24ec9ce778004d5e2717d922d574e96fb12a1
         reqs:
@@ -828,7 +858,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-052-01:
         hash: sha256:fb65951ec3a52ee56aad4979c622a21a42cbe76801acb79bfcec67c80763efef
         reqs:
@@ -839,7 +872,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-052-02:
         hash: sha256:a38137cf481c113f5334cd961300732f0b697dd2e29edfde182a94df06bd03e9
         reqs:
@@ -850,7 +886,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-053-01:
         hash: sha256:ca1ed59dedea19638fd11e8c905502b70e39f6e191c74f224ee1bbd850de1063
         reqs:
@@ -861,7 +900,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-053-02:
         hash: sha256:0c1563fe0c2d86c34edf67c4a78bc3ef2955cb9e5d72d6caded80b3f71e99b4d
         reqs:
@@ -872,7 +914,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-054-01:
         hash: sha256:49f5507e4afeaa10e07d73ff867748b354074236fed2ea8227919525dd432dd9
         reqs:
@@ -883,7 +928,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-054-02:
         hash: sha256:79edd7bdd3776bb7c9098b67246909301ad4bac6bb9dfa57a3cc554284378736
         reqs:
@@ -894,7 +942,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-055-01:
         hash: sha256:e3b8b52714f2a70a4c967eb3c7c830ae7c1f3b0457e23cff40f7d4e19e897143
         reqs:
@@ -916,7 +967,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-057-01:
         hash: sha256:c336fad73e0c78aaf55cbac4787ea8fca11598c697644db72cb0f412712fdbeb
         reqs:
@@ -982,7 +1036,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-061-01:
         hash: sha256:b511f42f332c269503cee8f15d1369da70d150639ff77bf8adfd60e2343eeaae
         reqs:
@@ -993,7 +1050,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-062-01:
         hash: sha256:c5138c5377619d5148b123b195656f4b6340041b7a4884cd6189c5f44212c4f0
         reqs:
@@ -1015,7 +1075,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-064-01:
         hash: sha256:53842f03cff11fde7980f5246ef29fad0e6c23881cd713c302d547ff6c5ee0aa
         reqs:
@@ -1026,7 +1089,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-064-02:
         hash: sha256:b205eae1336ca86c376804c777a3eecc92ac1890c1fc91e4fa97495277b44f47
         reqs:
@@ -1037,7 +1103,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-065-01:
         hash: sha256:12dcb1b47abf3a27f3607aeb80a9644bc9cf981fd0d955f2956a257cedf66bce
         reqs:
@@ -1048,7 +1117,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-065-02:
         hash: sha256:9ed9b693f4f1d2287882a3ed827df15404a7e2135084cb8561b353f4e2eca865
         reqs:
@@ -1059,7 +1131,10 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
     MODEL-066-01:
         hash: sha256:3dd24dc747c9a5c47883e755af754f9c7a1bdd78d4fe3eb4c4ab7a114158608f
         reqs:
@@ -1070,4 +1145,7 @@ scenarios:
         approved_at: "2026-11-17"
         note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/11
