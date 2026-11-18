@@ -136,6 +136,9 @@ func inputIndex(t *Template) map[string]Input {
 
 // Assemble builds a prompt from a template (caller must have resolved it).
 func Assemble(t *Template, ref string, inputs map[string]string, history []HistoryEntry) (*Assembled, error) {
+	if t == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "template required", nil)
+	}
 	idx := inputIndex(t)
 	if err := validateInputs(t, inputs); err != nil {
 		return nil, err
@@ -268,6 +271,7 @@ func renderAll(t *Template, ordered []orderedSegment, idx map[string]Input, inpu
 
 func renderSegment(seg Segment, idx map[string]Input, inputs, trusted map[string]string, rawSizes map[string]int) (AssembledPart, int, error) {
 	sub := map[string]string{}
+	untrusted := map[string]bool{}
 	size := CodePointCount(stripVars(seg.Text))
 	for _, m := range varRef.FindAllStringSubmatch(seg.Text, -1) {
 		name := m[1]
@@ -278,10 +282,12 @@ func renderSegment(seg Segment, idx map[string]Input, inputs, trusted map[string
 			sub[name] = raw
 		} else {
 			sub[name] = WrapUntrusted(name, raw)
+			untrusted[name] = true
 		}
 	}
 	text := Substitute(seg.Text, sub)
-	return AssembledPart{Name: seg.Name, Kind: seg.Kind, Text: text, ContentSize: size}, size, nil
+	wrapped := collectWrappedRegions(text, sub, untrusted)
+	return AssembledPart{Name: seg.Name, Kind: seg.Kind, Text: text, ContentSize: size, Wrapped: wrapped}, size, nil
 }
 
 func renderHistory(seg Segment, history []HistoryEntry) (AssembledPart, int, error) {
@@ -289,10 +295,16 @@ func renderHistory(seg Segment, history []HistoryEntry) (AssembledPart, int, err
 	entries := make([]AssembledHistoryEntry, len(history))
 	for i, h := range history {
 		size += CodePointCount(h.Text)
+		wtext := WrapUntrusted("history", h.Text)
+		var wrec []DelimiterRecord
+		if rec, ok := delimiterRecordInWrapped(wtext, 0); ok {
+			wrec = []DelimiterRecord{rec}
+		}
 		entries[i] = AssembledHistoryEntry{
 			Role:         h.Role,
 			OriginalText: h.Text,
-			Text:         WrapUntrusted("history", h.Text),
+			Text:         wtext,
+			Wrapped:      wrec,
 		}
 	}
 	return AssembledPart{Name: seg.Name, Kind: KindHistory, History: entries, Text: "", ContentSize: size}, size, nil
@@ -376,6 +388,9 @@ func finalizeAssembled(ref string, parts []AssembledPart, dropped int) *Assemble
 
 // TotalContentSize sums segment content sizes (code points of originals, not delimiters).
 func TotalContentSize(a *Assembled) int {
+	if a == nil {
+		return 0
+	}
 	total := 0
 	for _, p := range a.Parts {
 		total += p.ContentSize
@@ -385,6 +400,9 @@ func TotalContentSize(a *Assembled) int {
 
 // SegmentContentSize returns the content size of a named part from an assembly.
 func SegmentContentSize(a *Assembled, name string) (int, bool) {
+	if a == nil {
+		return 0, false
+	}
 	for _, p := range a.Parts {
 		if p.Name != name {
 			continue
@@ -396,6 +414,9 @@ func SegmentContentSize(a *Assembled, name string) (int, bool) {
 
 // AssembledText concatenates rendered segment texts in order for comparison.
 func AssembledText(a *Assembled) string {
+	if a == nil {
+		return ""
+	}
 	var b strings.Builder
 	for _, p := range a.Parts {
 		if p.Kind == KindHistory {

@@ -60,7 +60,7 @@ func toCanonPart(p AssembledPart) canonPart {
 	if len(p.History) > 0 {
 		cp.History = make([]canonHist, len(p.History))
 		for i, h := range p.History {
-			cp.History[i] = canonHist(h)
+			cp.History[i] = canonHist{Role: h.Role, OriginalText: h.OriginalText, Text: h.Text}
 		}
 	}
 	return cp

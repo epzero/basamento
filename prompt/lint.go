@@ -67,18 +67,18 @@ func LintAssembled(a *Assembled) []Finding {
 
 func partHasUnpairedDelimiters(p AssembledPart) bool {
 	if p.Kind != KindHistory {
-		return hasUnpairedDelimiters(p.Text)
+		return lintTextWithRecords(p.Text, p.Wrapped)
 	}
 	for _, h := range p.History {
-		expected := WrapUntrusted("history", h.OriginalText)
-		if h.Text != expected {
+		if lintTextWithRecords(h.Role, nil) {
 			return true
 		}
-		if hasUnpairedDelimiters(h.Role) {
+		if lintTextWithRecords(h.Text, h.Wrapped) {
 			return true
 		}
 		combined := h.Role + h.Text
-		if hasUnpairedDelimiters(combined) {
+		recs := shiftDelimiterRecords(h.Wrapped, len(h.Role))
+		if lintTextWithRecords(combined, recs) {
 			return true
 		}
 	}

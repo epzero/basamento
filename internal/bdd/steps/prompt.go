@@ -287,6 +287,13 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		cp := *last
 		cp.Parts = append([]prompt.AssembledPart(nil), last.Parts...)
 		for i := range cp.Parts {
+			cp.Parts[i].Wrapped = append([]prompt.DelimiterRecord(nil), last.Parts[i].Wrapped...)
+			if len(cp.Parts[i].History) > 0 {
+				cp.Parts[i].History = append([]prompt.AssembledHistoryEntry(nil), last.Parts[i].History...)
+				for j := range cp.Parts[i].History {
+					cp.Parts[i].History[j].Wrapped = append([]prompt.DelimiterRecord(nil), last.Parts[i].History[j].Wrapped...)
+				}
+			}
 			if cp.Parts[i].Name == name {
 				cp.Parts[i].Text += suffix
 			}

@@ -52,7 +52,8 @@ type HistoryEntry struct {
 type AssembledHistoryEntry struct {
 	Role         string
 	OriginalText string
-	Text         string // wrapped
+	Text         string            // wrapped
+	Wrapped      []DelimiterRecord // untrusted delimiters in Text
 }
 
 // AssembledPart is one rendered segment in an assembled prompt.
@@ -61,6 +62,7 @@ type AssembledPart struct {
 	Kind        Kind
 	Text        string
 	ContentSize int
+	Wrapped     []DelimiterRecord       // untrusted delimiters the assembler wrote in Text
 	History     []AssembledHistoryEntry // only for KindHistory
 }
 

@@ -18,10 +18,21 @@ func TestLintAssembledRejectsDelimiterLookAlikes(t *testing.T) {
 			t.Fatalf("text %q: got %+v", text, findings)
 		}
 	}
-	wrapped := WrapUntrusted("doc", "hello")
-	a := &Assembled{Parts: []AssembledPart{{Name: "dyn", Kind: KindDynamic, Text: wrapped}}}
+	reg := NewRegistry()
+	tpl := &Template{
+		ID: "doc", Version: "1",
+		Inputs:   []Input{{Name: "doc"}},
+		Segments: []Segment{{Name: "dyn", Kind: KindDynamic, Budget: 100, Text: `{{doc}}`}},
+	}
+	if _, err := reg.Register(tpl); err != nil {
+		t.Fatal(err)
+	}
+	a, err := reg.Assemble("doc@1", map[string]string{"doc": "hello"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if f := LintAssembled(a); len(f) != 0 {
-		t.Fatalf("wrapped ok: %+v", f)
+		t.Fatalf("assembled wrap: %+v", f)
 	}
 }
 

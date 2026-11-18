@@ -54,6 +54,9 @@ func Substitute(text string, values map[string]string) string {
 
 // CheckDeclaredVars returns the first variable used in segments but not declared.
 func CheckDeclaredVars(t *Template) (string, bool) {
+	if t == nil {
+		return "", false
+	}
 	decl := map[string]bool{}
 	for _, in := range t.Inputs {
 		decl[in.Name] = true

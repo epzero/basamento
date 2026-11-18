@@ -32,7 +32,11 @@ func TestWrapUntrustedSanitizesSource(t *testing.T) {
 		if inner != tc.want {
 			t.Fatalf("source %q: sanitized %q, want %q", tc.source, inner, tc.want)
 		}
-		if f := LintAssembled(&Assembled{Parts: []AssembledPart{{Name: "x", Kind: KindDynamic, Text: w}}}); len(f) != 0 {
+		rec, ok := delimiterRecordInWrapped(w, 0)
+		if !ok {
+			t.Fatal("expected record in wrapped output")
+		}
+		if f := LintAssembled(&Assembled{Parts: []AssembledPart{{Name: "x", Kind: KindDynamic, Text: w, Wrapped: []DelimiterRecord{rec}}}}); len(f) != 0 {
 			t.Fatalf("lint rejected wrapped output: %+v", f)
 		}
 	}
