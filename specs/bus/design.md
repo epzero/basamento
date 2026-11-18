@@ -8,7 +8,7 @@ with embedded and cloud implementations), ADR-0005 (the bus under streaming).
 | Package | Contents |
 | --- | --- |
 | `platform` (`platform.go`) | The `Bus` and `KV` ports and `Message`. The changes in §2 are made there. |
-| `platform/bus` | The embedded implementation (`nats-server` in-process, JetStream file storage under the data directory) and the cloud implementation (`nats.go` against a NATS cluster). One JetStream code path serves both; they differ in how the connection is made. |
+| `platform/bus` | The embedded implementation (`nats-server` in-process, JetStream file storage under the data directory) and the cloud implementation (`nats.go` against a NATS cluster). One JetStream code path serves both; they differ in how the connection is made. `Store.InProcessServer()` is public surface for in-process clients: it returns the embedded server the store runs on, and is nil for the cloud store. |
 | `internal/bdd/bustest` | The in-process fake. Test-only (constitution 11): imported from `internal/bdd` only; production layers cannot import `internal/bdd` (see layering). |
 
 Selecting an implementation by URL (`nats-embedded://…` or `nats://…`) is
@@ -127,20 +127,23 @@ system clock in production):
   sleeps: after the expected messages, the driver publishes a sentinel and
   checks that it is the next message delivered.
 - Time moves only through the fake clock (`core/coretest`).
-- The corrupt-record scenario (BUS-026-01) runs against the embedded and the
-  cloud implementations, which keep the KV entries in a JetStream bucket, and
-  not against the fake, whose store holds decoded entries and cannot hold a
-  foreign record. The driver writes the foreign record into the `KIT_KV` data
-  bucket through a test-only helper of `internal/bdd/bustest` that connects to
-  the same server and writes the value under the key through `nats.go` and
-  JetStream directly, as any other client of the bucket would. The embedded
-  server has no network listener, so for the embedded implementation the
-  helper connects through the server's in-process connection
-  (`nats.InProcessServer`); for the cloud implementation it dials the
-  server's `nats://` URL. A fresh bucket
-  per scenario puts the record it writes at revision 1, which the swap step
-  uses. The value is shorter than the eight-byte deadline header of a record,
-  so the store cannot decode it.
+- The corrupt-record scenario (BUS-026-01) runs against all three
+  implementations. Against the embedded and the cloud implementations, which
+  keep the KV entries in a JetStream bucket, the driver writes the foreign
+  record into the `KIT_KV` data bucket through a test-only helper of
+  `internal/bdd/bustest` that connects to the same server and writes the value
+  under the key through `nats.go` and JetStream directly, as any other client
+  of the bucket would. The embedded server has no network listener, so
+  `platform/bus` hands the server its embedded store runs on to the driver
+  (`Store.InProcessServer()`), and the helper connects through it with
+  `nats.InProcessServer`; for the cloud implementation it dials the server's
+  `nats://` URL. Against the fake, whose store keeps decoded entries, the same
+  helper installs the foreign record through a test-only hook
+  (`bustest.Fake.WriteForeignRecord`); the fake fails a read, swap or create of
+  that key with `internal` (REQ-BUS-026). A fresh bucket per scenario puts the
+  record the helper writes at revision 1, which the swap step uses. The value
+  is shorter than the eight-byte deadline header of a record, so the store
+  cannot decode it.
 - The cancellation and deadline scenarios (BUS-027-01 and BUS-028-01) pass a
   context that is already cancelled, or one whose deadline is the Unix epoch
   and therefore always past, to the driver; neither reads the wall clock nor
