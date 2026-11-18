@@ -156,6 +156,29 @@ func mapExecErr(err error) error {
 	return core.NewError(core.CodeInternal, "sql: execution failed", nil)
 }
 
+// mapMigrationErr maps migration failures to CodeInternal except for cancelled,
+// timeout, and unavailable conditions that mapExecErr recognizes.
+func mapMigrationErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pe *core.Error
+	if errors.As(err, &pe) {
+		switch pe.Code {
+		case core.CodeCancelled, core.CodeTimeout, core.CodeUnavailable:
+			return pe
+		}
+		return core.NewError(core.CodeInternal, "sql: migration failed", nil)
+	}
+	mapped := mapExecErr(err)
+	switch core.CodeOf(mapped) {
+	case core.CodeCancelled, core.CodeTimeout, core.CodeUnavailable:
+		return mapped
+	default:
+		return core.NewError(core.CodeInternal, "sql: migration failed", nil)
+	}
+}
+
 func mapPgErr(pgErr *pgconn.PgError) error {
 	details := map[string]any{"sqlstate": pgErr.Code}
 	code, retryable := pgSQLStateMapping(pgErr.Code)

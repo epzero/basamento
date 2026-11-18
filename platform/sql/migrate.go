@@ -64,10 +64,10 @@ func withPostgresMigrateLock(ctx context.Context, db *sql.DB, fn func() error) e
 func runMigrations(ctx context.Context, db *sql.DB, d dialect, migrations fs.FS) error {
 	provider, err := goose.NewProvider(gooseDialect(d), db, migrations)
 	if err != nil {
-		return mapExecErr(err)
+		return mapMigrationErr(err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
-		return mapExecErr(err)
+		return mapMigrationErr(err)
 	}
 	return nil
 }
