@@ -1,4 +1,4 @@
-@planned @wp:WP-L0-01 @level:component
+@wp:WP-L0-01 @level:component
 Feature: Tenant context
   A tenant id travels in the context as the isolation boundary for data and
   spend. The context reports no tenant when it carries none, or when the id it

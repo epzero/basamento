@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -18,6 +19,10 @@ type coreWorld struct {
 	issued  []string
 	named   map[string]string
 	lastErr error
+
+	tenantCtx context.Context
+	tenantID  core.TenantID
+	tenantOK  bool
 }
 
 func newCoreWorld() *coreWorld {
@@ -121,4 +126,81 @@ func registerCore(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+
+	reportTenant := func(ctx context.Context) *coreWorld {
+		w := world(ctx).Core
+		if w.tenantCtx == nil {
+			w.tenantCtx = context.Background()
+		}
+		w.tenantID, w.tenantOK = core.TenantFrom(w.tenantCtx)
+		return w
+	}
+	sc.Step(`^a context carries the tenant id "([^"]*)"$`, func(ctx context.Context, id string) error {
+		world(ctx).Core.tenantCtx = core.WithTenant(context.Background(), core.TenantID(id))
+		return nil
+	})
+	sc.Step(`^a context carries the tenant-id literal (.+)$`, func(ctx context.Context, literal string) error {
+		id, ok, err := parseTenantLiteral(literal)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			world(ctx).Core.tenantCtx = context.Background()
+			return nil
+		}
+		world(ctx).Core.tenantCtx = core.WithTenant(context.Background(), id)
+		return nil
+	})
+	sc.Step(`^a derived context carries the tenant id "([^"]*)"$`, func(ctx context.Context, id string) error {
+		w := world(ctx).Core
+		if w.tenantCtx == nil {
+			return fmt.Errorf("no parent context: a context must carry a tenant first")
+		}
+		w.tenantCtx = core.WithTenant(w.tenantCtx, core.TenantID(id))
+		return nil
+	})
+	sc.Step(`^the context reports no tenant$`, func(ctx context.Context) error {
+		w := reportTenant(ctx)
+		if w.tenantOK || w.tenantID != "" {
+			return fmt.Errorf("context reports tenant %q, want none", w.tenantID)
+		}
+		return nil
+	})
+	sc.Step(`^the derived context reports no tenant$`, func(ctx context.Context) error {
+		w := reportTenant(ctx)
+		if w.tenantOK || w.tenantID != "" {
+			return fmt.Errorf("derived context reports tenant %q, want none", w.tenantID)
+		}
+		return nil
+	})
+	sc.Step(`^the context reports the tenant id "([^"]*)"$`, func(ctx context.Context, want string) error {
+		w := reportTenant(ctx)
+		if !w.tenantOK || w.tenantID != core.TenantID(want) {
+			return fmt.Errorf("context reports tenant (%q, %v), want (%q, true)", w.tenantID, w.tenantOK, want)
+		}
+		return nil
+	})
+	sc.Step(`^the reported tenant id is empty$`, func(ctx context.Context) error {
+		w := reportTenant(ctx)
+		if w.tenantID != "" {
+			return fmt.Errorf("reported tenant id is %q, want empty", w.tenantID)
+		}
+		return nil
+	})
+}
+
+// parseTenantLiteral parses a tenant-id literal as the feature defines it: a
+// Go interpreted string literal, or the word absent for no id at all.
+func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
+	if literal == "absent" {
+		return "", false, nil
+	}
+	if len(literal) < 2 || literal[0] != '"' || literal[len(literal)-1] != '"' {
+		return "", false, fmt.Errorf("tenant-id literal %q is not a Go interpreted string literal", literal)
+	}
+	s, err := strconv.Unquote(literal)
+	if err != nil {
+		return "", false, fmt.Errorf("tenant-id literal %q: %w", literal, err)
+	}
+	return core.TenantID(s), true, nil
 }
