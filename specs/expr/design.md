@@ -131,10 +131,10 @@ nothing is coerced from strings.
   expressions: it is unbounded for any comprehension over a list of unknown
   size.
 
-## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-020)
+## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-026)
 
 - **Variables**: named variables (`$params`, `$inputs`…) declared at compile
-  time; `$ENV` is never one of them.
+  time. `$ENV`, `$__loc__` and `$__prog_args` are never one of them.
 - **Rejected** at compile time, by walking the parsed query, wherever they
   appear, including inside function definitions:
 
@@ -147,7 +147,37 @@ nothing is coerced from strings.
   | `import`, `include`, `modulemeta` | read modules from files |
 
   Pure time functions on given values (`gmtime`, `mktime`, `strftime`,
-  `strptime`, `todate`, `fromdate`) are allowed.
+  `strptime`, `todate`, `fromdate`) are allowed. `input_line_number`,
+  `halt_error` and `get_search_list` are rejected as well, and so are the
+  variables `$ENV`, `$__loc__` and `$__prog_args`, the shorthand `{$ENV}`
+  included (REQ-EXPR-024). The walk inspects every function call, every
+  definition name and the parameters of every definition, and every variable
+  outside a pattern, at any depth: inside another definition, an array, an
+  object, a string interpolation, an `if`, a `try`, a `reduce`, a `foreach`,
+  a label or `break`, or an argument passed to a function (`f(now)`). It fails
+  closed on a construct the version of gojq in use introduces without the
+  walk knowing it. A second layer registers these builtins as functions that
+  return an error, in case the walk misses a call.
+- **Reserved names** (REQ-EXPR-023): the rejected names are reserved even
+  when a mapping defines its own function or parameter with them, as in
+  `def now: 1; now`. With no scope resolution of its own, the compiler would
+  have to decide where a local definition wins over the builtin and where the
+  builtin still applies (an argument of the same name, a call before the
+  definition, a definition inside another); a scope-dependent ban would leave
+  the other places open. Refusing the name outright leaves one place for it
+  to be banned, and the case is rare: a mapping that wants its own function
+  called `now` can rename it. The error names the function and says the name
+  is reserved.
+- **Reserved names as data** (REQ-EXPR-025): the walk rejects a name only
+  where the language makes it a call of a function, a definition, a
+  parameter or a variable. A field name (`.now`, `.input`), an object key
+  (`{now}`, `{"now": 1}`), a key string (`getpath(["now"])`) and a string
+  value are data and are accepted, so a provider's request or response keeps
+  a field called `now`.
+- **Imports** (REQ-EXPR-026): `import` and `include` are rejected by terms
+  of the parsed query, before any module loader is asked for the file:
+  every `import` or `include` in the query, where the language allows it
+  only at the start of a program.
 - **Object order**: gojq iterates objects (`.[]`, `to_entries`, `keys`) and
   encodes them (`tojson`) in ascending key order. Scenarios pin this so a
   future gojq upgrade cannot change it silently. Functions the gojq library
