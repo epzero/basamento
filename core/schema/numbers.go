@@ -7,18 +7,32 @@ import (
 	"strings"
 )
 
-// validateJSONNumberString rejects number literals that overflow math/big or our bounds.
+// validateJSONNumberString rejects number literals whose exponent or mantissa digit
+// count would be pathologically expensive in validation or canonicalization.
 func validateJSONNumberString(s string) error {
-	if len(s) > maxNumberDigitRun+20 {
+	if n := numberMantissaDigitCount(s); n > maxNumberMantissaDigits {
 		return errNumberBounds
 	}
 	if exp := numberExponentMagnitude(s); exp > maxNumberExponent {
 		return errNumberBounds
 	}
-	if _, _, err := big.ParseFloat(s, 10, 256, big.ToNearestEven); err != nil {
+	if len(s) > maxNumberMantissaDigits+maxNumberExponent/10+20 {
 		return errNumberBounds
 	}
 	return nil
+}
+
+func numberMantissaDigitCount(s string) int {
+	if i := strings.LastIndexAny(s, "eE"); i >= 0 {
+		s = s[:i]
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			n++
+		}
+	}
+	return n
 }
 
 type numberBoundsError struct{}

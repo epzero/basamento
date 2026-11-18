@@ -5,6 +5,7 @@
 // contentEncoding "base64". json.RawMessage accepts any JSON value including null.
 // Fixed-length [N]byte arrays remain JSON arrays of integers.
 //
-// Untrusted JSON is bounded: nesting depth at most 10000 and number exponents
-// at most 1e6, so hostile input cannot exhaust stack or panic the validator.
+// Untrusted JSON is bounded: nesting depth at most 10000; number literals at
+// most 1000 mantissa digits and exponent magnitude at most 8192; canonicalization
+// still enforces exact IEEE-754 doubles.
 package schema
