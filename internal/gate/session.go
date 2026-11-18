@@ -225,6 +225,17 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 				}
 			}
 			return s, writeSession(s)
+		case linked:
+			if cur, err := readSession(top); err == nil && cur.Issue == r.Issue && cur.Branch != "" {
+				s.Worktree, s.Branch = top, cur.Branch
+				s.Previous = &Handoff{Identity: cur.Identity, Status: cur.Status, Note: cur.Note}
+				if id.Role != RoleCodeReviewer {
+					if err := fastForwardBranch(top, s.Branch); err != nil {
+						return Session{}, err
+					}
+				}
+				return s, writeSession(s)
+			}
 		}
 	}
 	if r.Branch != "" && !r.NoWorktree {

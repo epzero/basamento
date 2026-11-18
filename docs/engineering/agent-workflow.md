@@ -35,6 +35,9 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   local branch diverged or has unpushed commits `origin` lacks (never reset,
   never discard commits). With no `origin` or nothing on `origin` for that
   branch yet, the checkout is left as-is.
+- **Starting inside the issue worktree.** A harness may run `gate agent new`
+  from the worktree path instead of the main checkout; the previous session's
+  hand-off is kept and printed like any other turn on the branch.
 - **Code reviewers get a detached snapshot** of that branch, so several can
   run in parallel and none commits.
 - **Leads stay in the main checkout**, as do sessions started with

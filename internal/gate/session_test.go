@@ -217,6 +217,28 @@ func TestReleaseAfterASquashMerge(t *testing.T) {
 	}
 }
 
+func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
+	repo := gitRepo(t)
+	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L4-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetStatus(author.Worktree, "", "spec-review-requested", "review round 1"); err != nil {
+		t.Fatal(err)
+	}
+	// A later session starts inside the same worktree (harness reuse).
+	reviewer, err := NewSession(author.Worktree, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L4-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewer.Worktree != author.Worktree || reviewer.Branch != author.Branch {
+		t.Fatalf("should stay in the issue worktree: %+v", reviewer)
+	}
+	if p := reviewer.Previous; p == nil || p.Identity != author.Identity || p.Note != "review round 1" {
+		t.Fatalf("hand-off must survive: %+v", reviewer.Previous)
+	}
+}
+
 func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
