@@ -63,6 +63,7 @@ the same change that first uses it.
 | **Principal** | An authenticated user or service token acting within a tenant. |
 | **Worker token** | A token issued to an external service for one session (such as a browser session), limited to that session's resources and a fixed expiry. A **pool token** instead lets a worker join one pool, and a **join token** admits one launched worker. |
 | **Audit event** | A record of a security-relevant decision, such as a denied action and who attempted it, with the time, tenant, principal, action, resource and outcome, and optionally the run, step and reason. Never a secret value or a raw token. Its tenant is the caller's; an event with no tenant is **deployment-level** (a refused join with an unknown pool token, shared-pool and launch events, operator actions), kept out of tenant-scoped reads. |
+| **Audit store** | The append-only table that the SQL implementation of `platform.Audit` writes; one store serves every producer (tenant events and deployment-level events). Tenant-scoped reads return only the calling tenant's events. |
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
@@ -147,5 +148,7 @@ the same change that first uses it.
 | **Key service** | What holds the master key, selected by URL: `localsecrets://` in the embedded profile, a KMS or Vault Transit in the cloud one. The gate uses a **simulated key service**. |
 | **Data key**, **keyset** | A tenant's keyset is its data keys, one of them **primary**, stored only wrapped by the master key. New payloads use the primary data key; earlier ones still decrypt. |
 | **Payload codec** | Encrypts each payload a runtime records in history with the tenant's primary data key, and decrypts it on the way back. |
+| **Credential store** | The vault: a tenant's named credentials, stored only encrypted, written and rotated through a write-only API and resolved by `cred://` reference inside a step. |
+| **Credential name** | The `<name>` of a `cred://<name>` reference: 1–128 characters among ASCII letters, digits, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..`. |
 | **SQL store** | The SQL port of the platform: a SQLite file in the embedded profile, Postgres in the cloud profile, opened by URL. Its repositories are scoped to the tenant of each call. |
 | **Migration**, **migration set**, **schema version** | A numbered schema change embedded in the binary; the ordered migrations a SQL store applies on open; the number of the last migration applied to a database. |

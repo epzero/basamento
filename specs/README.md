@@ -32,6 +32,8 @@ Capabilities:
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
+| [`secrets`](secrets/requirements.md) | Planned (WP-L1-04). |
+| [`credentials`](credentials/requirements.md) | Planned (WP-L1-06). |
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
 | [`prompt`](prompt/requirements.md) | Planned (WP-L3-05). |
@@ -44,5 +46,4 @@ Capabilities:
 | [`bus`](bus/requirements.md) | Planned (WP-L1-03). |
 | [`expr`](expr/requirements.md) | Planned (WP-L2-01). |
 | [`blob`](blob/requirements.md) | Planned (WP-L1-02). |
-| [`secrets`](secrets/requirements.md) | Planned (WP-L1-04). |
 | [`sql`](sql/requirements.md) | Planned (WP-L1-01). |
