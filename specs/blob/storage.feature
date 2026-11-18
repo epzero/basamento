@@ -182,3 +182,15 @@ Feature: Storing, reading and deleting blobs
     Then tenant "acme" reads "hello" under the content key of "hello"
     And the blob of tenant "acme" under the content key of "hello" has content type "text/plain"
     And tenant "acme" has no blob under the content key of "world"
+
+  @REQ-BLOB-046 @planned @wp:WP-L1-02 @id:BLOB-046-01
+  Scenario Outline: A failed write fails with its class and keeps nothing
+    Given content "big" of 8 MiB generated from seed 7
+    When tenant "acme" stores content "big" and <failure> after 1 MiB
+    Then the write fails with code "<code>"
+    And tenant "acme" has no blob under the content key of "big"
+
+    Examples:
+      | failure               | code             |
+      | the source fails      | invalid_argument |
+      | the call is cancelled | cancelled        |

@@ -145,3 +145,19 @@ If the blob store starts an upload, or commits a staging key, for a caller with 
 
 ### REQ-BLOB-043 — A content key that already holds a blob is kept
 When a commit stores content under a content key that already holds a blob of the committing tenant, the blob store shall keep the existing blob and its content type unchanged.
+
+## Proxied read URLs
+
+A proxied blob URL is served from the application's own origin, so a browser
+renders whatever content the tenant stored next to the application's own pages.
+
+### REQ-BLOB-044 — A proxied read response cannot run as a page of the application
+While a proxied blob URL is served, the response shall carry `Content-Disposition: attachment; filename="<content hash>"`, where `<content hash>` is the 64 hexadecimal digits of the blob's content key; `Content-Security-Policy: sandbox; default-src 'none'`; `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and it shall keep the blob's content type.
+
+### REQ-BLOB-045 — The signing key has a minimum length
+If a blob store is opened with a signing key that is not empty and shorter than 32 bytes, then opening it shall fail with code `invalid_argument`. A store opened with an empty signing key shall issue no proxied blob URL: a blob URL request for a blob of the tenant shall fail with code `internal`.
+
+## Writing
+
+### REQ-BLOB-046 — Write failures carry their class
+If a write is cancelled or its source fails, then the blob store shall fail it with code `cancelled` or `invalid_argument` respectively and keep nothing under its content key; and if the bucket or the writer fails, then the blob store shall fail it with code `unavailable`.

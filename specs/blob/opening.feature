@@ -44,3 +44,20 @@ Feature: Opening a blob store from its location URL
     When a blob store is opened from a file URL of its subdirectory "blobs"
     Then the subdirectory "blobs" exists
     And tenant "acme" has no blob under the content key of "hello"
+
+  @REQ-BLOB-045 @security @planned @wp:WP-L1-02 @id:BLOB-045-01
+  Scenario Outline: A signing key shorter than 32 bytes is refused
+    When a blob store is opened from a file URL of a temporary directory with a signing key of <key> bytes
+    Then <outcome>
+
+    Examples:
+      | key | outcome                                     |
+      | 31  | the call fails with code "invalid_argument" |
+      | 32  | the store is open                           |
+
+  @REQ-BLOB-045 @planned @wp:WP-L1-02 @id:BLOB-045-02
+  Scenario: A store opened without a signing key issues no proxied blob URL
+    Given a blob store is opened from a file URL of a temporary directory without a signing key
+    And tenant "acme" has stored "hello" as "text/plain"
+    When tenant "acme" requests a blob URL for the content key of "hello" with a lifetime of 15 minutes
+    Then the call fails with code "internal"

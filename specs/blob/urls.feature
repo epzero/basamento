@@ -86,3 +86,29 @@ Feature: Blob URLs
     When tenant "acme" requests a blob URL for the content key of "hello" with a lifetime of 7 days
     And a client with no credentials fetches the blob URL
     Then the response has status 200, content type "text/plain" and body "hello"
+
+  @REQ-BLOB-044 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-044-01
+  Scenario: A proxied read of stored HTML is served as an inert attachment
+    Given tenant "acme" has stored "<h1>hello</h1>" as "text/html"
+    And tenant "acme" has a blob URL for the content key of "<h1>hello</h1>" with a lifetime of 15 minutes
+    When a client with no credentials fetches the blob URL
+    Then the response has status 200, content type "text/html" and body "<h1>hello</h1>"
+    And the response header "Content-Disposition" is "attachment; filename=\"4db7ef630005c462450ea587722b1a7cff53dfdcd35d7dd40bcf8e97e50826ee\""
+    And the response header "Content-Security-Policy" is "sandbox; default-src 'none'"
+    And the response header "Cache-Control" is "private, no-store"
+    And the response header "X-Content-Type-Options" is "nosniff"
+
+  @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-016-03
+  Scenario Outline: A proxied blob URL serves a tenant whose id needs escaping
+    Given tenant "<tenant>" has stored "hello" as "text/plain"
+    And tenant "<tenant>" has a blob URL for the content key of "hello" with a lifetime of 15 minutes
+    When a client with no credentials fetches the blob URL
+    Then the response has status 200, content type "text/plain" and body "hello"
+
+    Examples:
+      | tenant  |
+      | a%b     |
+      | a b     |
+      | a?b     |
+      | a#b     |
+      | aéb     |

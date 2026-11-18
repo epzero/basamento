@@ -14,6 +14,22 @@ and the read URLs, and WP-L1-08 adds the upload methods of §Uploads.
   source error or a cancelled context it aborts the `gocloud.dev/blob` writer
   (cancel its context before `Close`), so no object and no temporary file
   remain (REQ-BLOB-002, REQ-BLOB-009).
+- **Write failures carry their class** (REQ-BLOB-046). A reader that fails is
+  `invalid_argument`; a cancelled context is `cancelled`, checked first, so a
+  source that fails because the caller cancelled reads as `cancelled`. A
+  failure of the bucket or of the writer is `unavailable`, retryable. A failed
+  write leaves nothing under the tenant's content key.
+- `key` is the expected hash: `Put` has no other hash input, so a mismatch is
+  the only hash check, and `Commit` passes `sha256:` of what it read
+  (ADR-0013).
+- The body reaches the bucket through one writer: `Put` streams the reader
+  once into a staging object under `<tenant id>/.part/<hex>/<sequence>`,
+  hashes it on the way, and only after the hash matches copies it once into
+  the final object, so the bucket sees one write to the object that counts.
+  On every failure the writer is cancelled before `Close`, and the staging
+  object is removed by the deferred cleanup of the next write under the same
+  key; no failure path deletes the final object, another tenant's or another
+  key's.
 - A `Put` for a key the tenant already holds still hashes the reader so a
   content mismatch fails with `invalid_argument` without touching the existing
   blob (REQ-BLOB-002); when the hash matches, `Put` succeeds without rewriting
@@ -22,8 +38,12 @@ and the read URLs, and WP-L1-08 adds the upload methods of §Uploads.
 
 ## Tenancy
 
-- The tenant comes from `ctx`, as for `Credentials`. A call without one fails
-  with `invalid_argument` before touching the bucket (REQ-BLOB-011).
+- The tenant comes from `ctx`, as for `Credentials`: every exported method and
+  the proxied URL handler's reads take it from the context with
+  `core.TenantFrom` and never from an argument (REQ-BLOB-006, REQ-BLOB-011). A
+  call without one fails with `invalid_argument` before touching the bucket
+  (REQ-BLOB-011), and the handler builds its context with `core.WithTenant`
+  from the tenant it verified in the URL.
 - Objects live under `<tenant id>/<64 hex digits>` in one bucket. There is no
   cross-tenant deduplication: sharing would let one tenant learn through
   `Exists` that another holds some content (REQ-BLOB-010).
@@ -45,7 +65,37 @@ and the read URLs, and WP-L1-08 adds the upload methods of §Uploads.
   expiry against the injected `core` clock (valid while now < expiry), and
   answers 403 with an empty body for any failure and 404 for a deleted blob
   (REQ-BLOB-013, REQ-BLOB-015, REQ-BLOB-016). The signing key and base URL
-  are constructor arguments; wiring chooses them.
+  are `Open` options; wiring chooses them.
+- **Tenant in the URL.** The tenant segment is `url.PathEscape`d. Interior
+  characters such as `%`, `?`, `#` and space are still valid tenant
+  characters under REQ-CORE-005, so the escaping is not redundant: it keeps
+  the tenant one path segment and out of the query. The HMAC covers the
+  decoded tenant, and the handler reads the decoded tenant back from the
+  request path, the same value `TenantFrom` would give.
+- **A tenant that needs escaping has one spelling in a URL.** A valid tenant
+  id neither begins nor ends with Unicode white space (REQ-CORE-005), so
+  `url.PathEscape` leaves it unchanged, and a header sent as is and a header
+  sent percent-encoded decode to the same path.
+- **Protective headers.** The application serves proxied blob URLs from its own
+  origin, where a script stored by a tenant as `text/html` or `image/svg+xml`
+  would otherwise run as a page of the application: stored XSS
+  (REQ-BLOB-044). Every proxied read response, served or refused, therefore
+  carries `Content-Disposition: attachment; filename="<hex>"`,
+  `Content-Security-Policy: sandbox; default-src 'none'`,
+  `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`,
+  and keeps the stored `Content-Type`. A blob of tenant-chosen content that is
+  an attachment with a script-disabled sandbox cannot run on that origin. A
+  dedicated origin for blobs, where a page escapes nothing of the
+  application, is the alternative; it adds an origin, a certificate and a
+  routing rule per environment to a URL the handler already serves, so it is
+  not chosen.
+- **Signing key** (REQ-BLOB-045). A non-empty `SignKey` under 32 bytes, the
+  HMAC-SHA256 block size, is refused at `Open` with `invalid_argument`. An
+  empty `SignKey` disables proxied URLs: `SignedURL` on the embedded store
+  fails with `internal`, and the handler answers 403 to every request.
+  `BaseURL` is required the same way: `SignedURL` fails with `internal`
+  without it. The cloud store signs with the provider's credentials and
+  ignores both.
 
 ## Opening
 
@@ -54,6 +104,33 @@ and the read URLs, and WP-L1-08 adds the upload methods of §Uploads.
   missing), `s3`, `gs`, `azblob`. Any other scheme, or no scheme, fails with
   `invalid_argument` naming the four schemes (REQ-BLOB-018 to REQ-BLOB-020).
   `mem` is not supported: production code holds no test doubles.
+- **Embedded profile.** A `file` URL is opened with fileblob's `no_tmp_dir`
+  option, unless the operator set it in the URL. By default fileblob stages a
+  write in the system temporary directory and renames it into place, which
+  fails when the data directory is a mount of its own; `no_tmp_dir` creates
+  the temporary file next to the target object, the final file in the process
+  (`<object>.<hex>.tmp`). A process killed mid-write can leave those files
+  behind: an operator may remove them when no write is in flight. They are
+  never read as blobs, because a blob is named by its 64-hex object path.
+
+## Content type
+
+- The content type lives in a sidecar object `<tenant id>/<64 hex>.meta`,
+  holding the type as its body. The embedded store needs it anyway, because
+  fileblob keeps no attributes; both profiles use it, so one read path serves
+  both. A missing sidecar, from a blob written before it existed or by a
+  cloud tool, reads as no stored type, and the object's own content type or
+  `application/octet-stream` serves it (REQ-BLOB-014).
+- The sidecar is written before the object, and the object's existence is
+  the commit point: a reader that finds the object finds its type. A crash
+  between the two leaves an orphan sidecar the next write overwrites.
+- **Concurrency.** Within one process, `Put` serializes writes of one key
+  under one tenant, so the first content type wins (REQ-BLOB-005,
+  REQ-BLOB-043). Across replicas there is no such lock: two writers that both
+  see a new key can each write a sidecar before either writes the object, and
+  the later sidecar's type stays. The bytes are identical, by content
+  addressing, and the first content type wins only within a replica. A
+  caller must not rely on first-wins across replicas; the race is accepted.
 
 ## Conformance
 
@@ -233,6 +310,14 @@ o.ContentType})`: the provider enforces the expiry and the signature, and
 signs the content type. No condition on the size is set (`IfNotExists()` is dropped: it
 expresses existence, not a bound). The size is enforced by `Commit` only, and
 the bucket lifecycle rule below expires abandoned slots.
+- **Abandoned multipart uploads, an operator requirement.** A presigned PUT
+  large enough to be multipart leaves its parts in the bucket until the
+  upload is completed or aborted. The operator configures an
+  `AbortIncompleteMultipartUpload` lifecycle rule on the bucket: abort
+  incomplete multipart uploads after 1 day, S3 and GCS alike (GCS aborts them
+  through the same `AbortIncompleteMultipartUpload` action of its lifecycle
+  rule). The staging rule below deletes the objects; this rule deletes the
+  parts an interrupted PUT left behind.
 
 ### Expiry sweep
 
@@ -253,7 +338,8 @@ the bucket lifecycle rule below expires abandoned slots.
   which expires every object there after 7 days, the maximum TTL. The
   embedded sweep is not part of the cloud store; `Commit` refuses a late key
   from the slot metadata even before the rule acts. A key whose slot metadata
-  the rule removed is an unknown key: `not_found`.
+  the rule removed is an unknown key: `not_found`. The abort rule above is
+  configured by the same operator step.
 
 ### Errors
 
@@ -279,7 +365,7 @@ Every refusal of a proxied upload URL has an empty body. The two staged-object
 rows are checked in both profiles by `Commit`; the URL rows are URL-level and
 therefore `@profile:embedded`. There is no `conflict` and no
 hash mismatch: a client cannot name a hash, so `Commit` has nothing to compare
-it with (ADR-0013).
+it with (ADR-0013); `Put` does, and is the only call with a hash mismatch.
 
 ### Conformance
 
