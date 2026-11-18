@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 
 	"gocloud.dev/blob"
 )
@@ -58,6 +59,40 @@ func (g *gocloudBucket) ListKeys(ctx context.Context, prefix string) ([]string, 
 		keys = append(keys, obj.Key)
 	}
 	return keys, nil
+}
+
+func (g *gocloudBucket) ListTenantPrefixes(ctx context.Context) ([]string, error) {
+	iter := g.b.List(&blob.ListOptions{Delimiter: "/"})
+	var tenants []string
+	for {
+		obj, err := iter.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, mapError(err)
+		}
+		if obj.IsDir || strings.HasSuffix(obj.Key, "/") {
+			tenants = append(tenants, strings.TrimSuffix(obj.Key, "/"))
+		}
+	}
+	return tenants, nil
+}
+
+func (g *gocloudBucket) ListKeysCallback(ctx context.Context, prefix string, fn func(string) error) error {
+	iter := g.b.List(&blob.ListOptions{Prefix: prefix})
+	for {
+		obj, err := iter.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return mapError(err)
+		}
+		if err := fn(obj.Key); err != nil {
+			return err
+		}
+	}
 }
 
 func (g *gocloudBucket) Close() error {

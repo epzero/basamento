@@ -58,6 +58,14 @@ func (f *faultBucket) ListKeys(ctx context.Context, prefix string) ([]string, er
 	return f.inner.ListKeys(ctx, prefix)
 }
 
+func (f *faultBucket) ListTenantPrefixes(ctx context.Context) ([]string, error) {
+	return f.inner.ListTenantPrefixes(ctx)
+}
+
+func (f *faultBucket) ListKeysCallback(ctx context.Context, prefix string, fn func(string) error) error {
+	return f.inner.ListKeysCallback(ctx, prefix, fn)
+}
+
 func (f *faultBucket) Close() error { return f.inner.Close() }
 
 func openFileStore(t *testing.T) (*Store, bucketBackend, string) {
@@ -67,7 +75,15 @@ func openFileStore(t *testing.T) (*Store, bucketBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &Store{bucket: wrapBucket(b), clock: coretest.NewFakeClock(time.Unix(1700000000, 0)), rand: coretest.SeededRand(1), embedded: true}
+	st := &Store{
+		bucket:   wrapBucket(b),
+		clock:    coretest.NewFakeClock(time.Unix(1700000000, 0)),
+		rand:     coretest.SeededRand(1),
+		embedded: true,
+		maxTTL:   DefaultMaxURLTTL,
+		baseURL:  "http://test/blob",
+		signKey:  []byte("test-signing-key-32-bytes-long"),
+	}
 	return st, wrapBucket(b), dir
 }
 

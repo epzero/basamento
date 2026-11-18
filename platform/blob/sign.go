@@ -57,14 +57,14 @@ func signUpload(key []byte, tenant, stageKey string, exp, max int64, contentType
 }
 
 func verifyUpload(key []byte, tenant, stageKey, sig string, exp, max int64, contentType string, now time.Time) bool {
-	if now.Unix() >= exp {
-		return false
-	}
 	want := signUpload(key, tenant, stageKey, exp, max, contentType)
 	if len(sig) != len(want) {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(sig), []byte(want)) == 1
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(want)) != 1 {
+		return false
+	}
+	return now.Unix() < exp
 }
 
 func verifyRead(key []byte, tenant, hexdigest, sig string, exp int64, now time.Time) bool {
