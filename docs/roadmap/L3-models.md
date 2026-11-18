@@ -33,7 +33,7 @@ Owns: `model/catalog`.
 Descriptors by model id; the price table with its shipped snapshot, deployment and tenant overrides; the default token formula; estimates for reservations (`model-layer.md` §7).
 
 ### WP-L3-07 — Workers
-Depends: WP-L3-04, WP-L1-03, WP-L8-01.
+Depends: WP-L3-04, WP-L1-03, WP-L8-01, WP-L1-08.
 Owns: `model/worker`, `contracts/basamento/worker`.
 `kit worker` and the worker contract (ADR-0012 §1 to §11): joining with a pool token, descriptors kept by the pool, the queue in the SQL store with classes, fairness and ageing, leases by free capacity, draining and pausing, the worker's journal, restart-safe redelivery and `worker_lost`, spill-over as a tenant setting, queue metrics and worker administration; routing by labels. Serves models and tools. Specs: `specs/models/workers.feature`.
 

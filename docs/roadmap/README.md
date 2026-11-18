@@ -74,6 +74,7 @@ flowchart LR
     WP_L1_05["WP-L1-05<br/>Configuration, profiles and kit serve"]
     WP_L1_06["WP-L1-06<br/>Credential store"]
     WP_L1_07["WP-L1-07<br/>Telemetry"]
+    WP_L1_08["WP-L1-08<br/>Blob upload URLs"]
   end
   subgraph L2_epic["L2 Expressions and schemas"]
     WP_L2_01["WP-L2-01<br/>CEL environment"]
@@ -111,6 +112,7 @@ flowchart LR
     WP_L7_01["WP-L7-01<br/>Agent loop"]
     WP_L7_02["WP-L7-02<br/>Tools and MCP"]
     WP_L7_03["WP-L7-03<br/>Conversations"]
+    WP_L7_04["WP-L7-04<br/>Conversations on a durable runtime"]
   end
   subgraph L8_epic["L8 Auth"]
     WP_L8_01["WP-L8-01<br/>Authentication modes"]
@@ -134,10 +136,11 @@ flowchart LR
   WP_L1_01 --> WP_L1_07
   WP_L1_01 --> WP_L6_01
   WP_L1_02 --> WP_L1_05
+  WP_L1_02 --> WP_L1_08
   WP_L1_02 --> WP_L3_03
   WP_L1_02 --> WP_L5_02
   WP_L1_03 --> WP_L1_05
-  WP_L1_03 --> WP_L6_02
+  WP_L1_03 --> WP_L6_01
   WP_L1_04 --> WP_L1_05
   WP_L1_04 --> WP_L1_06
   WP_L1_04 --> WP_L5_02
@@ -145,6 +148,8 @@ flowchart LR
   WP_L1_05 --> WP_L5_03
   WP_L1_05 --> WP_L8_01
   WP_L1_06 --> WP_L3_01
+  WP_L1_08 --> WP_L3_07
+  WP_L1_08 --> WP_L9_01
   WP_L2_01 --> WP_L4_01
   WP_L2_02 --> WP_L3_01
   WP_L2_02 --> WP_L4_01
@@ -154,6 +159,7 @@ flowchart LR
   WP_L3_03 --> WP_L3_04
   WP_L3_03 --> WP_L6_02
   WP_L3_04 --> WP_L3_07
+  WP_L3_04 --> WP_L7_04
   WP_L3_06 --> WP_L3_03
   WP_L3_07 --> WP_L3_08
   WP_L4_01 --> WP_L4_02
@@ -167,14 +173,17 @@ flowchart LR
   WP_L5_01 --> WP_L7_01
   WP_L5_02 --> WP_L5_03
   WP_L5_03 --> WP_L5_04
+  WP_L5_03 --> WP_L7_04
   WP_L6_01 --> WP_L6_02
   WP_L6_02 --> WP_L6_03
   WP_L6_02 --> WP_L7_03
   WP_L6_03 --> WP_L6_04
+  WP_L6_03 --> WP_L7_04
   WP_L6_03 --> WP_L9_01
   WP_L7_01 --> WP_L7_02
   WP_L7_01 --> WP_L7_03
   WP_L7_02 --> WP_L10_01
+  WP_L7_03 --> WP_L7_04
   WP_L8_01 --> WP_L3_07
   WP_L8_01 --> WP_L8_02
   WP_L8_02 --> WP_L6_03

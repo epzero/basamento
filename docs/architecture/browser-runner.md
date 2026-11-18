@@ -49,7 +49,7 @@ a Temporal worker:
   - screenshots per action;
   - video, needed for canvas, WebGL and video content, which rrweb does not capture;
   - Playwright trace, HAR, console log, and accessibility report.
-- Artifacts are uploaded to blob storage through scoped URLs.
+- Artifacts are uploaded to blob storage through scoped URLs (ADR-0013).
 
 ## 4. Models
 

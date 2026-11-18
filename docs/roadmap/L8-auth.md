@@ -10,4 +10,4 @@ Owns: `auth/authn`.
 ### WP-L8-02 — Authorization
 Depends: WP-L8-01.
 Owns: `auth/authz`.
-In-app RBAC with CEL conditions, audit events, Postgres row-level security in the cloud profile. Specs: `specs/auth/permissions.feature`.
+In-app RBAC with CEL conditions, audit events for denials, through the `platform.Audit` port (store from WP-L1-06), Postgres row-level security in the cloud profile. Specs: `specs/auth/permissions.feature`.

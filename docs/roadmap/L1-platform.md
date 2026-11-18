@@ -32,8 +32,14 @@ koanf; URL-selected implementations; plain-constructor wiring for `embedded` and
 Depends: WP-L1-01, WP-L1-04.
 Owns: `platform/credentials`.
 The vault (ADR-0004): named secrets per tenant, envelope-encrypted in SQL, `cred://` references resolved inside steps, write-only API, audit on use; external stores behind the same port.
+The first producer of `platform.Audit` (`Record(ctx, AuditEvent) error`) and the owner of its SQL implementation: an append-only audit table with tenant-scoped reads. An event carries time, tenant, principal, action, resource and outcome, and optionally the run id, step and reason; never a secret value.
 
 ### WP-L1-07 — Telemetry
 Depends: WP-L1-01.
 Owns: `platform/telemetry`.
 `slog` and OpenTelemetry traces and metrics behind one setup; OTLP export in the cloud profile, spans kept in SQLite for the run inspector in the embedded one.
+
+### WP-L1-08 — Blob upload URLs
+Depends: WP-L1-02.
+Owns: the upload part of `platform/blob` (and the port change).
+Upload URLs and commit (ADR-0013): `StartUpload` gives a single-use URL to a fresh staging key, scoped to the tenant, with a maximum size, a content type and a lifetime; `Commit` hashes the staged object, enforces the size and the tenant, and moves it to its content key, so a client never names one. Proxied signed URLs in the embedded profile, the provider's presigned PUT in the cloud; staged objects that are never committed expire.

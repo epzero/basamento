@@ -1,0 +1,426 @@
+# Approval ledger for this capability. Edit only with `go tool gate spec approve|human`.
+# See docs/engineering/spec-review.md.
+version: 1
+scenarios:
+    AGENT-001-01:
+        hash: sha256:1e3a67f6d28dcaf756b55ba6ca25dec9a239c207d0b3d69e44461164c2be6c81
+        reqs:
+            - REQ-AGENT-001
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-002-01:
+        hash: sha256:15454785814225e4ec7539b1b07e14f5f17c4a5929228f07187da615ee5497df
+        reqs:
+            - REQ-AGENT-002
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Durability and money safety: resumed run feeds recorded turn and tool results without re-invoking completed steps.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-003-01:
+        hash: sha256:d78c6017be9581d247a20a5a5fe647a30305ed519acc848680f6f8910c2179f3
+        reqs:
+            - REQ-AGENT-003
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-003-02:
+        hash: sha256:ffdc0420cd90f1c36389c464c9538da441561ebd2f761628bf30194248781b86
+        reqs:
+            - REQ-AGENT-003
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-004-01:
+        hash: sha256:5ee5ce5d3465dc0890b6eb55c147474174e37a06e4add2d7329630ec60b7b3e7
+        reqs:
+            - REQ-AGENT-004
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-005-01:
+        hash: sha256:6612f9dcafb9bd613b23ce8e15717c7c97a9ea638f92e4feb118471d89ce2434
+        reqs:
+            - REQ-AGENT-005
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-007-01:
+        hash: sha256:f2d0e2bfe9db38f1a2f1767450a254bd7f08409c721dee2b1a014442ed39fb64
+        reqs:
+            - REQ-AGENT-007
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-008-01:
+        hash: sha256:735d16f93fbf46a5cc8bd46199aa804734140e63c67d9958fa19421df28265fc
+        reqs:
+            - REQ-AGENT-008
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-009-01:
+        hash: sha256:e905b0845df85ef464ebdec8670fa0f85d903c934116b357020bf180a2b56f1c
+        reqs:
+            - REQ-AGENT-009
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Money safety (@cost): reserves estimated turn cost against cost cap before model invocation and settles actual charge.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-009-02:
+        hash: sha256:7be136196c70d7f12f2212b4ec8a33de5a6f8f043bd636c048037c2c77725e2e
+        reqs:
+            - REQ-AGENT-009
+            - REQ-AGENT-010
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Money safety (@cost): spending the exact cost cap allows a zero-cost follow-up turn without stopping early.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-010-01:
+        hash: sha256:bcd1f7919c7fcf1e5be58dfa9a24e626cdb61d51fb15891a7a65bfa4f15f4736
+        reqs:
+            - REQ-AGENT-010
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Money safety (@cost): stops the agent loop with cost_cap_reached before a turn whose reservation exceeds the cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-011-01:
+        hash: sha256:bab9078118dea2feb77364f3a27a819a574ecb90b02317e32d7eba606a0a6d1f
+        reqs:
+            - REQ-AGENT-011
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Spend control (@cost): stops the agent loop with token_cap_reached before a turn whose input tokens exceed the cap.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-011-02:
+        hash: sha256:7158a63fa2495e6562b5813b55128cce12e340004e5df27f0dd24cd38be324fc
+        reqs:
+            - REQ-AGENT-011
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Spend control (@cost): reaching the exact token cap allows a zero-token follow-up turn without stopping early.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-012-01:
+        hash: sha256:291d8770d6fff18e31d1a0c1e2d522facf33815224de6c7d8c9d42917141f9a7
+        reqs:
+            - REQ-AGENT-012
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-012-02:
+        hash: sha256:5ecf84d9b971946020addad3a6ed573ca232f74cfebba583b55ca68f551d9ebb
+        reqs:
+            - REQ-AGENT-012
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-016-01:
+        hash: sha256:290b82facf3b448b65a82ffc645f4bfdf812f227086267eb97302995bb5625f0
+        reqs:
+            - REQ-AGENT-016
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-016-02:
+        hash: sha256:43c24a4951409edbfa0c3ff68c54969c8beaee58a095abfcf61e6b28e2bf320c
+        reqs:
+            - REQ-AGENT-016
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-016-03:
+        hash: sha256:fb186d09babfaa9f1776344146909005a090815097ce951613a3ababd43dffa5
+        reqs:
+            - REQ-AGENT-016
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-017-01:
+        hash: sha256:c0607dd3ac46bb8e28de131747a5bdb6e8adbb89d1ecf3a15058a97126676c65
+        reqs:
+            - REQ-AGENT-017
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-018-01:
+        hash: sha256:5e2182894df6c25b6841bf4ac0d3b2cf73e277d125617f428ab70c7400464241
+        reqs:
+            - REQ-AGENT-018
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-018-02:
+        hash: sha256:7587b47c2ca318146a7cd628befda31ecb8446975e8cbcadcd130fc9014c5a0b
+        reqs:
+            - REQ-AGENT-018
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Spend control (@cost): target agent enforces its own token cap independently of the handing-off agent''s usage.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-018-03:
+        hash: sha256:3c7cb0684126e45ac66db914bcbcdfdfe26235faa04a8b5a9ced9d572ea5e499
+        reqs:
+            - REQ-AGENT-018
+        tier: P0
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: 'Money safety (@cost): target agent enforces its own cost cap independently of the handing-off agent''s spend.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/19
+    AGENT-019-01:
+        hash: sha256:b36f4eb9bcfb476f2f2899705edf681fe6c3bf08cdc33e66bce153cb875658a4
+        reqs:
+            - REQ-AGENT-019
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-019-02:
+        hash: sha256:2d6e92cef78095f406b05863d60b7ad9733bc3140c086df848d6b3c73475d0e1
+        reqs:
+            - REQ-AGENT-019
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-019-03:
+        hash: sha256:2662052745f7450dd1dfd672f4510f809f33cee0825f57c356a85613a08f89ec
+        reqs:
+            - REQ-AGENT-019
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-019-04:
+        hash: sha256:0440b69b0c6b8091be1d5a88ea9732f1ee33a6c8368a375989927b32a3d4cd4c
+        reqs:
+            - REQ-AGENT-016
+            - REQ-AGENT-019
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-020-01:
+        hash: sha256:a965ca2435d22ec13e19c6df27ded2dc390e3c0f9d53f097e2d88eb36bf507ef
+        reqs:
+            - REQ-AGENT-020
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-023-01:
+        hash: sha256:da0530d80342453b73b387c4d2b7274302b4f6ce2fbbaf7ae1439df69ff3a3cd
+        reqs:
+            - REQ-AGENT-023
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-024-01:
+        hash: sha256:eb7dec76fb40ec64c5b3055ebf46519fc4a2308ef215ce3006aca84bfe8e5252
+        reqs:
+            - REQ-AGENT-024
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-024-02:
+        hash: sha256:96abdbcdfc3778b35afe1517306aadb131707ca3df62a66a104aaba0d6c3c098
+        reqs:
+            - REQ-AGENT-024
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-025-01:
+        hash: sha256:9430e35862a757d985521c76587fc58fb8ce19fef91425cd0d6789416f655a52
+        reqs:
+            - REQ-AGENT-025
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-027-01:
+        hash: sha256:d6117f63c3714c6d2090528eef56e7f311ca431d52825dde9560e0854aa10ebb
+        reqs:
+            - REQ-AGENT-027
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-028-01:
+        hash: sha256:7adda4ef5bf53916c6fb584ae2f82a8600be3e74b2b0231b4d9dfc342d37d25d
+        reqs:
+            - REQ-AGENT-028
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-029-01:
+        hash: sha256:4208d27d9800c6be546458827183507efbb4a22c23f8f7869e90ffaeeda4765c
+        reqs:
+            - REQ-AGENT-029
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-029-02:
+        hash: sha256:1915766e68acd944a0c70b4aac7ab59c7aeafd7730eba8664df25a2d6e739f8f
+        reqs:
+            - REQ-AGENT-029
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-030-01:
+        hash: sha256:9bc5d2f233363d5bcdfed3223affb5cd721dd54a53a876c3acad8e5f4b755635
+        reqs:
+            - REQ-AGENT-030
+        tier: P2
+        author: claude-code:spec-author:0e15eb
+        reviewer: antigravity:spec-reviewer:f43b40
+        approved_at: "2026-11-18"
+        note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
