@@ -16,7 +16,12 @@ const defaultTags = "~@planned && ~@live && ~@eval && ~@journey && ~@slow && ~@q
 // TestFeatures runs every scenario under specs/ in strict mode.
 func TestFeatures(t *testing.T) {
 	if extra := os.Getenv("BDD_TAGS"); extra != "" {
-		runSuite(t, extra, "")
+		runSuite(t, extra, "embedded")
+		if sqltest.PostgresConfigured() {
+			runSuite(t, extra, "cloud")
+		} else {
+			t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
+		}
 		return
 	}
 	runSuite(t, defaultTags, "embedded")
@@ -34,9 +39,7 @@ func runSuite(t *testing.T, tags, profile string) {
 	}
 	if profile != "" {
 		t.Run(profile, func(t *testing.T) {
-			if err := os.Setenv("BDD_SQL_PROFILE", profile); err != nil {
-				t.Fatal(err)
-			}
+			t.Setenv("BDD_SQL_PROFILE", profile)
 			suite := godog.TestSuite{
 				Name:                name,
 				ScenarioInitializer: steps.Initialize,

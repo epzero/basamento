@@ -24,7 +24,6 @@ type sqlWorld struct {
 	lastErr     error
 	openErr     error
 	lastTxErr   error
-	itemIDs     map[string]string // key "tenant:key" -> id
 	closedPort  string
 	keyOrder    []string
 	extraStores []*psql.Store
@@ -35,7 +34,7 @@ func newSQLWorld() *sqlWorld {
 	if profile == "" {
 		profile = "embedded"
 	}
-	return &sqlWorld{profile: profile, itemIDs: map[string]string{}}
+	return &sqlWorld{profile: profile}
 }
 
 func (w *sqlWorld) tenantCtx(tenant string) context.Context {
@@ -66,6 +65,10 @@ func (w *sqlWorld) teardown() {
 	if w.pgCleanup != nil {
 		w.pgCleanup()
 		w.pgCleanup = nil
+	}
+	if w.dataDir != "" {
+		_ = os.RemoveAll(w.dataDir)
+		w.dataDir = ""
 	}
 }
 
