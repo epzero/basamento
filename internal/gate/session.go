@@ -166,6 +166,16 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	if r.Base == "" {
 		r.Base = "main"
 	}
+	// Neither value may reach git as an option. A base ref is also checked to
+	// name a commit before a worktree is created from it.
+	if err := checkRefNotOption("base ref", r.Base); err != nil {
+		return Session{}, err
+	}
+	if r.Branch != "" {
+		if err := checkRefNotOption("branch", r.Branch); err != nil {
+			return Session{}, err
+		}
+	}
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Session{}, err
@@ -207,6 +217,9 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 			return Session{}, err
 		}
 	default:
+		if err := checkBaseRef(top, r.Base); err != nil {
+			return Session{}, err
+		}
 		prefix := r.Issue
 		if prefix == "" {
 			prefix = id.Role
@@ -294,13 +307,13 @@ func writeSession(s Session) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(p, append(b, '\n'), 0o644)
+	return writeFileAtomic(p, append(b, '\n'))
 }
 
 // writeFileAtomic replaces path with data through a file in the same
 // directory, so a crash leaves either the old contents or the new ones, never
 // a truncated file.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+func writeFileAtomic(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -311,10 +324,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = f.Close()
 		return err
 	}
-	if err := f.Chmod(perm); err != nil {
-		_ = f.Close()
-		return err
-	}
+	// CreateTemp already made the file 0600 and it stays that way: a chmod to
+	// 0644 would widen it under a restrictive umask. The hand-off holds paths
+	// and notes, not secrets, but it is only ever read by this user.
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err
@@ -322,7 +334,19 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// The rename itself must reach disk, or a crash can lose the new name.
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 func readSession(dir string) (Session, error) {

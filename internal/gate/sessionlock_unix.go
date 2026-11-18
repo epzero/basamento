@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !solaris && !aix
 
 package gate
 
@@ -17,7 +17,7 @@ func tryLock(f *os.File) (bool, error) {
 	case errors.Is(err, syscall.EWOULDBLOCK), errors.Is(err, syscall.EAGAIN):
 		return false, nil
 	default:
-		return false, fmt.Errorf("lock %s: %w", f.Name(), err)
+		return false, fmt.Errorf("flock %s: %w", f.Name(), err)
 	}
 }
 

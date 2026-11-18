@@ -420,8 +420,13 @@ func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
 		func(base string) error { _, err := PlanReview(root, base, nil); return err },
 		func(base string) error { _, _, err := RedGreen(root, base); return err },
 	} {
-		if err := fn("origin/nope"); err == nil || !strings.Contains(err.Error(), "does not name a commit") {
-			t.Errorf("an unresolvable base must say so: %v", err)
+		// A revision-set negation exits 0 in rev-parse and prints ^<sha>; if
+		// it passed, `git show ^main:review.yaml` would print nothing and
+		// PlanReview would silently fall back to the default tier.
+		for _, base := range []string{"origin/nope", "^main", "^HEAD", "^main^{commit}"} {
+			if err := fn(base); err == nil || !strings.Contains(err.Error(), "does not name a commit") {
+				t.Errorf("base %q must be refused as not naming a commit: %v", base, err)
+			}
 		}
 	}
 
@@ -439,7 +444,7 @@ func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
 	}
 }
 
-func TestRemoteGitTimeoutSaysWhatToCheck(t *testing.T) {
+func TestRemoteGitTimeoutErrorSaysWhatToCheck(t *testing.T) {
 	repo := gitRepo(t)
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
 	defer cancel()
@@ -450,6 +455,27 @@ func TestRemoteGitTimeoutSaysWhatToCheck(t *testing.T) {
 	for _, want := range []string{"timed out after", "git remote -v", "network", "credentials"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the timeout error must say what to check (%q): %v", want, err)
+		}
+	}
+}
+
+func TestHeadRefIsNotAGitOption(t *testing.T) {
+	root := gitRepo(t)
+	for _, head := range []string{"--all", "-x", "--upload-pack=sh"} {
+		if _, err := ChangedFiles(root, "main", head); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("ChangedFiles must refuse head %q before git reads it as an option: %v", head, err)
+		}
+	}
+}
+
+func TestNewSessionRefsAreNotGitOptions(t *testing.T) {
+	repo := gitRepo(t)
+	for _, r := range []NewSessionRequest{
+		{Harness: "codex", Role: RoleImplementer, Issue: "WP-L1-08", Base: "--no-checkout"},
+		{Harness: "codex", Role: RoleImplementer, Issue: "WP-L1-08", Branch: "--upload-pack=sh"},
+	} {
+		if _, err := NewSession(repo, r); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("NewSession must refuse %+v before git reads it as an option: %v", r, err)
 		}
 	}
 }

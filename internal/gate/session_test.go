@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -247,6 +248,9 @@ func TestSessionFileIsReplacedNotTruncated(t *testing.T) {
 	if os.SameFile(before, after) {
 		t.Fatal("the session file was written in place; it must be replaced atomically")
 	}
+	if got := after.Mode().Perm(); got != 0o600 {
+		t.Fatalf("the session file is %o; it must stay 0600 so a rewrite cannot widen it past umask 077", got)
+	}
 	got, err := readSession(repo)
 	if err != nil || got.Status != s.Status || got.Note != s.Note {
 		t.Fatalf("the replacement holds the new hand-off: %+v, %v", got, err)
@@ -272,36 +276,66 @@ func TestIssueLockSerialisesWriters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
 
-	// A second writer must wait for the first, not enter beside it.
-	acquired := make(chan *fileLock, 1)
-	failed := make(chan error, 1)
-	attempting := make(chan struct{})
-	go func() {
-		close(attempting)
-		l, err := acquireFileLock(ctx, path)
-		if err != nil {
-			failed <- err
-			return
-		}
-		acquired <- l
-	}()
-	<-attempting
-	select {
-	case l := <-acquired:
-		l.release()
-		t.Fatal("a second writer acquired the per-issue lock while the first held it")
-	default:
+	// Assert the primitive directly: a second exclusive attempt fails while
+	// the first holds the lock. (A goroutine that has not yet attempted would
+	// let a check of the acquired channel pass trivially.)
+	second, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := tryLock(second); ok || err != nil {
+		t.Fatalf("two writers must not hold the per-issue lock at once: ok=%v err=%v", ok, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	if _, err := acquireFileLock(ctx, path); !errors.Is(err, errLockContended) {
+		t.Fatalf("a waiter on a held lock must report contention: %v", err)
 	}
 
 	first.release()
-	select {
-	case l := <-acquired:
-		l.release()
-	case err := <-failed:
+	if ok, err := tryLock(second); !ok || err != nil {
+		t.Fatalf("the lock must be free after release: ok=%v err=%v", ok, err)
+	}
+	_ = second.Close()
+	third, err := acquireFileLock(t.Context(), path)
+	if err != nil {
 		t.Fatal(err)
+	}
+	third.release()
+}
+
+func TestIssueLockWaitOutlastsTheWorstCaseHold(t *testing.T) {
+	// A reused worktree may check the remote and then fetch, two calls each
+	// bounded by a remote timeout plus its wait delay. The waiter's budget
+	// must leave room for local work on top, or a healthy slow call fails it.
+	worstHold := 2 * (gitRemoteTimeout + gitWaitDelay)
+	if issueLockWait < worstHold+10*time.Second {
+		t.Fatalf("issueLockWait = %s; want at least %s (worst-case hold plus margin)", issueLockWait, worstHold+10*time.Second)
+	}
+}
+
+func TestLockFailuresThatAreNotContentionAreReportedAsThemselves(t *testing.T) {
+	repo := gitRepo(t)
+	p, err := issueLockPath(repo, "WP-L1-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(p, 0o755); err != nil { // a directory where the lock file goes
+		t.Fatal(err)
+	}
+	_, err = acquireIssueLock(repo, "WP-L1-09")
+	if err == nil {
+		t.Fatal("a lock file that cannot be opened must fail")
+	}
+	if strings.Contains(err.Error(), "may still be running") {
+		t.Fatalf("a non-contention failure was reported as contention: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot lock") {
+		t.Fatalf("the error must say the lock could not be taken: %v", err)
 	}
 }
 
