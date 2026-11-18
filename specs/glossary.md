@@ -66,6 +66,8 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Expression** | A CEL condition or computed value (an edge's `when`, a guard, a gate's acceptance, a price rule, an authorization condition), type-checked against the schemas of the variables its **expression environment** declares and evaluated within that environment's **cost limit**. |
+| **Mapping** | A gojq program that reshapes one JSON value into exactly one other, such as a provider's request or response mapping, evaluated within a **step limit**. |
 | **Blob** | Immutable content kept by a tenant in blob storage under its **content key**, `sha256:` and the hex SHA-256 of the content. |
 | **Blob URL** | A URL that lets a client without credentials fetch one blob until its lifetime ends. In the embedded profile it is a **proxied blob URL**, signed and served by the platform. |
 | **Master key** | The key-encryption key held by the key service (a local key, a KMS key or a Vault Transit key). It wraps data keys and never leaves the key service. |
