@@ -132,5 +132,5 @@ func classifyOpenKeeperErr(ctx context.Context, err error, scheme string) error 
 	if core.CodeOf(c) == core.CodeUnavailable {
 		return c
 	}
-	return errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
+	return errInvalidArgument(fmt.Sprintf(msgInvalidKeyURL, scheme))
 }
