@@ -31,7 +31,7 @@ becoming a cluster manager.
 - **It pulls.** The platform queues invocations for the pool and decides
   their order. A worker asks for work, is leased only what it declared and
   can fit, keeps the lease with heartbeats, and sends events and the result
-  back. Output files go to blob storage through scoped URLs.
+  back. Output files go to blob storage through scoped URLs (ADR-0013).
 - **To a flow it is one more provider.** The platform side implements
   `model.Invoker`, so budget, cancellation, reattach and replay work as for
   any model. The router matches capability, tenant and required labels.

@@ -38,3 +38,8 @@ The first producer of `platform.Audit` (`Record(ctx, AuditEvent) error`) and the
 Depends: WP-L1-01.
 Owns: `platform/telemetry`.
 `slog` and OpenTelemetry traces and metrics behind one setup; OTLP export in the cloud profile, spans kept in SQLite for the run inspector in the embedded one.
+
+### WP-L1-08 — Blob upload URLs
+Depends: WP-L1-02.
+Owns: the upload part of `platform/blob` (and the port change).
+Upload URLs and commit (ADR-0013): `StartUpload` gives a single-use URL to a fresh staging key, scoped to the tenant, with a maximum size, a content type and a lifetime; `Commit` hashes the staged object, enforces the size and the tenant, and moves it to its content key, so a client never names one. Proxied signed URLs in the embedded profile, the provider's presigned PUT in the cloud; staged objects that are never committed expire.
