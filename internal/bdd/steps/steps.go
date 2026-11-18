@@ -14,7 +14,8 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core *coreWorld
+	Core   *coreWorld
+	Schema *schemaWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -22,7 +23,8 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 // Initialize registers hooks and every domain's steps.
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		return context.WithValue(ctx, worldKey{}, &World{Core: newCoreWorld()}), nil
+		return context.WithValue(ctx, worldKey{}, &World{Core: newCoreWorld(), Schema: newSchemaWorld()}), nil
 	})
 	registerCore(sc)
+	registerSchema(sc)
 }
