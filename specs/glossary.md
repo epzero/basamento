@@ -77,6 +77,10 @@ the same change that first uses it.
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Temporal runtime** | The `temporal` runtime: runs the flow host as a Temporal workflow and each step as an activity, with a payload codec that stores large run history payloads as blobs and encrypts every run history payload. Durable; continues a run as new at a checkpoint event threshold (`REQ-RT-039` … `REQ-RT-041`, `REQ-RT-028` … `REQ-RT-038`). |
+| **Run history** | The ordered record a durable runtime keeps of a run's durable calls and their results (on the temporal runtime, Temporal's event history); replay reads it, and ciphertexts and blobs in it differ between records of the same payload. |
+| **Claim-check threshold** | The most bytes of a run history payload the temporal runtime keeps in the run history; a larger payload is stored as a blob (`REQ-RT-028`). |
+| **Checkpoint event threshold** | The number of events in the run history from which a checkpoint continues the run as new (`REQ-RT-034`). |
 | **Prompt template** | A prompt stored under an id and a version (`<id>@<version>`, the **template reference**) that never changes once registered in the **prompt registry**. It declares its inputs, each `trusted` or not, and is made of segments. |
 | **Segment** | A named part of a prompt template of one kind: `static`, `semi-static`, `dynamic`, `history` or `user`. A **segment budget** is the most characters it may hold; a template may also have a **total budget**. |
 | **Assembled prompt** | What the **assembler** makes from a template reference, inputs and history: segments in order, history trimmed to fit, a content hash. |
