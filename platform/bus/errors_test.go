@@ -3,42 +3,70 @@ package bus
 import (
 	"context"
 	"errors"
-	"net/url"
+	"fmt"
 	"testing"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/epzero/basamento/core"
 )
 
 func TestMapConnErrNoCredentialLeak(t *testing.T) {
-	raw := "nats://secret:token@127.0.0.1:4222"
-	_, err := nats.Connect(raw, nats.Timeout(1))
-	mapped := mapConnErr(err)
+	raw := "nats://secret:token@evil.example:4222"
+	wrapped := fmt.Errorf("dial failed: %s", raw)
+	mapped := mapConnErr(wrapped)
 	if mapped == nil {
 		t.Fatal("expected error")
 	}
-	if mapped.Error() != "" {
-		_ = mapped
+	if containsAny(mapped.Error(), "secret", "token", raw, "evil.example") {
+		t.Fatalf("leaked in message: %v", mapped)
 	}
 	var ce *core.Error
-	if !errors.As(mapped, &ce) {
-		t.Fatal("not core error")
-	}
-	if ce.Details == nil {
-		return
-	}
-	for _, v := range ce.Details {
-		if s, ok := v.(string); ok {
-			if containsAny(s, "secret", "token", raw) {
-				t.Fatalf("leaked credential in detail %q", s)
+	if errors.As(mapped, &ce) && ce.Details != nil {
+		for _, v := range ce.Details {
+			if s, ok := v.(string); ok && containsAny(s, "secret", "token", raw) {
+				t.Fatalf("leaked in detail %q", s)
 			}
 		}
 	}
-	if containsAny(mapped.Error(), "secret", "token") {
-		t.Fatal("leaked in message")
+}
+
+func TestMapConnErrJetStream10054(t *testing.T) {
+	mapped := mapConnErr(&jetstream.APIError{ErrorCode: jetstream.ErrorCode(jsAPIStreamMessageExceedsMaximum)})
+	if string(core.CodeOf(mapped)) != string(core.CodeInvalidArgument) {
+		t.Fatalf("got %s", core.CodeOf(mapped))
 	}
-	_ = url.Parse
+}
+
+func TestOpenCloudPlaintextCredentialPolicy(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		raw    string
+		reject bool
+	}{
+		{"nats://user:pass@127.0.0.1:4222", false},
+		{"nats://user:pass@[::1]:4222", false},
+		{"nats://user:pass@localhost:4222", false},
+		{"nats://user:pass@10.0.0.1:4222", true},
+		{"nats://user:pass@remote.example:4222", true},
+		{"tls://user:pass@remote.example:4222", false},
+	}
+	for _, tc := range cases {
+		_, err := OpenCloud(ctx, tc.raw, Options{})
+		if tc.reject {
+			if err == nil || string(core.CodeOf(err)) != string(core.CodeInvalidArgument) {
+				t.Fatalf("%q: got %v", tc.raw, err)
+			}
+			if containsAny(err.Error(), "user", "pass", tc.raw) {
+				t.Fatalf("leaked url: %v", err)
+			}
+		} else if tc.raw == "tls://user:pass@remote.example:4222" {
+			continue
+		} else if err != nil && string(core.CodeOf(err)) == string(core.CodeInvalidArgument) && err.Error() == plaintextCredential().Error() {
+			t.Fatalf("unexpected reject %q: %v", tc.raw, err)
+		}
+	}
 }
 
 func TestInvalidURLMapping(t *testing.T) {
@@ -80,6 +108,15 @@ func TestMapConnErrContext(t *testing.T) {
 	}
 	if string(core.CodeOf(mapConnErr(context.DeadlineExceeded))) != string(core.CodeTimeout) {
 		t.Fatal("timeout")
+	}
+}
+
+func TestMapConnErrInvalidKey(t *testing.T) {
+	if string(core.CodeOf(mapConnErr(jetstream.ErrInvalidKey))) != string(core.CodeInvalidArgument) {
+		t.Fatal("invalid key")
+	}
+	if string(core.CodeOf(mapConnErr(nats.ErrBadSubject))) != string(core.CodeInvalidArgument) {
+		t.Fatal("bad subject")
 	}
 }
 

@@ -37,6 +37,8 @@ func TestValidKey(t *testing.T) {
 		{"lock.*", false},
 		{"lock.>", false},
 		{"a/b=c", true},
+		{"lock.ré", false},
+		{"a..b", false},
 	}
 	for _, tt := range tests {
 		if got := ValidKey(tt.k); got != tt.want {

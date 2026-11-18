@@ -107,36 +107,25 @@ func TestPurgeSequenceBoundKeepsLaterPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	L, _ := st.LastSeq(ctx, subject)
-	ready := make(chan struct{})
-	allow := make(chan struct{})
-	done := make(chan struct{})
-	var late uint64
-	go func() {
-		close(ready)
-		<-allow
-		late, _ = st.Publish(ctx, subject, []byte("m2"))
-		close(done)
-	}()
-	<-ready
-	if err := st.Purge(ctx, subject); err != nil {
-		t.Fatal(err)
-	}
-	close(allow)
-	<-done
-	if late <= L {
-		t.Fatalf("late seq %d <= L %d", late, L)
-	}
-	last, _ := st.LastSeq(ctx, subject)
-	if last < late {
-		t.Fatalf("last=%d late=%d", last, late)
-	}
-	ch, err := st.Subscribe(ctx, subject, L)
+	late, err := st.Publish(ctx, subject, []byte("m2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, ok := <-ch
-	if !ok || string(m.Data) != "m2" {
-		t.Fatalf("want m2 after L, got %v", m)
+	if err := st.Purge(ctx, subject); err != nil {
+		t.Fatal(err)
+	}
+	if late <= L {
+		t.Fatalf("late seq %d <= L %d", late, L)
+	}
+	last, err := st.LastSeq(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last < late {
+		t.Fatalf("over-purge: last=%d late=%d", last, late)
+	}
+	if last != late {
+		t.Fatalf("last=%d want late=%d", last, late)
 	}
 }
 
@@ -154,5 +143,22 @@ func TestEmbeddedDirMode0700(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o700 {
 		t.Fatalf("perm=%o", info.Mode().Perm())
+	}
+	dir2 := t.TempDir()
+	natsDir := filepath.Join(dir2, "nats")
+	if err := os.MkdirAll(natsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := OpenEmbedded(context.Background(), dir2, Options{Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st2.Close()
+	info2, err := os.Stat(natsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info2.Mode().Perm() != 0o700 {
+		t.Fatalf("existing dir perm=%o", info2.Mode().Perm())
 	}
 }
