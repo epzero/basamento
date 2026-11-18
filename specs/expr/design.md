@@ -17,7 +17,7 @@ func (e *Env) Compile(src string, result json.RawMessage /* expected result sche
 func (p *Program) Eval(vars map[string]any) (any, error) // JSON values in, a JSON value out
 
 // Mappings (gojq).
-func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapping, error) // opts: WithStepLimit(uint64)
+func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapping, error) // opts: WithStepLimit(uint64), WithOutputLimit(int)
 func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
 ```
 
@@ -36,6 +36,9 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error)
   - `out of bounds` (an index outside a list)
   - `no such key` (an absent map key or property)
   - `no JSON form` (a result that cannot be written as JSON)
+  - `unordered key` (a map key whose kind has no place in the order of §4)
+  - `output over the output limit` (a mapping output over its output limit,
+    §5)
 - A compiled `Program` or `Mapping` is immutable and safe for concurrent use.
 - `expr` imports only `core` (`layering.yaml`). It reads schemas as JSON, so
   it does not need `core/schema` (§2).
@@ -103,12 +106,24 @@ nothing is coerced from strings.
   database embedded in the binary (`time/tzdata`), never the host's.
 - **Map iteration**: every map an expression sees, bound from a variable,
   written as a literal or built during evaluation, iterates its keys in
-  ascending order. Keys of one type sort by value (strings by Unicode code
-  point); mixed key types sort `bool` < `int` < `uint` < `string`. This makes
-  `map`, `filter`, `all`, `exists`, `exists_one` and two-variable
-  comprehensions independent of Go map order, including which error an
-  evaluation reports first. A custom type adapter that returns a sorted map
-  for every native map is one way to do it.
+  ascending order as REQ-EXPR-021 orders them: keys of one kind sort by value
+  (strings by Unicode code point); keys of different kinds sort `bool` <
+  `int` < `uint` < `double` < `string`. A map whose keys are all `double` is
+  listed numerically, NaNs after every number, −0 before +0, and NaNs of one
+  bit pattern in a fixed order among themselves, so the order is total. Any
+  operation that orders a map's keys, `keys`, `toSortedList`, `sort`, uses the
+  same order. This makes `map`, `filter`, `all`, `exists`, `exists_one` and
+  two-variable comprehensions independent of Go map order, including which
+  error an evaluation reports first. A custom type adapter that returns a
+  sorted map for every native map is one way to do it.
+- **Keys of no order** (REQ-EXPR-022): a map key with any other CEL type,
+  such as a timestamp, a duration or a list, has no place in that order. An
+  evaluation that iterates over such a map fails with the cause
+  `unordered key`; it never falls back to Go map order and never drops the
+  entry. The error does not name the key or its value, which may be a
+  credential a mapping has resolved. A map that holds a key of no order
+  fails only when an evaluation iterates over it; the same value does
+  nothing when it is only passed on without its keys being visited.
 - **Cost**: cel-go's runtime cost tracking, with a limit per environment,
   default **1 000 000**. Cost is counted in cel-go's units, which do not
   depend on time or machine, so the same evaluation fails at the same point
@@ -116,7 +131,7 @@ nothing is coerced from strings.
   expressions: it is unbounded for any comprehension over a list of unknown
   size.
 
-## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-019)
+## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-020)
 
 - **Variables**: named variables (`$params`, `$inputs`…) declared at compile
   time; `$ENV` is never one of them.
@@ -143,6 +158,53 @@ nothing is coerced from strings.
   channel closes after the limit's number of checks bounds evaluation
   deterministically, by instructions rather than by time. The evaluator
   reports the step limit, not a context error.
+- **Output limit** (REQ-EXPR-020): default **1 048 576 bytes**, the size of
+  the value's compact JSON encoding, set per mapping with `WithOutputLimit`
+  and counted on every value the mapping builds, not only on its final
+  output.
+
+  The limit is a bound on memory: one mapping evaluates on behalf of the
+  whole server, so a value it builds to a large size must be refused before
+  it is allocated. Measuring the final output after the mapping has built it
+  would break that bound, and the step limit does not stand in for it: a
+  mapping such as `"x" * 2147483647` builds its value in a single step.
+
+  gojq offers no hook that sees every value an expression builds. Its
+  `WithFunction` and `WithIterFunction` options register a custom function,
+  and the compiler resolves builtins and operators before custom functions:
+  `*`, `+` and `[]` construction are internal instructions, never callable
+  names. The evaluator therefore bounds what a mapping builds in two ways:
+
+  - **Every value the mapping yields.** Each message the gojq iterator
+    returns, including every intermediate value of `limit`, `range`, `first`,
+    `foreach`, `reduce` and a function's own results, is counted: its size in
+    the canonical form of REQ-SCHEMA-030 (RFC 8785 bytes) while it is
+    converted to a gojq value, a walk that gives up once it has visited more
+    than the limit's number of nodes, as a deeply nested array would. The
+    conversion frees each node as it counts it. The messages are counted as a
+    running total, and the mapping stops with the cause `output over the
+    output limit` when the total exceeds the limit. gojq keeps no value a
+    mapping builds that does not reach this iterator, so a mapping whose
+    value stays within the limit is counted completely; the counting is
+    linear in the value and deterministic.
+  - **A single step that allocates without limit.** Only one gojq operation
+    allocates a value from a count rather than from values it already holds:
+    string repetition, `s * n`. The compiler resolves it through the internal
+    function `_repeat_string`, and `WithIterFunction` replaces that entry
+    with a function that refuses a repeated length over the limit before it
+    allocates; where a gojq upgrade compiles the operator to a different
+    function, the mapping's compilation fails cleanly rather than batching
+    the repetition unchecked. Adding
+    strings (`+`, `implode`, `join`, the encoders) and building arrays and
+    objects allocate from operands that are already counted, so their result
+    is at most the sum of the operands' sizes, which the message count bounds
+    on the next yield.
+
+  A value that gojq builds but backtracks out of, such as `"x" * 2000 | empty`,
+  is never yielded and so is not counted: the bound holds the memory a
+  mapping keeps, not every byte it touches. Stopping is deterministic: the
+  same mapping fails at the same message, or at the same repetition, every
+  time.
 - **Outputs**: the evaluator takes at most two values from the iterator. One
   is the result; none or two is an error (REQ-EXPR-014).
 - **Numbers**: inputs keep integers exact (`json.Number` converted to `int`

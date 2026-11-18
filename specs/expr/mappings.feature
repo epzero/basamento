@@ -119,3 +119,37 @@ Feature: JSON mappings
     When the mapping "{prompt: .text" is compiled
     Then compilation fails with code "invalid_argument"
     And the error names the mapping and the position of the error
+
+  @REQ-EXPR-020 @id:EXPR-020-01
+  Scenario Outline: A mapping whose output exceeds its output limit stops before it builds that much
+    Given the mapping "<mapping>" with an output limit of 1024 bytes
+    When the mapping is evaluated on null
+    Then evaluation fails with code "invalid_argument"
+    And the error names the output limit 1024
+
+    Examples:
+      | mapping                     |
+      | "x" * 1025                  |
+      | "x" * 1000000000            |
+      | ("x" * 1023) + "yy"         |
+      | [range(1032)]               |
+
+  @REQ-EXPR-020 @id:EXPR-020-02
+  Scenario Outline: A mapping whose output is within its output limit succeeds
+    Given the mapping "<mapping>" with an output limit of 1024 bytes
+    When the mapping is evaluated on null
+    Then the result is written compactly in <length> bytes
+
+    Examples:
+      | mapping                                 | length |
+      | "x" * 1024                              | 1026   |
+      | ("x" * 1022) + "yy"                     | 1026   |
+      | [range(256)]                            | 741    |
+      | {a: ("x" * 500), b: ("y" * 500)}        | 1019   |
+
+  @REQ-EXPR-020 @id:EXPR-020-03
+  Scenario: The default output limit stops a value of 2 GiB
+    Given the mapping ""x" * 2147483647"
+    When the mapping is evaluated on null
+    Then evaluation fails with code "invalid_argument"
+    And the error names the output limit 1048576
