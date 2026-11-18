@@ -7,7 +7,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -44,6 +43,7 @@ type secretsWorld struct {
 	valuePlain       []byte
 	unwrapAtRestart  int
 	lastCodecUnwraps int
+	storeSnaps       map[string]secrets.StoredKeyset
 }
 
 func newSecretsWorld() *secretsWorld {
@@ -63,6 +63,7 @@ type simKeyRegistry struct {
 	rewraps          int
 	unwraps          int
 	unwrapByCodec    map[*secrets.Codec]int
+	plainByTenant    map[string][]byte
 }
 
 func newSimRegistry() *simKeyRegistry {
@@ -92,8 +93,6 @@ type simKeyService struct {
 	name string
 }
 
-func (s *simKeyService) Scheme() string { return "simulated" }
-
 func (s *simKeyService) MasterKeyID() string { return s.name }
 
 func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
@@ -101,6 +100,7 @@ func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byt
 	if err := s.reg.checkAvailable(true); err != nil {
 		return nil, err
 	}
+	s.reg.noteKeysetPlain(tenant, plaintext)
 	return s.encrypt(tenant, plaintext)
 }
 
@@ -114,8 +114,10 @@ func (s *simKeyService) Unwrap(ctx context.Context, tenant string, ciphertext []
 }
 
 func (s *simKeyService) encrypt(tenant string, plain []byte) ([]byte, error) {
-	inner := append([]byte(tenant), 0)
-	inner = append(inner, plain...)
+	inner, err := secrets.FrameBoundPlaintext(tenant, plain)
+	if err != nil {
+		return nil, err
+	}
 	key := s.reg.keyBytes(s.name)
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -150,15 +152,11 @@ func (s *simKeyService) decrypt(tenant string, ct []byte) ([]byte, error) {
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
 	}
-	i := bytes.IndexByte(inner, 0)
-	if i < 0 {
-		return nil, core.NewError(core.CodeInternal, "keyset of the tenant cannot be unwrapped", nil)
+	out, err := secrets.ParseBoundPlaintext(tenant, inner)
+	if err != nil {
+		return nil, err
 	}
-	bound := string(inner[:i])
-	if subtle.ConstantTimeCompare([]byte(bound), []byte(tenant)) != 1 {
-		return nil, core.NewError(core.CodeInternal, "keyset of the tenant cannot be unwrapped", nil)
-	}
-	return inner[i+1:], nil
+	return out, nil
 }
 
 func (r *simKeyRegistry) keyBytes(name string) []byte {
@@ -186,6 +184,21 @@ func (r *simKeyRegistry) countUnwrap() {
 	r.mu.Lock()
 	r.unwraps++
 	r.mu.Unlock()
+}
+
+func (r *simKeyRegistry) noteKeysetPlain(tenant string, plain []byte) {
+	r.mu.Lock()
+	if r.plainByTenant == nil {
+		r.plainByTenant = map[string][]byte{}
+	}
+	r.plainByTenant[tenant] = append([]byte(nil), plain...)
+	r.mu.Unlock()
+}
+
+func (r *simKeyRegistry) keysetPlain(tenant string) []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]byte(nil), r.plainByTenant[tenant]...)
 }
 
 func (r *simKeyRegistry) unwrapTotal() int {
@@ -260,11 +273,10 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^a second payload codec sharing the keyset store and master key "([^"]*)"$`, func(ctx context.Context, mk string) error {
 		w := world(ctx).Secrets
 		ks := &simKeyService{reg: w.sim, name: mk}
-		c, err := secrets.NewCodec(w.store, ks)
+		c, err := secrets.NewCodec(w.store, []secrets.KeyService{ks}, codecOpts(w)...)
 		if err != nil {
 			return err
 		}
-		applySecretsLogger(w, c, nil)
 		w.codec2 = c
 		return nil
 	})
@@ -373,15 +385,14 @@ func secretsW(ctx context.Context) *secretsWorld {
 func newPayloadCodec(ctx context.Context, mk string) error {
 	sw := secretsW(ctx)
 	if sw.store == nil {
-		sw.store = secrets.NewMemStore()
+		sw.store = newBDDKeysetStore()
 	}
 	sw.sim.hold(mk)
 	ks := &simKeyService{reg: sw.sim, name: mk}
-	c, err := secrets.NewCodec(sw.store, ks)
+	c, err := secrets.NewCodec(sw.store, []secrets.KeyService{ks}, codecOpts(sw)...)
 	if err != nil {
 		return err
 	}
-	applySecretsLogger(sw, c, nil)
 	sw.codec = c
 	sw.unwrapAtRestart = sw.sim.unwrapTotal()
 	return nil
@@ -393,34 +404,43 @@ func newPayloadCodecWithPrev(ctx context.Context, cur, prev string) error {
 	sw.sim.hold(prev)
 	curKS := &simKeyService{reg: sw.sim, name: cur}
 	prevKS := &simKeyService{reg: sw.sim, name: prev}
-	c, err := secrets.NewCodec(sw.store, curKS, prevKS)
+	c, err := secrets.NewCodec(sw.store, []secrets.KeyService{curKS, prevKS}, codecOpts(sw)...)
 	if err != nil {
 		return err
 	}
-	applySecretsLogger(sw, c, nil)
 	sw.codec = c
 	sw.unwrapAtRestart = sw.sim.unwrapTotal()
 	return nil
 }
 
-func secretsOpts(sw *secretsWorld) []secrets.Option {
+func codecOpts(sw *secretsWorld) []secrets.Option {
 	if sw.logHandler == nil {
 		return nil
 	}
 	return []secrets.Option{secrets.WithLogger(slog.New(sw.logHandler))}
 }
 
-func applySecretsLogger(sw *secretsWorld, c *secrets.Codec, p *secrets.Port) {
-	if sw.logHandler == nil {
-		return
+func secretsOpts(sw *secretsWorld) []secrets.Option {
+	return codecOpts(sw)
+}
+
+func snapshotStore(sw *secretsWorld, tenant string) error {
+	rec, ok, err := sw.store.Get(tenant)
+	if err != nil {
+		return err
 	}
-	l := slog.New(sw.logHandler)
-	if c != nil {
-		c.SetLogger(l)
+	if !ok {
+		return nil
 	}
-	if p != nil {
-		p.SetLogger(l)
+	if sw.storeSnaps == nil {
+		sw.storeSnaps = map[string]secrets.StoredKeyset{}
 	}
+	sw.storeSnaps[tenant] = rec
+	return nil
+}
+
+func storedKeysetEqual(a, b secrets.StoredKeyset) bool {
+	return a.Revision == b.Revision && a.MasterKeyID == b.MasterKeyID && bytes.Equal(a.Wrapped, b.Wrapped)
 }
 
 func payloadGiven(ctx context.Context, name, enc, data string) error {
@@ -459,6 +479,7 @@ func encodeWhenEncoded(ctx context.Context, name, enc, data, tenant string) erro
 	sw.lastOp = "encode"
 	if err == nil {
 		sw.encoded[name] = encOut
+		return snapshotStore(sw, tenant)
 	}
 	return nil
 }
@@ -480,7 +501,7 @@ func encodePayloadAs(ctx context.Context, name, tenant, out string) error {
 		return err
 	}
 	sw.encoded[out] = enc
-	return nil
+	return snapshotStore(sw, tenant)
 }
 
 func encodeNoTenant(ctx context.Context, name string) error {
@@ -564,8 +585,31 @@ func rotateMaster(ctx context.Context, from, to string) error {
 }
 
 func masterRotationFailedOnce(ctx context.Context, from, to string) error {
-	_ = from
-	_ = to
+	sw := secretsW(ctx)
+	if sw.codec == nil {
+		return fmt.Errorf("codec required")
+	}
+	sw.sim.hold(to)
+	newKS := &simKeyService{reg: sw.sim, name: to}
+	sw.lastErr = sw.codec.RotateMasterKey(ctx, newKS)
+	sw.lastOp = "master-rotate"
+	if sw.lastErr == nil {
+		return fmt.Errorf("master rotation should have failed")
+	}
+	if core.CodeOf(sw.lastErr) != core.CodeUnavailable {
+		return fmt.Errorf("master rotation: want unavailable, got %w", sw.lastErr)
+	}
+	ma, oka, err := sw.store.Get("acme")
+	if err != nil {
+		return err
+	}
+	mb, okb, err := sw.store.Get("globex")
+	if err != nil {
+		return err
+	}
+	if !oka || !okb || ma.MasterKeyID == mb.MasterKeyID {
+		return fmt.Errorf("expected split master keys after failed rotation")
+	}
 	return nil
 }
 
@@ -737,10 +781,20 @@ func assertMastersTwo(ctx context.Context, a, b, mk string) error {
 }
 
 func assertStoredUnchanged(ctx context.Context, tenant string) error {
-	// Snapshot taken before failed op in scenario flow; no-op check when unchanged was tested by prior encode.
-	_, ok, err := secretsW(ctx).store.Get(tenant)
-	if err != nil || !ok {
+	sw := secretsW(ctx)
+	snap, ok := sw.storeSnaps[tenant]
+	if !ok {
+		return fmt.Errorf("no snapshot for tenant %q", tenant)
+	}
+	cur, found, err := sw.store.Get(tenant)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return fmt.Errorf("keyset missing after failed op")
+	}
+	if !storedKeysetEqual(snap, cur) {
+		return fmt.Errorf("stored keyset changed for %q", tenant)
 	}
 	return nil
 }
@@ -752,10 +806,14 @@ func swapKeysets(ctx context.Context, a, b string) error {
 	if !oka || !okb {
 		return fmt.Errorf("missing keysets")
 	}
-	if err := sw.store.Replace(a, rb); err != nil {
+	st, ok := sw.store.(*bddKeysetStore)
+	if !ok {
+		return fmt.Errorf("store cannot replace records")
+	}
+	if err := st.Replace(a, rb); err != nil {
 		return err
 	}
-	return sw.store.Replace(b, ra)
+	return st.Replace(b, ra)
 }
 
 func assertNoDataKeyLeaks(ctx context.Context, tenant string) error {
@@ -764,11 +822,8 @@ func assertNoDataKeyLeaks(ctx context.Context, tenant string) error {
 	if err != nil || !ok {
 		return err
 	}
-	mat, err := sw.codec.DataKeyMaterial(tenantCtx(ctx, tenant), tenant)
-	if err != nil {
-		return err
-	}
-	for _, b := range mat {
+	plain := sw.sim.keysetPlain(tenant)
+	for _, b := range [][]byte{plain} {
 		if len(b) > 0 && bytes.Contains(rec.Wrapped, b) {
 			return fmt.Errorf("wrapped keyset contains data key bytes")
 		}
@@ -778,8 +833,17 @@ func assertNoDataKeyLeaks(ctx context.Context, tenant string) error {
 
 func assertSplitMasters(ctx context.Context, a, b string) error {
 	sw := secretsW(ctx)
-	ma, _, _ := sw.store.Get("acme")
-	mb, _, _ := sw.store.Get("globex")
+	ma, oka, err := sw.store.Get("acme")
+	if err != nil {
+		return err
+	}
+	mb, okb, err := sw.store.Get("globex")
+	if err != nil {
+		return err
+	}
+	if !oka || !okb {
+		return fmt.Errorf("missing keysets")
+	}
 	ids := map[string]bool{ma.MasterKeyID: true, mb.MasterKeyID: true}
 	if !ids[a] || !ids[b] || ma.MasterKeyID == mb.MasterKeyID {
 		return fmt.Errorf("masters %q %q want distinct %q %q", ma.MasterKeyID, mb.MasterKeyID, a, b)
@@ -999,7 +1063,6 @@ func openSecretsURL(ctx context.Context, raw string) error {
 	sw.lastErr = err
 	sw.lastOp = "open"
 	if err == nil {
-		applySecretsLogger(sw, nil, p)
 		sw.port = p
 		sw.portURL = raw
 	}
@@ -1080,10 +1143,6 @@ func captureLog(ctx context.Context) error {
 	sw.logBuf = &bytes.Buffer{}
 	h := slog.NewTextHandler(sw.logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	sw.logHandler = h
-	applySecretsLogger(sw, sw.codec, sw.port)
-	if sw.codec2 != nil {
-		sw.codec2.SetLogger(slog.New(h))
-	}
 	return nil
 }
 
@@ -1109,8 +1168,8 @@ func logLacksKeyMaterial(ctx context.Context, tenant, mk string) error {
 	if sw.lastErr != nil {
 		text += sw.lastErr.Error()
 	}
-	mat, _ := sw.codec.DataKeyMaterial(tenantCtx(ctx, tenant), tenant)
-	for _, b := range mat {
+	plain := sw.sim.keysetPlain(tenant)
+	for _, b := range [][]byte{plain} {
 		if len(b) > 0 && strings.Contains(text, string(b)) {
 			return fmt.Errorf("log/error contains data key bytes")
 		}
