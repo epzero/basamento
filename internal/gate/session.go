@@ -186,6 +186,8 @@ func fastForwardBranch(dir, branch string) error {
 	return nil
 }
 
+// issueWorktree returns the latest working (non-reviewer) session of an issue
+// whose worktree is not exclude.
 func issueWorktree(dir, issue, exclude string) (Session, bool, error) {
 	sessions, err := ListSessions(dir, "")
 	if err != nil {
