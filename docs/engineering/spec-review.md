@@ -29,6 +29,15 @@ The repository keeps the decision, not the conversation.
 - Reads only. It never edits the spec under review; it requests changes, with
   exact replacement text for blocking ones.
 - Checks every scenario against the rubric (§3).
+- Runs the first round at the heavy effort tier and later rounds at standard
+  (`agent-workflow.md` §2.3).
+- From the second round on, checks each finding still open and the whole diff
+  since the last reviewed commit; it does not re-run the round-1 checks on
+  unchanged text. Fixes introduce new defects, so the review is not limited
+  to the lines a finding named.
+- Before approving, reads the complete final text of the changed spec files
+  once, in a single session with no fan-out: an approval locks that text and
+  assigns its tiers, so it vouches for all of it.
 - Approves with its own identity as reviewer:
 
   ```bash
