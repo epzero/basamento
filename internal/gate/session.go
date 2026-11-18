@@ -83,7 +83,7 @@ type NewSessionRequest struct {
 	Role       string
 	Issue      string
 	Parent     string
-	Base       string // branch to start from; default "main"
+	Base       string // local branch or remote-tracking branch to start from; default "main"
 	Branch     string // continue this pushed branch instead of starting one (work begun in another clone)
 	NoWorktree bool   // stay in the current checkout (the default for dispatchers)
 }
@@ -151,6 +151,32 @@ func validateBranchName(branch string) error {
 
 func headBranchRef(branch string) string   { return "refs/heads/" + branch }
 func remoteBranchRef(branch string) string { return "refs/remotes/origin/" + branch }
+
+func remoteTrackingRef(name string) string { return "refs/remotes/" + name }
+
+// resolveBaseRef maps a -base name to a fully qualified ref: an existing refs/…
+// value, else refs/heads/<base>, else refs/remotes/<base>.
+func resolveBaseRef(dir, base string) (string, error) {
+	if base == "" {
+		base = "main"
+	}
+	if strings.HasPrefix(base, "-") {
+		return "", fmt.Errorf("base %q is not accepted: use a local branch or a remote-tracking branch (for example main or origin/main)", base)
+	}
+	if strings.HasPrefix(base, "refs/") {
+		if _, err := git(dir, "rev-parse", "--verify", "--quiet", base); err != nil {
+			return "", fmt.Errorf("base %q is not accepted: use a local branch or a remote-tracking branch (for example main or origin/main)", base)
+		}
+		return base, nil
+	}
+	if _, err := git(dir, "rev-parse", "--verify", "--quiet", headBranchRef(base)); err == nil {
+		return headBranchRef(base), nil
+	}
+	if _, err := git(dir, "rev-parse", "--verify", "--quiet", remoteTrackingRef(base)); err == nil {
+		return remoteTrackingRef(base), nil
+	}
+	return "", fmt.Errorf("base %q is not accepted: use a local branch or a remote-tracking branch (for example main or origin/main)", base)
+}
 
 func originFetchRefspec(branch string) string {
 	return "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
@@ -319,9 +345,6 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 			return Session{}, fmt.Errorf("parent: %w", err)
 		}
 	}
-	if r.Base == "" {
-		r.Base = "main"
-	}
 	if r.Branch != "" {
 		if err := validateBranchName(r.Branch); err != nil {
 			return Session{}, err
@@ -389,11 +412,11 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		}
 		s.Branch = prefix + "-" + id.Instance
 		s.Worktree = filepath.Join(filepath.Dir(top), filepath.Base(top)+"-worktrees", s.Branch)
-		start := r.Base
-		if !strings.HasPrefix(start, "refs/") {
-			start = headBranchRef(start)
+		baseRef, err := resolveBaseRef(top, r.Base)
+		if err != nil {
+			return Session{}, err
 		}
-		if _, err := git(top, "worktree", "add", "-b", s.Branch, s.Worktree, start); err != nil {
+		if _, err := git(top, "worktree", "add", "-b", s.Branch, s.Worktree, baseRef); err != nil {
 			return Session{}, err
 		}
 	}
@@ -579,15 +602,16 @@ type SessionStatus struct {
 
 // ListSessions returns the session of every worktree that has one.
 func ListSessions(dir, base string) ([]SessionStatus, error) {
-	if base == "" {
-		base = "main"
+	baseRef, err := resolveBaseRef(dir, base)
+	if err != nil {
+		return nil, err
 	}
 	out, err := git(dir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
 	merged := map[string]bool{}
-	if m, err := git(dir, "branch", "--format=%(refname:short)", "--merged", base); err == nil {
+	if m, err := git(dir, "branch", "--format=%(refname:short)", "--merged", baseRef); err == nil {
 		for _, b := range strings.Fields(m) {
 			merged[b] = true
 		}

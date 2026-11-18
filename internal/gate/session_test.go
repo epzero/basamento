@@ -736,6 +736,108 @@ func TestTagDoesNotShadowReviewSnapshot(t *testing.T) {
 	}
 }
 
+func TestListSessionsMergedWithTagNamedLikeBase(t *testing.T) {
+	repo := gitRepo(t)
+	commitFile(t, repo, "on-main.txt")
+	initHead, _ := git(repo, "rev-parse", "HEAD~1")
+	if initHead == "" {
+		initHead, _ = git(repo, "rev-parse", "HEAD")
+	}
+	mustGit(t, repo, "tag", "-f", "main", initHead)
+	mustGit(t, repo, "checkout", "-q", "-b", "feat")
+	commitFile(t, repo, "feat.txt")
+	mustGit(t, repo, "checkout", "-q", "main")
+	mustGit(t, repo, "merge", "-q", "feat")
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", "feat")
+	mustGit(t, repo, "worktree", "add", wt, headBranchRef("feat"))
+	if err := writeSession(Session{
+		Identity: "cursor:implementer:fe0101",
+		Branch:   "feat",
+		Worktree: wt,
+		Created:  "2020-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := ListSessions(repo, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ss := range sessions {
+		if ss.Branch == "feat" {
+			found = true
+			if !ss.Merged {
+				t.Fatalf("feat should be merged into main; sessions=%+v", sessions)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected feat session")
+	}
+}
+
+func TestNewSessionBaseOriginMain(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
+	mustGit(t, repo, "fetch", "-q", "origin", "main")
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L7-01", Base: "origin/main"})
+	if err != nil {
+		t.Fatalf("Base origin/main: %v", err)
+	}
+	if !strings.HasPrefix(s.Branch, "WP-L7-01-") {
+		t.Fatalf("unexpected branch %+v", s)
+	}
+}
+
+func TestNewSessionBaseMainWithTagShadow(t *testing.T) {
+	repo := gitRepo(t)
+	initHead, _ := git(repo, "rev-parse", "HEAD")
+	mustGit(t, repo, "tag", "-f", "main", initHead)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-02", Base: "main"})
+	if err != nil {
+		t.Fatalf("Base main with tag shadow: %v", err)
+	}
+	if s.Branch == "" || s.Worktree == "" {
+		t.Fatalf("expected worktree: %+v", s)
+	}
+}
+
+func TestResolveBaseRejectsLeadingDash(t *testing.T) {
+	repo := gitRepo(t)
+	if _, err := ListSessions(repo, "-evil"); err == nil {
+		t.Fatal("base starting with - must be refused")
+	} else if !strings.Contains(err.Error(), "-evil") {
+		t.Fatalf("error should name base: %v", err)
+	}
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L7-03", Base: "-x"}); err == nil {
+		t.Fatal("NewSession must reject base -x")
+	}
+}
+
+func TestResolveBaseUnknown(t *testing.T) {
+	repo := gitRepo(t)
+	if _, err := ListSessions(repo, "no-such-base"); err == nil {
+		t.Fatal("unknown base must fail")
+	} else if !strings.Contains(err.Error(), "no-such-base") || !strings.Contains(err.Error(), "local branch") {
+		t.Fatalf("error should explain accepted bases: %v", err)
+	}
+}
+
+func TestListSessionsWithOriginMainBase(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
+	mustGit(t, repo, "fetch", "-q", "origin", "main")
+	if _, err := ListSessions(repo, "origin/main"); err != nil {
+		t.Fatalf("ListSessions origin/main base: %v", err)
+	}
+}
+
 func TestContinueABranchFromAnotherClone(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
