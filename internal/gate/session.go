@@ -149,7 +149,7 @@ func validateBranchName(branch string) error {
 	return nil
 }
 
-func headBranchRef(branch string) string  { return "refs/heads/" + branch }
+func headBranchRef(branch string) string   { return "refs/heads/" + branch }
 func remoteBranchRef(branch string) string { return "refs/remotes/origin/" + branch }
 
 func originFetchRefspec(branch string) string {
