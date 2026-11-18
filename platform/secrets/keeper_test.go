@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,7 +119,10 @@ func TestKeeperMasterKeyIDStableNoSecret(t *testing.T) {
 func TestOpenCodecLocalsecrets(t *testing.T) {
 	t.Parallel()
 	ctx := tenantCtx("acme")
-	store := secrets.NewMemStore()
+	store, err := secrets.NewFileStore(filepath.Join(t.TempDir(), "ks"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	c, err := secrets.OpenCodec(ctx, store, localURL(3), nil)
 	if err != nil {
 		t.Fatal(err)

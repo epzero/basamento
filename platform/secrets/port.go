@@ -37,11 +37,6 @@ func (p *Port) Decrypt(ctx context.Context, ciphertext []byte) ([]byte, error) {
 	return pt, nil
 }
 
-// SetLogger sets where the port writes operational records (optional).
-func (p *Port) SetLogger(l *slog.Logger) {
-	p.opts.logger = l
-}
-
 var _ interface {
 	Encrypt(ctx context.Context, plaintext []byte) ([]byte, error)
 	Decrypt(ctx context.Context, ciphertext []byte) ([]byte, error)
