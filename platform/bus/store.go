@@ -281,12 +281,9 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		live.end()
 		return nil, mapConnErr(err)
 	}
-	floor, err = purgeFloor(ctx, s.meta, subject)
-	if err != nil {
-		live.end()
-		return nil, err
-	}
-	if err := subscribePurged(after, floor); err != nil {
+	if err := floorAfterConsumer(after, func() (uint64, error) {
+		return purgeFloor(ctx, s.meta, subject)
+	}); err != nil {
 		live.end()
 		return nil, err
 	}
