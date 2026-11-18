@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -127,13 +128,16 @@ func registerCore(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	reportTenant := func(ctx context.Context) *coreWorld {
+	// reportTenant reads the tenant carried by the scenario's context. It fails
+	// when no When step set a context, so a Then cannot pass against a context
+	// the scenario never produced.
+	reportTenant := func(ctx context.Context) (*coreWorld, error) {
 		w := world(ctx).Core
 		if w.tenantCtx == nil {
-			w.tenantCtx = context.Background()
+			return nil, fmt.Errorf("no context under test: a When step must carry a tenant id first")
 		}
 		w.tenantID, w.tenantOK = core.TenantFrom(w.tenantCtx)
-		return w
+		return w, nil
 	}
 	sc.Step(`^a context carries the tenant id "([^"]*)"$`, func(ctx context.Context, id string) error {
 		world(ctx).Core.tenantCtx = core.WithTenant(context.Background(), core.TenantID(id))
@@ -160,28 +164,40 @@ func registerCore(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the context reports no tenant$`, func(ctx context.Context) error {
-		w := reportTenant(ctx)
+		w, err := reportTenant(ctx)
+		if err != nil {
+			return err
+		}
 		if w.tenantOK || w.tenantID != "" {
 			return fmt.Errorf("context reports tenant %q, want none", w.tenantID)
 		}
 		return nil
 	})
 	sc.Step(`^the derived context reports no tenant$`, func(ctx context.Context) error {
-		w := reportTenant(ctx)
+		w, err := reportTenant(ctx)
+		if err != nil {
+			return err
+		}
 		if w.tenantOK || w.tenantID != "" {
 			return fmt.Errorf("derived context reports tenant %q, want none", w.tenantID)
 		}
 		return nil
 	})
 	sc.Step(`^the context reports the tenant id "([^"]*)"$`, func(ctx context.Context, want string) error {
-		w := reportTenant(ctx)
+		w, err := reportTenant(ctx)
+		if err != nil {
+			return err
+		}
 		if !w.tenantOK || w.tenantID != core.TenantID(want) {
 			return fmt.Errorf("context reports tenant (%q, %v), want (%q, true)", w.tenantID, w.tenantOK, want)
 		}
 		return nil
 	})
 	sc.Step(`^the reported tenant id is empty$`, func(ctx context.Context) error {
-		w := reportTenant(ctx)
+		w, err := reportTenant(ctx)
+		if err != nil {
+			return err
+		}
 		if w.tenantID != "" {
 			return fmt.Errorf("reported tenant id is %q, want empty", w.tenantID)
 		}
@@ -189,8 +205,16 @@ func registerCore(sc *godog.ScenarioContext) {
 	})
 }
 
-// parseTenantLiteral parses a tenant-id literal as the feature defines it: a
-// Go interpreted string literal, or the word absent for no id at all.
+// parseTenantLiteral parses the tenant-id literal of a feature Examples table:
+// a Go interpreted string literal, or the word absent for no id at all.
+//
+// The Gherkin table layer consumes one backslash: the row "a\\b" reaches the
+// step as `"a\b"`. So before strconv.Unquote, a backslash that does not start
+// one of the escapes the feature documents (\u, \x, \" and \\) is put back as
+// the `\\` the author wrote. That reads the row as the literal backslash it
+// names, and keeps Unquote from accepting Go escapes the feature does not
+// document: \n, \t, \r, \a, \f, \v, octal and \U all arrive as a backslash and
+// a letter, and stay that literal pair.
 func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
 	if literal == "absent" {
 		return "", false, nil
@@ -198,9 +222,30 @@ func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
 	if len(literal) < 2 || literal[0] != '"' || literal[len(literal)-1] != '"' {
 		return "", false, fmt.Errorf("tenant-id literal %q is not a Go interpreted string literal", literal)
 	}
-	s, err := strconv.Unquote(literal)
+	s, err := strconv.Unquote(redoubleBackslashes(literal))
 	if err != nil {
 		return "", false, fmt.Errorf("tenant-id literal %q: %w", literal, err)
 	}
 	return core.TenantID(s), true, nil
+}
+
+// redoubleBackslashes restores the backslash the Gherkin table layer consumes,
+// for every backslash that is not the start of a documented escape.
+func redoubleBackslashes(lit string) string {
+	var b strings.Builder
+	b.Grow(len(lit) + 8)
+	for i := 0; i < len(lit); i++ {
+		if lit[i] == '\\' && i+1 < len(lit) && !isTenantLiteralEscape(lit[i+1]) {
+			b.WriteString(`\\`)
+			continue
+		}
+		b.WriteByte(lit[i])
+	}
+	return b.String()
+}
+
+// isTenantLiteralEscape reports whether c starts an escape the feature
+// documents after the Gherkin table layer: \u, \x, \" or \\.
+func isTenantLiteralEscape(c byte) bool {
+	return c == 'u' || c == 'x' || c == '"' || c == '\\'
 }

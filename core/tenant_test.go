@@ -110,6 +110,14 @@ func TestTenantFromGrammar(t *testing.T) {
 		{name: "leading U+00A0", id: "\u00a0acme"},
 		{name: "trailing U+00A0", id: "acme\u00a0"},
 		{name: "leading U+0085", id: "\u0085acme"},
+		// U+2028 and U+3000 sit past Latin-1 in the White_Space table, so they
+		// only fail if the check asks Unicode, not ASCII or Latin-1.
+		{name: "trailing U+2028", id: "acme\u2028"},
+		{name: "leading U+3000", id: "\u3000acme"},
+		// U+200B is a zero-width space, which Unicode does not classify as
+		// White_Space; a check that broadened to all invisible separators would
+		// reject it.
+		{name: "leading U+200B", id: "\u200bacme", ok: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
