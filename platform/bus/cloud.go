@@ -8,15 +8,18 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// OpenCloud connects to a NATS cluster at rawURL (scheme nats, tls, or nats+tls).
-// Credential-bearing URLs are never logged.
+// OpenCloud connects to a NATS cluster at rawURL (scheme nats or tls).
+// Credential-bearing URLs are never logged. ctx bounds connection and asset setup.
 func OpenCloud(ctx context.Context, rawURL string, opts Options) (*Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, mapConnErr(err)
+	}
 	opts = opts.withDefaults()
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, invalidURL()
 	}
-	if u.Scheme != "nats" && u.Scheme != "tls" && u.Scheme != "nats+tls" {
+	if u.Scheme != "nats" && u.Scheme != "tls" {
 		return nil, invalidURL()
 	}
 	pass, _ := u.User.Password()
@@ -29,10 +32,10 @@ func OpenCloud(ctx context.Context, rawURL string, opts Options) (*Store, error)
 	if err != nil {
 		return nil, mapConnErr(err)
 	}
-	st, err := connectAndOpen(nc, opts, nil)
+	st, err := connectAndOpen(ctx, nc, opts, nil)
 	if err != nil {
+		nc.Close()
 		return nil, err
 	}
-	_ = ctx
 	return st, nil
 }

@@ -54,6 +54,35 @@ func TestInvalidURLMapping(t *testing.T) {
 	}
 }
 
+func TestOpenCloudRejectsBadSchemes(t *testing.T) {
+	ctx := context.Background()
+	for _, raw := range []string{
+		"nats+tls://127.0.0.1:4222",
+		"http://127.0.0.1:4222",
+		"ftp://user:secret@127.0.0.1:4222",
+	} {
+		_, err := OpenCloud(ctx, raw, Options{})
+		if err == nil {
+			t.Fatalf("want error for %q", raw)
+		}
+		if string(core.CodeOf(err)) != string(core.CodeInvalidArgument) {
+			t.Fatalf("%q code %s", raw, core.CodeOf(err))
+		}
+		if containsAny(err.Error(), "secret", "user", "4222", "nats+tls", "http://") {
+			t.Fatalf("leaked url in %v", err)
+		}
+	}
+}
+
+func TestMapConnErrContext(t *testing.T) {
+	if string(core.CodeOf(mapConnErr(context.Canceled))) != string(core.CodeCancelled) {
+		t.Fatal("cancelled")
+	}
+	if string(core.CodeOf(mapConnErr(context.DeadlineExceeded))) != string(core.CodeTimeout) {
+		t.Fatal("timeout")
+	}
+}
+
 func TestOversizePublishInvalidArgument(t *testing.T) {
 	st, _, _ := openTestEmbedded(t)
 	ctx := context.Background()
