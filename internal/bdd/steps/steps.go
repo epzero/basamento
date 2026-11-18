@@ -40,6 +40,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerPrompt(sc)
 	registerBlob(sc)
 	registerSharedSteps(sc)
+	registerBlobUploads(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

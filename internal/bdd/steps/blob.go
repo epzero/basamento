@@ -19,6 +19,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/internal/bdd/s3sim"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/blob"
@@ -47,6 +48,7 @@ type blobWorld struct {
 	openErr      error
 	lastExists   bool
 	hasExists    bool
+	uploadSt     *blobUploadState
 }
 
 type fetchResp struct {
@@ -99,10 +101,11 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 		w.altStore = nil
 	}
 	opts := blob.Options{
-		Clock:     clock,
-		MaxURLTTL: w.maxTTL,
-		BaseURL:   "http://blob.test" + blob.HandlerRoute(),
-		SignKey:   w.signKey,
+		Clock:      clock,
+		MaxURLTTL:  w.maxTTL,
+		BaseURL:    "http://blob.test" + blob.HandlerRoute(),
+		SignKey:    w.signKey,
+		RandReader: coretest.SeededRand(7),
 	}
 	useS3Backend := w.backend == "s3"
 	if useS3Backend {
@@ -821,7 +824,8 @@ func openBlobFromPhrase(ctx context.Context, phrase string) error {
 func tryOpenPath(ctx context.Context, raw string) error {
 	w := world(ctx).Blob
 	opts := blob.Options{Clock: world(ctx).Core.clock, MaxURLTTL: w.maxTTL,
-		BaseURL: "http://blob.test" + blob.HandlerRoute(), SignKey: w.signKey}
+		BaseURL: "http://blob.test" + blob.HandlerRoute(), SignKey: w.signKey,
+		RandReader: coretest.SeededRand(7)}
 	st, h, err := blob.Open(ctx, raw, opts)
 	w.openErr = err
 	if err != nil {

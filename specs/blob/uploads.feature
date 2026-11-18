@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-08 @level:component
+@wp:WP-L1-08 @level:component
 Feature: Blob upload URLs
   A large body is produced where the platform does not host it, so a client
   uploads it through a short-lived upload URL into a staging slot of its own
