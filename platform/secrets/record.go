@@ -1,5 +1,7 @@
 package secrets
 
+import "context"
+
 // StoredKeyset is one tenant's wrapped Tink keyset on disk.
 type StoredKeyset struct {
 	Wrapped     []byte
@@ -9,14 +11,9 @@ type StoredKeyset struct {
 
 // KeysetStore persists wrapped keysets with compare-and-swap.
 type KeysetStore interface {
-	// Get returns the stored keyset and true, or false when absent.
-	Get(tenant string) (StoredKeyset, bool, error)
-	// CreateIfAbsent writes record when no row exists; reports whether it created.
-	CreateIfAbsent(tenant string, record StoredKeyset) (created bool, err error)
-	// CompareAndSwap updates when revision matches.
-	CompareAndSwap(tenant string, expectRevision uint64, record StoredKeyset) error
-	// Count returns how many tenants have a stored keyset.
-	Count() (int, error)
-	// Tenants lists tenants with a stored keyset.
-	Tenants() ([]string, error)
+	Get(ctx context.Context, tenant string) (StoredKeyset, bool, error)
+	CreateIfAbsent(ctx context.Context, tenant string, record StoredKeyset) (created bool, err error)
+	CompareAndSwap(ctx context.Context, tenant string, expectRevision uint64, record StoredKeyset) error
+	Count(ctx context.Context) (int, error)
+	Tenants(ctx context.Context) ([]string, error)
 }
