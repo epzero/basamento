@@ -50,7 +50,8 @@ type sub struct {
 	replayThrough uint64
 	ch            chan platform.Message
 	cancel        context.CancelFunc
-	replayDone    chan struct{}
+	replaying     bool
+	livePending   []platform.Message
 	ended         bool
 	chClosed      bool
 }
@@ -141,6 +142,53 @@ func (f *Fake) lastSeqLocked(subject string) uint64 {
 	return floor
 }
 
+func (f *Fake) subTeardownLocked(s *sub) {
+	if !s.chClosed {
+		s.chClosed = true
+		close(s.ch)
+	}
+	if !s.ended {
+		s.ended = true
+	}
+	f.removeSub(s)
+}
+
+func (f *Fake) flushLivePending(s *sub, subCtx context.Context) {
+	for {
+		f.mu.Lock()
+		pending := s.livePending
+		s.livePending = nil
+		f.mu.Unlock()
+		for _, msg := range pending {
+			if msg.Seq <= s.after {
+				continue
+			}
+			f.mu.Lock()
+			ended := s.ended
+			closed := s.chClosed
+			f.mu.Unlock()
+			if ended || closed {
+				return
+			}
+			select {
+			case s.ch <- msg:
+			case <-subCtx.Done():
+				f.mu.Lock()
+				f.subTeardownLocked(s)
+				f.mu.Unlock()
+				return
+			}
+		}
+		f.mu.Lock()
+		if len(s.livePending) == 0 {
+			s.replaying = false
+			f.mu.Unlock()
+			return
+		}
+		f.mu.Unlock()
+	}
+}
+
 // Publish stores a message and delivers it to active subscribers of the subject.
 func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
 	_ = ctx
@@ -161,20 +209,20 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 	msg := platform.Message{Subject: subject, Seq: seq, Data: append([]byte(nil), data...)}
 	f.retained[subject] = append(f.retained[subject], retainedMsg{seq: seq, data: msg.Data})
 	snap := append([]*sub(nil), f.subs...)
-	f.mu.Unlock()
 	for _, s := range snap {
 		if s.subject != subject {
 			continue
 		}
-		if s.replayDone != nil {
-			<-s.replayDone
+		if s.ended {
+			continue
 		}
-		f.mu.Lock()
-		if !s.ended {
-			f.deliverLiveLocked(s, msg)
+		if s.replaying {
+			s.livePending = append(s.livePending, msg)
+			continue
 		}
-		f.mu.Unlock()
+		f.deliverLiveLocked(s, msg)
 	}
+	f.mu.Unlock()
 	return seq, nil
 }
 
@@ -236,7 +284,6 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		replayThrough: replayThrough,
 		ch:            make(chan platform.Message, f.bufSize),
 		cancel:        cancel,
-		replayDone:    make(chan struct{}),
 	}
 	var replay []retainedMsg
 	for _, m := range f.retained[subject] {
@@ -244,37 +291,44 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			replay = append(replay, m)
 		}
 	}
+	if len(replay) > 0 {
+		s.replaying = true
+	}
 	f.subs = append(f.subs, s)
 	f.mu.Unlock()
 	go func() {
+		defer func() {
+			<-subCtx.Done()
+			f.mu.Lock()
+			f.subTeardownLocked(s)
+			f.mu.Unlock()
+		}()
 		for _, m := range replay {
 			f.mu.Lock()
 			ended := s.ended
 			f.mu.Unlock()
 			if ended {
-				break
+				return
 			}
 			msg := platform.Message{Subject: subject, Seq: m.seq, Data: append([]byte(nil), m.data...)}
 			if m.seq <= replayThrough {
+				f.mu.Lock()
+				closed := s.chClosed
+				f.mu.Unlock()
+				if closed {
+					return
+				}
 				select {
 				case s.ch <- msg:
 				case <-subCtx.Done():
+					f.mu.Lock()
+					s.replaying = false
+					f.mu.Unlock()
 					return
 				}
 			}
 		}
-		close(s.replayDone)
-		<-subCtx.Done()
-		f.mu.Lock()
-		if !s.chClosed {
-			s.chClosed = true
-			close(s.ch)
-		}
-		if !s.ended {
-			s.ended = true
-		}
-		f.removeSub(s)
-		f.mu.Unlock()
+		f.flushLivePending(s, subCtx)
 	}()
 	return s.ch, nil
 }
