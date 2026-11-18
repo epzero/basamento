@@ -84,7 +84,7 @@ scenarios:
         hash: sha256:657aec6b2e5228d2f41cd62894ab1057f7afbaf0e0304fe5d7158845bd150df7
         reqs:
             - REQ-SCHEMA-007
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -131,7 +131,7 @@ scenarios:
         hash: sha256:56d59d87ae1bb0f3638a0dd06a9b233d7193de9e1bc18cb707398fd427ae2b7a
         reqs:
             - REQ-SCHEMA-012
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -145,7 +145,7 @@ scenarios:
         hash: sha256:366b93e7f26e508e8d1d02cc4b2d1f7cd8078a0809418fbfcee73f7a66278030
         reqs:
             - REQ-SCHEMA-012
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -159,7 +159,7 @@ scenarios:
         hash: sha256:4448dcdacd5d4a93c766075c72d9e17c72f27791fe64febb2b61fe65b425cbb9
         reqs:
             - REQ-SCHEMA-012
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -250,7 +250,7 @@ scenarios:
         hash: sha256:6c43d945d5985ecba7232125dd13868d57f1e54bd7822f08fc68ba263c17fc96
         reqs:
             - REQ-SCHEMA-025
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -275,7 +275,7 @@ scenarios:
         hash: sha256:c3912449bb8fe01b540d6cb90d4b6c6bebb4c2f2f40cd1879d48fc9e556f82e1
         reqs:
             - REQ-SCHEMA-030
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -289,7 +289,7 @@ scenarios:
         hash: sha256:45b9409ef7a653d5128f6dd36918a747604bf5425a3339f5870eaf941224b6aa
         reqs:
             - REQ-SCHEMA-030
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -303,7 +303,7 @@ scenarios:
         hash: sha256:a05071b8cf5897405d3e7b7fa8ebd344a6355933d2cf79df472308a81e882482
         reqs:
             - REQ-SCHEMA-031
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -317,7 +317,7 @@ scenarios:
         hash: sha256:2650810b8d028c0020bb9c4f9d1ce5ec38c214304a2ad407c7816be470d1f919
         reqs:
             - REQ-SCHEMA-032
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -331,7 +331,7 @@ scenarios:
         hash: sha256:e4eb4df194ecf879952d48a9c27d02e12ee6d0c728b991a01b99af88c5396e4f
         reqs:
             - REQ-SCHEMA-033
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -345,7 +345,7 @@ scenarios:
         hash: sha256:02a86d6827d9aa6e2d93f76005c414ab1bb9c1cb54ad55c7c9a605990b394682
         reqs:
             - REQ-SCHEMA-034
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -359,7 +359,7 @@ scenarios:
         hash: sha256:dfa8fa57c2b00b5ecde41498aee2b4b705d51e90c8937b9a1f5f76b6df1d58ba
         reqs:
             - REQ-SCHEMA-035
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -373,7 +373,7 @@ scenarios:
         hash: sha256:90f3120561265ac9d10b984543ebe630a01fb1083af83cd0d370c49e2d942f7d
         reqs:
             - REQ-SCHEMA-036
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -387,7 +387,7 @@ scenarios:
         hash: sha256:0609c16160cd57885046b74e6a4fa14c1484ddad22dbaff90029c676412c94d1
         reqs:
             - REQ-SCHEMA-037
-        tier: P0
+        tier: P2
         author: claude-code:spec-author:5120f5
         reviewer: antigravity:spec-reviewer:30dc9b
         approved_at: "2026-11-17"
@@ -397,3 +397,39 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-038-01:
+        hash: sha256:7f070c3aff1085b21fe849fa9a12c0a4b15420d733ecf06e839438dfcec5c43f
+        reqs:
+            - REQ-SCHEMA-038
+        tier: P2
+        author: claude-code:spec-author:883789
+        reviewer: claude-code:spec-reviewer:57f886
+        approved_at: "2026-11-18"
+        note: 'Byte slices, raw JSON and byte arrays: schema follows encoding/json.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending
+    SCHEMA-039-01:
+        hash: sha256:8354cdb0fa79d55c4fb0b8bfcc9c480cf4b9ea09cda214d4d4586bf06e168edc
+        reqs:
+            - REQ-SCHEMA-039
+        tier: P2
+        author: claude-code:spec-author:883789
+        reviewer: claude-code:spec-reviewer:57f886
+        approved_at: "2026-11-18"
+        note: 'Byte slices, raw JSON and byte arrays: schema follows encoding/json.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending
+    SCHEMA-040-01:
+        hash: sha256:38262b22ae1f6ad62eb19810f6186856009110699fa6865054cf38b98bf3e965
+        reqs:
+            - REQ-SCHEMA-040
+        tier: P2
+        author: claude-code:spec-author:883789
+        reviewer: claude-code:spec-reviewer:57f886
+        approved_at: "2026-11-18"
+        note: 'Byte slices, raw JSON and byte arrays: schema follows encoding/json.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending
