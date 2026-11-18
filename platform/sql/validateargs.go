@@ -55,8 +55,7 @@ func walkArgForNUL(a any, depth int, seen map[uintptr]bool) error {
 	if !rv.IsValid() {
 		return nil
 	}
-	switch rv.Kind() {
-	case reflect.Ptr:
+	if rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
 			return nil
 		}
@@ -69,6 +68,8 @@ func walkArgForNUL(a any, depth int, seen map[uintptr]bool) error {
 		}
 		seen[ptr] = true
 		return walkArgForNUL(rv.Elem().Interface(), depth+1, seen)
+	}
+	switch rv.Kind() {
 	case reflect.Interface:
 		if rv.IsNil() {
 			return nil
@@ -80,12 +81,6 @@ func walkArgForNUL(a any, depth int, seen map[uintptr]bool) error {
 		case reflect.String:
 			for i := 0; i < rv.Len(); i++ {
 				if err := ValidateText(rv.Index(i).String()); err != nil {
-					return err
-				}
-			}
-		case reflect.Interface, reflect.Slice, reflect.Array:
-			for i := 0; i < rv.Len(); i++ {
-				if err := walkArgForNUL(rv.Index(i).Interface(), depth+1, seen); err != nil {
 					return err
 				}
 			}
