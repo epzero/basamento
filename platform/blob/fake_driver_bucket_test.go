@@ -108,11 +108,7 @@ func (r *testReader) Attributes() *driver.ReaderAttributes { return &driver.Read
 
 func (r *testReader) As(any) bool { return false }
 
-func (b *testBucket) NewTypedWriter(ctx context.Context, key, contentType string, opts *driver.WriterOptions) (driver.Writer, error) {
-	if opts == nil {
-		opts = &driver.WriterOptions{}
-	}
-	opts = &driver.WriterOptions{BufferSize: 1, Metadata: opts.Metadata}
+func (b *testBucket) NewTypedWriter(ctx context.Context, key, contentType string, _ *driver.WriterOptions) (driver.Writer, error) {
 	w := &testWriter{ctx: ctx, bucket: b, key: key}
 	if b.failAt > 0 {
 		return &failOnKWriter{ctx: ctx, inner: w, failAt: b.failAt, code: b.failCode}, nil
@@ -233,7 +229,6 @@ func openStoreFailWriteAt(t *testing.T, failAt int, code gcerrors.ErrorCode) *St
 func openStoreBlockWriteUntilCancel(t *testing.T, failAt int) *Store {
 	t.Helper()
 	drv := newTestBucket(failAt, gcerrors.Unknown)
-	drv.failAt = failAt
 	bkt := blob.NewBucket(&blockFailBucket{testBucket: drv, failAt: failAt})
 	st := &Store{bucket: bkt}
 	t.Cleanup(func() { _ = st.Close() })
@@ -245,11 +240,7 @@ type blockFailBucket struct {
 	failAt int
 }
 
-func (b *blockFailBucket) NewTypedWriter(ctx context.Context, key, contentType string, opts *driver.WriterOptions) (driver.Writer, error) {
-	if opts == nil {
-		opts = &driver.WriterOptions{}
-	}
-	opts = &driver.WriterOptions{BufferSize: 1, Metadata: opts.Metadata}
+func (b *blockFailBucket) NewTypedWriter(ctx context.Context, key, contentType string, _ *driver.WriterOptions) (driver.Writer, error) {
 	w := &testWriter{ctx: ctx, bucket: b.testBucket, key: key}
 	return &failOnKWriter{ctx: ctx, inner: w, failAt: b.failAt, block: true}, nil
 }

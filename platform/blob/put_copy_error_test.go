@@ -52,19 +52,12 @@ func TestPutWriterFailMidStreamUnavailable(t *testing.T) {
 			ctx := core.WithTenant(context.Background(), "acme")
 			err := st.Put(ctx, key, &chunkReader{b: body, chunk: 64}, "text/plain")
 			if err == nil || core.CodeOf(err) != core.CodeUnavailable {
-				t.Fatalf("want unavailable, got %v (gc %v)", err, gcerrors.Code(err))
+				t.Fatalf("want unavailable, got %v (code %v)", err, core.CodeOf(err))
 			}
 			if strings.Contains(err.Error(), "content does not match content key") {
 				t.Fatalf("writer failure misclassified as hash mismatch: %v", err)
 			}
-			ok, _ := st.Exists(ctx, key)
-			if ok {
-				t.Fatal("object leaked")
-			}
-			mp, _ := metaPath("acme", key)
-			if metaOK, _ := st.bucket.Exists(ctx, mp); metaOK {
-				t.Fatal("meta leaked")
-			}
+			assertPutLeftNoObjectOrMeta(t, st, ctx, key)
 		})
 	}
 }
@@ -94,6 +87,25 @@ func TestPutHashMismatchInvalidArgument(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "content does not match content key") {
 		t.Fatalf("message %q", err.Error())
+	}
+	assertPutLeftNoObjectOrMeta(t, st, ctx, key)
+}
+
+func assertPutLeftNoObjectOrMeta(t *testing.T, st *Store, ctx context.Context, key string) {
+	t.Helper()
+	if ok, _ := st.Exists(ctx, key); ok {
+		t.Fatal("object leaked")
+	}
+	tid, err := st.tenantOK(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp, err := metaPath(tid, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metaOK, _ := st.bucket.Exists(ctx, mp); metaOK {
+		t.Fatal("meta leaked")
 	}
 }
 
