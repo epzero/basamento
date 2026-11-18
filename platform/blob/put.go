@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"gocloud.dev/blob"
 
@@ -43,7 +44,8 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 	if err != nil {
 		return err
 	}
-	stage := fmt.Sprintf("%s/.part/%s", tid, want)
+	seq := atomic.AddUint64(&s.stageSeq, 1)
+	stage := fmt.Sprintf("%s/.part/%s/%d", tid, want, seq)
 	_ = s.bucket.Delete(ctx, stage)
 	defer func() { _ = s.bucket.Delete(ctx, stage) }()
 
@@ -72,15 +74,25 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 	if err := w.Close(); err != nil {
 		return mapError(err)
 	}
-	// Copy staged bytes to the final key; fileblob has no server-side copy, so
-	// reopen the staged object.
 	rd, err := s.bucket.NewReader(ctx, stage, nil)
 	if err != nil {
 		return mapError(err)
 	}
 	defer func() { _ = rd.Close() }()
+
+	// Sidecar first, object last: the object existing is the commit point. A crash
+	// may leave an orphan .meta; the next Put overwrites it before committing a
+	// new object (hasObject only checks the object path).
+	mp, err := metaPath(tid, key)
+	if err != nil {
+		return err
+	}
+	if err := s.writeMeta(ctx, mp, contentType); err != nil {
+		return err
+	}
 	ww, err := s.bucket.NewWriter(ctx, path, &blob.WriterOptions{ContentType: contentType})
 	if err != nil {
+		_ = s.bucket.Delete(ctx, mp)
 		return mapError(err)
 	}
 	if _, err := io.Copy(ww, rd); err != nil {
@@ -96,19 +108,11 @@ func (s *Store) putNew(ctx context.Context, tid core.TenantID, key string, r io.
 		_ = s.bucket.Delete(ctx, path)
 		return mapError(err)
 	}
-	mp, err := metaPath(tid, key)
-	if err != nil {
-		return err
-	}
-	mw, err := s.bucket.NewWriter(ctx, mp, nil)
-	if err != nil {
-		return mapError(err)
-	}
-	if _, err := mw.Write([]byte(contentType)); err != nil {
-		_ = mw.Close()
-		return mapError(err)
-	}
-	if err := mw.Close(); err != nil {
+	return nil
+}
+
+func (s *Store) writeMeta(ctx context.Context, metaKey, contentType string) error {
+	if err := s.bucket.WriteAll(ctx, metaKey, []byte(contentType), nil); err != nil {
 		return mapError(err)
 	}
 	return nil

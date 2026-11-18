@@ -2,4 +2,7 @@
 // a tenant prefix in a single bucket opened from a file, S3, GCS or Azure URL.
 // The embedded profile keeps data in a local directory and serves proxied read
 // URLs; the cloud profile uses the provider's signed GET URLs.
+//
+// Tenant ids must be one safe path segment until shared validation lands in core
+// (EP0-52); see validateTenantSegment.
 package blob

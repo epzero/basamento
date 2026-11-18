@@ -25,7 +25,7 @@ func mapError(err error) error {
 	case gcerrors.Canceled:
 		return core.NewError(core.CodeCancelled, "blob operation cancelled", nil)
 	case gcerrors.DeadlineExceeded:
-		return &core.Error{Code: core.CodeUnavailable, Message: "blob store unavailable", Retryable: true, Cause: err}
+		return &core.Error{Code: core.CodeUnavailable, Message: "blob store unavailable", Retryable: true}
 	default:
 		if errors.Is(err, os.ErrNotExist) {
 			return core.NewError(core.CodeNotFound, "blob not found", nil)
@@ -33,7 +33,25 @@ func mapError(err error) error {
 		if strings.Contains(err.Error(), "NoSuchKey") {
 			return core.NewError(core.CodeNotFound, "blob not found", nil)
 		}
-		return &core.Error{Code: core.CodeUnavailable, Message: "blob store error", Retryable: true, Cause: err}
+		return core.NewError(core.CodeUnavailable, "blob store error", nil)
+	}
+}
+
+// mapOpenError maps bucket open failures without echoing URL or provider details.
+func mapOpenError(err error) error {
+	if err == nil {
+		return nil
+	}
+	code := gcerrors.Code(err)
+	switch code {
+	case gcerrors.NotFound:
+		return core.NewError(core.CodeNotFound, "blob not found", nil)
+	case gcerrors.InvalidArgument:
+		return core.NewError(core.CodeInvalidArgument, "invalid blob location", nil)
+	case gcerrors.PermissionDenied:
+		return core.NewError(core.CodePermissionDenied, "blob access denied", nil)
+	default:
+		return core.NewError(core.CodeUnavailable, "blob store unavailable", nil)
 	}
 }
 

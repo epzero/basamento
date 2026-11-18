@@ -13,8 +13,6 @@ import (
 	_ "gocloud.dev/blob/fileblob"
 	_ "gocloud.dev/blob/gcsblob"
 	_ "gocloud.dev/blob/s3blob"
-
-	"github.com/epzero/basamento/platform"
 )
 
 // Open selects an implementation from the location URL (REQ-BLOB-018).
@@ -43,8 +41,6 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 		embedded: embedded,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
 		signKey:  append([]byte(nil), opts.SignKey...),
-		location: raw,
-		openOpts: opts,
 	}
 	var handler http.Handler
 	if embedded {
@@ -69,20 +65,7 @@ func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 	}
 	b, err := blob.OpenBucket(ctx, u.String())
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapOpenError(err)
 	}
 	return b, nil
 }
-
-// OpenResult wraps Open for callers that need the port type.
-func OpenBlob(ctx context.Context, raw string, opts Options) (OpenResult, error) {
-	st, h, err := Open(ctx, raw, opts)
-	if err != nil {
-		return OpenResult{}, err
-	}
-	return OpenResult{Blob: st, Handler: h, Store: st}, nil
-}
-
-var (
-	_ platform.Blob = (*Store)(nil)
-)

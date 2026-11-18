@@ -2,10 +2,8 @@ package blob
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"gocloud.dev/blob"
@@ -16,22 +14,18 @@ import (
 
 // Store is a tenant-scoped content store over one bucket.
 type Store struct {
-	bucket    *blob.Bucket
-	clock     core.Clock
-	maxTTL    time.Duration
-	embedded  bool
-	baseURL   string
-	signKey   []byte
-	location  string
-	openOpts  Options
-	closeHook func() error
+	bucket   bucketBackend
+	clock    core.Clock
+	maxTTL   time.Duration
+	embedded bool
+	baseURL  string
+	signKey  []byte
+	putLocks keyedMu
+	stageSeq uint64
 }
 
 // Close releases the underlying bucket.
 func (s *Store) Close() error {
-	if s.closeHook != nil {
-		return s.closeHook()
-	}
 	return s.bucket.Close()
 }
 
@@ -40,16 +34,23 @@ func (s *Store) tenantOK(ctx context.Context) (core.TenantID, error) {
 	if !ok {
 		return "", core.NewError(core.CodeInvalidArgument, "tenant required", nil)
 	}
+	if err := validateTenantSegment(string(tid)); err != nil {
+		return "", err
+	}
 	return tid, nil
 }
 
-// Reopen opens again on the same location with the same options.
-func (s *Store) Reopen(ctx context.Context) (*Store, http.Handler, error) {
-	return Open(ctx, s.location, s.openOpts)
+func (s *Store) contentLength(ctx context.Context, tid core.TenantID, key string) (int64, error) {
+	path, err := objectPath(tid, key)
+	if err != nil {
+		return 0, err
+	}
+	attrs, err := s.bucket.Attributes(ctx, path)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return attrs.Size, nil
 }
-
-// Location returns the URL this store was opened from.
-func (s *Store) Location() string { return s.location }
 
 // ContentType returns the stored content type for key under tid, or "" if unset.
 func (s *Store) ContentType(ctx context.Context, tid core.TenantID, key string) (string, error) {
@@ -110,6 +111,12 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, contentType st
 	if err != nil {
 		return err
 	}
+	hex, err := HexOf(key)
+	if err != nil {
+		return err
+	}
+	unlock := s.putLocks.lock(string(tid) + "/" + hex)
+	defer unlock()
 	exists, err := s.hasObject(ctx, tid, key)
 	if err != nil {
 		return err
@@ -219,37 +226,3 @@ func (s *Store) SignedURL(ctx context.Context, key string, ttl time.Duration) (s
 }
 
 var _ platform.Blob = (*Store)(nil)
-
-// OpenResult is what Open returns.
-type OpenResult struct {
-	Blob    platform.Blob
-	Handler http.Handler // proxied read URLs; nil for cloud stores
-	Store   *Store       // concrete type for reopen and tests
-}
-
-// ParseLocation normalizes phrases like "a file URL of a temporary directory".
-func ParseLocation(raw string, roots map[string]string) (*url.URL, error) {
-	if u, ok := roots[raw]; ok {
-		return url.Parse(u)
-	}
-	switch raw {
-	case "a file URL of a temporary directory":
-		if p, ok := roots["tempdir"]; ok {
-			return url.Parse("file://" + p)
-		}
-	case "an s3 URL of a bucket in the S3 simulator":
-		if u, ok := roots["s3"]; ok {
-			return url.Parse(u)
-		}
-	case "a gs URL of the nightly test bucket", "an azblob URL of the nightly test container":
-		if u, ok := roots[raw]; ok {
-			return url.Parse(u)
-		}
-	}
-	if stringsHasPrefix(raw, "file://") || stringsHasPrefix(raw, "s3://") || stringsHasPrefix(raw, "gs://") || stringsHasPrefix(raw, "azblob://") {
-		return url.Parse(raw)
-	}
-	return nil, fmt.Errorf("unknown location phrase %q", raw)
-}
-
-func stringsHasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }

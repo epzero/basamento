@@ -3,6 +3,9 @@ package steps
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math/rand"
@@ -10,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,6 +45,8 @@ type blobWorld struct {
 	subdirRoot string
 	backend    string
 	openErr    error
+	lastExists bool
+	hasExists  bool
 }
 
 type fetchResp struct {
@@ -155,17 +161,18 @@ func registerBlob(sc *godog.ScenarioContext) {
 		world(ctx).Blob.content[name] = b
 		return nil
 	})
-	sc.Step(`^tenant "([^"]*)" stores "([^"]*)" as "([^"]*)"$`, tenantStoreString)
+	sc.Step(`^tenant "([^"]*)" stores "([^"]*)" as "([^"]*)"$`, whenStoreString)
 	sc.Step(`^tenant "([^"]*)" stores "([^"]*)" with no content type$`, func(ctx context.Context, tenant, body string) error {
-		return tenantPut(ctx, tenant, world(ctx).Blob.keyOf(body), strings.NewReader(body), "")
+		return whenPut(ctx, tenant, world(ctx).Blob.keyOf(body), strings.NewReader(body), "")
 	})
-	sc.Step(`^tenant "([^"]*)" has stored "([^"]*)" as "([^"]*)"$`, tenantStoreString)
+	sc.Step(`^tenant "([^"]*)" has stored "([^"]*)" as "([^"]*)"$`, givenStoreString)
 	sc.Step(`^tenant "([^"]*)" has stored "([^"]*)" with no content type$`, func(ctx context.Context, tenant, body string) error {
-		return tenantPut(ctx, tenant, blob.ContentKeyOf([]byte(body)), strings.NewReader(body), "")
+		return givenPut(ctx, tenant, blob.ContentKeyOf([]byte(body)), strings.NewReader(body), "")
 	})
 	sc.Step(`^tenant "([^"]*)" has deleted the content key of "([^"]*)"$`, func(ctx context.Context, tenant, name string) error {
-		world(ctx).Blob.lastErr = world(ctx).Blob.blob.Delete(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name))
-		return nil
+		err := world(ctx).Blob.blob.Delete(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name))
+		world(ctx).Blob.lastErr = err
+		return err
 	})
 	sc.Step(`^tenant "([^"]*)" stores "([^"]*)" under the content key of "([^"]*)"$`, func(ctx context.Context, tenant, body, of string) error {
 		return tenantPut(ctx, tenant, world(ctx).Blob.keyOf(of), strings.NewReader(body), "application/octet-stream")
@@ -314,7 +321,10 @@ func registerBlob(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^tenant "([^"]*)" checks the existence of the content key of "([^"]*)"$`, func(ctx context.Context, tenant, name string) error {
-		_, world(ctx).Blob.lastErr = world(ctx).Blob.blob.Exists(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name))
+		ok, err := world(ctx).Blob.blob.Exists(world(ctx).Blob.tenantCtx(ctx, tenant), world(ctx).Blob.keyOf(name))
+		world(ctx).Blob.lastErr = err
+		world(ctx).Blob.hasExists = true
+		world(ctx).Blob.lastExists = ok
 		return nil
 	})
 	sc.Step(`^tenant "([^"]*)" requests a blob URL for the content key of "([^"]*)" with a lifetime of (.+)$`, requestBlobURL)
@@ -326,21 +336,17 @@ func registerBlob(sc *godog.ScenarioContext) {
 	sc.Step(`^a client with no credentials fetches the blob URL$`, fetchBlobURL)
 	sc.Step(`^a client fetches the blob URL with (.+)$`, func(ctx context.Context, alt string) error {
 		raw := world(ctx).Blob.blobURL
+		var err error
 		if strings.HasPrefix(alt, "its tenant replaced by ") {
 			tenant := strings.TrimPrefix(alt, "its tenant replaced by ")
 			tenant = strings.Trim(tenant, `"`)
-			u, err := blob.AlterURL(raw, alt, "", tenant, world(ctx).Blob.altSignKey)
-			if err != nil {
-				return err
-			}
-			raw = u
+			raw, err = alterProxiedBlobURL(raw, alt, "", tenant, world(ctx).Blob.altSignKey)
 		} else {
 			other := world(ctx).Blob.keyOf("world")
-			u, err := blob.AlterURL(raw, alt, other, "", world(ctx).Blob.altSignKey)
-			if err != nil {
-				return err
-			}
-			raw = u
+			raw, err = alterProxiedBlobURL(raw, alt, other, "", world(ctx).Blob.altSignKey)
+		}
+		if err != nil {
+			return err
 		}
 		return fetchRawURL(ctx, raw)
 	})
@@ -375,8 +381,15 @@ func registerBlob(sc *godog.ScenarioContext) {
 		return w.openAt(ctx, world(ctx).Core.clock, w.locURL)
 	})
 	sc.Step(`^the answer is that no blob exists$`, func(ctx context.Context) error {
-		if world(ctx).Blob.lastErr != nil {
-			return fmt.Errorf("unexpected error: %w", world(ctx).Blob.lastErr)
+		w := world(ctx).Blob
+		if w.lastErr != nil {
+			return fmt.Errorf("unexpected error: %w", w.lastErr)
+		}
+		if !w.hasExists {
+			return fmt.Errorf("existence not checked")
+		}
+		if w.lastExists {
+			return fmt.Errorf("blob exists")
 		}
 		return nil
 	})
@@ -420,7 +433,10 @@ func registerBlob(sc *godog.ScenarioContext) {
 		return tenantPut(ctx, tenant, key, strings.NewReader(body), "application/octet-stream")
 	})
 	sc.Step(`^tenant "([^"]*)" checks the existence of key "([^"]*)"$`, func(ctx context.Context, tenant, key string) error {
-		_, world(ctx).Blob.lastErr = world(ctx).Blob.blob.Exists(world(ctx).Blob.tenantCtx(ctx, tenant), key)
+		ok, err := world(ctx).Blob.blob.Exists(world(ctx).Blob.tenantCtx(ctx, tenant), key)
+		world(ctx).Blob.lastErr = err
+		world(ctx).Blob.hasExists = true
+		world(ctx).Blob.lastExists = ok
 		return nil
 	})
 	sc.Step(`^tenant "([^"]*)" requests a blob URL for key "([^"]*)"$`, func(ctx context.Context, tenant, key string) error {
@@ -452,18 +468,36 @@ func registerBlob(sc *godog.ScenarioContext) {
 	})
 }
 
-func tenantStoreString(ctx context.Context, tenant, body, ctype string) error {
-	return tenantPut(ctx, tenant, blob.ContentKeyOf([]byte(body)), strings.NewReader(body), ctype)
+func whenStoreString(ctx context.Context, tenant, body, ctype string) error {
+	return whenPut(ctx, tenant, blob.ContentKeyOf([]byte(body)), strings.NewReader(body), ctype)
 }
 
-func tenantPut(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
+func givenStoreString(ctx context.Context, tenant, body, ctype string) error {
+	return givenPut(ctx, tenant, blob.ContentKeyOf([]byte(body)), strings.NewReader(body), ctype)
+}
+
+func putBlob(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
 	w := world(ctx).Blob
 	cctx := w.tenantCtx(ctx, tenant)
 	if tenant == "" {
 		cctx = ctx
 	}
-	w.lastErr = w.blob.Put(cctx, key, r, ctype)
+	return w.blob.Put(cctx, key, r, ctype)
+}
+
+func whenPut(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
+	world(ctx).Blob.lastErr = putBlob(ctx, tenant, key, r, ctype)
 	return nil
+}
+
+func givenPut(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
+	err := putBlob(ctx, tenant, key, r, ctype)
+	world(ctx).Blob.lastErr = err
+	return err
+}
+
+func tenantPut(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
+	return whenPut(ctx, tenant, key, r, ctype)
 }
 
 func assertBlobCallCode(ctx context.Context, code string) error {
@@ -683,6 +717,56 @@ func tryOpenPath(ctx context.Context, raw string) error {
 		world(ctx).Blob.handlerSrv = httptest.NewServer(h)
 	}
 	return nil
+}
+
+func alterProxiedBlobURL(raw, alteration, otherKey, otherTenant string, altSignKey []byte) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	tenant, hexd, ok := proxiedPathParts(u.Path)
+	if !ok {
+		return "", fmt.Errorf("bad proxied path")
+	}
+	sig := u.Query().Get("sig")
+	exp, _ := strconv.ParseInt(u.Query().Get("exp"), 10, 64)
+	basePath := strings.TrimSuffix(u.Path, "/"+tenant+"/"+hexd)
+	switch alteration {
+	case `its key replaced by the content key of "world"`:
+		hexd = strings.TrimPrefix(otherKey, "sha256:")
+	case "its expiry moved 1 hour later":
+		exp += 3600
+	case "its signature removed":
+		sig = ""
+	case "its signature replaced by one from another signing key":
+		sig = bddSignRead(altSignKey, tenant, hexd, exp)
+	case `its tenant replaced by "globex"`:
+		tenant = otherTenant
+	default:
+		return "", fmt.Errorf("unknown alteration %q", alteration)
+	}
+	out := fmt.Sprintf("%s://%s%s/%s/%s?exp=%d&sig=%s", u.Scheme, u.Host, basePath, tenant, hexd, exp, sig)
+	return out, nil
+}
+
+func proxiedPathParts(p string) (tenant, hexd string, ok bool) {
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimPrefix(p, strings.Trim(path.Clean(blob.HandlerRoute()), "/")+"/")
+	parts := strings.Split(p, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func bddSignRead(key []byte, tenant, hexdigest string, exp int64) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(tenant))
+	mac.Write([]byte{0})
+	mac.Write([]byte(hexdigest))
+	mac.Write([]byte{0})
+	mac.Write([]byte(strconv.FormatInt(exp, 10)))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func assertContentPlace(ctx context.Context, body, place string) error {
