@@ -72,8 +72,9 @@ Module map: `cmd/kit` → `internal/config` → `core` (`internal/bdd` not drawn
 ## Revert
 
 Revert the merge commit. Remove the `internal/config` layer and list entries from
-`layering.yaml`, this ADR, its row in `docs/adr/README.md`, and the regenerated
-module map block in `docs/architecture/overview.md` §3. WP-L1-05 does not ship
+`layering.yaml`, this ADR, its row in `docs/adr/README.md`, the regenerated
+module map block in `docs/architecture/overview.md` §3, and the §4 dependency
+bullet in `docs/engineering/coding-guidelines.md`. WP-L1-05 does not ship
 `internal/config` until a replacement graph lands.
 
 ## Implementation changes these files
@@ -83,4 +84,5 @@ module map block in `docs/architecture/overview.md` §3. WP-L1-05 does not ship
 | `layering.yaml` | `internal/config` layer, grants, `deny_external` port-vendor prefixes. |
 | `docs/architecture/overview.md` | Regenerated module map; §3 wording and package table row. |
 | `docs/adr/README.md` | Row for ADR-0016. |
+| `docs/engineering/coding-guidelines.md` §4 | Bullet: port vendor prefixes in `deny_external`; allow-list for port packages. |
 | `specs/config/design.md` §1 | **EP0-78** (designer, prerequisite of EP0-23): replace §1 with this ADR's graph. |

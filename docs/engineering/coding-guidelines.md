@@ -94,10 +94,11 @@ check every change against this page. Tools enforce what they can
   - be pure Go (the binary is built with `CGO_ENABLED=0`).
 - Pin exact versions. Heavy dependencies (servers, SDKs with large trees) live
   in their own module, as `runtime/temporal/embedded` does.
-- A dependency that is a port vendor library (`platform`, cloud SDKs, SQL
-  drivers, NATS, gocloud, Temporal, and the like) must not be imported from
-  `internal/config`; add its import-path prefix to that layer's `deny_external`
-  in the same change (ADR-0016).
+- A port vendor library (cloud SDKs, SQL drivers, NATS, gocloud, Temporal, Tink
+  and the like) must not be imported from `internal/config`; add its import-path
+  prefix to that layer's `deny_external` in the same change (ADR-0016). The
+  module port packages (`platform`, `runtime`, and subpackages) stay out via the
+  layer allow-list, not `deny_external`.
 
 ## 5. Documentation
 
