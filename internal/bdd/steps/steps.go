@@ -17,6 +17,7 @@ type World struct {
 	Core   *coreWorld
 	Prompt *promptWorld
 	Expr   *exprWorld
+	Schema *schemaWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -28,9 +29,11 @@ func Initialize(sc *godog.ScenarioContext) {
 			Core:   newCoreWorld(),
 			Prompt: newPromptWorld(),
 			Expr:   &exprWorld{bindings: map[string]any{}},
+			Schema: newSchemaWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerPrompt(sc)
 	registerExpr(sc)
+	registerSchema(sc)
 }
