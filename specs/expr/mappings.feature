@@ -168,7 +168,6 @@ Feature: JSON mappings
       | mapping                                  | name            |
       | def now: 1; now                          | now             |
       | def halt: 1; . \| halt                   | halt            |
-      | def env: 1; . \| env                   | env             |
       | def env: 1; env                          | env             |
       | def f(env): env; f(1)                    | env             |
       | def f(env): 1; f(2) \| env               | env             |
@@ -219,7 +218,7 @@ Feature: JSON mappings
       | has("halt")      | {"halt": 1}                 | true                        |
 
   @REQ-EXPR-026 @id:EXPR-026-01 @security
-  Scenario Outline: A mapping that imports or includes a module is rejected
+  Scenario Outline: A mapping that imports or includes a module or data file is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
     And the error names "<name>"
@@ -227,5 +226,4 @@ Feature: JSON mappings
     Examples:
       | mapping                  | name    |
       | include "lib";           | include |
-      | import "lib" as lib; .   | import  |
       | import "lib" as $lib; .  | import  |

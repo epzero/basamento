@@ -160,29 +160,23 @@ nothing is coerced from strings.
   and WithModuleLoader is the backing guard for env/$ENV, input/inputs and
   modules.
 
-  A second layer registers these builtins as functions that return an
-  error, in case the walk misses a call.
+  The walk is the only guard for the names gojq already defines: its
+  `WithFunction` and `WithIterFunction` options are looked up only after the
+  internal functions, so they cannot shadow `now`, `env`, `input`, `halt` or
+  `modulemeta`.
 - **Reserved names** (REQ-EXPR-023): the rejected names are reserved even
   when a mapping defines its own function or parameter with them, as in
-  `def now: 1; now` or `def f(env): 1; f(2) | env`. Without its own scope
-  resolution, the mapping compiler cannot tell a call of the definition from
-  a call of the builtin: gojq fills in the builtins as function definitions
-  while it compiles, so `def halt: 1; . | halt` compiles to the builtin, a
-  parameter holds a value rather than a function, and `| env` after the
-  definition is still a call of the builtin. Deciding this per scope would
-  need gojq's resolution to be reimplemented, and would leave the other
-  places open; refusing the name leaves one place for it to be banned, and
-  the case is rare, because a mapping that wants its own function called
-  `now` can rename it. The error names the function and says the name is
-  reserved.
+  `def now: 1; now` or `def f(env): 1; f(2)`. gojq resolves a definition or
+  a parameter before the builtin; telling that harmless shadowing from a
+  call of the builtin would need gojq's resolution to be reimplemented, and
+  would leave the other places open. Refusing the name everywhere leaves one
+  place for it to be banned, and the case is rare, because a mapping that
+  wants its own function called `now` can rename it. The error names the
+  function and says the name is reserved.
 - **Imports** (REQ-EXPR-026): `import` and `include` are rejected from
   Query.Imports of the parsed query before any module loader is asked for
   the file, with or without metadata or a body query. A data import
-  (`import "path" as $name`) is in the same list. gojq keeps its own
-  builtin definitions in a second list of the query, which the walk visits
-  too, but it reports a builtin there by position only: no builtin of
-  gojq's own is named like a rejected name, so nothing is reported for it,
-  and the step functions stay allowed.
+  (`import "path" as $name`) is in the same list.
 - **Object order**: gojq iterates objects (`.[]`, `to_entries`, `keys`) and
   encodes them (`tojson`) in ascending key order. Scenarios pin this so a
   future gojq upgrade cannot change it silently. Functions the gojq library
