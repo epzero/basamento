@@ -94,7 +94,7 @@ When prompt lint reports only warnings for a template, the prompt registry shall
 When an assembled prompt is linted, prompt lint shall report the error `unpaired_delimiter` for every untrusted-content delimiter that is not one of the pairs the assembler wrapped a value in.
 
 ### REQ-PROMPT-025 — Structure errors name their rule
-When a template breaks a structure rule, prompt lint shall report the error named for that rule, one of `empty_template_id`, `at_in_template_id`, `empty_template_version`, `at_in_template_version`, `duplicate_input`, `duplicate_segment`, `multiple_history` or `unknown_segment_kind`, and the prompt registry shall reject the template with code `invalid_argument` listing it.
+When a template breaks a structure rule, prompt lint shall report the error named for that rule: `empty_template_id`, `at_in_template_id`, `empty_template_version`, `at_in_template_version`, `duplicate_input`, `duplicate_segment`, `multiple_history` or `unknown_segment_kind`.
 
 ## History
 

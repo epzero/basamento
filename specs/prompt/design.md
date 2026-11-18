@@ -100,19 +100,27 @@ an optional `/`, optional whitespace, then `untrusted` in any letter case. No
 other text is changed, so a value without such a sequence is wrapped
 unchanged.
 
-The assembler records the byte span of each delimiter pair it writes: the
-opening delimiter from its `<` through its `>`, and the closing delimiter
-through its last byte. Prompt lint of an assembled prompt accepts a delimiter
-only at a recorded span and in the order recorded; every other delimiter, and
-every delimiter in a prompt that carries no record, is `unpaired_delimiter`.
-The record decides, not a scan of the text, because text alone cannot tell
-the assembler's own pairs from a pair forged by trusted values or by fixed
-text. The record is not part of `ContentHash` or `PrefixHash`, and it
-survives a JSON round trip of the assembled prompt.
+The assembler records each delimiter pair it writes. Spans are per rendered
+text: one per segment, and one per history entry within its own rendered
+text. The opening delimiter's span runs from its `<` through its `>`, and the
+closing delimiter's span from its `<` through its `>`. Prompt lint of an
+assembled prompt accepts a delimiter only when both delimiters of its
+recorded pair are at their recorded spans; every other delimiter, including
+either half of a recorded pair whose other half is not at its span, is
+`unpaired_delimiter`, and a prompt that carries no record reports every
+delimiter. The record decides, not a scan of the text, because text alone
+cannot tell the assembler's own pairs from a pair forged by trusted values
+or by fixed text. The record is not part of `hash` or `prefix_hash` (§4), and
+it survives a JSON round trip of the assembled prompt.
 
 ## 6. Prompt lint
 
 Findings carry a rule, a severity (`error` or `warning`) and a segment name.
+The segment name is empty for a template-level rule (`empty_template_id`,
+`at_in_template_id`, `empty_template_version`, `at_in_template_version`,
+`duplicate_input` and `multiple_history`). A segment-level rule names its
+segment: `duplicate_segment` names the repeated segment, and every rule
+checked on one segment names that segment.
 
 | Rule | Severity | Checked on |
 | --- | --- | --- |

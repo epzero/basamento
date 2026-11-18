@@ -63,8 +63,27 @@ Feature: Prompt lint
     Then the registration fails with code "invalid_argument" listing the lint error "variable_in_static" for segment "rules"
     And "greeting@1" does not resolve
 
-  @REQ-PROMPT-025 @REQ-PROMPT-020 @id:PROMPT-025-01
-  Scenario Outline: A template that breaks a structure rule is refused with that rule's name
+  @REQ-PROMPT-025 @id:PROMPT-025-01
+  Scenario Outline: Prompt lint names the structure rule a template breaks
+    Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>"
+    When the template is linted
+    Then prompt lint reports exactly the findings
+      | rule                   | severity | segment |
+      | <rule>                 | error    | <segment> |
+
+    Examples:
+      | rule                   | id     | version | inputs  | segments                  | segment |
+      | empty_template_id      |        | 1       |         | main:static               |         |
+      | at_in_template_id      | chat@1 | 1       |         | main:static               |         |
+      | empty_template_version | chat   |         |         | main:static               |         |
+      | at_in_template_version | chat   | 1@2     |         | main:static               |         |
+      | duplicate_input        | chat   | 1       | doc,doc | main:static               |         |
+      | duplicate_segment      | chat   | 1       |         | main:static,main:dynamic  | main    |
+      | multiple_history       | chat   | 1       |         | past:history,turn:history |         |
+      | unknown_segment_kind   | chat   | 1       |         | main:banner               | main    |
+
+  @REQ-PROMPT-025 @REQ-PROMPT-020 @id:PROMPT-025-02
+  Scenario Outline: A template that breaks a structure rule is not registered
     Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>"
     When the template is registered
     Then the registration fails with code "invalid_argument" listing the lint error "<rule>"
@@ -124,6 +143,7 @@ Feature: Prompt lint
     Then prompt lint reports exactly the findings
       | rule               | severity | segment |
       | unpaired_delimiter | error    | tenant  |
+      | unpaired_delimiter | error    | tenant  |
 
   @REQ-PROMPT-021 @security @id:PROMPT-021-04
   Scenario: A delimiter pair in a template's fixed text is an error
@@ -135,6 +155,7 @@ Feature: Prompt lint
     And the assembled prompt is linted
     Then prompt lint reports exactly the findings
       | rule               | severity | segment |
+      | unpaired_delimiter | error    | rules   |
       | unpaired_delimiter | error    | rules   |
 
   @REQ-PROMPT-021 @security @id:PROMPT-021-05
