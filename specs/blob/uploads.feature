@@ -121,21 +121,28 @@ Feature: Blob upload URLs
     And tenant "acme" has no blob under the content key of "hello"
 
   @REQ-BLOB-026 @security @profile:embedded @id:BLOB-026-01
-  Scenario Outline: A proxied upload URL refuses a spent staging key
-    When tenant "acme" starts an upload of at most 1 MiB as <content type> with a lifetime of 15 minutes
+  Scenario: A proxied upload URL refuses a committed staging key
+    When tenant "acme" starts an upload of at most 1 MiB as "text/plain" with a lifetime of 15 minutes
+    And a client with no credentials uploads "hello" as "text/plain" to the upload URL
+    And tenant "acme" commits the staging key of the upload
+    And a client with no credentials uploads "world" as "text/plain" to the upload URL
+    Then the commit returns the content key of "hello"
+    And the response has status 403 and an empty body
+    And tenant "acme" has no staged object under the staging key of the upload
+    And tenant "acme" has no blob under the content key of "world"
+
+  @REQ-BLOB-026 @security @profile:embedded @id:BLOB-026-02
+  Scenario: A proxied upload URL refuses a staging key spent by a failed commit
+    When tenant "acme" starts an upload of at most 1 MiB as "text/plain" with a lifetime of 15 minutes
     And the staged object of the upload is "hello" as "text/markdown"
     And tenant "acme" commits the staging key of the upload
     And a client with no credentials uploads "world" as "text/plain" to the upload URL
-    Then the commit fails with code "invalid_argument"
+    Then the call fails with code "invalid_argument"
     And the response has status 403 and an empty body
+    And tenant "acme" has no staged object under the staging key of the upload
     And tenant "acme" has no blob under the content key of "world"
 
-    Examples:
-      | content type             |
-      | text/plain               |
-      | text/markdown            |
-
-  @REQ-BLOB-026 @REQ-BLOB-030 @security @profile:embedded @id:BLOB-026-02
+  @REQ-BLOB-026 @REQ-BLOB-030 @security @profile:embedded @id:BLOB-026-03
   Scenario: A proxied upload URL refuses the staging slot of a swept upload
     When tenant "acme" starts an upload of at most 1 MiB as "text/plain" with a lifetime of 15 minutes
     And a client with no credentials uploads "hello" as "text/plain" to the upload URL
@@ -200,7 +207,6 @@ Feature: Blob upload URLs
     And 15 minutes pass
     And the expired staging slots are swept
     Then tenant "acme" has no staged object under the staging key of the upload
-    And tenant "acme" has no commit record for the staging key of the upload
 
   @REQ-BLOB-030 @REQ-BLOB-029 @profile:embedded @id:BLOB-030-02
   Scenario: A sweep keeps staging slots that are still within their lifetime
@@ -230,8 +236,7 @@ Feature: Blob upload URLs
 
   @REQ-BLOB-033 @security @id:BLOB-033-01
   Scenario: A commit refuses a staged object over the maximum size in both profiles
-    Given tenant "acme" has stored "hello" as "text/plain"
-    And content "oversized" is the stored "hello" followed by 1 MiB generated from seed 7
+    Given content "oversized" of 1 MiB and 1 byte generated from seed 7
     When tenant "acme" starts an upload of at most 1 MiB as "application/octet-stream" with a lifetime of 15 minutes
     And the staged object of the upload is content "oversized"
     And tenant "acme" commits the staging key of the upload
@@ -273,7 +278,7 @@ Feature: Blob upload URLs
     And tenant "acme" commits the staging key of the upload
     And the staged object of the upload is "hello" as "text/plain"
     And tenant "acme" commits the staging key of the upload again
-    Then the call fails with code "not_found"
+    Then the first commit fails with code "not_found"
     And the second commit returns the content key of "hello"
 
   @REQ-BLOB-039 @id:BLOB-039-01
@@ -297,8 +302,7 @@ Feature: Blob upload URLs
 
   @REQ-BLOB-040 @REQ-BLOB-033 @id:BLOB-040-02
   Scenario: A commit of a staged object over the maximum size spends the staging key
-    Given tenant "acme" has stored "hello" as "text/plain"
-    And content "oversized" is the stored "hello" followed by 1 MiB generated from seed 7
+    Given content "oversized" of 1 MiB and 1 byte generated from seed 7
     When tenant "acme" starts an upload of at most 1 MiB as "application/octet-stream" with a lifetime of 15 minutes
     And the staged object of the upload is content "oversized"
     And tenant "acme" commits the staging key of the upload

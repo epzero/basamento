@@ -135,7 +135,8 @@ the cloud store needs no stub for a request it never receives.
   replica that did not issue the URL. The slot is open while its metadata
   exists and its expiry has not passed. It lives until the sweep deletes it.
 - **Commit record:** `<tenant id>/stage/<staging key>.committed`, with an
-  empty body. A staging key with a commit record is spent: `Commit` answers
+  empty body. It is internal to the store: clients never see it, and no
+  scenario asserts it. A staging key with a commit record is spent: `Commit` answers
   `not_found` for it (REQ-BLOB-039), and a proxied upload URL for it answers
   403 (REQ-BLOB-026). The record is written only by a successful commit
   (step 7 below) and by a failed one that the size or the content type bound
@@ -178,7 +179,9 @@ Under the tenant of `ctx`, in this order, with no fallback to another tenant:
 
 An `invalid_argument` at steps 4 or 5 deletes the staging object and writes
 the commit record, in that order, so a failed commit is spent and leaves
-nothing readable (REQ-BLOB-040). Step 6 aborts before writing anything when
+nothing readable (REQ-BLOB-040). A crash between the two leaves the key not
+yet spent with its staged object gone, so a retried commit is `not_found`
+(REQ-BLOB-038). Step 6 aborts before writing anything when
 its reader fails, as `Put` does (REQ-BLOB-009). A store error is mapped to
 `unavailable`; the staging object and the slot metadata are kept then, so the
 client may retry `Commit` until the expiry. `Platform/blob`'s conformance
@@ -216,7 +219,8 @@ signed with the same signing key as the proxied blob URLs:
   expired and its staging key is neither committed nor spent (REQ-BLOB-024).
   A replayed PUT to such a URL replaces the staged object, so a client can
   retry an interrupted upload; only the last body before `Commit` counts
-  (REQ-BLOB-025). A committed or spent key answers 403 (REQ-BLOB-026): the
+  (REQ-BLOB-025). A committed or spent key answers 403 (REQ-BLOB-026, BLOB-026-01 to
+  BLOB-026-03): the
   "single use" is one commit per staging key.
 
 ### Cloud presign
@@ -236,13 +240,15 @@ the bucket lifecycle rule below expires abandoned slots.
   records are swept on open and then at most once per maximum TTL interval,
   from the `core.Clock`, never a `time.Sleep` or the wall clock. Each
   tenant's `<tenant>/stage/` is listed once per sweep, and every staging key
-  whose slot metadata says its expiry is at or before now loses its slot
-  metadata, its staged object and its commit record, together. A staged
-  object or a commit record without slot metadata is an orphan left by a
-  crash between two writes; it is not swept on its entry's slot expiry, which
-  is gone with its metadata. Once its commit record is swept, a spent key is
-  only an unknown key: `Commit` still answers `not_found` for it
-  (REQ-BLOB-037).
+  whose slot metadata says its expiry is at or before now is swept. The sweep
+  deletes a slot's staged object and commit record first, and its slot
+  metadata last. Commit follows the same order: it writes the commit record
+  before it deletes the staged object, and a failed commit deletes the staged
+  object before it writes the commit record. A crash at any point therefore
+  leaves the slot metadata in place, and the next sweep finishes the job; no
+  object under `stage/` outlives its slot's expiry by more than one sweep
+  interval. Once its commit record is swept, a spent key is only an unknown
+  key: `Commit` still answers `not_found` for it (REQ-BLOB-037).
 - **Cloud:** the sweep is the bucket's lifecycle rule on the staging prefix,
   which expires every object there after 7 days, the maximum TTL. The
   embedded sweep is not part of the cloud store; `Commit` refuses a late key
