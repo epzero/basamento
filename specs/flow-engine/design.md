@@ -99,6 +99,126 @@ WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
 requirements REQ-FLOW-001 … 006, scenarios `compile.feature`,
 `routing.feature` and `runs.feature`.
 
+## 3. Flow host (WP-L4-04)
+
+`flow/host` is the layer ADR-0011 defines (`layering.yaml`): it may import
+`core`, `expr`, `flow` and `runtime`, never a durable-execution vendor, and it
+imports no node handler. It provides the one `runtime.FlowHost`
+(`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
+owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038 and 044, scenarios
+`host.feature`.
+
+```go
+// NodeHandler is the flow code of one effectful node kind (ADR-0011).
+type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (json.RawMessage, error)
+
+// Host implements runtime.FlowHost via its Run method, with a definition
+// catalog and registered node handlers.
+type Host struct{ /* unexported */ }
+
+func New(catalog DefinitionCatalog) *Host
+// RegisterHandler registers the handler for a node kind. The composition root
+// calls it before the host is registered with a runtime.
+func (h *Host) RegisterHandler(kind string, handler NodeHandler)
+func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.RawMessage) (json.RawMessage, error)
+
+// DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
+type DefinitionCatalog interface {
+	Load(ctx context.Context, ref runtime.FlowRef) (*flow.IR, error)
+}
+```
+
+**Pinned definition (REQ-FLOW-027).** The host loads the IR from the catalog by
+the run's content-addressed `FlowRef` (`Name` and `Hash`) at the start of `Run`
+and holds it in a local variable for that execution. Because `FlowRef.Hash`
+identifies an immutable compiled IR, re-loading on replay returns the identical
+IR, and registering a new version cannot affect a running run. Loading is not a
+step.
+
+**Node kinds (REQ-FLOW-028 … 033, 036).** The host checks the whole IR before
+`flow.Machine.Start`: if any node's kind is `model` or `agent` and
+`RegisterHandler` was not called for it, the host returns a `*core.Error` with
+`CodeUnsupported` naming the node, and starts nothing (REQ-FLOW-028). Nodes are
+scanned in sorted node-id order, so two missing handlers always report the same
+(`IR.Nodes` is a map, and Go map order is not deterministic). The host then
+drives the machine, and turns its commands into calls:
+
+| Command, node kind | Durable call | Node event fed back |
+| --- | --- | --- |
+| `run_node`, kind `tool` or `task` | `dc.Step(stepName, cmd.Input, runtime.StepOptions{IdempotencyKey: ...})` where `stepName` is `spec["tool"]` / `spec["task"]` | `node_completed` with the step result |
+| `run_node`, kind with a registered handler (`model`, `agent`) | `handler(dc, node, cmd.Input)` called directly as deterministic flow code; its own side effects are `dc.Step` calls | `node_completed` with the handler's output |
+| `run_node`, kind `map` or `parallel` | the fan-out commands the machine returns for the node (WP-L4-02) | as the machine defines |
+| `start_timer`, kind `wait` | `dc.Sleep(duration of the node spec)` | `timer_fired` with no payload |
+| `await_gate`, kind `gate` | `dc.Await(GateSpec{Name: cmd.Node, Schema, AcceptIf, Timeout from the node spec})` | `gate_resolved` with the accepted payload |
+| `run_node`, kind `subflow` | `dc.Child(FlowRef of the flow named in the node spec, cmd.Input, ChildOptions{...})` | `node_completed` with the child result |
+| `emit` | `dc.Emit(ProgressEvent{Type, Data})` | none |
+| `checkpoint` | `dc.Checkpoint(SnapshotRef)` | none |
+
+Pure `set` nodes and edge routing are evaluated by `flow/machine` itself without
+host durable calls (REQ-FLOW-036, `docs/architecture/flow-engine.md` §4).
+
+A command for a kind the machine returns without a follow-up event is answered
+with the one event in its row, so the machine advances: for `wait` and `gate`
+the host feeds `timer_fired` or `gate_resolved` alone, and adds no
+`node_completed` after it.
+
+**Superstep concurrency (REQ-FLOW-044).** When `Machine.Start` or
+`Machine.Apply` returns multiple commands in one superstep, the host starts all
+of their Future-returning durable calls (`dc.Step`, `dc.Sleep`, `dc.Await` and
+`dc.Child`) in command order and then waits for completions with `dc.Select`,
+rather than blocking on each command sequentially. `NodeHandler` is synchronous
+and returns no `Future`: the host calls it directly, one command at a time, as
+the table above says; it occupies the host while it runs, so the host has no
+other concurrent work to wait on around it.
+
+**Node failure (REQ-FLOW-035).** Any error from a `NodeHandler`, `dc.Step`,
+`dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a `node_failed`
+event carrying the error's `core.Code` and message (`core.CodeOf`, so a
+non-`*core.Error` becomes `internal`). Handing `node_failed` to the machine is
+the host's whole decision; when the machine returns `fail`, the host returns a
+`*core.Error` with that code.
+
+**Replay and state (REQ-FLOW-037, 038).** The host keeps no state between calls
+other than local variables of the `FlowHost` call and the machine `Snapshot`
+it carries: the snapshot is fed back to `Machine.Apply` from the bookkeeping of
+that replay, so the same history and the same IR give the same commands and
+the same `DurableContext` calls. Step, timer, gate and child-run results come
+from the history, so re-executing deterministic handler code on replay replays
+its `DurableContext` calls from history without re-running side effects. When
+the machine returns `complete`, the host returns the run's final state as the
+`FlowHost` result, and `host.feature`'s "no durable call after it completed"
+excludes the runtime's own recording of that result. When the machine returns
+`fail`, the host returns a `*core.Error` with the run's code.
+
+**Waiting.** The local runtime and the replay tests read the run's waiting
+state from the fake's gate; no scenario of this work package carries
+`@runtime:local` or `@runtime:temporal`. The fake is the recording
+`DurableContext` in `internal/bdd` (steps: `internal/bdd/steps/flow_host.go`),
+which records every call in order, replays a scripted history and advances only
+on the test's clock. Every name, gate payload and timer in `host.feature` is
+given literally in its step, so no scenario derives a number.
+
+**Boundary:**
+
+- `flow/host` is owned by WP-L4-04; it does not import `internal/bdd` code and
+  contains no handler.
+- `flow` stays free of `runtime`; `gate layering` enforces the `flow`,
+  `flow/host` and `deny_external` lines of `layering.yaml` (ADR-0011).
+- Node handlers of the other kinds (WP-L3-03, WP-L7-01) only call
+  `RegisterHandler` at the composition root; nothing here changes for them.
+
 ## Open questions
 
+- **Durable progress events (`node.started`, `node.completed`, `run.*`)**:
+  `docs/architecture/streaming.md` §2 and §7 name `node.started` and
+  `node.completed` as durable stream events, and `flow.Command` includes `emit`,
+  but neither ADR-0011 nor `docs/architecture/flow-engine.md` specifies whether
+  `flow/machine` emits them as `emit` commands or `flow/host` emits them
+  around node transitions, nor their exact `Data` JSON shape (deferred to
+  WP-L6-01 / `specs/streaming`).
+- **Shapes that the compiler does not yet fix**: the node-spec fields
+  `duration` (`wait`), `schema`, `accept_if` and `timeout` (`gate`) and `flow`
+  (`subflow`) are read from the node spec as the scenarios write them; the
+  compiler (WP-L4-01) does not check their shape yet. The `subflow` child's
+  run id and parent-close policy are not specified here.
 - **Compiler (`WP-L4-01`) coverage of `START` and `FAIL` edge ends**: `docs/architecture/flow-engine.md` §1 uses `START` as the entry edge source and `FAIL` as the failure edge target in the IR, and `WP-L4-03` (`REQ-FLOW-014`) specifies that `flow/builder` emits them, but `specs/flow-engine/compile.feature` (`WP-L4-01`) has no explicit requirement or scenario yet stating that `flow/compile` accepts `"START"` as an edge source and `"FAIL"` as an edge target without declaring nodes of those names.
