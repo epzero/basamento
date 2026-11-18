@@ -78,6 +78,9 @@ func incompatibleBusStreamConfig(cfg jetstream.StreamConfig, clientMax int) bool
 	if cfg.DenyPurge || cfg.Sealed {
 		return true
 	}
+	if cfg.Mirror != nil || len(cfg.Sources) > 0 {
+		return true
+	}
 	return false
 }
 
@@ -89,6 +92,9 @@ func incompatibleKVBackingStreamConfig(cfg jetstream.StreamConfig) bool {
 		return true
 	}
 	if cfg.DenyPurge || cfg.Sealed {
+		return true
+	}
+	if cfg.Mirror != nil || len(cfg.Sources) > 0 {
 		return true
 	}
 	return false
@@ -138,8 +144,13 @@ func openKV(ctx context.Context, js jetstream.JetStream, bucket string, want jet
 	if want.History > 0 && status.History() < int64(want.History) {
 		return nil, assetMismatch(bucket)
 	}
-	if si := kvStreamInfo(status); si != nil && incompatibleKVBackingStreamConfig(si.Config) {
-		return nil, assetMismatch(bucket)
+	if si := kvStreamInfo(status); si != nil {
+		if incompatibleKVBackingStreamConfig(si.Config) {
+			return nil, assetMismatch(bucket)
+		}
+		if si.Config.Mirror != nil || len(si.Config.Sources) > 0 {
+			return nil, assetMismatch(bucket)
+		}
 	}
 	return kv, nil
 }
