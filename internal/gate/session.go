@@ -119,15 +119,37 @@ func inLinkedWorktree(dir string) (bool, error) {
 	return filepath.Clean(gitDir) != filepath.Clean(common), nil
 }
 
-// issueWorktree returns the latest working (non-reviewer) session of an issue
-// whose worktree is not exclude.
+// originHasBranch reports whether refs/heads/<branch> exists on origin.
+// Exit code 2 from ls-remote means no such ref; other failures are reachability errors.
+func originHasBranch(dir, branch string) (bool, error) {
+	cmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/"+branch)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 2 {
+		return false, nil
+	}
+	return false, fmt.Errorf("cannot reach origin to check branch %q: %w; check network, credentials and git remote get-url origin", branch, err)
+}
+
 // fastForwardBranch fetches origin/<branch> and fast-forwards the checkout at dir.
 // It refuses when the local branch has diverged or has unpushed commits origin lacks.
 func fastForwardBranch(dir, branch string) error {
 	if _, err := git(dir, "remote", "get-url", "origin"); err != nil {
 		return nil // no origin: local-only worktrees need no sync
 	}
-	if _, err := git(dir, "fetch", "origin", branch); err != nil {
+	onOrigin, err := originHasBranch(dir, branch)
+	if err != nil {
+		return err
+	}
+	if !onOrigin {
+		return nil
+	}
+	refspec := "refs/heads/" + branch + ":refs/remotes/origin/" + branch
+	if _, err := git(dir, "fetch", "origin", refspec); err != nil {
 		return err
 	}
 	head, err := git(dir, "rev-parse", "HEAD")

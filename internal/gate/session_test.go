@@ -239,6 +239,35 @@ func TestHandoffSurvivesNewSessionInsideIssueWorktree(t *testing.T) {
 	}
 }
 
+func TestFastForwardSkipsUnpushedBranch(t *testing.T) {
+	repo := gitRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	mustGit(t, repo, "init", "-q", "--bare", remote)
+	mustGit(t, repo, "remote", "add", "origin", remote)
+	mustGit(t, repo, "push", "-q", "origin", "main")
+
+	author, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L5-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, author.Worktree, "wip.txt")
+	headBefore, err := git(author.Worktree, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L5-01"})
+	if err != nil {
+		t.Fatalf("next turn must succeed with unpushed branch: %v", err)
+	}
+	headAfter, err := git(author.Worktree, "rev-parse", "HEAD")
+	if err != nil || headBefore != headAfter {
+		t.Fatalf("unpushed branch must leave checkout untouched")
+	}
+	if reviewer.Worktree != author.Worktree {
+		t.Fatalf("should reuse worktree: %+v", reviewer)
+	}
+}
+
 func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
