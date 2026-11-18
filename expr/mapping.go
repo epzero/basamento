@@ -2,6 +2,7 @@ package expr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -80,11 +81,11 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 			if ctx.limitExceeded() {
 				return nil, mappingEvalErr(fmt.Sprintf("step limit %d exceeded", m.stepLimit))
 			}
-			msg := err.Error()
-			if strings.Contains(msg, "cannot be sorted") {
-				return nil, mappingEvalErr("mapping produced more than one value")
+			cause := mapGoJQCause(err.Error())
+			if cause == "" {
+				cause = "mapping evaluation failed"
 			}
-			return nil, mappingEvalErr(msg)
+			return nil, mappingEvalErr(cause)
 		}
 		count++
 		if count == 1 {
@@ -103,7 +104,8 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 }
 
 func formatMappingParseErr(src string, err error) error {
-	if pe, ok := err.(*gojq.ParseError); ok {
+	var pe *gojq.ParseError
+	if errors.As(err, &pe) {
 		return mappingCompileErr(src, fmt.Sprintf("parse error at offset %d", pe.Offset))
 	}
 	return mappingCompileErr(src, err.Error())
@@ -128,26 +130,39 @@ func normalizeMappingInputMap(m map[string]any) map[string]any {
 	return out
 }
 
+func mapGoJQCause(msg string) string {
+	switch {
+	case strings.Contains(msg, "cannot be sorted"):
+		return "mapping produced more than one value"
+	case strings.Contains(msg, "division by zero"):
+		return "division by zero"
+	case strings.Contains(strings.ToLower(msg), "overflow"):
+		return "overflow"
+	case strings.Contains(msg, "index out of range"), strings.Contains(msg, "out of bounds"):
+		return "out of bounds"
+	case strings.Contains(msg, "no such key"), strings.Contains(msg, "does not exist"):
+		return "no such key"
+	default:
+		return ""
+	}
+}
+
 func normalizeMappingInputValue(v any) any {
 	switch t := v.(type) {
 	case int64:
-		return float64(t)
+		return int(t)
 	case int:
-		return float64(t)
+		return t
 	case json.Number:
-		if i, err := t.Int64(); err == nil {
-			if i >= -9007199254740991 && i <= 9007199254740991 {
-				return float64(i)
-			}
-			bi := new(big.Int)
-			if _, ok := bi.SetString(string(t), 10); ok {
-				return bi
-			}
-			return t
-		}
 		bi := new(big.Int)
 		if _, ok := bi.SetString(string(t), 10); ok {
+			if bi.IsInt64() {
+				return int(bi.Int64())
+			}
 			return bi
+		}
+		if f, err := t.Float64(); err == nil {
+			return f
 		}
 		return t
 	case map[string]any:
@@ -199,7 +214,8 @@ func scanBanned(query *gojq.Query) (string, bool) {
 	if query == nil {
 		return "", false
 	}
-	for _, im := range query.Imports {
+	if len(query.Imports) > 0 {
+		im := query.Imports[0]
 		if im.ImportPath != "" {
 			return "import", true
 		}
@@ -282,9 +298,6 @@ func scanBannedIndex(q *gojq.Query) (string, bool) {
 		if bannedNames[name] {
 			return strings.TrimPrefix(name, "$"), true
 		}
-	}
-	if q.Term.Type == gojq.TermTypeIdentity && len(q.Term.SuffixList) > 0 {
-		// field chain like env.HOME
 	}
 	return "", false
 }
