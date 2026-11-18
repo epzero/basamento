@@ -14,10 +14,11 @@ Most review happens before anyone else looks, on the author's machine.
 - The author's lead then runs this review (§2 to §4) using the self-review
   finders (§3) and the self-review verifier rule (§4), and sends the surviving
   findings back to the implementer. The reviewer's own review re-checks every
-  code change independently, at full depth for high risk, so a finding missed
-  or wrongly dropped here gets a second, stronger check before merge.
+  code change independently, at Deep depth (sections 3 to 4), so a finding
+  missed or wrongly dropped here gets a second, stronger check before merge.
   (Technical designs are not re-reviewed on the pull request, so the architect
-  runs full deep depth for up to three rounds, `agent-workflow.md` §7.4.)
+  runs Deep depth (sections 3 to 4) for up to three rounds,
+  `agent-workflow.md` §7.4.)
 - If round 1 raised important findings, round 2 is incremental (§6): each open
   finding, and the whole diff since the last reviewed commit. After **two
   rounds** the lead stops spawning code reviewers: it reads what is still open
@@ -65,8 +66,8 @@ ordinary package, a new dependency), never lower it.
 
 | Tier | Typical paths | Depth | Person |
 | --- | --- | --- | --- |
-| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep (§3–§4); consolidated in the developer's self-review (§1) | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
-| **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard (§3–§4); consolidated in the developer's self-review (§1) | No |
+| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep (§3–§4); finder groups per §3 (reviewer column for the reviewer's review, self-review column for the self-review) | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
+| **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard (§3–§4); finder groups per §3 (reviewer column for the reviewer's review, self-review column for the self-review) | No |
 | **low** | Other docs | Quick (§3–§4), no verifier | No |
 
 Each session's effort follows `agent-workflow.md` §2.3.
@@ -99,6 +100,10 @@ Round-1 finder groups by tier:
 | **medium** | 2 finders: `1`, `2–4` (split `2` and `3–4` when >1,000 non-generated changed lines) | 1 finder: `1–4` |
 | **low** | 1 finder: `1` (or the reviewer's lead reads the diff itself, §1) | 1 finder: `1` |
 
+A change's **non-generated changed lines** are the lines added plus removed in
+`git diff <base>...<head>`, without the generated content `REVIEW.md` lists
+(`go.sum`, the mermaid blocks `gate docs` writes, and `spec.lock.yaml` hashes).
+
 Every finder reads the applicable `REVIEW.md` files. A finding names the file
 and line, the problem, a concrete failure scenario, and a proposed fix. When
 the problem is a class of bug, the finding says so and lists every instance,
@@ -127,6 +132,10 @@ Survival rules:
 | **Standard** (medium risk — reviewer's PR review) | One verifier pass per batch; findings confirmed with evidence survive. |
 | **Developer's self-review** (high and medium risk) | One verifier pass per batch; findings confirmed with evidence survive. |
 | **Quick** (low risk — either review) | No verifier. |
+
+A **blind** verifier's task contains only the finding as its finder wrote it
+(id, file and line, problem, failure scenario, proposed fix) and the branch
+snapshot: never another verifier's verdict, reasons or the vote so far.
 
 New findings raised in a round-2+ re-review (§6) follow the same tier rule.
 Once verification finishes, unconfirmed findings — and, in every review,

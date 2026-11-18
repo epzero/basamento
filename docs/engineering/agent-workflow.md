@@ -353,7 +353,7 @@ branch was pushed by another maintainer.)
 Why you were started: <new work package | write the specs | review the specs
 | implement the approved specs | fix these findings: … | the owner answered:
 "<answer>" | resolve the rebase conflict | review lenses <lenses>, base <base>,
-from <commit> | verify findings <list>>.
+from <commit> | verify findings <list>, blind (`code-review.md` §4)>.
 Do this one step, record your status and stop. Never ask a person directly:
 end with needs-human.
 ```
@@ -447,7 +447,7 @@ contract or layer, a different approach) is the architect's.
 
 | Step | Who | What |
 | --- | --- | --- |
-| 1. Draft | architect | A spec author session writes the ADR as it will read once merged (*Accepted*: an open pull request is the proposal), with the architecture docs it changes. Code reviewer sessions review it, several rounds, until nothing important is open. |
+| 1. Draft | architect | A spec author session writes the ADR as it will read once merged (*Accepted*: an open pull request is the proposal), with the architecture docs it changes. Code reviewer sessions review it at Deep depth (`code-review.md` §3 reviewer column and §4), up to three rounds, then the architect settles what is still open, with reasons (the `lead-architect` playbook). |
 | 2. Open | architect | Opens the pull request and hands the ticket to the owner with a summary: the decision, the alternatives, what it costs. |
 | 3. Decide | owner | Discusses on the ticket (comments go back to the architect, who answers or changes the design), then `approve` to the reviewer, or closes it. |
 | 4. Approve | reviewer | Checks that the pull request is still the commit the owner saw and that CI is green, sets the risk, approves with a link to the owner's comment. It does not review the design again. Hands the ticket to the architect. |

@@ -73,10 +73,10 @@ to the owner.
 1. Spawn a spec author to write the ADR and the architecture docs it
    changes, from the ticket and the ADRs it touches.
 2. Review it with code reviewer sessions (ADRs are high-risk and are not
-   re-reviewed on the pull request: full deep depth, `code-review.md` §2 to
-   §4; later rounds as in §6), and send findings back to the spec author. Go
-   on until nothing important is open; after three rounds settle the rest
-   yourself, with reasons.
+   re-reviewed on the pull request: Deep depth, sections 3 to 4 of
+   `code-review.md`; later rounds as in §6), and send findings back to the
+   spec author. Go on until nothing important is open; after three rounds
+   settle the rest yourself, with reasons.
 3. Push, open the pull request (`risk: TBD`), and hand the ticket to the
    owner: `needs-human`, with the decision, the alternatives you rejected
    and what it costs.
