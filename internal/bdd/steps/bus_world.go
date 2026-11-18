@@ -58,7 +58,6 @@ type busWorld struct {
 	subErr        error
 	subBuf        int
 	maxMsg        int
-	serverDown    bool
 	publishOK     []uint64
 	putRevs       []uint64
 	swapWinner    string
@@ -430,7 +429,6 @@ func parseDurationPass(s string) (time.Duration, error) {
 }
 
 func (w *busWorld) stopServer() {
-	w.serverDown = true
 	if w.fake != nil {
 		w.fake.Stop()
 		return
