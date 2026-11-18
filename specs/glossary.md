@@ -70,6 +70,10 @@ the same change that first uses it.
 | **Allowlist** | The tools one caller was given. A call to any other tool is refused. |
 | **MCP server** | An external service that lists tools with their schemas and runs them when called; the platform reaches it through an MCP client. A **simulated MCP server** stands in for it in the gate. |
 | **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A **simulated sandbox** stands in for it in the gate. |
+| **Durable event log** | The per-run, ordered record of a run's durable events (`seq`), written in the same transaction as the state change that records them. |
+| **Outbox** | The durable event log, read as work to relay: each entry is an event pending publication to the bus until it is marked relayed. |
+| **Relay** | The component that publishes a run's outbox entries to the bus in `seq` order and marks them relayed after the bus accepts them. |
+| **Event envelope** | What the bus carries for a durable event: run id, `seq`, event type, schema version (`v`) and data. A consumer recognises a repeated event by run id and `seq`. |
 | **Inspector** | The run inspector, a web UI that reads runs through the API: the runs a person may see, a run's events, its open gates and the recordings attached to it. |
 | **Account** | A person's login in the inspector, identified by a username (`"ana"`). |
 | **Recording** | The rrweb DOM recording of a browser session, replayed in the inspector. |
