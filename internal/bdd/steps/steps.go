@@ -15,6 +15,7 @@ type worldKey struct{}
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
 	Core *coreWorld
+	SQL  *sqlWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -25,4 +26,5 @@ func Initialize(sc *godog.ScenarioContext) {
 		return context.WithValue(ctx, worldKey{}, &World{Core: newCoreWorld()}), nil
 	})
 	registerCore(sc)
+	registerSQL(sc)
 }
