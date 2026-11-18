@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,20 @@ func TestHandlerNosniffAndContentLength(t *testing.T) {
 	}
 	if resp.Header.Get("Content-Length") != "5" {
 		t.Fatalf("length %q", resp.Header.Get("Content-Length"))
+	}
+}
+
+func TestHandlerRejectsRequestWithoutSignKey(t *testing.T) {
+	t.Parallel()
+	hex := strings.TrimPrefix(ContentKeyOf([]byte("hello")), "sha256:")
+	exp := time.Now().Add(time.Hour).Unix()
+	sig := signRead(nil, "acme", hex, exp)
+	h := &URLHandler{Store: &Store{}}
+	req := httptest.NewRequest(http.MethodGet, "/acme/"+hex+"?exp="+strconv.FormatInt(exp, 10)+"&sig="+sig, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d", rec.Code)
 	}
 }
 

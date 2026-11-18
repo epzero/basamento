@@ -44,9 +44,6 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 	}
 	var handler http.Handler
 	if embedded {
-		if st.baseURL == "" {
-			st.baseURL = "http://blob.test" + HandlerRoute()
-		}
 		handler = (&URLHandler{Store: st}).Mount()
 	}
 	return st, handler, nil

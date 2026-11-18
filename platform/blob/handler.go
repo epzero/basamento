@@ -30,7 +30,7 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	tenant, hex, ok := parseURLPath(r.URL.Path, h.Store.baseURL)
+	tenant, hex, ok := parseURLPath(r.URL.Path)
 	if !ok || len(hex) != 64 {
 		w.WriteHeader(http.StatusForbidden)
 		return
@@ -88,7 +88,7 @@ func (h *URLHandler) respondBody(w http.ResponseWriter, r *http.Request, body io
 	}
 }
 
-func parseURLPath(p, base string) (tenant, hex string, ok bool) {
+func parseURLPath(p string) (tenant, hex string, ok bool) {
 	p = strings.TrimPrefix(p, "/")
 	parts := strings.Split(p, "/")
 	if len(parts) != 2 {

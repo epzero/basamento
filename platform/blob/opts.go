@@ -15,9 +15,11 @@ type Options struct {
 	Clock core.Clock
 	// MaxURLTTL caps SignedURL lifetimes; defaults to DefaultMaxURLTTL.
 	MaxURLTTL time.Duration
-	// BaseURL is the public origin for proxied read URLs (embedded file only).
+	// BaseURL is required on a file-backed store for SignedURL: the public origin
+	// of proxied read URLs (scheme + host + HandlerRoute prefix). Wiring sets it.
 	BaseURL string
-	// SignKey is the HMAC key for proxied read URLs (embedded file only).
+	// SignKey is required on a file-backed store for SignedURL and the proxied
+	// read handler. Wiring sets it.
 	SignKey []byte
 }
 
