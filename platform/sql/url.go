@@ -17,11 +17,13 @@ const (
 
 type parsedURL struct {
 	dialect dialect
-	// sqlite: absolute file path; postgres: connection string without secrets in errors
+	// sqlitePath is the absolute database file path for SQLite URLs.
 	sqlitePath string
-	pgConn     string
-	raw        string
-	user       string
+	// pgConn is the full raw Postgres DSN, including credentials; only redactURL
+	// output may appear in errors and logs.
+	pgConn string
+	raw    string
+	user   string
 }
 
 func parseStoreURL(raw string) (parsedURL, error) {

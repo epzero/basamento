@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io/fs"
 	"strconv"
 	"strings"
@@ -23,56 +22,62 @@ func gooseDialect(d dialect) goose.Dialect {
 }
 
 func migrateDB(ctx context.Context, db *sql.DB, d dialect, migrations fs.FS, sqlitePath string) error {
-	if d == dialectSQLite && sqlitePath != "" {
-		mu := sqliteMigrateMutex(sqlitePath)
-		mu.Lock()
-		defer mu.Unlock()
-		if err := checkSchemaVersion(db, d, migrations); err != nil {
-			return err
+	if d == dialectSQLite {
+		run := func() error {
+			if err := checkSchemaVersion(ctx, db, d, migrations); err != nil {
+				return err
+			}
+			return runMigrations(ctx, db, d, migrations)
 		}
-		if err := sqliteRecheckVersion(ctx, db, migrations); err != nil {
+		if sqlitePath != "" && !sqliteMemoryPath(sqlitePath) {
+			return withSQLiteMigrateFileLock(ctx, sqlitePath, run)
+		}
+		return run()
+	}
+	if err := checkSchemaVersion(ctx, db, d, migrations); err != nil {
+		return err
+	}
+	return withPostgresMigrateLock(ctx, db, func() error {
+		if err := checkSchemaVersion(ctx, db, d, migrations); err != nil {
 			return err
 		}
 		return runMigrations(ctx, db, d, migrations)
-	}
-	if err := checkSchemaVersion(db, d, migrations); err != nil {
-		return err
-	}
-	if err := acquirePostgresMigrateLock(ctx, db); err != nil {
-		return err
-	}
-	defer func() { _ = releasePostgresMigrateLock(ctx, db) }()
-	if err := checkSchemaVersion(db, d, migrations); err != nil {
-		return err
-	}
-	return runMigrations(ctx, db, d, migrations)
+	})
 }
 
-func sqliteRecheckVersion(ctx context.Context, db *sql.DB, migrations fs.FS) error {
-	if _, err := db.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+// withPostgresMigrateLock takes the session advisory lock on one dedicated pool
+// connection, runs fn while that connection holds the lock, and unlocks on the
+// same connection before returning. Waits on ctx while acquiring the lock.
+func withPostgresMigrateLock(ctx context.Context, db *sql.DB, fn func() error) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
 		return err
 	}
-	defer func() { _, _ = db.ExecContext(ctx, `ROLLBACK`) }()
-	return checkSchemaVersion(db, dialectSQLite, migrations)
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID); err != nil {
+		return err
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, migrateLockID) }()
+	return fn()
 }
 
 func runMigrations(ctx context.Context, db *sql.DB, d dialect, migrations fs.FS) error {
 	provider, err := goose.NewProvider(gooseDialect(d), db, migrations)
 	if err != nil {
-		return fmt.Errorf("sql: migration provider: %w", err)
+		return core.NewError(core.CodeInternal, "sql: migration provider failed", nil)
 	}
 	if _, err := provider.Up(ctx); err != nil {
-		return core.NewError(core.CodeInternal, "sql: migration failed", map[string]any{"reason": err.Error()})
+		return core.NewError(core.CodeInternal, "sql: migration failed", nil)
 	}
 	return nil
 }
 
-func checkSchemaVersion(db *sql.DB, d dialect, migrations fs.FS) error {
+func checkSchemaVersion(ctx context.Context, db *sql.DB, d dialect, migrations fs.FS) error {
 	maxSet, err := maxMigrationVersion(migrations)
 	if err != nil {
 		return err
 	}
-	cur, found, err := currentVersion(db, d)
+	cur, found, err := currentVersion(ctx, db, d)
 	if err != nil {
 		return err
 	}
@@ -109,15 +114,15 @@ func maxMigrationVersion(migrations fs.FS) (int64, error) {
 	return max, err
 }
 
-func currentVersion(db *sql.DB, d dialect) (int64, bool, error) {
+func currentVersion(ctx context.Context, db *sql.DB, d dialect) (int64, bool, error) {
 	var ver int64
-	q := `SELECT version_id FROM goose_db_version WHERE is_applied ORDER BY version_id DESC LIMIT 1`
+	var q string
 	if d == dialectPostgres {
 		q = `SELECT version_id FROM goose_db_version WHERE is_applied = true ORDER BY version_id DESC LIMIT 1`
 	} else {
 		q = `SELECT version_id FROM goose_db_version WHERE is_applied = 1 ORDER BY version_id DESC LIMIT 1`
 	}
-	err := db.QueryRow(q).Scan(&ver)
+	err := db.QueryRowContext(ctx, q).Scan(&ver)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -138,30 +143,23 @@ func isMissingTable(err error) bool {
 	return strings.Contains(s, "no such table") || strings.Contains(s, "does not exist")
 }
 
-func acquirePostgresMigrateLock(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrateLockID)
-	return err
-}
-
-func releasePostgresMigrateLock(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `SELECT pg_advisory_unlock($1)`, migrateLockID)
-	return err
-}
-
 // SchemaVersion returns the newest applied migration version.
 func (s *Store) SchemaVersion(ctx context.Context) (int64, error) {
-	ver, found, err := currentVersion(s.db, s.dialect)
+	ver, found, err := currentVersion(ctx, s.db, s.dialect)
 	if err != nil {
 		return 0, err
 	}
 	if !found {
 		return 0, nil
 	}
-	_ = ctx
 	return ver, nil
 }
 
 // MaxMigrationVersion reports the highest version in migrations.
 func MaxMigrationVersion(migrations fs.FS) (int64, error) {
 	return maxMigrationVersion(migrations)
+}
+
+func sqliteMemoryPath(path string) bool {
+	return path == ":memory:" || strings.HasSuffix(path, ":memory:")
 }

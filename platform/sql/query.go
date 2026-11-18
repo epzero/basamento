@@ -13,7 +13,8 @@ import (
 
 var placeholderRe = regexp.MustCompile(`\?`)
 
-// Execer runs SQL with dialect-correct placeholders.
+// Execer runs SQL with dialect-correct placeholders for either the pool or an
+// active transaction when created by Store.InTx.
 type Execer struct {
 	db      *sql.DB
 	tx      *sql.Tx
@@ -44,34 +45,78 @@ type queryR interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// Exec runs q with args rewritten for the store dialect. String arguments must
+// not contain NUL (REQ-SQL-018). Driver errors are mapped by mapExecErr.
 func (e *Execer) Exec(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	if err := validateArgs(args); err != nil {
+		return nil, err
+	}
 	res, err := e.runner().ExecContext(ctx, e.rewrite(q), args...)
 	return res, mapExecErr(err)
 }
 
+// Query runs a read query on the pool or transaction, rejecting NUL in string arguments.
 func (e *Execer) Query(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	return e.runner().QueryContext(ctx, e.rewrite(q), args...)
+	if err := validateArgs(args); err != nil {
+		return nil, err
+	}
+	rows, err := e.runner().QueryContext(ctx, e.rewrite(q), args...)
+	return rows, mapExecErr(err)
 }
 
-func (e *Execer) QueryRow(ctx context.Context, q string, args ...any) *sql.Row {
-	return e.runner().QueryRowContext(ctx, e.rewrite(q), args...)
+// Row holds the result of Execer.QueryRow; Scan reads the row and maps driver errors.
+type Row struct {
+	inner *sql.Row
+	err   error
 }
 
-func validateText(s string) error {
+// Scan reads one row and maps driver errors.
+func (r *Row) Scan(dest ...any) error {
+	if r == nil {
+		return core.NewError(core.CodeInternal, "sql: nil row", nil)
+	}
+	if r.err != nil {
+		return r.err
+	}
+	return mapExecErr(r.inner.Scan(dest...))
+}
+
+// QueryRow runs a single-row read, rejecting NUL in string arguments before touching the database.
+func (e *Execer) QueryRow(ctx context.Context, q string, args ...any) *Row {
+	if err := validateArgs(args); err != nil {
+		return &Row{err: err}
+	}
+	return &Row{inner: e.runner().QueryRowContext(ctx, e.rewrite(q), args...)}
+}
+
+// ValidateText rejects strings that contain a NUL byte (REQ-SQL-018).
+func ValidateText(s string) error {
 	if strings.ContainsRune(s, 0) {
 		return core.NewError(core.CodeInvalidArgument, "sql: text contains nul", nil)
 	}
 	return nil
 }
 
-// truncateMicrosecond converts to UTC and truncates to whole microseconds (REQ-SQL-016).
-func truncateMicrosecond(t time.Time) time.Time {
+func validateArgs(args []any) error {
+	for _, a := range args {
+		if s, ok := a.(string); ok {
+			if err := ValidateText(s); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// TruncateMicrosecond converts to UTC and truncates to whole microseconds (REQ-SQL-016).
+func TruncateMicrosecond(t time.Time) time.Time {
 	return t.UTC().Truncate(time.Microsecond)
 }
 
-func textOrderClause(d dialect, col string) string {
-	if d == dialectSQLite {
-		return col + ` COLLATE BINARY`
+// TextOrderClause returns an ORDER BY column expression with dialect collation (REQ-SQL-017).
+func TextOrderClause(dialectName, col string) string {
+	if dialectName == "postgres" {
+		return col + ` COLLATE "C"`
 	}
-	return col + ` COLLATE "C"`
+	return col + ` COLLATE BINARY`
 }

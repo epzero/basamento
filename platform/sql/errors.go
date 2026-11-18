@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -27,7 +28,8 @@ func wrapOpenErr(p parsedURL, err error) error {
 			Cause:     scrubCause(err, p.raw),
 		}
 	}
-	if pe, ok := err.(*core.Error); ok {
+	var pe *core.Error
+	if errors.As(err, &pe) {
 		return pe
 	}
 	return core.NewError(core.CodeInternal, msg, details)
@@ -50,7 +52,7 @@ func isUnavailable(err error) bool {
 func scrubCause(err error, rawURL string) error {
 	pass := urlPassword(rawURL)
 	if pass == "" {
-		return errors.New(err.Error())
+		return errors.New("connection failed")
 	}
 	return errors.New(redactDriverMsg(err.Error(), pass))
 }
@@ -94,26 +96,23 @@ func mapExecErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return core.NewError(core.CodeNotFound, "sql: not found", nil)
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		details := map[string]any{"sqlstate": pgErr.Code}
 		switch pgErr.Code {
 		case "23505":
-			return core.NewError(core.CodeConflict, "sql: unique violation", nil)
+			return core.NewError(core.CodeConflict, "sql: unique violation", details)
 		case "23503":
-			return core.NewError(core.CodeConflict, "sql: foreign key violation", nil)
+			return core.NewError(core.CodeConflict, "sql: foreign key violation", details)
+		default:
+			return core.NewError(core.CodeInvalidArgument, "sql: execution failed", details)
 		}
 	}
 	if ce := sqliteConstraintCode(err); ce != 0 {
-		return core.NewError(core.CodeConflict, "sql: constraint violation", nil)
+		return core.NewError(core.CodeConflict, "sql: constraint violation", map[string]any{"sqlite_code": ce})
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return core.NewError(core.CodeConflict, "sql: unique violation", nil)
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-		return core.NewError(core.CodeConflict, "sql: foreign key violation", nil)
-	}
-	return fmt.Errorf("sql: %w", err)
+	return core.NewError(core.CodeInternal, "sql: execution failed", nil)
 }

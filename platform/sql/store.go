@@ -3,6 +3,7 @@ package sql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -33,7 +34,8 @@ func Open(ctx context.Context, rawURL string, migrations fs.FS) (*Store, error) 
 	}
 	if err := migrateDB(ctx, db, p.dialect, migrations, p.sqlitePath); err != nil {
 		_ = db.Close()
-		if _, ok := err.(*core.Error); ok {
+		var pe *core.Error
+		if errors.As(err, &pe) {
 			return nil, err
 		}
 		return nil, wrapOpenErr(p, err)
@@ -55,9 +57,13 @@ func Open(ctx context.Context, rawURL string, migrations fs.FS) (*Store, error) 
 func openDB(ctx context.Context, p parsedURL) (*sql.DB, error) {
 	switch p.dialect {
 	case dialectSQLite:
-		dir := filepath.Dir(p.sqlitePath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
+		if !sqliteMemoryPath(p.sqlitePath) {
+			if err := ensureSQLiteDataDir(p.sqlitePath); err != nil {
+				return nil, err
+			}
+			if err := ensureSQLiteDBFile(p.sqlitePath); err != nil {
+				return nil, err
+			}
 		}
 		dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)", p.sqlitePath)
 		db, err := sql.Open("sqlite", dsn)
@@ -81,6 +87,29 @@ func openDB(ctx context.Context, p parsedURL) (*sql.DB, error) {
 	}
 }
 
+func ensureSQLiteDataDir(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	if _, err := os.Stat(dir); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.Mkdir(dir, 0o700)
+}
+
+func ensureSQLiteDBFile(dbPath string) error {
+	if _, err := os.Stat(dbPath); err == nil {
+		return os.Chmod(dbPath, 0o600)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 // Close releases the database.
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
@@ -100,22 +129,37 @@ func (s *Store) Dialect() string {
 	return "sqlite"
 }
 
-// InTx runs fn inside one transaction; rolled back when fn returns an error (REQ-SQL-013).
-func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Execer) error) error {
+// InTx runs fn inside one transaction on this store. The transaction rolls back
+// when fn returns an error or panics, and commits only when fn returns nil.
+// Nested InTx on the same store returns invalid_argument immediately instead of blocking.
+func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context, exec *Execer) error) (err error) {
+	if ctx.Value(txActiveKey{}) != nil {
+		return core.NewError(core.CodeInvalidArgument, "sql: nested transaction", nil)
+	}
 	sqlTx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapExecErr(err)
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = sqlTx.Rollback()
+			panic(p)
+		}
+		if err != nil {
+			_ = sqlTx.Rollback()
+		}
+	}()
+	ctx = context.WithValue(ctx, txActiveKey{}, true)
 	exec := &Execer{db: s.db, tx: sqlTx, dialect: s.dialect}
-	if err := fn(ctx, exec); err != nil {
-		_ = sqlTx.Rollback()
+	if err = fn(ctx, exec); err != nil {
 		return err
 	}
-	return mapExecErr(sqlTx.Commit())
+	err = mapExecErr(sqlTx.Commit())
+	return err
 }
 
 // DB exposes the database handle for conformance tests that need raw access.
 func (s *Store) DB() *sql.DB { return s.db }
 
-// ParsedURLRedacted returns the store url with secrets removed.
+// ParsedURLRedacted returns the store URL with secrets removed for safe logging.
 func (s *Store) ParsedURLRedacted() string { return redactURL(s.url.raw) }

@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,71 +16,6 @@ import (
 	"github.com/epzero/basamento/internal/bdd/sqltest"
 	psql "github.com/epzero/basamento/platform/sql"
 )
-
-type sqlWorld struct {
-	profile     string
-	dataDir     string
-	dbURL       string
-	pgCleanup   func()
-	store       *psql.Store
-	repo        *sqltest.SampleRepo
-	lastErr     error
-	openErr     error
-	lastTxErr   error
-	itemIDs     map[string]string // key "tenant:key" -> id
-	closedPort  string
-	keyOrder    []string
-	extraStores []*psql.Store
-}
-
-func newSQLWorld() *sqlWorld {
-	profile := os.Getenv("BDD_SQL_PROFILE")
-	if profile == "" {
-		profile = "embedded"
-	}
-	return &sqlWorld{profile: profile, itemIDs: map[string]string{}}
-}
-
-func (w *sqlWorld) tenantCtx(tenant string) context.Context {
-	return core.WithTenant(context.Background(), core.TenantID(tenant))
-}
-
-func (w *sqlWorld) activeURL() string {
-	if w.dbURL != "" {
-		return w.dbURL
-	}
-	if w.profile == "cloud" {
-		return ""
-	}
-	return filepath.Join(w.dataDir, "kit.db")
-}
-
-func (w *sqlWorld) sqliteFileURL(path string) string {
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(w.dataDir, path)
-	}
-	return "sqlite:///" + path
-}
-
-func (w *sqlWorld) closeStores() {
-	if w.store != nil {
-		_ = w.store.Close()
-		w.store = nil
-		w.repo = nil
-	}
-	for _, s := range w.extraStores {
-		_ = s.Close()
-	}
-	w.extraStores = nil
-}
-
-func (w *sqlWorld) teardown() {
-	w.closeStores()
-	if w.pgCleanup != nil {
-		w.pgCleanup()
-		w.pgCleanup = nil
-	}
-}
 
 func registerSQL(sc *godog.ScenarioContext) {
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
@@ -228,7 +162,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 	sc.Step(`^a database migrated with the sample migrations 1 to (\d+)$`, func(ctx context.Context, max int) error {
 		w := world(ctx).SQL
 		if w.dbURL == "" {
-			if err := worldStepEmptyDB(ctx); err != nil {
+			if err := stepsEmptyDB(ctx); err != nil {
 				return err
 			}
 			w = world(ctx).SQL
@@ -257,8 +191,11 @@ func registerSQL(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^both stores open$`, func(ctx context.Context) error {
-		if world(ctx).SQL.store == nil {
-			return fmt.Errorf("stores did not open")
+		w := world(ctx).SQL
+		for i, s := range append([]*psql.Store{w.store}, w.extraStores...) {
+			if s == nil {
+				return fmt.Errorf("store %d did not open", i)
+			}
 		}
 		return nil
 	})
@@ -286,16 +223,8 @@ func registerSQL(sc *godog.ScenarioContext) {
 		if err == nil {
 			return fmt.Errorf("no error")
 		}
-		if strings.Contains(err.Error(), secret) {
-			return fmt.Errorf("password in message")
-		}
-		var pe *core.Error
-		if errorsAs(err, &pe) && pe.Details != nil {
-			for _, v := range pe.Details {
-				if strings.Contains(fmt.Sprint(v), secret) {
-					return fmt.Errorf("password in details")
-				}
-			}
+		if psql.ErrorContainsSecret(err, secret) {
+			return fmt.Errorf("password in message or details")
 		}
 		return nil
 	})
@@ -339,7 +268,8 @@ func registerSQL(sc *godog.ScenarioContext) {
 				return err
 			}
 		}
-		n, err := world(ctx).SQL.repo.CountItemsByKey(ctx, tenant, key)
+		w := world(ctx).SQL
+		n, err := w.repo.CountItemsByKey(w.tenantCtx(tenant), key)
 		if err != nil {
 			return err
 		}
@@ -392,12 +322,12 @@ func registerSQL(sc *godog.ScenarioContext) {
 				return err
 			}
 		}
-		n, err := w.repo.CountItemsByKey(ctx, tenant, key)
+		n, err := w.repo.CountItemsByKey(w.tenantCtx(tenant), key)
 		if err != nil {
 			return err
 		}
 		if n > 0 {
-			got, err := w.repo.ItemListName(w.tenantCtx(tenant), tenant, key)
+			got, err := w.repo.ItemListName(w.tenantCtx(tenant), key)
 			if err != nil {
 				return err
 			}
@@ -556,7 +486,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 
 	sc.Step(`^tenant "([^"]*)" reads the item "([^"]*)" of tenant "([^"]*)" by its id$`, func(ctx context.Context, reader, key, owner string) error {
 		w := world(ctx).SQL
-		id, err := w.repo.LookupIDByKey(ctx, owner, key)
+		id, err := w.repo.LookupIDByKey(w.tenantCtx(owner), key)
 		if err != nil {
 			return err
 		}
@@ -566,7 +496,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 
 	sc.Step(`^tenant "([^"]*)" changes the key of the item "([^"]*)" of tenant "([^"]*)" to "([^"]*)"$`, func(ctx context.Context, reader, key, owner, newKey string) error {
 		w := world(ctx).SQL
-		id, err := w.repo.LookupIDByKey(ctx, owner, key)
+		id, err := w.repo.LookupIDByKey(w.tenantCtx(owner), key)
 		if err != nil {
 			return err
 		}
@@ -576,7 +506,7 @@ func registerSQL(sc *godog.ScenarioContext) {
 
 	sc.Step(`^tenant "([^"]*)" deletes the item "([^"]*)" of tenant "([^"]*)" by its id$`, func(ctx context.Context, reader, key, owner string) error {
 		w := world(ctx).SQL
-		id, err := w.repo.LookupIDByKey(ctx, owner, key)
+		id, err := w.repo.LookupIDByKey(w.tenantCtx(owner), key)
 		if err != nil {
 			return err
 		}
@@ -600,14 +530,14 @@ func registerSQL(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^no tenant has an item with key "([^"]*)"$`, func(ctx context.Context, key string) error {
-		repo := world(ctx).SQL.repo
-		if repo == nil {
+		w := world(ctx).SQL
+		if w.store == nil {
 			if err := ensureOpenStore(ctx, 3); err != nil {
 				return err
 			}
-			repo = world(ctx).SQL.repo
+			w = world(ctx).SQL
 		}
-		ok, err := repo.HasItemKey(ctx, key)
+		ok, err := anyTenantHasItemKey(ctx, w.store, key)
 		if err != nil {
 			return err
 		}
@@ -616,202 +546,4 @@ func registerSQL(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-}
-
-func errorsAs(err error, target interface{}) bool {
-	if err == nil {
-		return false
-	}
-	if pe, ok := err.(*core.Error); ok {
-		if t, ok := target.(**core.Error); ok {
-			*t = pe
-			return true
-		}
-	}
-	return false
-}
-
-func expandData(raw, dataDir string) string {
-	return strings.ReplaceAll(raw, "{data}", dataDir)
-}
-
-func openStoreWithMigrations(ctx context.Context, raw string, max int, broken bool) error {
-	w := world(ctx).SQL
-	w.closeStores()
-	mig, err := sqltest.MigrationsThrough(max, broken)
-	if err != nil {
-		return err
-	}
-	if strings.HasPrefix(raw, "sqlite://") {
-		w.dbURL = raw
-	} else if w.profile == "cloud" && !strings.HasPrefix(raw, "postgres") {
-		if w.dbURL != "" {
-			raw = w.dbURL
-		}
-	}
-	s, err := psql.Open(ctx, raw, mig)
-	if err != nil {
-		w.openErr = err
-		return nil
-	}
-	w.store = s
-	w.repo = sqltest.NewSampleRepo(s)
-	w.openErr = nil
-	if strings.HasPrefix(raw, "sqlite:") {
-		w.dbURL = raw
-	}
-	return nil
-}
-
-func tryOpen(ctx context.Context, raw string, max int, broken bool) error {
-	w := world(ctx).SQL
-	w.closeStores()
-	mig, err := sqltest.MigrationsThrough(maxOr(max, 3), broken)
-	if err != nil {
-		return err
-	}
-	s, err := psql.Open(ctx, raw, mig)
-	w.openErr = err
-	if err != nil {
-		return nil
-	}
-	_ = s.Close()
-	return nil
-}
-
-func maxOr(max, def int) int {
-	if max > 0 {
-		return max
-	}
-	return def
-}
-
-func inspectSchemaVersion(ctx context.Context, max int) (int64, error) {
-	w := world(ctx).SQL
-	if w.store != nil {
-		return w.store.SchemaVersion(ctx)
-	}
-	mig, err := sqltest.MigrationsThrough(max, false)
-	if err != nil {
-		return 0, err
-	}
-	s, err := psql.Open(ctx, w.dbURL, mig)
-	if err != nil {
-		return 0, err
-	}
-	defer s.Close()
-	return s.SchemaVersion(ctx)
-}
-
-func inspectRepo(ctx context.Context, max int) (*sqltest.SampleRepo, error) {
-	w := world(ctx).SQL
-	if w.repo != nil {
-		return w.repo, nil
-	}
-	if err := openStoreWithMigrations(ctx, w.dbURL, max, false); err != nil {
-		return nil, err
-	}
-	return world(ctx).SQL.repo, nil
-}
-
-func worldStepEmptyDB(ctx context.Context) error {
-	return registerEmptyDB(ctx)
-}
-
-func registerEmptyDB(ctx context.Context) error {
-	sc := &godog.ScenarioContext{}
-	_ = sc
-	return stepsEmptyDB(ctx)
-}
-
-func stepsOpenStore(ctx context.Context, max int) error {
-	w := world(ctx).SQL
-	if w.dbURL == "" {
-		if err := stepsEmptyDB(ctx); err != nil {
-			return err
-		}
-		w = world(ctx).SQL
-	}
-	return openStoreWithMigrations(ctx, w.dbURL, max, false)
-}
-
-func stepsEmptyDB(ctx context.Context) error {
-	w := world(ctx).SQL
-	if w.profile == "cloud" {
-		u, cleanup, err := sqltest.CreateDatabase(ctx)
-		if err != nil {
-			return err
-		}
-		w.dbURL = u
-		w.pgCleanup = cleanup
-		return nil
-	}
-	dir, err := os.MkdirTemp("", "sql-sqlite-*")
-	if err != nil {
-		return err
-	}
-	w.dataDir = dir
-	w.dbURL = w.sqliteFileURL("kit.db")
-	return nil
-}
-
-func ensureOpenStore(ctx context.Context, max int) error {
-	w := world(ctx).SQL
-	if w.store != nil {
-		return nil
-	}
-	return openStoreWithMigrations(ctx, w.dbURL, max, false)
-}
-
-func storeItem(ctx context.Context, tenant, key string, opts sqltest.StoreOptions) error {
-	w := world(ctx).SQL
-	if w.repo == nil {
-		if err := ensureOpenStore(ctx, 3); err != nil {
-			return err
-		}
-	}
-	return w.repo.StoreItem(w.tenantCtx(tenant), key, opts)
-}
-
-func countItem(ctx context.Context, tenant string, n int, key string) error {
-	if world(ctx).SQL.repo == nil {
-		if _, err := inspectRepo(ctx, 3); err != nil {
-			return err
-		}
-	}
-	got, err := world(ctx).SQL.repo.CountItemsByKey(ctx, tenant, key)
-	if err != nil {
-		return err
-	}
-	if got != n {
-		return fmt.Errorf("tenant %s has %d items with key %s, want %d", tenant, got, key, n)
-	}
-	return nil
-}
-
-func skipByProfile(scn *godog.Scenario, profile string) error {
-	tags := scn.Tags
-	hasEmbedded := false
-	hasCloud := false
-	for _, t := range tags {
-		if t.Name == "@profile:embedded" {
-			hasEmbedded = true
-		}
-		if t.Name == "@profile:cloud" {
-			hasCloud = true
-		}
-	}
-	// inherit from feature tags not visible here; godog merges scenario tags
-	if profile == "embedded" && hasCloud && !hasEmbedded {
-		return godog.ErrSkip
-	}
-	if profile == "cloud" {
-		if hasEmbedded && !hasCloud {
-			return godog.ErrSkip
-		}
-		if !sqltest.PostgresConfigured() {
-			return godog.ErrSkip
-		}
-	}
-	return nil
 }

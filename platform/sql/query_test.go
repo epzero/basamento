@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,15 +11,47 @@ import (
 func TestTruncateMicrosecond(t *testing.T) {
 	in, _ := time.Parse(time.RFC3339Nano, "2026-10-01T09:00:00.9999999Z")
 	want, _ := time.Parse(time.RFC3339, "2026-10-01T09:00:00.999999Z")
-	got := truncateMicrosecond(in)
+	got := TruncateMicrosecond(in)
 	if !got.Equal(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
 
 func TestValidateTextRejectsNUL(t *testing.T) {
-	if err := validateText("a\x00"); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("validateText: %v", err)
+	if err := ValidateText("a\x00"); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("ValidateText: %v", err)
+	}
+}
+
+func TestExecRejectsNULInArgument(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	store, err := Open(ctx, "sqlite:///"+dir+"/kit.db", emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	_, err = store.Execer().Exec(ctx, `SELECT 1`, "\x00")
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("Exec NUL: %v", err)
+	}
+	if stringsContains(err.Error(), "\x00") {
+		t.Fatalf("error echoed argument")
+	}
+}
+
+func TestQueryRowRejectsNULInArgument(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	store, err := Open(ctx, "sqlite:///"+dir+"/kit.db", emptyMigrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	var n int
+	err = store.Execer().QueryRow(ctx, `SELECT 1`, "\x00").Scan(&n)
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("QueryRow NUL: %v", err)
 	}
 }
 

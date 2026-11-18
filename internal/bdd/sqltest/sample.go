@@ -3,9 +3,7 @@ package sqltest
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -31,16 +29,30 @@ func (r *SampleRepo) requireTenant(ctx context.Context) (core.TenantID, error) {
 	return id, nil
 }
 
+// StoreOptions optional fields for StoreItem.
+type StoreOptions struct {
+	ID       string
+	Note     string
+	At       time.Time
+	ListName string
+}
+
 // StoreItem inserts or replaces an item for the tenant in ctx.
 func (r *SampleRepo) StoreItem(ctx context.Context, key string, opts StoreOptions) error {
 	tenant, err := r.requireTenant(ctx)
 	if err != nil {
 		return err
 	}
-	if err := validateTextFields(key, opts.Note); err != nil {
+	if err := psql.ValidateText(key); err != nil {
 		return err
 	}
-	at := psqlTruncate(opts.At)
+	if err := psql.ValidateText(opts.Note); err != nil {
+		return err
+	}
+	at := psql.TruncateMicrosecond(opts.At)
+	if at.IsZero() {
+		at = conformanceFixedTime
+	}
 	id := opts.ID
 	if id == "" {
 		id = fmt.Sprintf("item-%s-%s", tenant, key)
@@ -60,28 +72,14 @@ func (r *SampleRepo) StoreItem(ctx context.Context, key string, opts StoreOption
 	return err
 }
 
-// StoreOptions optional fields for StoreItem.
-type StoreOptions struct {
-	ID       string
-	Note     string
-	At       time.Time
-	ListName string
-}
+var conformanceFixedTime = mustParseTime("2026-01-01T00:00:00Z")
 
-func validateTextFields(fields ...string) error {
-	for _, f := range fields {
-		if strings.ContainsRune(f, 0) {
-			return core.NewError(core.CodeInvalidArgument, "sql: text contains nul", nil)
-		}
+func mustParseTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		panic(err)
 	}
-	return nil
-}
-
-func psqlTruncate(t time.Time) time.Time {
-	if t.IsZero() {
-		t = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	}
-	return t.UTC().Truncate(time.Microsecond)
+	return t
 }
 
 func nullString(s string) any {
@@ -110,22 +108,19 @@ func (r *SampleRepo) StoreItemInMissingList(ctx context.Context, key string) err
 	}
 	id := fmt.Sprintf("item-%s-%s", tenant, key)
 	_, err = r.store.Execer().Exec(ctx, `INSERT INTO items (id, tenant_id, key, list_id, at) VALUES (?, ?, ?, ?, ?)`,
-		id, string(tenant), key, "list-missing", time.Now().UTC())
+		id, string(tenant), key, "list-missing", conformanceFixedTime)
 	return err
 }
 
-// CountItemsByKey counts items with key for tenant.
-func (r *SampleRepo) CountItemsByKey(ctx context.Context, tenant, key string) (int, error) {
+// CountItemsByKey counts items with key for the tenant in ctx.
+func (r *SampleRepo) CountItemsByKey(ctx context.Context, key string) (int, error) {
+	tenant, err := r.requireTenant(ctx)
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := r.store.Execer().QueryRow(ctx, `SELECT COUNT(*) FROM items WHERE tenant_id = ? AND key = ?`, tenant, key).Scan(&n)
+	err = r.store.Execer().QueryRow(ctx, `SELECT COUNT(*) FROM items WHERE tenant_id = ? AND key = ?`, string(tenant), key).Scan(&n)
 	return n, err
-}
-
-// HasItemKey reports whether any tenant has the key.
-func (r *SampleRepo) HasItemKey(ctx context.Context, key string) (bool, error) {
-	var n int
-	err := r.store.Execer().QueryRow(ctx, `SELECT COUNT(*) FROM items WHERE key = ?`, key).Scan(&n)
-	return n > 0, err
 }
 
 // DeleteItemByKey deletes the tenant's item with key.
@@ -144,16 +139,13 @@ func (r *SampleRepo) ListItemKeys(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	order := `key COLLATE BINARY`
-	if r.dialect == "postgres" {
-		order = `key COLLATE "C"`
-	}
+	order := psql.TextOrderClause(r.dialect, "key")
 	q := fmt.Sprintf(`SELECT key FROM items WHERE tenant_id = ? ORDER BY %s`, order)
 	rows, err := r.store.Execer().Query(ctx, q, string(tenant))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var keys []string
 	for rows.Next() {
 		var k string
@@ -173,10 +165,10 @@ func (r *SampleRepo) ItemAt(ctx context.Context, key string) (time.Time, error) 
 	}
 	var at time.Time
 	err = r.store.Execer().QueryRow(ctx, `SELECT at FROM items WHERE tenant_id = ? AND key = ?`, string(tenant), key).Scan(&at)
-	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, core.NewError(core.CodeNotFound, "sql: not found", nil)
+	if err != nil {
+		return time.Time{}, err
 	}
-	return at.UTC().Truncate(time.Microsecond), mapRowErr(err)
+	return psql.TruncateMicrosecond(at), nil
 }
 
 // ItemNote returns the note for key.
@@ -187,32 +179,23 @@ func (r *SampleRepo) ItemNote(ctx context.Context, key string) (string, error) {
 	}
 	var note sql.NullString
 	err = r.store.Execer().QueryRow(ctx, `SELECT note FROM items WHERE tenant_id = ? AND key = ?`, string(tenant), key).Scan(&note)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", core.NewError(core.CodeNotFound, "sql: not found", nil)
+	if err != nil {
+		return "", err
 	}
 	if !note.Valid {
 		return "", nil
 	}
-	return note.String, mapRowErr(err)
+	return note.String, nil
 }
 
-func mapRowErr(err error) error {
-	if err == nil {
-		return nil
+// LookupIDByKey finds id for the tenant in ctx and key.
+func (r *SampleRepo) LookupIDByKey(ctx context.Context, key string) (string, error) {
+	tenant, err := r.requireTenant(ctx)
+	if err != nil {
+		return "", err
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return core.NewError(core.CodeNotFound, "sql: not found", nil)
-	}
-	return err
-}
-
-// LookupIDByKey finds id for tenant and key (test helper).
-func (r *SampleRepo) LookupIDByKey(ctx context.Context, tenant, key string) (string, error) {
 	var id string
-	err := r.store.Execer().QueryRow(ctx, `SELECT id FROM items WHERE tenant_id = ? AND key = ?`, tenant, key).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", core.NewError(core.CodeNotFound, "sql: not found", nil)
-	}
+	err = r.store.Execer().QueryRow(ctx, `SELECT id FROM items WHERE tenant_id = ? AND key = ?`, string(tenant), key).Scan(&id)
 	return id, err
 }
 
@@ -224,10 +207,7 @@ func (r *SampleRepo) GetByID(ctx context.Context, id string) (string, error) {
 	}
 	var key string
 	err = r.store.Execer().QueryRow(ctx, `SELECT key FROM items WHERE id = ? AND tenant_id = ?`, id, string(tenant)).Scan(&key)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", core.NewError(core.CodeNotFound, "sql: not found", nil)
-	}
-	return key, mapRowErr(err)
+	return key, err
 }
 
 // UpdateKeyByID changes key for id if row belongs to tenant.
@@ -265,18 +245,22 @@ func (r *SampleRepo) DeleteByID(ctx context.Context, id string) error {
 }
 
 // ItemListName returns the list name an item belongs to, or "" when none.
-func (r *SampleRepo) ItemListName(ctx context.Context, tenant, key string) (string, error) {
-	var listID sql.NullString
-	err := r.store.Execer().QueryRow(ctx, `SELECT list_id FROM items WHERE tenant_id = ? AND key = ?`, tenant, key).Scan(&listID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", core.NewError(core.CodeNotFound, "sql: not found", nil)
+func (r *SampleRepo) ItemListName(ctx context.Context, key string) (string, error) {
+	tenant, err := r.requireTenant(ctx)
+	if err != nil {
+		return "", err
 	}
-	if err != nil || !listID.Valid {
-		return "", mapRowErr(err)
+	var listID sql.NullString
+	err = r.store.Execer().QueryRow(ctx, `SELECT list_id FROM items WHERE tenant_id = ? AND key = ?`, string(tenant), key).Scan(&listID)
+	if err != nil {
+		return "", err
+	}
+	if !listID.Valid {
+		return "", nil
 	}
 	var name string
-	err = r.store.Execer().QueryRow(ctx, `SELECT name FROM lists WHERE id = ? AND tenant_id = ?`, listID.String, tenant).Scan(&name)
-	return name, mapRowErr(err)
+	err = r.store.Execer().QueryRow(ctx, `SELECT name FROM lists WHERE id = ? AND tenant_id = ?`, listID.String, string(tenant)).Scan(&name)
+	return name, err
 }
 
 // DeleteList deletes list by name for tenant.
@@ -291,7 +275,7 @@ func (r *SampleRepo) DeleteList(ctx context.Context, name string) error {
 }
 
 // TxStoreItems stores items in a transaction; failAfterSecond forces rollback test.
-func (r *SampleRepo) TxStoreItems(ctx context.Context, keys []string, failAfterSecond bool) (err error) {
+func (r *SampleRepo) TxStoreItems(ctx context.Context, keys []string, failAfterSecond bool) error {
 	tenant, err := r.requireTenant(ctx)
 	if err != nil {
 		return err
@@ -300,7 +284,7 @@ func (r *SampleRepo) TxStoreItems(ctx context.Context, keys []string, failAfterS
 		for i, key := range keys {
 			id := fmt.Sprintf("item-%s-%s-tx", tenant, key)
 			if _, err := exec.Exec(ctx, `INSERT INTO items (id, tenant_id, key, at) VALUES (?, ?, ?, ?)`,
-				id, string(tenant), key, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+				id, string(tenant), key, conformanceFixedTime); err != nil {
 				return err
 			}
 			if failAfterSecond && i == 1 {

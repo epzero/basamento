@@ -1,6 +1,6 @@
 # SQL: store, migrations and tenant-scoped repositories
 
-Status: **Planned** (WP-L1-01). Design: ADR-0001, ADR-0004,
+Status: **Implemented** (WP-L1-01, platform/sql). Design: ADR-0001, ADR-0004,
 [`design.md`](design.md).
 
 The SQL store is the SQL port of `platform`: SQLite (`modernc.org/sqlite`) in

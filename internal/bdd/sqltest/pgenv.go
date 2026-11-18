@@ -2,13 +2,12 @@ package sqltest
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
+	"strconv"
+	"sync/atomic"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -23,6 +22,8 @@ func PostgresConfigured() bool {
 	return PostgresAdminURL() != ""
 }
 
+var bddDBSeq atomic.Uint64
+
 // CreateDatabase allocates a fresh database and returns its connection URL.
 func CreateDatabase(ctx context.Context) (dbURL string, cleanup func(), err error) {
 	admin := PostgresAdminURL()
@@ -33,11 +34,7 @@ func CreateDatabase(ctx context.Context) (dbURL string, cleanup func(), err erro
 	if err != nil {
 		return "", nil, err
 	}
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", nil, err
-	}
-	dbName := "bdd_" + hex.EncodeToString(b[:])
+	dbName := "bdd_" + strconv.FormatUint(bddDBSeq.Add(1), 10)
 	connURL := *u
 	connURL.Path = "/" + dbName
 	dbURL = connURL.String()
@@ -50,7 +47,7 @@ func CreateDatabase(ctx context.Context) (dbURL string, cleanup func(), err erro
 	if err != nil {
 		return "", nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `CREATE DATABASE "`+dbName+`"`); err != nil {
 		return "", nil, err
 	}
@@ -67,12 +64,4 @@ func CreateDatabase(ctx context.Context) (dbURL string, cleanup func(), err erro
 // UnreachablePostgresURL builds a postgres URL against a closed loopback port.
 func UnreachablePostgresURL(hostPort string) string {
 	return fmt.Sprintf("postgres://kit:secret@%s/nodb?connect_timeout=1", hostPort)
-}
-
-func postgresURLWithCreds(hostPort, user, password string) string {
-	userEsc := url.UserPassword(user, password).String()
-	if strings.Contains(hostPort, ":") {
-		return fmt.Sprintf("postgres://%s@%s/kit?connect_timeout=1", userEsc, hostPort)
-	}
-	return fmt.Sprintf("postgres://%s@%s/kit?connect_timeout=1", userEsc, hostPort)
 }

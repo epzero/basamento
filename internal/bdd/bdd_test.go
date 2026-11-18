@@ -34,7 +34,9 @@ func runSuite(t *testing.T, tags, profile string) {
 	}
 	if profile != "" {
 		t.Run(profile, func(t *testing.T) {
-			os.Setenv("BDD_SQL_PROFILE", profile)
+			if err := os.Setenv("BDD_SQL_PROFILE", profile); err != nil {
+				t.Fatal(err)
+			}
 			suite := godog.TestSuite{
 				Name:                name,
 				ScenarioInitializer: steps.Initialize,
