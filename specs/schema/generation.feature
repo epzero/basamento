@@ -53,6 +53,58 @@ Feature: Generating schemas from Go types
     Then the schema accepts the instance {"reviewers": [{"login": "ana"}]}
     And the schema rejects the instance {"reviewers": [{"login": 7}]} with a violation at "/reviewers/0/login" of keyword "type"
 
+  @REQ-SCHEMA-038 @id:SCHEMA-038-01
+  Scenario Outline: A byte slice is a nullable base64 string
+    Given a named Go type "NamedBytes" with underlying type "[]byte"
+    And a Go struct type "Payload" with fields:
+      | field | type   | json tag |
+      | Data  | <type> | data     |
+    When a schema is generated from "Payload"
+    Then property "data" of the schema has contentEncoding "base64"
+    And the schema accepts the instance {"data": <accepted>}
+    And the schema rejects the instance {"data": <rejected>}
+
+    Examples:
+      | type        | accepted    | rejected   |
+      | []byte      | "aGk="      | 1          |
+      | []byte      | "not-b64!"  | true       |
+      | []byte      | null        | [104, 105] |
+      | NamedBytes  | null        | 1          |
+      | NamedBytes  | "aGk="      | {"a": 1}   |
+
+  @REQ-SCHEMA-039 @id:SCHEMA-039-01
+  Scenario Outline: Raw JSON admits any value
+    Given a Go struct type "Blob" with fields:
+      | field | type            | json tag |
+      | Doc   | json.RawMessage | doc      |
+    When a schema is generated from "Blob"
+    Then the schema accepts the instance {"doc": <value>}
+
+    Examples:
+      | value          |
+      | null           |
+      | {"a": [1, 2]}  |
+      | "text"         |
+      | 3              |
+      | [true, false]  |
+
+  @REQ-SCHEMA-040 @id:SCHEMA-040-01
+  Scenario Outline: A fixed-length byte array is an array of integers
+    Given a Go struct type "Digest" with fields:
+      | field | type    | json tag |
+      | Sum   | [3]byte | sum      |
+    When a schema is generated from "Digest"
+    Then the schema accepts the instance {"sum": <accepted>}
+    And the schema rejects the instance {"sum": <rejected>} with a violation at "<location>" of keyword "<keyword>"
+
+    Examples:
+      | accepted      | rejected     | location | keyword  |
+      | [1, 2, 3]     | "abc"        | /sum     | type     |
+      | [0, 255, 128] | null         | /sum     | type     |
+      | [1, 2, 3]     | [1, 2]       | /sum     | minItems |
+      | [1, 2, 3]     | [1, 2, 3, 4] | /sum     | maxItems |
+      | [1, 2, 3]     | [1, "2", 3]  | /sum/1   | type     |
+
   @REQ-SCHEMA-003 @id:SCHEMA-003-01
   Scenario Outline: Only fields without omitempty or omitzero are required
     Given a Go struct type "Options" with fields:
