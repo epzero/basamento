@@ -431,3 +431,218 @@ scenarios:
         note: 'Step execution semantics: once per step name per run, single gate resolution, bounded retries; wrong behavior duplicates side effects.'
         human:
             status: pending
+    RT-028-01:
+        hash: sha256:98e8fab00b4a754f92a833936483f4dd5b007843921354fa369881768500f9da
+        reqs:
+            - REQ-RT-028
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-029-01:
+        hash: sha256:541f7bec82fe143440f40e13fbacd2d863d90e2a3ab1708f58ed32856fabeb97
+        reqs:
+            - REQ-RT-029
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Data integrity: claim-checked payloads must round-trip content and encoding unchanged across blob offload and encryption.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-031-01:
+        hash: sha256:6822aa4a906c3baefb22902c67ca139f67a6b2adad776197b1070f3ed099c292
+        reqs:
+            - REQ-RT-031
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Security: every run history payload must be encrypted for the run''s tenant with no plaintext or unencrypted metadata.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-031-02:
+        hash: sha256:e572d025d8a6492e20d9ef09d55700d842f1ac23803ff5b74987e41538147a17
+        reqs:
+            - REQ-RT-031
+            - REQ-RT-040
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Security: starting a run without a tenant must fail before any step executes or any unencrypted history is written.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-032-01:
+        hash: sha256:a12c19e0bfe9fe85e480ef1b8cfdcae265885da69bef77462864141cd25dd897
+        reqs:
+            - REQ-RT-032
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Security: reading an unencrypted payload from run history must fail the step and run with invalid_argument.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-033-01:
+        hash: sha256:9207292a30630351294622b7ff6818bd1ed2fd2e967e1f2951a87b1e41ad4dea
+        reqs:
+            - REQ-RT-033
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Security: cross-tenant claim-check blob references must fail with not_found rather than reading another tenant''s blob.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-034-01:
+        hash: sha256:cf174c3a4c80c0865d155715d83630455a098fcfb63f096fe04391c92b9454fd
+        reqs:
+            - REQ-RT-034
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Durability: checkpointing at or above the event threshold must continue the run as new so history stays bounded.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-035-01:
+        hash: sha256:f15f731caf6af0bfde9e7393ac8b297820f832ce2e173e82114bdfea44f4ee86
+        reqs:
+            - REQ-RT-035
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-035-02:
+        hash: sha256:aab1bbc4f4238847c450e421b89c73d210469ef4a097ef8d7ba73b730afb5640
+        reqs:
+            - REQ-RT-035
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-036-01:
+        hash: sha256:dd4506cbc054d4f5d59b5139954373eec0916228bb04cb28f55082b2fd444138
+        reqs:
+            - REQ-RT-036
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Durability and determinism: ContinueAsNew must preserve run id, recorded step results, and pending gate waits without re-running steps.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-036-02:
+        hash: sha256:cb31a6b4e1ed84ffc7c2ecc3b6b08d4236dea685b3a7ccd75a0a3b91f100cd77
+        reqs:
+            - REQ-RT-036
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Durability: emitted durable events before ContinueAsNew must reach the outbox once and in order.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-037-01:
+        hash: sha256:dc1f697dae4cc075a30ebe58d441fe1780356286e91136291c77eba2c3170e56
+        reqs:
+            - REQ-RT-037
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-037-02:
+        hash: sha256:6b910ebc7eec2a084843e437a54c5556fd831da86469e866617899f39ab67bcc
+        reqs:
+            - REQ-RT-037
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-038-01:
+        hash: sha256:c13e8bf884d288e28fb491b90c7e759d8bd0fc9b4519972f87b20bb261c5a4ac
+        reqs:
+            - REQ-RT-038
+        tier: P0
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: 'Durability and determinism: Checkpoint must drain in-flight steps before ContinueAsNew so running steps are never re-dispatched.'
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://github.com/epzero/basamento/pull/22
+    RT-039-01:
+        hash: sha256:4951d950cd2df91ebc8f0731ca36a194638490e229610cc578f7ac0a7fd6b9d5
+        reqs:
+            - REQ-RT-039
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-041-01:
+        hash: sha256:f22eb06e5145e56ddd7220d0afa692c50dc9f8e5456955018d72ef924bf90a81
+        reqs:
+            - REQ-RT-041
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending
+    RT-041-02:
+        hash: sha256:ea0de99124b02c85ec5c24fea3a516cb56c7b752fee687d9d9eddd7971ae7f38
+        reqs:
+            - REQ-RT-041
+        tier: P2
+        author: claude-code:spec-author:8a7891
+        reviewer: antigravity:spec-reviewer:ed2ce7
+        approved_at: "2026-11-18"
+        note: New temporal runtime behavior.
+        human:
+            status: pending

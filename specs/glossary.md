@@ -66,6 +66,16 @@ the same change that first uses it.
 | **Identity** | Who acted: `<harness>:<role>:<instance>` for an agent session, `human:<login>` for a person. |
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
+| **Agent** | A named behavior in a flow node: a model, system messages, the tools it allows, caps and a memory policy. The `agent` node handler runs the **agent loop**. |
+| **Agent loop** | The flow code of the `agent` node handler: one model turn per step, one tool call per step, caps checked in flow code. |
+| **Agent run** | One execution of an `agent` node, from its start (or its handoff) to its end. |
+| **Model turn** | One call of the agent's model with its messages, made as one step of the agent run. |
+| **Tool call** | One tool step of an agent run: a tool the model requested, run by the tool port, with its result. |
+| **Agent output** | What an agent run ends with: its answer, or the state and turns of a run that a cap ended or that handed off. |
+| **Cap** | A limit of an agent: steps (model turns), cost in milli-points, tokens, or time on the run clock. Reaching one ends the agent run as completed with a state naming it. |
+| **Handoff** | A model request that ends its agent run so that another agent node continues with the model turns so far. |
+| **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
+| **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
 | **User message** | A message with a message id and text that a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
@@ -74,6 +84,35 @@ the same change that first uses it.
 | **Queued message** | A user message sent while a turn is running, whose turn starts after it. |
 | **Interrupted message** | A model message of a cancelled or failed turn, kept with the text produced so far and marked interrupted. |
 | **Checkpoint threshold** | How many durable calls the conversation coordinator may make since it last started before it checkpoints and continues as new at the next turn boundary; 1000 by default. |
+| **Preset version** | The content hash of a preset's flows, prompts and evals, together with the `@eval` scores recorded for it. A run pins the version it started with; a new version becomes current only when it compiles, does not regress, and a person resolves its review gate. |
+| **Codegen stage** | One of `plan`, `implement`, `verify`, `repair`, `self-review` and `commit` in `codegen.bootstrap` and `codegen.iterate`. A completed stage is checkpointed; a resumed run starts again no stage that has a checkpoint. |
+| **Repair guard** | The bound on the codegen loop: a visit limit (how many times `repair` may run) and a cost limit in milli-points. A guard that is reached ends the run `failed` with code `budget_exceeded`. |
+| **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A codegen run writes modules and runs the plan's tests in one; nothing it writes reaches a repository. A **simulated sandbox** stands in for it in the gate. |
+| **Git host** | The remote a codegen run reads a repository from and commits to, behind the repository's own port. A **simulated git host** is its deterministic stand-in in the gate, recording commits, branches and writer calls. |
+| **Review gate** | A `gate` node where a person approves or rejects a proposal. The preset uses it only for a new preset version, never in a codegen run, which commits without one. |
+| **Self-review** | The `self-review` codegen stage, in which an agent reviews the workspace for findings before the commit under a visit limit (the **self-review guard**); findings go back to repair. It starts no reviewer session and asks no person. |
+| **Model id** | The name a model is looked up by in the catalog and passed in a request, such as `sim-chat`. |
+| **Rate rule** | One row of a model's price: rates per million tokens (input, output, …) and an optional condition, the `when`, under which they apply. |
+| **Price formula** | The CEL expression that turns call parameters, usage and rates into milli-points, where cached tokens are part of the input and reasoning tokens part of the output. A model may declare its own; otherwise the default token formula applies. |
+| **Default token formula** | The price formula of a model priced by rate rules: a million input tokens cost the input rate and a million output tokens the output rate. Cached tokens are part of the input and cost the rule's cached rate when it has one, otherwise the input rate; reasoning tokens are part of the output and are counted once. |
+| **Price override** | A price set for one model in one layer above the shipped snapshot: the deployment's, or a tenant's, which applies only to that tenant's calls and wins over the deployment's. |
+| **Counted input tokens** | The tokens a model's tokenizer gives the messages, tool definitions and repair input of a call; an estimate counts them before the call. |
+| **Estimate** | What the price table computes for a call before it starts, from its counted input tokens and its output limit, to reserve against a budget. |
+| **Temporal runtime** | The `temporal` runtime: runs the flow host as a Temporal workflow and each step as an activity, with a payload codec that stores large run history payloads as blobs and encrypts every run history payload. Durable; continues a run as new at a checkpoint event threshold (`REQ-RT-039` … `REQ-RT-041`, `REQ-RT-028` … `REQ-RT-038`). |
+| **Run history** | The ordered record a durable runtime keeps of a run's durable calls and their results (on the temporal runtime, Temporal's event history); replay reads it, and ciphertexts and blobs in it differ between records of the same payload. |
+| **Claim-check threshold** | The most bytes of a run history payload the temporal runtime keeps in the run history; a larger payload is stored as a blob (`REQ-RT-028`). |
+| **Checkpoint event threshold** | The number of events in the run history from which a checkpoint continues the run as new (`REQ-RT-034`). |
+| **Prompt template** | A prompt stored under an id and a version (`<id>@<version>`, the **template reference**) that never changes once registered in the **prompt registry**. It declares its inputs, each `trusted` or not, and is made of segments. |
+| **Segment** | A named part of a prompt template of one kind: `static`, `semi-static`, `dynamic`, `history` or `user`. A **segment budget** is the most characters it may hold; a template may also have a **total budget**. |
+| **Assembled prompt** | What the **assembler** makes from a template reference, inputs and history: segments in order, history trimmed to fit, a content hash. |
+| **Cache hint** | The mark an assembled prompt carries after its **cacheable prefix**, the `static` and `semi-static` segments; the **prefix hash** identifies that prefix. |
+| **Untrusted value** | An input value not declared `trusted`, or a history entry. The assembler wraps it in **untrusted-content delimiters** labelled with its source. |
+| **Prompt lint** | The checks run on a prompt template before it is registered, and on an assembled prompt; each finding has a rule, a severity (`error` or `warning`) and a segment. |
+| **Setting** | One configuration key of a `kit` process, written with dots (`listen.addr`). Each process reads settings from flags, environment variables, a configuration file and defaults. |
+| **Effective configuration** | The settings a `kit` process ends with, after precedence, with the source each one came from: `flag`, `env`, `file` or `default`. |
+| **Port URL** | The setting that selects a port's implementation by its scheme (`sql.url`, `blob.url`, `bus.url`, `secrets.url`). Which schemes a profile accepts, and which implementation each selects, is `specs/config`; how the implementation behaves is the port's own capability. |
+| **Ready** | Said of `kit serve` once its runtime started, every port is open and its listener is bound; it reports it with one `ready` line on stdout. |
+| **Smoke check** | The gate G6 run: the built binary, started with `kit serve --profile embedded` in an empty directory, must pass every `@smoke` scenario. |
 | **Telemetry setup** | The wiring of `slog` log records and OpenTelemetry traces and metrics (`platform/telemetry`), built with a profile, a clock, the credential values to redact and, in the cloud profile, a collector URL. |
 | **Span** | One timed unit of work in a trace, with a trace id, a span id, an optional parent span id, a name, start and end times, a status (`ok`, `error`, `unset`), a run id, a tenant and attributes. |
 | **Trace context** | A trace id and a span id carried in a `context.Context` and serialized across process or lease boundaries so child spans join the parent trace. |
@@ -90,7 +129,6 @@ the same change that first uses it.
 | **Tool** | A named operation an agent or a flow's `tool` node may call: its name, description and input JSON Schema, and a run with arguments that satisfy the schema. A call is one step that runs once. |
 | **Allowlist** | The tools one caller was given. A call to any other tool is refused. |
 | **MCP server** | An external service that lists tools with their schemas and runs them when called; the platform reaches it through an MCP client. A **simulated MCP server** stands in for it in the gate. |
-| **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A **simulated sandbox** stands in for it in the gate. |
 | **Durable event log** | The per-run, ordered record of a run's durable events (`seq`), written in the same transaction as the state change that records them. |
 | **Outbox** | The durable event log, read as work to relay: each entry is an event pending publication to the bus until it is marked relayed. |
 | **Relay** | The component that publishes a run's outbox entries to the bus in `seq` order and marks them relayed after the bus accepts them. |
