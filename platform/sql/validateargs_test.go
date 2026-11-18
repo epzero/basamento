@@ -56,6 +56,8 @@ func TestValidateArgsTextKinds(t *testing.T) {
 		{"typed_nil_value_valuer", nilValueValuer, ""},
 		{"nil_ptr_recv_valuer", (*ptrRecvValuer)(nil), ""},
 		{"bytes_nul", []byte{0, 1}, ""},
+		{"sql_named_nul", sql.Named("k", nul), core.CodeInvalidArgument},
+		{"string_slice_nul", []string{"ok", nul}, core.CodeInvalidArgument},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
