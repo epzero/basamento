@@ -20,7 +20,8 @@ session role for the gate is `dispatcher`. You stay in the main checkout and
 get the work done by starting **subagents**: fresh sessions of one role
 (spec author, spec reviewer, implementer, code reviewer, arbiter), each for
 one step, started with your tool's own way of spawning an agent and the
-subagent prompt in `docs/engineering/agent-workflow.md` §6.
+subagent prompt in `docs/engineering/agent-workflow.md` §6, with its short
+header; subagents report in its fields (`agent-workflow.md` §2.2).
 
 Once, when you start:
 
@@ -36,8 +37,9 @@ stop and say so: do not guess an account.
 ## Every wake
 
 1. Read the tickets assigned to you, by priority, and
-   `go tool gate agent list`. Look also at the tickets you handed to the
-   owner: take back one whose latest comment is the owner's.
+   `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
+   also at the tickets you handed to the owner: take back one whose latest
+   comment is the owner's. A wake with nothing to act on ends at once.
 2. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.
@@ -58,7 +60,7 @@ hand-off with `needs-human`, one question, with options.
 | The ticket | Do |
 | --- | --- |
 | `code-review-requested` | Review the pull request, below. |
-| `spec-review-requested` | Spawn a spec reviewer on the branch (`-branch`). Changes: post **Request changes** with its replacement text, hand back `spec-changes-requested`. Approved: push its ledger commit, **Approve**, hand back `spec-approved`. For P0 and P1 scenarios open one acceptance ticket for the owner listing ids, tiers and notes. |
+| `spec-review-requested` | Spawn a spec reviewer on the branch (`-branch`) at the tiers of `agent-workflow.md` §2.3; from round 2, give it the last reviewed commit and the open findings. Changes: post **Request changes** with its replacement text, hand back `spec-changes-requested`. Approved: push its ledger commit, **Approve**, hand back `spec-approved`. For P0 and P1 scenarios open one acceptance ticket for the owner listing ids, tiers and notes. |
 | `owner-approved`, or the owner's `approve` in the latest comment (a high-risk change, a technical design) | Check that the pull request is still at the commit the owner was shown and that CI is green. Set the risk label if it is still `TBD`. **Approve** with a link to the owner's comment. Hand the ticket to the author: `ready-to-integrate`. For a design you do not review again. If commits were added since, hand it back to the owner and say what changed. |
 | An outside pull request appeared | `agent-workflow.md` §7.6. |
 
@@ -70,12 +72,14 @@ hand-off with `needs-human`, one question, with options.
    (fetch the branch; no checkout needed). Replace `risk: TBD` with the
    tier, and write it in the description. Raise it when the change is
    riskier than its paths; never lower it.
-3. **Review** at the tier's depth (`code-review.md` §2 to §4): read a
-   low-risk change yourself; spawn code reviewer sessions for the rest. Read
-   the diff from GitHub, and give sessions a worktree only when the code
-   around the diff is needed. From the second round, only the diff since
-   the commit you last reviewed, and never a finding already raised or one
-   the author's self-review settled with a reason you accept.
+3. **Review** at the tier's depth and effort (`code-review.md` §2 to §4,
+   `agent-workflow.md` §2.3): a low-risk change you read yourself from the
+   diff on GitHub; the rest goes to code reviewer sessions, whose reports
+   you read instead of the diff. Give sessions a worktree only when the code
+   around the diff is needed. From the second round, `code-review.md` §6:
+   check every open finding by id, whether or not its file is in the latest
+   diff, and never raise a settled one again. An open finding that stands
+   goes back.
 4. **Post one review**: each important finding as a thread on its line and
    **Request changes**; or, with none, **Approve**. Resolve the threads that
    are settled.

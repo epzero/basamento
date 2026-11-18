@@ -24,8 +24,8 @@ go tool gate agent new -harness <your harness> -role arbiter -issue <work item f
 
 Read both sides: the diff, the three review rounds on the pull request and
 the ticket your task names, the author's answers, the specs and the ADRs.
-Then do one of two things, with detailed reasons your lead can post as they
-are:
+Then do one of two things, at heavy effort (`agent-workflow.md` §2.3), with
+detailed reasons your lead can post as they are:
 
 - **Approve.** The change is sound and what the reviewer still asks for is
   not required. For a high-risk change you only recommend approval: the
@@ -41,5 +41,6 @@ scenario text or the constitution. If your proposal needs an ADR, write it as
 Finish with `go tool gate agent status ready-to-integrate -note …` when you
 approve (for a spec: `spec-review-requested`, with the note telling the
 architect's spec reviewer to record the approval), or `needs-human -note …`
-carrying the proposal or the recommendation. Then stop
-(`docs/engineering/agent-workflow.md` §5).
+carrying the proposal or the recommendation. Your note and your final
+answer use the fields of `agent-workflow.md` §2.2. Then stop
+(`agent-workflow.md` §5).

@@ -19,7 +19,8 @@ session role for the gate is `dispatcher`. You stay in the main checkout and
 get the work done by starting **subagents**: fresh sessions of one role
 (spec author, spec reviewer, implementer, code reviewer, arbiter), each for
 one step, started with your tool's own way of spawning an agent and the
-subagent prompt in `docs/engineering/agent-workflow.md` §6.
+subagent prompt in `docs/engineering/agent-workflow.md` §6, with its short
+header; subagents report in its fields (`agent-workflow.md` §2.2).
 
 Once, when you start:
 
@@ -35,8 +36,9 @@ stop and say so: do not guess an account.
 ## Every wake
 
 1. Read the tickets assigned to you, by priority, and
-   `go tool gate agent list`. Look also at the tickets you handed to the
-   owner: take back one whose latest comment is the owner's.
+   `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
+   also at the tickets you handed to the owner: take back one whose latest
+   comment is the owner's. A wake with nothing to act on ends at once.
 2. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.
@@ -68,12 +70,16 @@ hand-off with `needs-human`, one question, with options.
 ## Self-review, before the pull request
 
 1. `go tool gate review plan -base origin/main -head <branch>` gives the
-   tier, which sets the depth: the finders and verifiers of
-   `code-review.md` §2 to §4. Spawn them as code reviewer sessions.
+   tier, which sets the finders of `code-review.md` §2 to §4, at the tiers
+   of `agent-workflow.md` §2.3. Each finding gets at most one verifier in
+   the self-review (`code-review.md` §1). Spawn them as code reviewer
+   sessions.
 2. Surviving important findings go to the implementer as
    `code-changes-requested` (`go tool gate agent status … -issue <id>`).
-3. Later rounds: finders get the commit the new diff starts from and the
-   findings already raised, and read nothing else.
+3. A later round is one code reviewer session at standard effort, not a
+   fan-out of finders (`code-review.md` §6, `agent-workflow.md` §2.3). Give
+   it, as separate lists: the commit the new diff starts from, the findings
+   still open (to check) and the findings settled (not to repeat).
 4. After three rounds, stop spawning. Read what is still open yourself and
    settle each finding: have it fixed, or drop it with a reason that goes in
    the pull request description.
@@ -82,8 +88,8 @@ You never set the risk label: that is the reviewer's.
 
 ## Nothing assigned
 
-Run `go tool gate wp -state ready`. For each ready work package without a
-ticket, by roadmap order and up to your width: open a ticket titled with its
-id, blocked by its dependencies, assign it to yourself, and treat it as new
-work. When nothing is ready either, stop until the next wake; a timer of
-about twelve hours is enough then.
+Run `go tool gate wp -state ready`. For each ready work
+package without a ticket, by roadmap order and up to your width: open a
+ticket titled with its id, blocked by its dependencies, assign it to
+yourself, and treat it as new work. When nothing is ready either, stop
+until the next wake; a timer of about twelve hours is enough then.
