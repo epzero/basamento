@@ -13,11 +13,16 @@ import (
 )
 
 type cacheEntry struct {
-	handle   *keyset.Handle
-	revision uint64
+	handle *keyset.Handle
 }
 
 // Codec encrypts and decrypts payloads with tenant data keys (WP-L1-04).
+//
+// It caches each tenant's unwrapped keyset until a decode names a data key id
+// absent from the cache (REQ-SECRET-018) or the process restarts. A data key
+// rotation performed in another process is therefore picked up when such a
+// decode reloads the store record, not on the next encode; older enabled keys
+// remain decryptable so history stays readable (REQ-SECRET-011, REQ-SECRET-017).
 type Codec struct {
 	store KeysetStore
 	keys  []KeyService
@@ -26,26 +31,26 @@ type Codec struct {
 	opts  options
 }
 
-func (c *Codec) setOptions(o options) { c.opts = o }
-
-// SetLogger sets where the codec writes operational records (optional).
-func (c *Codec) SetLogger(l *slog.Logger) { c.opts.logger = l }
-
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
 // are previous keys still able to unwrap stored keysets.
-func NewCodec(store KeysetStore, keys ...KeyService) (*Codec, error) {
+func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("master key is required")
 	}
-	return &Codec{store: store, keys: keys, cache: map[string]cacheEntry{}}, nil
+	o := applyOptions(opts)
+	return &Codec{store: store, keys: keys, cache: map[string]cacheEntry{}, opts: o}, nil
 }
 
 func (c *Codec) tenant(ctx context.Context) (string, error) {
 	id, ok := core.TenantFrom(ctx)
-	if !ok || id == "" {
+	if !ok {
 		return "", errInvalidArgument(msgTenantRequired)
 	}
-	return string(id), nil
+	t := string(id)
+	if err := ValidateTenant(t); err != nil {
+		return "", err
+	}
+	return t, nil
 }
 
 // Encode encrypts p for the tenant in ctx.
@@ -176,13 +181,16 @@ func (c *Codec) keysetForEncode(ctx context.Context, tenant string) (*keyset.Han
 	}
 	if !created {
 		rec, found, err = c.store.Get(tenant)
-		if err != nil || !found {
+		if err != nil {
+			return nil, err
+		}
+		if !found {
 			return nil, errInternal(msgKeysetCannotUnwrap)
 		}
 		return c.loadAndCache(ctx, tenant, rec)
 	}
 	c.mu.Lock()
-	c.cache[tenant] = cacheEntry{handle: h, revision: wrapped.Revision}
+	c.cache[tenant] = cacheEntry{handle: h}
 	c.mu.Unlock()
 	return h, nil
 }
@@ -210,7 +218,7 @@ func (c *Codec) loadAndCache(ctx context.Context, tenant string, rec StoredKeyse
 		return nil, err
 	}
 	c.mu.Lock()
-	c.cache[tenant] = cacheEntry{handle: h, revision: rec.Revision}
+	c.cache[tenant] = cacheEntry{handle: h}
 	c.mu.Unlock()
 	return h, nil
 }
@@ -257,13 +265,14 @@ func (c *Codec) RotateDataKey(ctx context.Context, tenant string) error {
 		return err
 	}
 	c.mu.Lock()
-	c.cache[tenant] = cacheEntry{handle: rotated, revision: wrapped.Revision}
+	c.cache[tenant] = cacheEntry{handle: rotated}
 	c.mu.Unlock()
 	return nil
 }
 
 // RotateMasterKey rewraps every stored keyset under keys[0] (the new master).
 func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error {
+	c.prependMasterKey(newMaster)
 	tenants, err := c.store.Tenants()
 	if err != nil {
 		return err
@@ -292,8 +301,19 @@ func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error
 	c.mu.Lock()
 	c.cache = map[string]cacheEntry{}
 	c.mu.Unlock()
-	c.keys = append([]KeyService{newMaster}, c.keys...)
 	return nil
+}
+
+func (c *Codec) prependMasterKey(ks KeyService) {
+	id := ks.MasterKeyID()
+	out := []KeyService{ks}
+	for _, k := range c.keys {
+		if k.MasterKeyID() == id {
+			continue
+		}
+		out = append(out, k)
+	}
+	c.keys = out
 }
 
 // PrimaryDataKeyID returns the decimal primary key id for tenant after load.
