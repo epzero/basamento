@@ -21,7 +21,7 @@ func gitRepo(t *testing.T) string {
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		cmd.Env = testGitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -65,9 +65,7 @@ func TestIssueSessionsTakeTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh := filepath.Join(freshBase, "fresh")
-	if out, err := exec.Command("git", "-C", repo, "worktree", "add", "-q", "-b", "harness-x", fresh, "main").CombinedOutput(); err != nil {
-		t.Fatalf("%v: %s", err, out)
-	}
+	mustGit(t, repo, "worktree", "add", "-q", "-b", "harness-x", fresh, headBranchRef("main"))
 	impl, err := NewSession(fresh, NewSessionRequest{Harness: "claude-code", Role: RoleImplementer, Issue: "WP-L3-05"})
 	if err != nil || impl.Worktree != author.Worktree {
 		t.Fatalf("implementer should continue in the issue's worktree: %+v, %v", impl, err)
@@ -158,10 +156,37 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
+func testGitEnv() []string {
+	return append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+	)
+}
+
+// initBareRemote creates a bare repository whose default branch is main.
+func initBareRemote(t *testing.T, dir, remote string) {
+	t.Helper()
+	mustGit(t, dir, "init", "-q", "--bare", "-b", "main", remote)
+}
+
+// cloneMain clones remote with local branch main checked out.
+func cloneMain(t *testing.T, dir, remote, dest string) {
+	t.Helper()
+	mustGit(t, dir, "clone", "-q", "-b", "main", remote, dest)
+}
+
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	if _, err := git(dir, append([]string{"-c", "commit.gpgsign=false"}, args...)...); err != nil {
-		t.Fatal(err)
+	cmd := exec.Command("git", append([]string{
+		"-c", "commit.gpgsign=false",
+		"-c", "user.name=t",
+		"-c", "user.email=t@example.com",
+	}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = testGitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, strings.TrimSpace(string(out)))
 	}
 }
 
@@ -197,7 +222,7 @@ func TestStatusIsHandedToTheNextSession(t *testing.T) {
 func TestReleaseAfterASquashMerge(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L1-03"})
 	if err != nil {
@@ -318,7 +343,7 @@ func TestCodeReviewerInsideIssueWorktreeGetsSnapshot(t *testing.T) {
 func TestFastForwardSkipsUnpushedBranch(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
@@ -347,7 +372,7 @@ func TestFastForwardSkipsUnpushedBranch(t *testing.T) {
 func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
@@ -362,7 +387,7 @@ func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
 	}
 
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", author.Branch)
 	commitFile(t, other, "v2.txt")
 	mustGit(t, other, "push", "-q", "origin", author.Branch)
@@ -382,13 +407,13 @@ func TestIssueWorktreeFastForwardsFromOrigin(t *testing.T) {
 func TestContinueBranchFastForwardsWhenBranchExists(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L4-03-abc123"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "spec.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -418,13 +443,13 @@ func TestContinueBranchFastForwardsWhenBranchExists(t *testing.T) {
 func TestContinueBranchRefusesDiverged(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L4-04-div"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "base.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -450,11 +475,11 @@ func repoWithPushedBranchAndConflictingTag(t *testing.T, branch string) (repo, o
 	t.Helper()
 	repo = gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 	other = filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "branch-tip.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -539,12 +564,12 @@ func TestContinueBranchWhenNameMatchesWorktreeFile(t *testing.T) {
 	const branch = "readme"
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	commitFile(t, repo, "readme")
 	mustGit(t, repo, "push", "-q", "origin", "main")
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "spec-on-branch.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -560,13 +585,13 @@ func TestContinueBranchWhenNameMatchesWorktreeFile(t *testing.T) {
 func TestCodeReviewerRound2SnapshotsPushedHead(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L6-01-aa0001"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "v1.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -593,13 +618,13 @@ func TestCodeReviewerRound2SnapshotsPushedHead(t *testing.T) {
 func TestContinueBranchRejectsPlainDirectoryReuse(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L6-02-bb0002"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "x.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -616,14 +641,14 @@ func TestContinueBranchRejectsPlainDirectoryReuse(t *testing.T) {
 func TestContinueBranchRejectsWorktreeOnOtherBranch(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L6-03-cc0003"
 	otherBranch := "WP-L6-03-other"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "x.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -640,13 +665,13 @@ func TestContinueBranchRejectsWorktreeOnOtherBranch(t *testing.T) {
 func TestFastForwardRefusesDetachedAtSameSHA(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L6-04-dd0004"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "x.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -670,13 +695,13 @@ func TestFastForwardRefusesDetachedAtSameSHA(t *testing.T) {
 func TestForceFetchUpdatesOriginTracking(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "WP-L6-05-ee0005"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "old.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -707,13 +732,13 @@ func TestForceFetchUpdatesOriginTracking(t *testing.T) {
 func TestTagDoesNotShadowReviewSnapshot(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 
 	branch := "v1release"
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", branch)
 	commitFile(t, other, "on-branch.txt")
 	mustGit(t, other, "push", "-q", "-u", "origin", branch)
@@ -779,7 +804,7 @@ func TestListSessionsMergedWithTagNamedLikeBase(t *testing.T) {
 func TestNewSessionBaseOriginMain(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
 	mustGit(t, repo, "fetch", "-q", "origin", "main")
@@ -819,7 +844,7 @@ func repoWithOnlyOriginMain(t *testing.T) string {
 	t.Helper()
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
 	mustGit(t, repo, "checkout", "-q", "--detach", "HEAD")
@@ -894,7 +919,7 @@ func TestResolveBaseUnknownRejectsNewSession(t *testing.T) {
 func TestListSessionsWithOriginMainBase(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "-u", "origin", "main")
 	mustGit(t, repo, "fetch", "-q", "origin", "main")
@@ -906,12 +931,12 @@ func TestListSessionsWithOriginMainBase(t *testing.T) {
 func TestContinueABranchFromAnotherClone(t *testing.T) {
 	repo := gitRepo(t)
 	remote := filepath.Join(t.TempDir(), "remote.git")
-	mustGit(t, repo, "init", "-q", "--bare", remote)
+	initBareRemote(t, repo, remote)
 	mustGit(t, repo, "remote", "add", "origin", remote)
 	mustGit(t, repo, "push", "-q", "origin", "main")
 	// Another machine starts the work package and pushes its branch.
 	other := filepath.Join(t.TempDir(), "other")
-	mustGit(t, repo, "clone", "-q", remote, other)
+	cloneMain(t, repo, remote, other)
 	mustGit(t, other, "checkout", "-q", "-b", "WP-L2-02-abc123")
 	commitFile(t, other, "spec.txt")
 	mustGit(t, other, "push", "-q", "origin", "WP-L2-02-abc123")
