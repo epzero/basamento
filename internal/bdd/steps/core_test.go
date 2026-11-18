@@ -19,6 +19,7 @@ func TestParseTenantLiteralFromTable(t *testing.T) {
 	}{
 		{name: "absent", literal: "absent"},
 		{name: "backslash", literal: `"a\b"`, wantID: `a\b`, wantOK: true},
+		{name: "two backslashes", literal: `"a\\b"`, wantID: `a\\b`, wantOK: true},
 		{name: "unicode escape", literal: `"a\u0000b"`, wantID: "a\x00b", wantOK: true},
 		{name: "byte escape", literal: `"\xFF\xFE"`, wantID: "\xff\xfe", wantOK: true},
 		{name: "quote escape", literal: `"a\"b"`, wantID: `a"b`, wantOK: true},

@@ -210,11 +210,13 @@ func registerCore(sc *godog.ScenarioContext) {
 //
 // The Gherkin table layer consumes one backslash: the row "a\\b" reaches the
 // step as `"a\b"`. So before strconv.Unquote, a backslash that does not start
-// one of the escapes the feature documents (\u, \x, \" and \\) is put back as
-// the `\\` the author wrote. That reads the row as the literal backslash it
-// names, and keeps Unquote from accepting Go escapes the feature does not
-// document: \n, \t, \r, \a, \f, \v, octal and \U all arrive as a backslash and
-// a letter, and stay that literal pair.
+// one of the escapes the feature documents (\u, \x and \") is put back as the
+// `\\` the author wrote. A backslash the table layer leaves behind is already
+// a collapsed pair, so every one of them is re-doubled, including the second
+// of two: a run then collapses to the literal backslashes the row names. That
+// also keeps Unquote from accepting Go escapes the feature does not document:
+// \n, \t, \r, \a, \f, \v, octal, \U and \\ all arrive as backslashes and stay
+// literal.
 func parseTenantLiteral(literal string) (core.TenantID, bool, error) {
 	if literal == "absent" {
 		return "", false, nil
@@ -245,7 +247,9 @@ func redoubleBackslashes(lit string) string {
 }
 
 // isTenantLiteralEscape reports whether c starts an escape the feature
-// documents after the Gherkin table layer: \u, \x, \" or \\.
+// documents after the Gherkin table layer: \u, \x or \". A backslash after a
+// backslash is not an escape: the pair is already collapsed, so the second one
+// is re-doubled like any other literal backslash.
 func isTenantLiteralEscape(c byte) bool {
-	return c == 'u' || c == 'x' || c == '"' || c == '\\'
+	return c == 'u' || c == 'x' || c == '"'
 }
