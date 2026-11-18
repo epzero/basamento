@@ -1,14 +1,18 @@
 package bus
 
 import (
+	"context"
 	"errors"
-	"strings"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/epzero/basamento/core"
 )
+
+// jsAPIStreamMessageExceedsMaximum is JetStream API err_code 10054
+// (nats-server/v2 server/jetstream_errors_generated.go: JSStreamMessageExceedsMaximumErr).
+const jsAPIStreamMessageExceedsMaximum uint16 = 10054
 
 func invalidSubject() error {
 	return core.NewError(core.CodeInvalidArgument, "malformed subject", nil)
@@ -50,6 +54,18 @@ func conflict(msg string) error {
 	return core.NewError(core.CodeConflict, msg, nil)
 }
 
+func kvRecordCorrupt() error {
+	return core.NewError(core.CodeInternal, "kv record corrupt", nil)
+}
+
+func cancelledErr() error {
+	return core.NewError(core.CodeCancelled, "cancelled", nil)
+}
+
+func timeoutErr() error {
+	return core.NewError(core.CodeTimeout, "timeout", nil)
+}
+
 func mapConnErr(err error) error {
 	if err == nil {
 		return nil
@@ -58,7 +74,17 @@ func mapConnErr(err error) error {
 	if errors.As(err, &ce) {
 		return err
 	}
-	if errors.Is(err, nats.ErrMaxPayload) || isMessageTooLarge(err) {
+	if errors.Is(err, context.Canceled) {
+		return cancelledErr()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return timeoutErr()
+	}
+	if errors.Is(err, nats.ErrMaxPayload) {
+		return messageTooLarge()
+	}
+	var api *jetstream.APIError
+	if errors.As(err, &api) && uint16(api.ErrorCode) == jsAPIStreamMessageExceedsMaximum {
 		return messageTooLarge()
 	}
 	return unavailable()
@@ -70,15 +96,4 @@ func errorsIsNotFound(err error) bool {
 
 func errorsIsConflict(err error) bool {
 	return errors.Is(err, jetstream.ErrKeyExists) || errors.Is(err, jetstream.ErrKeyDeleted)
-}
-
-func isMessageTooLarge(err error) bool {
-	var api *jetstream.APIError
-	if errors.As(err, &api) {
-		desc := strings.ToLower(api.Description)
-		return strings.Contains(desc, "max message") ||
-			strings.Contains(desc, "message size") ||
-			strings.Contains(desc, "maximum payload")
-	}
-	return false
 }

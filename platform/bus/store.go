@@ -33,6 +33,10 @@ type Store struct {
 
 	closeSrv func()
 	stopOnce sync.Once
+
+	closed bool
+	liveMu sync.Mutex
+	live   map[*liveSubscription]struct{}
 }
 
 // Options configures a Store. Zero values pick defaults via withDefaults.
@@ -63,7 +67,10 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-func connectAndOpen(nc *nats.Conn, opts Options, closeSrv func()) (*Store, error) {
+func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv func()) (*Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, mapConnErr(err)
+	}
 	opts = opts.withDefaults()
 	if err := nc.FlushTimeout(2 * time.Second); err != nil {
 		nc.Close()
@@ -78,7 +85,6 @@ func connectAndOpen(nc *nats.Conn, opts Options, closeSrv func()) (*Store, error
 		nc.Close()
 		return nil, mapConnErr(err)
 	}
-	ctx := context.Background()
 	assets, err := openJetAssets(ctx, js, opts)
 	if err != nil {
 		nc.Close()
@@ -104,9 +110,20 @@ func connectAndOpen(nc *nats.Conn, opts Options, closeSrv func()) (*Store, error
 	}, nil
 }
 
-// Close releases connections and, for embedded servers, stops the in-process NATS.
+// Close ends live subscriptions, releases the client connection and, for embedded
+// servers, stops the in-process NATS.
 func (s *Store) Close() error {
 	s.stopOnce.Do(func() {
+		s.liveMu.Lock()
+		s.closed = true
+		subs := make([]*liveSubscription, 0, len(s.live))
+		for l := range s.live {
+			subs = append(subs, l)
+		}
+		s.liveMu.Unlock()
+		for _, l := range subs {
+			l.end(l.consumeCC())
+		}
 		if s.nc != nil {
 			s.nc.Close()
 		}
@@ -117,7 +134,28 @@ func (s *Store) Close() error {
 	return nil
 }
 
+func (s *Store) registerLive(l *liveSubscription) {
+	s.liveMu.Lock()
+	defer s.liveMu.Unlock()
+	if s.live == nil {
+		s.live = map[*liveSubscription]struct{}{}
+	}
+	s.live[l] = struct{}{}
+}
+
+func (s *Store) unregisterLive(l *liveSubscription) {
+	s.liveMu.Lock()
+	delete(s.live, l)
+	s.liveMu.Unlock()
+}
+
 func (s *Store) ready() error {
+	s.liveMu.Lock()
+	closed := s.closed
+	s.liveMu.Unlock()
+	if closed {
+		return unavailable()
+	}
 	if s.nc == nil || s.nc.Status() != nats.CONNECTED {
 		return unavailable()
 	}
@@ -221,14 +259,21 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 	if err != nil {
 		return nil, mapConnErr(err)
 	}
+	replayAfter := after
 	subCtx, cancel := context.WithCancel(ctx)
-	live := newLiveSubscription(s.subBuf, cancel)
+	var live *liveSubscription
+	live = newLiveSubscription(s.subBuf, cancel, func() { s.unregisterLive(live) })
+	s.registerLive(live)
 	var cc jetstream.ConsumeContext
 	cc, err = cons.Consume(func(msg jetstream.Msg) {
-		meta, _ := msg.Metadata()
-		var seq uint64
-		if meta != nil {
-			seq = meta.Sequence.Stream
+		meta, mdErr := msg.Metadata()
+		if mdErr != nil {
+			cancel()
+			return
+		}
+		seq := meta.Sequence.Stream
+		if replayAfter > 0 && seq <= replayAfter {
+			return
 		}
 		m := platform.Message{Subject: logicalSubject(msg.Subject()), Seq: seq, Data: append([]byte(nil), msg.Data()...)}
 		select {
@@ -237,11 +282,13 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		default:
 		}
 		live.deliver(m)
-	}, jetstream.PullMaxMessages(1))
+	})
 	if err != nil {
 		cancel()
+		s.unregisterLive(live)
 		return nil, mapConnErr(err)
 	}
+	live.setCC(cc)
 	go func() {
 		<-subCtx.Done()
 		live.end(cc)
@@ -266,7 +313,7 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	}
 	rec, err := decodeKV(e.Value())
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, kvRecordCorrupt()
 	}
 	if expired(s.clock, rec) {
 		return nil, 0, notFoundKV()
@@ -285,11 +332,7 @@ func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Dura
 	if ttl < 0 {
 		return 0, invalidTTL()
 	}
-	var deadline time.Time
-	if ttl > 0 {
-		deadline = s.clock.Now().Add(ttl)
-	}
-	rec := kvRecord{Value: append([]byte(nil), value...), Deadline: deadline}
+	rec := kvRecord{Value: append([]byte(nil), value...), Deadline: deadlineFromTTL(s.clock.Now(), ttl)}
 	rev, err := s.data.Put(ctx, key, encodeKV(rec))
 	if err != nil {
 		return 0, mapConnErr(err)
@@ -308,11 +351,7 @@ func (s *Store) CompareAndSwap(ctx context.Context, key string, value []byte, re
 	if ttl < 0 {
 		return 0, invalidTTL()
 	}
-	var deadline time.Time
-	if ttl > 0 {
-		deadline = s.clock.Now().Add(ttl)
-	}
-	rec := kvRecord{Value: append([]byte(nil), value...), Deadline: deadline}
+	rec := kvRecord{Value: append([]byte(nil), value...), Deadline: deadlineFromTTL(s.clock.Now(), ttl)}
 	enc := encodeKV(rec)
 	if revision == 0 {
 		return s.kvCreate(ctx, key, enc)
@@ -326,7 +365,7 @@ func (s *Store) CompareAndSwap(ctx context.Context, key string, value []byte, re
 	}
 	deco, derr := decodeKV(cur.Value())
 	if derr != nil {
-		return 0, derr
+		return 0, kvRecordCorrupt()
 	}
 	if expired(s.clock, deco) {
 		if cur.Revision() == revision {
@@ -364,7 +403,7 @@ func (s *Store) kvCreate(ctx context.Context, key string, enc []byte) (uint64, e
 	}
 	deco, derr := decodeKV(cur.Value())
 	if derr != nil {
-		return 0, derr
+		return 0, kvRecordCorrupt()
 	}
 	if !expired(s.clock, deco) {
 		return 0, conflict("key exists")
