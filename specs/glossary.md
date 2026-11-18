@@ -66,6 +66,10 @@ the same change that first uses it.
 | **Browser session** | One run of the browser runner against a web app: scripted (from a feature) or goal-driven (an agent pursues a goal within a budget). |
 | **Tier** | Review priority of a scenario: P0 critical … P3 editorial. |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
+| **Tool** | A named operation an agent or a flow's `tool` node may call: its name, description and input JSON Schema, and a run with arguments that satisfy the schema. A call is one step that runs once. |
+| **Allowlist** | The tools one caller was given. A call to any other tool is refused. |
+| **MCP server** | An external service that lists tools with their schemas and runs them when called; the platform reaches it through an MCP client. A **simulated MCP server** stands in for it in the gate. |
+| **Sandbox** | An isolated place where a command runs: no host files, environment, instance metadata or network unless granted, with limits on time and output. A **simulated sandbox** stands in for it in the gate. |
 | **Durable event log** | The per-run, ordered record of a run's durable events (`seq`), written in the same transaction as the state change that records them. |
 | **Outbox** | The durable event log, read as work to relay: each entry is an event pending publication to the bus until it is marked relayed. |
 | **Relay** | The component that publishes a run's outbox entries to the bus in `seq` order and marks them relayed after the bus accepts them. |
