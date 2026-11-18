@@ -33,6 +33,9 @@ Capabilities:
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
+| [`prompt`](prompt/requirements.md) | Planned (WP-L3-05). |
+| [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
+| [`config`](config/requirements.md) | Planned (WP-L1-05). |
 | [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |
 | [`schema`](schema/requirements.md) | Planned (WP-L2-02). |
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |

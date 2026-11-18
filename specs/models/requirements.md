@@ -1,6 +1,6 @@
 # Models: one invocation contract
 
-Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04; workers in WP-L3-07 and
+Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04, WP-L3-06; workers in WP-L3-07 and
 WP-L3-08). Design: ADR-0006, ADR-0012,
 `docs/architecture/model-layer.md`.
 
@@ -222,3 +222,59 @@ If the attempt on the last rung the model supports does not satisfy the output s
 
 ### REQ-MODEL-066 — A spent budget ends the retries
 If an attempt fails with a retryable error and the attempt budget is spent, then the retry middleware shall fail the call with that error and make no further attempt.
+
+## Catalog and price table
+
+The catalog answers which descriptor a model id stands for and at which price
+a call of it is charged. Prices are the price table's: rate rules per model,
+overridden per deployment and per tenant (`docs/architecture/model-layer.md`
+§7). Reservations, their budget check and settlement consume what this section
+supplies and are specified in `cost.feature`.
+
+### REQ-MODEL-067 — A descriptor by model id
+When the catalog looks up a model id it holds, the catalog shall return that model's descriptor.
+
+### REQ-MODEL-068 — An unknown model id
+If the catalog looks up a model id it does not hold, then the catalog shall fail with code `not_found`.
+
+### REQ-MODEL-069 — A rate rule applies by its condition
+While a model's rate rule holds for an invocation, the price table shall price that invocation at the rule's rates.
+
+### REQ-MODEL-070 — The first holding rate rule wins
+When several of a model's rate rules hold for an invocation, the price table shall price it at the first of them in the table's order.
+
+### REQ-MODEL-071 — Prices come from the most specific layer
+When a call of a model is priced in a tenant that has a price for that model, the price table shall take the price from the tenant's override; otherwise, when the deployment has one, from the deployment's override; and otherwise from the snapshot shipped with the binary.
+
+### REQ-MODEL-072 — Tenant prices stay in their tenant
+The price table shall never apply a tenant's override to a call outside that tenant.
+
+### REQ-MODEL-073 — A model without a holding price fails pricing
+If no layer of the price table has an entry for a model, or the chosen layer's price has no rate rule that holds for a call, then the price table shall fail pricing the call with code `unsupported`.
+
+### REQ-MODEL-074 — The default token formula
+Where a model declares no price formula of its own, the model layer shall price its call with the chosen rates' per-million-token rates, where a million tokens cost as many milli-points as that rate.
+
+### REQ-MODEL-075 — The default formula prices cache reads at the cached rate
+Where the chosen rate rule defines a cached rate, the default token formula shall price the call's non-cached input tokens at the input rate, its cached tokens at the cached rate, and its output tokens at the output rate; the cached tokens are neither left at the input rate nor counted in addition to the input tokens.
+
+### REQ-MODEL-076 — Whole milli-points, rounded half up
+The price table and the price formulas shall return a whole number of milli-points, rounding half up when the exact amount falls between two whole milli-points.
+
+### REQ-MODEL-077 — The reservation estimate
+When the price table estimates the cost of a call before it starts, the estimate shall be the model's price formula on the call's parameters, its counted input tokens and its output limit as usage.
+
+### REQ-MODEL-078 — Prices do not change what a started call is charged
+When a price changes after a call has started, the price table shall price that call's settled usage using the price entry and start time that applied when the call started.
+
+### REQ-MODEL-079 — Without a cached rate, cached tokens cost the input rate
+Where the chosen rate rule does not define a cached rate, the default token formula shall price every input token of the call, cached ones included, at the input rate.
+
+### REQ-MODEL-080 — A cached rate of zero is a rate, not a missing one
+While the chosen rate rule defines a cached rate of zero, the default token formula shall price the call's cached tokens at zero milli-points.
+
+### REQ-MODEL-081 — Reasoning tokens are never counted a second time
+The default token formula shall count every reasoning token of the call exactly once, at the output rate.
+
+### REQ-MODEL-082 — Usage with more cached than input tokens fails pricing
+If a call's usage reports more cached tokens than input tokens, then the price table shall fail pricing the call with code `invalid_argument`.
