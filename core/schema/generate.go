@@ -51,35 +51,63 @@ func patchSliceNullTypes(raw json.RawMessage) json.RawMessage {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return raw
 	}
-	props, _ := doc["properties"].(map[string]any)
-	for name, p := range props {
-		pm, _ := p.(map[string]any)
-		if pm == nil {
-			continue
-		}
-		switch t := pm["type"].(type) {
-		case string:
-			switch t {
-			case "array":
-				min, minOK := asInt(pm["minItems"])
-				max, maxOK := asInt(pm["maxItems"])
-				if !(minOK && maxOK && min == max) {
-					pm["type"] = []any{"null", "array"}
-				}
-			case "object":
-				if pm["additionalProperties"] != nil {
-					pm["type"] = []any{"null", "object"}
-				}
-			}
-			props[name] = pm
-		}
-	}
-	doc["properties"] = props
+	patchSchemaValue(doc)
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return raw
 	}
 	return out
+}
+
+func patchSchemaValue(v any) {
+	switch node := v.(type) {
+	case map[string]any:
+		patchTypeNullUnion(node)
+		if props, ok := node["properties"].(map[string]any); ok {
+			for _, p := range props {
+				patchSchemaValue(p)
+			}
+		}
+		if items, ok := node["items"]; ok {
+			patchSchemaValue(items)
+		}
+		if ap, ok := node["additionalProperties"]; ok {
+			patchSchemaValue(ap)
+		}
+		if defs, ok := node["$defs"].(map[string]any); ok {
+			for _, d := range defs {
+				patchSchemaValue(d)
+			}
+		}
+		if prefix, ok := node["prefixItems"].([]any); ok {
+			for _, p := range prefix {
+				patchSchemaValue(p)
+			}
+		}
+	case []any:
+		for _, e := range node {
+			patchSchemaValue(e)
+		}
+	}
+}
+
+func patchTypeNullUnion(pm map[string]any) {
+	t, ok := pm["type"].(string)
+	if !ok {
+		return
+	}
+	switch t {
+	case "array":
+		min, minOK := asInt(pm["minItems"])
+		max, maxOK := asInt(pm["maxItems"])
+		if !minOK || !maxOK || min != max {
+			pm["type"] = []any{"null", "array"}
+		}
+	case "object":
+		if pm["additionalProperties"] != nil {
+			pm["type"] = []any{"null", "object"}
+		}
+	}
 }
 
 func invalidFieldPath(t reflect.Type) (string, bool) {
