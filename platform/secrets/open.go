@@ -3,11 +3,10 @@ package secrets
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
+	"log/slog"
 	"strings"
 
-	"gocloud.dev/secrets"
-	"gocloud.dev/secrets/localsecrets"
+	"github.com/epzero/basamento/core"
 )
 
 const (
@@ -17,37 +16,28 @@ const (
 )
 
 // OpenURL opens the secrets port from a key service URL (design §1).
-func OpenURL(ctx context.Context, raw string) (*Port, error) {
-	scheme, rest, ok := strings.Cut(raw, "://")
-	if !ok || scheme == "" {
-		return nil, errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
+func OpenURL(ctx context.Context, raw string, opts ...Option) (*Port, error) {
+	o := applyOptions(opts)
+	ks, err := newKeeperService(ctx, raw, o)
+	if err != nil {
+		logOpenFailure(o, schemeOf(raw), err)
+		return nil, err
 	}
-	switch scheme {
-	case "localsecrets":
-		keyB64 := rest
-		if keyB64 == "" {
-			return nil, errInvalidArgument(msgLocalKeyMissing)
-		}
-		key, err := decodeLocalKey(keyB64)
-		if err != nil {
-			return nil, err
-		}
-		var sk [32]byte
-		copy(sk[:], key)
-		return &Port{keeper: localsecrets.NewKeeper(sk), scheme: "localsecrets"}, nil
-	case "awskms", "gcpkms", "hashivault":
-		keeper, err := localsecretsOpenRemote(ctx, raw)
-		if err != nil {
-			return nil, errUnavailable(scheme)
-		}
-		return &Port{keeper: keeper, scheme: scheme}, nil
-	default:
-		return nil, errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
-	}
+	return &Port{ks: ks, opts: o}, nil
 }
 
-func localsecretsOpenRemote(ctx context.Context, raw string) (*secrets.Keeper, error) {
-	return secrets.OpenKeeper(ctx, raw)
+func schemeOf(raw string) string {
+	s, _, ok := strings.Cut(raw, "://")
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func logOpenFailure(o options, scheme string, err error) {
+	o.loggerOrDefault().Debug("secrets port open failed",
+		slog.String("scheme", scheme),
+		slog.String("code", string(core.CodeOf(err))))
 }
 
 func decodeLocalKey(keyB64 string) ([]byte, error) {
