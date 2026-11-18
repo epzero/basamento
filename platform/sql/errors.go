@@ -36,7 +36,7 @@ func wrapOpenErr(p parsedURL, err error) error {
 }
 
 func isUnavailable(err error) bool {
-	if errorsAsConnectError(err) {
+	if errorsAsConnectError(err) || errorsAsParseConfigError(err) {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -64,6 +64,14 @@ func scrubCause(err error, rawURL string) error {
 func errorsAsConnectError(err error) bool {
 	var conn *pgconn.ConnectError
 	return errors.As(err, &conn)
+}
+
+// errorsAsParseConfigError reports a Postgres URL the driver cannot honor
+// (for example a credential file that cannot be read). The database is not
+// reached, so opening fails as unavailable (REQ-SQL-003).
+func errorsAsParseConfigError(err error) bool {
+	var perr *pgconn.ParseConfigError
+	return errors.As(err, &perr)
 }
 
 // isConnectionFailure reports whether a query failed because its connection

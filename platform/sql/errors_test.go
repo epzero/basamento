@@ -161,6 +161,29 @@ func TestWrapOpenErrWithheldTextAndRedactedURL(t *testing.T) {
 	}
 }
 
+func TestWrapOpenErrCredentialConfigIsRetryableUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		"postgres://h/kit?passfile=/tmp/pgpass",
+		"postgres://h/kit?sslrootcert=/tmp/root.crt",
+		"postgres://h/kit?sslcert=/tmp/client.crt",
+		"postgres://h/kit?sslkey=/tmp/client.key",
+	} {
+		p := parsedURL{dialect: dialectPostgres, raw: raw}
+		driver := pgconn.NewParseConfigError(raw, "failed to configure TLS", errors.New("open file: no such file"))
+		wrapped := wrapOpenErr(p, driver)
+		if core.CodeOf(wrapped) != core.CodeUnavailable || !core.IsRetryable(wrapped) {
+			t.Fatalf("%s: got %v", raw, wrapped)
+		}
+		if strings.Contains(wrapped.Error(), "/tmp/") {
+			t.Fatalf("%s: leaked driver file path: %s", raw, wrapped)
+		}
+		if !strings.Contains(wrapped.Error(), withheldDriverText) {
+			t.Fatalf("%s: missing withheld text: %s", raw, wrapped)
+		}
+	}
+}
+
 func TestMapExecErrBrokenConnectionIsRetryableUnavailable(t *testing.T) {
 	t.Parallel()
 	for _, err := range []error{
