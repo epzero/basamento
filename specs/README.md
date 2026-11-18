@@ -33,3 +33,4 @@ Capabilities:
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`prompt`](prompt/requirements.md) | Planned (WP-L3-05). |
+| [`sql`](sql/requirements.md) | Planned (WP-L1-01). |

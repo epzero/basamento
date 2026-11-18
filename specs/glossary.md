@@ -64,3 +64,5 @@ the same change that first uses it.
 | **Cache hint** | The mark an assembled prompt carries after its **cacheable prefix**, the `static` and `semi-static` segments; the **prefix hash** identifies that prefix. |
 | **Untrusted value** | An input value not declared `trusted`, or a history entry. The assembler wraps it in **untrusted-content delimiters** labelled with its source. |
 | **Prompt lint** | The checks run on a prompt template before it is registered, and on an assembled prompt; each finding has a rule, a severity (`error` or `warning`) and a segment. |
+| **SQL store** | The SQL port of the platform: a SQLite file in the embedded profile, Postgres in the cloud profile, opened by URL. Its repositories are scoped to the tenant of each call. |
+| **Migration**, **migration set**, **schema version** | A numbered schema change embedded in the binary; the ordered migrations a SQL store applies on open; the number of the last migration applied to a database. |
