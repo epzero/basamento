@@ -390,6 +390,8 @@ func TestContinueBranchRefusesDiverged(t *testing.T) {
 
 	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L4-04", Branch: branch}); err == nil {
 		t.Fatal("diverged branch must be refused")
+	} else if !strings.Contains(err.Error(), "push your local commits") {
+		t.Fatalf("error must say what to do next: %v", err)
 	}
 }
 

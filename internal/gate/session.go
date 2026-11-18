@@ -164,14 +164,14 @@ func fastForwardBranch(dir, branch string) error {
 		return nil
 	}
 	if _, err := git(dir, "merge-base", "--is-ancestor", head, remote); err != nil {
-		return fmt.Errorf("branch %s cannot fast-forward to origin/%s (local commits or diverged history)", branch, branch)
+		return fmt.Errorf("branch %s cannot fast-forward to origin/%s: push your local commits to origin/%s first, or resolve the divergence by hand; never reset or discard commits", branch, branch, branch)
 	}
 	abbref, err := git(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil || abbref != branch {
-		return fmt.Errorf("worktree must be on %s to fast-forward (on %s)", branch, abbref)
+		return fmt.Errorf("worktree must be on branch %s to fast-forward (currently on %s); run git checkout %s in that worktree, then run gate agent new again", branch, abbref, branch)
 	}
 	if _, err := git(dir, "merge", "--ff-only", "origin/"+branch); err != nil {
-		return fmt.Errorf("branch %s cannot fast-forward to origin/%s: %w", branch, branch, err)
+		return fmt.Errorf("branch %s cannot fast-forward to origin/%s: fetch and resolve the divergence by hand; never reset or discard commits: %w", branch, branch, err)
 	}
 	return nil
 }
