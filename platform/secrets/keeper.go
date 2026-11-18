@@ -1,10 +1,8 @@
 package secrets
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -37,15 +35,13 @@ func newKeeperService(ctx context.Context, raw string, o options) (*keeperKeySer
 	return &keeperKeyService{keeper: keeper, scheme: scheme, id: id, opts: o}, nil
 }
 
-func (k *keeperKeyService) Scheme() string { return k.scheme }
-
 func (k *keeperKeyService) MasterKeyID() string { return k.id }
 
 func (k *keeperKeyService) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
-	inner := make([]byte, 0, len(tenant)+1+len(plaintext))
-	inner = append(inner, tenant...)
-	inner = append(inner, 0)
-	inner = append(inner, plaintext...)
+	inner, err := FrameBoundPlaintext(tenant, plaintext)
+	if err != nil {
+		return nil, err
+	}
 	ct, err := k.keeper.Encrypt(ctx, inner)
 	if err != nil {
 		return nil, keeperFail(err, k.scheme)
@@ -61,7 +57,7 @@ func (k *keeperKeyService) Unwrap(ctx context.Context, tenant string, ciphertext
 		}
 		return nil, core.NewError(core.CodeInvalidArgument, "unwrap failed", nil)
 	}
-	return splitTenantBoundPlaintext(tenant, inner)
+	return ParseBoundPlaintext(tenant, inner)
 }
 
 func (k *keeperKeyService) encryptValue(ctx context.Context, plaintext []byte) ([]byte, error) {
@@ -80,22 +76,7 @@ func (k *keeperKeyService) decryptValue(ctx context.Context, ciphertext []byte) 
 	return pt, nil
 }
 
-func splitTenantBoundPlaintext(tenant string, inner []byte) ([]byte, error) {
-	i := bytes.IndexByte(inner, 0)
-	if i < 0 {
-		return nil, errInternal(msgKeysetCannotUnwrap)
-	}
-	bound := string(inner[:i])
-	if subtle.ConstantTimeCompare([]byte(bound), []byte(tenant)) != 1 {
-		return nil, errInternal(msgKeysetCannotUnwrap)
-	}
-	return append([]byte(nil), inner[i+1:]...), nil
-}
-
 func keeperFail(err error, scheme string) error {
-	if unreachable(err) {
-		return errUnavailable(scheme)
-	}
 	return errUnavailable(scheme)
 }
 
@@ -122,22 +103,8 @@ func masterKeyID(raw, scheme string, localKey []byte) (string, error) {
 		sum := sha256.Sum256(localKey)
 		return "localsecrets:" + hex.EncodeToString(sum[:]), nil
 	default:
-		return stripURLSecret(raw), nil
+		return publicURLID(raw)
 	}
-}
-
-func stripURLSecret(raw string) string {
-	scheme, rest, ok := strings.Cut(raw, "://")
-	if !ok {
-		return raw
-	}
-	if before, after, ok := strings.Cut(rest, "@"); ok && strings.Contains(before, ":") {
-		return scheme + "://" + after
-	}
-	if i := strings.IndexByte(rest, '?'); i >= 0 {
-		return scheme + "://" + rest[:i]
-	}
-	return raw
 }
 
 func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, string, error) {
@@ -163,11 +130,14 @@ func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, strin
 		copy(sk[:], key)
 		return localsecrets.NewKeeper(sk), scheme, id, nil
 	case "awskms", "gcpkms", "hashivault":
+		id, err := publicURLID(raw)
+		if err != nil {
+			return nil, "", "", err
+		}
 		keeper, err := secrets.OpenKeeper(ctx, raw)
 		if err != nil {
 			return nil, "", "", errUnavailable(scheme)
 		}
-		id := stripURLSecret(raw)
 		return keeper, scheme, id, nil
 	default:
 		return nil, "", "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
@@ -190,10 +160,5 @@ func OpenCodec(ctx context.Context, store KeysetStore, currentURL string, prevUR
 		}
 		keys = append(keys, ks)
 	}
-	c, err := NewCodec(store, keys...)
-	if err != nil {
-		return nil, err
-	}
-	c.setOptions(o)
-	return c, nil
+	return NewCodec(store, keys, opts...)
 }
