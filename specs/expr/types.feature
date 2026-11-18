@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: Variable types from JSON Schema
   Each declared variable gets the CEL type its JSON Schema maps to
   (specs/expr/design.md §2), so expressions are checked against the shape of
