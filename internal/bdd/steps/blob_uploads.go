@@ -17,7 +17,6 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/blob"
@@ -215,7 +214,7 @@ func assertNoStagedFirst(ctx context.Context, tenant string) error {
 		return fmt.Errorf("need an upload")
 	}
 	w := world(ctx).Blob
-	ok, err := w.store.StagedObjectExists(w.tenantCtx(ctx, tenant), core.TenantID(tenant), u[0].StagingKey)
+	ok, err := w.stagingExists(ctx, tenant, u[0].StagingKey)
 	if err != nil {
 		return err
 	}
@@ -435,7 +434,7 @@ func writeStaged(ctx context.Context, body []byte, ctype string) error {
 	if tenant == "" {
 		tenant = "acme"
 	}
-	return blob.WriteStagedObjectForTest(w.tenantCtx(ctx, tenant), w.store, core.TenantID(tenant), u.StagingKey, body, ctype)
+	return w.writeStagingObject(ctx, tenant, u.StagingKey, body, ctype)
 }
 
 func assertStagedNamed(ctx context.Context, tenant, name, ctype string) error {
@@ -453,7 +452,7 @@ func assertStagedString(ctx context.Context, tenant, body string) error {
 func assertStagedBody(ctx context.Context, tenant string, want []byte, wantCT string) error {
 	w := world(ctx).Blob
 	sk := primaryUpload(w).StagingKey
-	got, ct, err := w.store.ReadStagedObject(w.tenantCtx(ctx, tenant), core.TenantID(tenant), sk)
+	got, ct, err := w.readStagingObject(ctx, tenant, sk)
 	if err != nil {
 		return err
 	}
@@ -468,7 +467,7 @@ func assertStagedBody(ctx context.Context, tenant string, want []byte, wantCT st
 
 func assertNoStaged(ctx context.Context, tenant string) error {
 	w := world(ctx).Blob
-	ok, err := w.store.StagedObjectExists(w.tenantCtx(ctx, tenant), core.TenantID(tenant), primaryUpload(w).StagingKey)
+	ok, err := w.stagingExists(ctx, tenant, primaryUpload(w).StagingKey)
 	if err != nil {
 		return err
 	}
@@ -484,7 +483,7 @@ func assertNoStagedSecond(ctx context.Context, tenant string) error {
 		return fmt.Errorf("need two uploads")
 	}
 	w := world(ctx).Blob
-	ok, err := w.store.StagedObjectExists(w.tenantCtx(ctx, tenant), core.TenantID(tenant), u[1].StagingKey)
+	ok, err := w.stagingExists(ctx, tenant, u[1].StagingKey)
 	if err != nil {
 		return err
 	}
@@ -495,7 +494,7 @@ func assertNoStagedSecond(ctx context.Context, tenant string) error {
 }
 
 func sweepStaging(ctx context.Context) error {
-	return world(ctx).Blob.store.SweepExpiredStagingSlots(ctx)
+	return sweepStagingSlots(ctx)
 }
 
 func sizedContentPlusOne(ctx context.Context, name string, mib, seed int) error {

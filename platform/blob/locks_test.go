@@ -15,7 +15,7 @@ func TestKeyedMuMapReclaimsEntries(t *testing.T) {
 		unlock := k.lock(key + string(rune('0'+i/26)))
 		unlock()
 	}
-	if c := k.entryCount(); c != 0 {
+	if c := k.activeKeys(); c != 0 {
 		t.Fatalf("map has %d entries, want 0", c)
 	}
 }
@@ -39,7 +39,7 @@ func TestKeyedMuSameKeySerializes(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if c := k.entryCount(); c != 0 {
+	if c := k.activeKeys(); c != 0 {
 		t.Fatalf("map has %d entries after wait, want 0", c)
 	}
 }

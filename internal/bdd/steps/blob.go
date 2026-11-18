@@ -14,7 +14,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	gcblob "gocloud.dev/blob"
 
 	"github.com/cucumber/godog"
 
@@ -49,6 +52,8 @@ type blobWorld struct {
 	lastExists   bool
 	hasExists    bool
 	uploadSt     *blobUploadState
+	conformOnce  sync.Once
+	conformB     *gcblob.Bucket
 }
 
 type fetchResp struct {
@@ -79,7 +84,16 @@ func (w *blobWorld) keyOf(name string) string {
 	return blob.ContentKeyOf([]byte(name))
 }
 
+func (w *blobWorld) closeConform() {
+	if w.conformB != nil {
+		_ = w.conformB.Close()
+		w.conformB = nil
+	}
+	w.conformOnce = sync.Once{}
+}
+
 func (w *blobWorld) openEmpty(ctx context.Context, clock core.Clock) error {
+	w.closeConform()
 	if w.store != nil {
 		_ = w.store.Close()
 	}
@@ -96,6 +110,7 @@ func (w *blobWorld) openEmpty(ctx context.Context, clock core.Clock) error {
 }
 
 func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) error {
+	w.closeConform()
 	if w.altStore != nil {
 		_ = w.altStore.Close()
 		w.altStore = nil
@@ -181,6 +196,7 @@ func registerBlob(sc *godog.ScenarioContext) {
 			_ = os.RemoveAll(w.dataDir)
 			w.dataDir = ""
 		}
+		w.closeConform()
 		return ctx, nil
 	})
 	sc.Step(`^an empty blob store$`, func(ctx context.Context) error {
