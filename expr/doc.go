@@ -1,4 +1,4 @@
-// Package expr hosts the CEL environment (github.com/cel-expr/cel-go) used for
+// Package expr hosts the CEL environment (cel.dev/cel-go) used for
 // edge conditions, guards, gate acceptance, price formulas and authorization
 // conditions, plus gojq for JSON-to-JSON mapping.
 //
