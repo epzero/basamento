@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -15,10 +16,28 @@ const (
 	closeDelim = `</untrusted>`
 )
 
-// WrapUntrusted neutralizes break-out sequences then wraps value for source name.
+// WrapUntrusted neutralizes break-out sequences then wraps value.
+// The source name is restricted to [A-Za-z0-9_.-]; other runes become '_'.
 func WrapUntrusted(source, value string) string {
+	source = sanitizeSource(source)
 	inner := neutralizeBreakout(value)
 	return openDelim + source + `">` + inner + closeDelim
+}
+
+func sanitizeSource(source string) string {
+	if source == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(source))
+	for _, r := range source {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 func neutralizeBreakout(s string) string {
@@ -51,17 +70,37 @@ func delimiterLikeAt(s string, pos int) bool {
 		return false
 	}
 	i := pos + 1
-	i = skipASCIISpace(s, i)
+	i = skipUnicodeSpace(s, i)
 	if i < len(s) && s[i] == '/' {
 		i++
-		i = skipASCIISpace(s, i)
+		i = skipUnicodeSpace(s, i)
 	}
-	return untrustedWordAt(s, i)
+	if !untrustedWordAt(s, i) {
+		return false
+	}
+	i += len("untrusted")
+	i = skipUnicodeSpace(s, i)
+	if i < len(s) && s[i] == '>' {
+		return true
+	}
+	// Opening tag look-alike may continue with attributes or suffix without '>'.
+	if i < len(s) && (s[i] == '/' || isNameChar(s[i])) {
+		return true
+	}
+	return i >= len(s)
 }
 
-func skipASCIISpace(s string, i int) int {
-	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
-		i++
+func skipUnicodeSpace(s string, i int) int {
+	for i < len(s) {
+		r, w := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && w == 1 {
+			break
+		}
+		if unicode.IsSpace(r) || unicode.In(r, unicode.Cf) {
+			i += w
+			continue
+		}
+		break
 	}
 	return i
 }
@@ -96,25 +135,44 @@ func toLower(b byte) byte {
 	return b
 }
 
-// CountUntrustedDelimiters counts opening and closing delimiters in rendered text
-// (not neutralized sequences).
+func scanCanonicalOpen(text string, i int) (end int, ok bool) {
+	if !strings.HasPrefix(text[i:], openDelim) {
+		return 0, false
+	}
+	j := i + len(openDelim)
+	quote := strings.IndexByte(text[j:], '"')
+	if quote < 0 {
+		return 0, false
+	}
+	if j+quote+1 >= len(text) || text[j+quote+1] != '>' {
+		return 0, false
+	}
+	return j + quote + 2, true
+}
+
+func scanCanonicalClose(text string, i int) (end int, ok bool) {
+	if !strings.HasPrefix(text[i:], closeDelim) {
+		return 0, false
+	}
+	end = i + len(closeDelim)
+	if end < len(text) && text[end] == '>' {
+		return 0, false
+	}
+	return end, true
+}
+
+// CountUntrustedDelimiters counts canonical opening and closing delimiters.
 func CountUntrustedDelimiters(text string) (opens, closes int) {
 	i := 0
 	for i < len(text) {
-		if strings.HasPrefix(text[i:], openDelim) {
+		if end, ok := scanCanonicalOpen(text, i); ok {
 			opens++
-			i += len(openDelim)
-			// skip to closing quote of source attribute
-			if j := strings.IndexByte(text[i:], '"'); j >= 0 {
-				i += j + 2 // quote and >
-			} else {
-				break
-			}
+			i = end
 			continue
 		}
-		if strings.HasPrefix(text[i:], closeDelim) {
+		if end, ok := scanCanonicalClose(text, i); ok {
 			closes++
-			i += len(closeDelim)
+			i = end
 			continue
 		}
 		if strings.HasPrefix(text[i:], "&lt;") {
@@ -125,4 +183,42 @@ func CountUntrustedDelimiters(text string) (opens, closes int) {
 		i += w
 	}
 	return opens, closes
+}
+
+func hasUnpairedDelimiters(text string) bool {
+	depth := 0
+	pairs := 0
+	i := 0
+	for i < len(text) {
+		if strings.HasPrefix(text[i:], "&lt;") {
+			i += 4
+			continue
+		}
+		if end, ok := scanCanonicalOpen(text, i); ok {
+			if depth > 0 {
+				return true
+			}
+			depth = 1
+			i = end
+			continue
+		}
+		if end, ok := scanCanonicalClose(text, i); ok {
+			if depth == 0 {
+				return true
+			}
+			depth = 0
+			pairs++
+			if pairs > 1 {
+				return true
+			}
+			i = end
+			continue
+		}
+		if delimiterLikeAt(text, i) {
+			return true
+		}
+		_, w := utf8.DecodeRuneInString(text[i:])
+		i += w
+	}
+	return depth != 0
 }

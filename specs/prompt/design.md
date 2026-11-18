@@ -29,8 +29,6 @@ control. That mapping is not part of this package.
 | `history` | Earlier turns of a conversation: ordered entries, each a role and a text. | the history list | no |
 | `user` | The current turn. | any | no |
 
-Each history entry's **role** is a short ASCII token matching `^[A-Za-z][A-Za-z0-9_-]{0,31}$` (for example `user`, `assistant`). The assembler rejects any other role with `invalid_argument` and does not echo the value. Roles are written before the wrapped entry text in model-facing output, so they are validated; wrapped text follows REQ-PROMPT-014 / REQ-PROMPT-015.
-
 A template has at most one `history` segment. Segments of other kinds may
 repeat; each has a name unique within the template.
 

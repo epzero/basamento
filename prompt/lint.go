@@ -1,9 +1,6 @@
 package prompt
 
-import (
-	"sort"
-	"strings"
-)
+import "sort"
 
 // LintTemplate checks a template before registration.
 func LintTemplate(t *Template) []Finding {
@@ -20,7 +17,7 @@ func LintTemplate(t *Template) []Finding {
 		if seg.Kind == KindStatic && len(VariablesInText(seg.Text)) > 0 {
 			out = append(out, Finding{Rule: "variable_in_static", Severity: "error", Segment: seg.Name})
 		}
-		if seg.Kind == KindSemiStatic {
+		if (seg.Kind == KindStatic || seg.Kind == KindSemiStatic) {
 			for _, v := range VariablesInText(seg.Text) {
 				if inputTrust[v] != TrustTrusted {
 					out = append(out, Finding{Rule: "untrusted_in_cacheable", Severity: "error", Segment: seg.Name})
@@ -56,6 +53,9 @@ func stripVars(text string) string {
 
 // LintAssembled checks delimiter pairing on an assembled prompt.
 func LintAssembled(a *Assembled) []Finding {
+	if a == nil {
+		return []Finding{{Rule: "assembled_required", Severity: "error"}}
+	}
 	var out []Finding
 	for _, p := range a.Parts {
 		if partHasUnpairedDelimiters(p) {
@@ -66,47 +66,21 @@ func LintAssembled(a *Assembled) []Finding {
 }
 
 func partHasUnpairedDelimiters(p AssembledPart) bool {
-	if hasUnpairedDelimiters(p.Text) {
-		return true
-	}
 	if p.Kind != KindHistory {
-		return false
+		return hasUnpairedDelimiters(p.Text)
 	}
 	for _, h := range p.History {
-		if hasUnpairedDelimiters(h.Text) || hasUnpairedDelimiters(h.Role) || hasUnpairedDelimiters(h.Role+h.Text) {
+		expected := WrapUntrusted("history", h.OriginalText)
+		if h.Text != expected {
+			return true
+		}
+		if hasUnpairedDelimiters(h.Role) {
+			return true
+		}
+		combined := h.Role + h.Text
+		if hasUnpairedDelimiters(combined) {
 			return true
 		}
 	}
 	return false
-}
-
-func hasUnpairedDelimiters(text string) bool {
-	depth := 0
-	i := 0
-	for i < len(text) {
-		if strings.HasPrefix(text[i:], openDelim) {
-			depth++
-			i += len(openDelim)
-			if j := strings.IndexByte(text[i:], '"'); j >= 0 {
-				i += j + 2
-			} else {
-				return true
-			}
-			continue
-		}
-		if strings.HasPrefix(text[i:], closeDelim) {
-			depth--
-			if depth < 0 {
-				return true
-			}
-			i += len(closeDelim)
-			continue
-		}
-		if strings.HasPrefix(text[i:], "&lt;") {
-			i += 4
-			continue
-		}
-		i++
-	}
-	return depth != 0
 }
