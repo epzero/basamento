@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/epzero/basamento/internal/bdd/sqltest"
 )
@@ -52,10 +53,11 @@ func WriteBDDReport(failed bool) error {
 }
 
 func moduleRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", errors.New("bdd: cannot locate module root")
 	}
+	dir := filepath.Dir(file)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir, nil

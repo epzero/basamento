@@ -86,7 +86,6 @@ func initPostgres(ctx context.Context) error {
 		pgMu.Unlock()
 		return nil
 	}
-	pgMode = PostgresServerEmbedded
 	admin, emb, err := startEmbedded(ctx)
 	if err != nil {
 		pgFailed = true
