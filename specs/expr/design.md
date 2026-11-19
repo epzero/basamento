@@ -66,6 +66,22 @@ for typing (validation is `core/schema`'s work).
 | `{"$ref": "#/$defs/<name>"}` | the type of that definition; where a definition refers back to itself, `dyn` at that point |
 | `false`, a `$ref` to a missing `#/$defs/<name>`, or any other `$ref` | rejected with `invalid_argument` (the caller resolves external references first) |
 
+An object type keeps the fields of its `properties` wherever it appears:
+written inline as a variable's schema, reached through `$ref`, as the value
+type of an array's `items`, or as the value type `S` of a map's
+`additionalProperties`. `{"type": "object", "additionalProperties":
+{"type": "object", "properties": {"v": {"type": "integer"}}}}` is therefore
+`map(string, object{v: int})`, and `x['k'].v` on it compiles to `int` and
+reads the field: only the map is a map; its values keep the type that the
+same object has inline or through `$ref`, including the type error for a
+property the object does not declare. A `S` that is not an object — a
+scalar, a list, or `dyn` — gives the plain `map(string, T(S))` of the table,
+whose lookup yields that type and no field access. An object schema with
+`additionalProperties` alongside its `properties`, as in
+`{"type": "object", "properties": …, "additionalProperties": S}`, is the
+object type of its `properties`, including when it is a map's value;
+`additionalProperties` adds no fields to that type and takes none away.
+
 The boolean schema in the last row is the schema itself being `false`, which
 accepts no value; an object schema's `"additionalProperties": false` is
 unaffected and is not rejected.
