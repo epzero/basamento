@@ -55,6 +55,9 @@ func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool, err
 	if !ok {
 		return nil, false, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
 	}
+	if clientRef == "" {
+		return nil, false, core.NewError(core.CodeInvalidArgument, "client ref required", nil)
+	}
 	key := invocationKey{tenant: tid, ref: clientRef}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -114,11 +117,14 @@ func (g *Registry) Cancel(ctx context.Context, h Handle) error {
 // Lookup resolves a client ref to its invocation within the tenant of ctx. It
 // requires that tenant; without one it fails with invalid_argument. A client
 // ref that belongs to another tenant, or to nobody, returns (nil, nil), the
-// same as an unknown ref in this tenant.
+// same as an unknown ref in this tenant. A registry only resolves refs it owns.
 func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error) {
 	tid, ok := core.TenantFrom(ctx)
 	if !ok {
 		return nil, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
+	if clientRef == "" {
+		return nil, core.NewError(core.CodeInvalidArgument, "client ref required", nil)
 	}
 	g.mu.Lock()
 	r, ok := g.byRef[invocationKey{tenant: tid, ref: clientRef}]
@@ -133,6 +139,11 @@ func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error
 func (g *Registry) run(ctx context.Context, h Handle) (*Run, error) {
 	if h.ClientRef == "" {
 		return nil, core.NewError(core.CodeInvalidArgument, "handle has no client ref", nil)
+	}
+	if h.Provider != "" && h.Provider != g.provider {
+		return nil, core.NewError(core.CodeNotFound,
+			fmt.Sprintf("no invocation for client ref %q", h.ClientRef),
+			map[string]any{"client_ref": h.ClientRef})
 	}
 	tid, ok := core.TenantFrom(ctx)
 	if !ok {

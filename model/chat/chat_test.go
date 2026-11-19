@@ -529,6 +529,21 @@ func TestNewValidatesItsConfig(t *testing.T) {
 	}
 }
 
+func TestWrongProviderHandleNotFound(t *testing.T) {
+	a := newAdapter(t, &fakeChat{chunks: []*schema.Message{{Content: "x"}}})
+	h, err := a.Start(testCtx(t), model.Request{
+		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-wrong-prov",
+		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	h.Provider = "other-vendor"
+	if _, err := a.Result(testCtx(t), h); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("result code = %q, want not_found", core.CodeOf(err))
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	a := newAdapter(t, &fakeChat{})
 	ds, err := a.Describe(testCtx(t))

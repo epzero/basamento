@@ -16,6 +16,32 @@ func testHandle(clientRef string) Handle {
 	return Handle{Provider: "test", ID: clientRef, ClientRef: clientRef}
 }
 
+func TestBeginRejectsEmptyClientRef(t *testing.T) {
+	reg := NewRegistry("test")
+	if _, _, err := reg.Begin(context.Background(), ""); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("no tenant: code = %q, want invalid_argument", core.CodeOf(err))
+	}
+	if _, _, err := reg.Begin(testCtx(t), ""); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("empty ref: code = %q, want invalid_argument", core.CodeOf(err))
+	}
+}
+
+func TestRegistryWrongProviderHandleNotFound(t *testing.T) {
+	reg := NewRegistry("alpha")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
+	h := run.Handle()
+	h.Provider = "beta"
+	if _, err := reg.Events(testCtx(t), h, 0); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("events code = %q, want not_found", core.CodeOf(err))
+	}
+	if _, err := reg.Result(testCtx(t), h); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("result code = %q, want not_found", core.CodeOf(err))
+	}
+	if err := reg.Cancel(testCtx(t), h); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("cancel code = %q, want not_found", core.CodeOf(err))
+	}
+}
+
 func TestRegistryStartIsIdempotent(t *testing.T) {
 	reg := NewRegistry("test")
 	first, existing, err := reg.Begin(testCtx(t), "ref-1")
@@ -266,7 +292,7 @@ func TestEventsMaxInt64CursorWaitsForLaterEvents(t *testing.T) {
 		if len(got) != 0 {
 			t.Fatalf("events = %+v, want none (cursor beyond every seq)", got)
 		}
-	case <-testCtx(t).Done():
+	case <-t.Context().Done():
 		t.Fatal("timed out waiting on MaxInt64 cursor follower")
 	}
 }
