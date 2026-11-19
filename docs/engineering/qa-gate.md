@@ -39,13 +39,24 @@ The SQL conformance driver's **Postgres pass** (not every `@profile:cloud`
 scenario) needs a server once per `go test` process of `internal/bdd` (G3).
 `gate redgreen` starts embedded again per activated scenario (G4); each base
 worktree run reuses the head checkout's built supervisor (`EP_SUPERVISOR`) and
-inherits `BDD_POSTGRES_CACHE_DIR`, matching the G3 BDD step environment.
+inherits `BDD_POSTGRES_CACHE_DIR`, matching the G3 BDD step environment. A base
+run is the red proof only when it fails on the behavior: `gate redgreen` fails
+closed when the base run cannot start Postgres (`embedded postgres
+unavailable`, `BDD_POSTGRES_URL is set but the server is unavailable`), fails
+the strict skip rule, or exits zero without a passed step (it reads the base's
+`.gate/bdd.json` when the base writes one, and otherwise the step summary).
+Each names `make pg-prefetch` as the remedy instead of passing as a vacuous red
+or as "passes at base".
 
 **Precedence.** A non-empty `BDD_POSTGRES_URL` uses only that admin server
 (typically `/postgres`); unreachable or unauthorised URLs never fall back to
-embedded. An empty or unset variable starts embedded Postgres **16** (`V16` /
+embedded. The role must hold `CREATEDB`: after the ping, init asks
+`pg_roles` for `rolcreatedb` and an admin role that cannot create databases is
+**unavailable** (one skip, or one strict failure), never a first-scenario
+`42501`. An empty or unset variable starts embedded Postgres **16** (`V16` /
 16.15.1) via `github.com/fergusstrange/embedded-postgres/v2` with `Port(0)`, a
-random password per process, and loopback only. Under `GATE_STRICT=1`, any
+random password per process (128 bits from `crypto/rand`, never the PID), and
+loopback only. Under `GATE_STRICT=1`, any
 skipped Postgres run fails the gate; otherwise unavailable servers record
 `postgres-unavailable` skips and `go tool gate bdd-skips` prints
 `gate: scenario runs skipped: <total>` after the BDD step.
@@ -64,9 +75,19 @@ export BDD_POSTGRES_URL='postgres://kit:kit@127.0.0.1:5432/kit?sslmode=disable'
 `make pg-prefetch` before a strict gate: it builds the supervisor CLI from the
 pinned module (`EP_SUPERVISOR` / `.gate/bin/embedded-postgres`) and downloads
 checksum-pinned bundles — not a vendor API call (bounded infrastructure, same
-role as pulling a CI image). With `GATE_STRICT=1`, the BDD step sets offline
+role as pulling a CI image). The prefetched bundle version is the driver's pin
+(`embeddedpostgres.V16`); a test in `internal/gate` fails the gate when the
+recipe's literal drifts from that constant, and the CI cache key derives its
+module version from `go.mod` with `go list -m`, never from a hand-written copy.
+With `GATE_STRICT=1`, the BDD step sets offline
 mode and never downloads; a cold cache fails until prefetch fills the cache.
 Without strict mode, the first embedded start in a test process may download.
+
+**Cache trust.** A cache hit trusts the extracted bundle directory through the
+library's completion digest marker; the module re-hashes only on download, so
+`BDD_POSTGRES_CACHE_DIR` must be writable by the gate's user only (a shared or
+world-writable cache directory is an injection point, not just a correctness
+risk).
 
 **Bundles and licences.** PostgreSQL in the bundles is under the
 [PostgreSQL licence](https://www.postgresql.org/about/licence/) (similar to
