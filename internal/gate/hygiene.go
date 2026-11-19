@@ -75,6 +75,8 @@ var bannedTestRandFuncs = map[string]bool{
 //     test_only and test_only_allowed_from);
 //   - production isolation: no "testing" / "testing/*" import or exported
 //     *ForTest* hooks in production Go files (matched by name);
+//   - merge conflict markers in any tracked text file (qa-gate.md § Conflict
+//     markers);
 //   - when base is non-empty, spec/code separation: a change to any file
 //     outside specs/ and docs/ must not edit specs/*/design.md
 //     (agent-workflow.md §7.3).
@@ -83,6 +85,11 @@ func Hygiene(root, base string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	markers, err := CheckConflictMarkers(root)
+	if err != nil {
+		return nil, err
+	}
+	errs = append(errs, markers...)
 	if base != "" {
 		changed, err := ChangedFiles(root, base, "")
 		if err != nil {
