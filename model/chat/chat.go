@@ -170,9 +170,9 @@ func (a *Adapter) execute(run *model.Run, chat einomodel.BaseChatModel, messages
 	var stream *schema.StreamReader[*schema.Message]
 	defer func() {
 		if p := recover(); p != nil {
-			if stream != nil {
-				stream.Close()
-			}
+			// Do not Close stream here: defer stream.Close below is registered
+			// after this recover and runs first on unwind, so a second Close
+			// can panic inside this defer and kill the process.
 			// Deliberately converts a panic at the invocation boundary;
 			// run.Fail is a no-op after the run ended.
 			var cause error

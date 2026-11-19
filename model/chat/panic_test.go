@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -24,12 +25,15 @@ func (p *panicChat) Stream(context.Context, []*schema.Message, ...einomodel.Opti
 	if p.when == "stream" {
 		panic("vendor exploded: secret-token")
 	}
-	src := schema.StreamReaderFromArray([]*schema.Message{{Content: "a"}, {Content: "b"}})
-	return schema.StreamReaderWithConvert(src, func(m *schema.Message) (*schema.Message, error) {
-		if m.Content == "b" {
-			panic("recv panic: secret-token")
-		}
-		return m, nil
+	const panicText = "recv panic: secret-token"
+	reader, writer := schema.Pipe[*schema.Message](1)
+	go func() {
+		defer writer.Close()
+		writer.Send(&schema.Message{Content: "a"}, nil)
+	}()
+	return schema.StreamReaderWithConvert(reader, func(m *schema.Message) (*schema.Message, error) {
+		_ = m
+		panic(panicText)
 	}), nil
 }
 
@@ -45,7 +49,7 @@ func assertPanicFailed(t *testing.T, res model.Result) {
 	if failure.Code != core.CodeInternal || failure.Message != "vendor call panicked" {
 		t.Fatalf("failure = %+v", failure)
 	}
-	if failure.Message != "vendor call panicked" {
+	if strings.Contains(failure.Message, "secret-token") {
 		t.Fatalf("stored message must not carry panic text: %q", failure.Message)
 	}
 }
