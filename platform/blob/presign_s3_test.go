@@ -53,6 +53,8 @@ func (p *presignCountBucket) ListKeysCallback(ctx context.Context, prefix string
 }
 func (p *presignCountBucket) Close() error { return p.inner.Close() }
 
+// TestPresignRetryOnlyUnimplemented pins the cloud upload URL presign fallback: a second
+// SignedURL call drops the bound content type only after Unimplemented; Commit enforces the type.
 func TestPresignRetryOnlyUnimplemented(t *testing.T) {
 	t.Parallel()
 	s3 := s3sim.Start()
