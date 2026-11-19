@@ -61,7 +61,8 @@ type Event struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 	// CostMpts is milli-points the completed node settled, set by the host from
 	// the model node's settlement (model-layer.md §4); only node_completed and
-	// node_failed may carry it.
+	// node_failed may carry it. A node_failed accrues cost once, for the pending
+	// step it names.
 	CostMpts int64 `json:"cost_mpts,omitempty"`
 }
 
@@ -106,7 +107,9 @@ type Step struct {
 // sequence always yield the same snapshots and commands, independent of the
 // order in which parallel nodes complete (updates merge in canonical node-id
 // order at superstep barriers). The snapshot passed to Apply is never modified;
-// on error the host keeps that snapshot unchanged.
+// on error the host keeps that snapshot unchanged. json.RawMessage fields in
+// snapshots, events and commands share backing arrays across return values;
+// callers must treat them as read-only.
 type Machine interface {
 	Start(input json.RawMessage) (Snapshot, []Command, error)
 	Apply(s Snapshot, ev Event) (Snapshot, []Command, error)
