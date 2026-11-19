@@ -18,11 +18,62 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
 
-`layering.yaml` assigns `internal/config` the layer `[core]` and a
-`deny_external` list for the port vendor families; `cmd/kit` and
-`internal/bdd` may import it (ADR-0016). The package imports `core` and the
-standard library only. It returns validated values and lets `cmd/kit` import
-the port implementations.
+`internal/gate/layering.go` fails the gate for every package `layering.yaml`
+does not assign to a layer (`package not assigned to a layer in
+layering.yaml`). ADR-0016 added the row, and `layering.yaml` on `main` has it
+before WP-L1-05 starts:
+
+```yaml
+internal/config: [core]
+```
+
+The graph therefore admits the package: the implementer creates
+`internal/config` under that row and changes nothing in `layering.yaml`
+(changing the graph needs an ADR, AGENTS.md). The row allows imports of
+`core` only: no `platform`, no `runtime`, no port package.
+
+`cmd/kit` and `internal/bdd` are the only layers that import `internal/config`,
+each through a path-segment prefix entry naming that package, not the
+`internal` directory. `internal/gate/layering.go` matches a `layers` value on
+whole path segments and keeps the longest match, so the value
+`internal/config` grants that tree alone (`internal/bdd/steps` included,
+through its layer), while the value `internal` would grant every nested
+package under `internal/` that `layers` does not name. The broad entry is not
+merely wider than needed, it is wrong for this graph: with `internal` in
+`cmd/kit`'s list, `cmd/kit` may import `internal/gate` and `gate layering`
+stays green, so the gate binary joins the shipped graph and the two-importer
+rule is void. Naming `internal/config` in a list is valid: it is a layer key
+of its own, so `deny_external` attaches to it, and in another layer's list it
+is a path-segment prefix.
+
+The narrow grant keeps the graph closed. Exactly two layers import
+`internal/config`: `cmd/kit`, for `Load` and `Validate`, and `internal/bdd`
+and its `steps`, for the harness. `internal/gate` (empty list) and
+`tools/gate` (whose list names `internal/gate`) import no configuration and
+stay closed. Whether code under `internal/` is trusted is a policy, not a
+gate check: by policy untrusted code does not live there, the gate cannot
+tell it apart, and a new `internal/<pkg>` row or grant needs an ADR
+(ADR-0016).
+
+`deny_external` for `internal/config` lists the port vendor prefixes:
+`go.temporal.io/`, `gocloud.dev/`, `github.com/jackc/pgx/`, `modernc.org/`,
+`github.com/nats-io/`, `github.com/tink-crypto/`, `github.com/aws/`,
+`cloud.google.com/`, `github.com/Azure/` (ADR-0002, ADR-0004). The gate has
+no way to know which modules are port vendors, so whoever adds a port library
+to the config package extends that list in the same change and a reviewer
+checks it; an import the list does not name passes. Imports are read from
+`go list` in the gate's build context (Linux on CI), so a file built only on
+another platform is outside the check and is reviewed by hand; `_test.go`
+imports are not read at all, as `test_only` already relies on. The standard
+library and small parsers are allowed.
+
+Keep `internal/config` free of every port implementation and of
+`go.temporal.io/`: the allow-list admits `core` only and `deny_external`
+blocks the vendors above. It returns validated values and the implementation
+name a URL selects (REQ-CONFIG-011, REQ-CONFIG-012), and lets `cmd/kit`
+import the implementations and their constructors. `cmd/kit` may already
+import `platform` and `runtime`; with the row in place it also imports
+`internal/config`.
 
 `serve.go` holds the part of `kit serve` that does not know a port: it opens
 the ports it is given in order, binds the listener, prints the ready line and
