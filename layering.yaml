@@ -31,9 +31,9 @@ layers:
   internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
   internal/config:    [core]
 
-# Fakes and BDD harness helpers: importable only from _test.go files of any
-# layer and from packages in test_only_allowed_from (ADR-0018).
-test_only: [core/coretest, internal/bdd/s3sim, internal/bdd/blobmatrix, internal/bdd/modroot]
+# core/coretest and the whole BDD harness tree: importable only from _test.go
+# files of any layer and from packages under internal/bdd (ADR-0018).
+test_only: [core/coretest, internal/bdd]
 test_only_allowed_from: [internal/bdd]
 
 # Durable-execution vendors stay behind runtime implementations; flow code and

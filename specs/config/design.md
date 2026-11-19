@@ -63,7 +63,8 @@ no way to know which modules are port vendors, so whoever adds a port library
 to the config package extends that list in the same change and a reviewer
 checks it; an import the list does not name passes. `gate layering` reads
 production and test imports and build-excluded files in the gate's build context
-(Linux on CI), with `test_only` as the cross-layer test exemption (`ADR-0018`).
+(Linux on CI), with `test_only` (`core/coretest`, `internal/bdd`) as the
+cross-layer test exemption (`ADR-0018`).
 The standard library and small parsers are allowed.
 
 Keep `internal/config` free of every port implementation and of

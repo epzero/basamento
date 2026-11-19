@@ -32,8 +32,9 @@ set it.
 `gate layering` enforces `layering.yaml` on every module package: production
 imports, in-package and external test imports, and imports in files excluded by
 build constraints on the host that runs the gate (CI: linux/amd64, default tags).
-`test_only` packages may be imported only from `_test.go` files and from
-`internal/bdd` (`ADR-0018`). The success line is `layering: ok`.
+`test_only` (`core/coretest`, the whole `internal/bdd` tree) may be imported
+only from `_test.go` files and from packages under `internal/bdd` (`ADR-0018`).
+The success line is `layering: ok`.
 
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
 the **line** job above, and a flake hunt (repeated runs that look for

@@ -47,7 +47,8 @@ Ports are selected by URL in configuration (see `platform/platform.go`).
 
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The check
 covers production code, `_test.go` imports, and imports in build-tag-excluded
-files; `test_only` packages are the sole cross-layer test exemption (ADR-0018).
+files; `test_only` (`core/coretest`, all of `internal/bdd`) is the sole
+cross-layer test exemption (ADR-0018).
 The module map below is generated from it (an arrow means "may import"; arrows
 implied by longer paths are omitted). Build tooling (`tools/gate`,
 `internal/gate`, `internal/bdd`) is not shown; other product layers under
