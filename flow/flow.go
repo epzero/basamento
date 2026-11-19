@@ -7,7 +7,7 @@
 // every runtime with identical results (REQ-FLOW-*). See ADR-0003.
 //
 // Status: IR and compiler implemented (WP-L4-01); machine implemented in
-// flow/machine (WP-L4-02).
+// flow/machine (WP-L4-02); host implemented in flow/host (WP-L4-04).
 package flow
 
 import "encoding/json"
@@ -31,6 +31,10 @@ type StateSpec struct {
 
 // Node is one step of a flow.
 type Node struct {
+	// Name is the node's key in IR.Nodes. It is not part of the IR: the host
+	// fills it in when it passes a node to a NodeHandler, which otherwise
+	// could not tell two nodes of the same kind apart (ADR-0011).
+	Name  string          `json:"-"`
 	Kind  string          `json:"kind"`          // set|task|model|agent|tool|map|parallel|subflow|gate|wait
 	In    string          `json:"in,omitempty"`  // CEL or jq mapping from state to node input
 	Out   string          `json:"out,omitempty"` // state key receiving the node's update
