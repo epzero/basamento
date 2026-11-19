@@ -98,7 +98,7 @@ never a false rejection.
 `encoding/json` stores a field tagged `,string` as a JSON string holding the
 field's JSON literal; a string field is double-encoded. The generator gives
 the property a string schema whose pattern matches exactly the literals
-`encoding/json` writes, after following pointers:
+`encoding/json` writes, after following one unnamed pointer type:
 
 | field type | pattern |
 | --- | --- |
@@ -115,6 +115,16 @@ and the infinities fail the encoding outright, so no schema sees them.
 A pointer field tagged `,string` writes `null` when it is nil and the same
 literals when it is not, so its schema adds `null` to the string schema, as a
 pointer field does everywhere else.
+
+Only one unnamed pointer is followed, because that is the one level
+`encoding/json` looks through: the option is read against the element type of
+an unnamed pointer, while a named pointer type is read as the pointer itself
+and so is not a number, boolean or string. The option is therefore ignored on
+a named pointer type. For `type P *int`, a field `V P` tagged
+`json:"v,string"` encodes `{"v":3}` when it is not nil and `{"v":null}` when
+it is: the property keeps the ordinary pointer schema, `null` or the pointee's
+unquoted encoding, with no quoted-string pattern (REQ-SCHEMA-046,
+REQ-SCHEMA-047).
 
 ### Map keys
 
