@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -24,8 +23,15 @@ func TestReplayBacklogDistanceDuringBlockedReplayDeliver(t *testing.T) {
 	finishBlockedReplayAssert(t, live, wg, 3)
 }
 
+// replayBlockedFixture fills the buffer from the test goroutine and then starts a
+// second replay delivery. With nothing consuming, that sender can only be
+// blocked in its send (or not yet scheduled), so the snapshot below always sees
+// exactly one delivered message: no spin, no sleep, no hook.
 func replayBlockedFixture(t *testing.T, buf int, after, replayThrough uint64) (*liveSubscription, context.Context, *sync.WaitGroup) {
 	t.Helper()
+	if buf != 1 {
+		t.Fatalf("fixture needs a buffer of 1 to keep the second sender blocked, got %d", buf)
+	}
 	live := newLiveSubscription("run.r1.d", buf, after, replayThrough, func() {}, nil)
 	ctx := context.Background()
 	live.deliverReplay(ctx, platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("a")})
@@ -35,29 +41,19 @@ func replayBlockedFixture(t *testing.T, buf int, after, replayThrough uint64) (*
 		defer wg.Done()
 		live.deliverReplay(ctx, platform.Message{Subject: "run.r1.d", Seq: 2, Data: []byte("b")})
 	}()
-	waitChannelFull(t, live)
 	return live, ctx, &wg
 }
 
-func waitChannelFull(t *testing.T, live *liveSubscription) {
-	t.Helper()
-	for i := 0; i < 10000; i++ {
-		live.mu.Lock()
-		full := len(live.ch) == cap(live.ch)
-		live.mu.Unlock()
-		if full {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatal("channel not full while replay goroutine should be blocked")
-}
-
+// snapBacklogWhileBlocked asserts the state the snapshot relies on before taking
+// it: the buffer is full and only the first replay message was delivered.
 func snapBacklogWhileBlocked(t *testing.T, live *liveSubscription, snap func()) {
 	t.Helper()
-	waitChannelFull(t, live)
-	for i := 0; i < 500; i++ {
-		runtime.Gosched()
+	live.mu.Lock()
+	full := len(live.ch) == cap(live.ch)
+	delivered := live.replayDelivered
+	live.mu.Unlock()
+	if !full || delivered != 1 {
+		t.Fatalf("fixture is not blocked on a full buffer: full=%v delivered=%d", full, delivered)
 	}
 	snap()
 }
