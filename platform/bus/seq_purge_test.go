@@ -106,26 +106,34 @@ func TestPurgeSequenceBoundKeepsLaterPublish(t *testing.T) {
 	if _, err := st.Publish(ctx, subject, []byte("m1")); err != nil {
 		t.Fatal(err)
 	}
-	L, _ := st.LastSeq(ctx, subject)
-	late, err := st.Publish(ctx, subject, []byte("m2"))
+	L, err := st.LastSeq(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Purge(ctx, subject); err != nil {
+	late, err := st.Publish(ctx, subject, []byte("m2"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if late <= L {
 		t.Fatalf("late seq %d <= L %d", late, L)
 	}
-	last, err := st.LastSeq(ctx, subject)
+	if err := st.purgeThrough(ctx, subject, L); err != nil {
+		t.Fatal(err)
+	}
+	ch, err := st.Subscribe(ctx, subject, L)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last < late {
-		t.Fatalf("over-purge: last=%d late=%d", last, late)
+	m, ok := <-ch
+	if !ok {
+		t.Fatal("subscription closed early")
 	}
-	if last != late {
-		t.Fatalf("last=%d want late=%d", last, late)
+	if m.Seq != late || string(m.Data) != "m2" {
+		t.Fatalf("got seq %d data %q", m.Seq, m.Data)
+	}
+	last, err := st.LastSeq(ctx, subject)
+	if err != nil || last < late {
+		t.Fatalf("LastSeq=%d want >= %d err=%v", last, late, err)
 	}
 }
 
