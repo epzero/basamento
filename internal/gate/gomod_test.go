@@ -136,6 +136,39 @@ func TestParseGoModDirective(t *testing.T) {
 	}
 }
 
+func TestCheckSameGoModLineNonASCIIPath(t *testing.T) {
+	const mod = "module x\n\ngo 1.26.11\n"
+	const other = "module y\n\ngo 1.26.10\n"
+	root := gitRepo(t)
+	commitBytes(t, root, "go.mod", []byte(mod))
+	commitBytes(t, root, "nested/é/go.mod", []byte(other))
+	errs, err := CheckSameGoModLine(root)
+	if err != nil || len(errs) != 1 {
+		t.Fatalf("want mismatch on non-ASCII path: %v %v", errs, err)
+	}
+}
+
+func TestModuleRootsCoverEveryGoMod(t *testing.T) {
+	root := gitRepo(t)
+	commitBytes(t, root, "go.mod", []byte("module x\n\ngo 1.26.11\n"))
+	commitBytes(t, root, "runtime/temporal/embedded/go.mod", []byte("module x/e\n\ngo 1.26.11\n"))
+	roots, err := ModuleRoots(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs, err := VulnScopeErrors(root, roots)
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("ModuleRoots should cover every go.mod: %v %v", errs, err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("want 2 module roots, got %v", roots)
+	}
+	errs, err = VulnScopeErrors(root, []string{"."})
+	if err != nil || len(errs) != 1 {
+		t.Fatalf("want missing embedded root error: %v %v", errs, err)
+	}
+}
+
 func TestCheckSameGoModLine(t *testing.T) {
 	const mod = "module x\n\ngo 1.26.10\n"
 	root := gitRepo(t)

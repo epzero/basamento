@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -86,8 +86,9 @@ func ParseGoModDirective(content []byte) (GoModVersion, error) {
 }
 
 // PatchOnlyGoModBump reports whether head is a medium-tier patch-only bump of
-// base: both parse, share the same 1.M release line, head patch is greater,
-// and the files are byte-identical apart from that go line.
+// base: both parse, share the same 1.M release line, head patch is greater, and
+// the rest of each file matches aside from the single go 1.M.P line (no other
+// directive or body change; leading zeros in the patch are tolerated).
 func PatchOnlyGoModBump(base, head []byte) bool {
 	baseParsed, err := parseGoModFile(base)
 	if err != nil {
@@ -108,20 +109,70 @@ func PatchOnlyGoModBump(base, head []byte) bool {
 
 // CheckSameGoModLine returns errors when tracked go.mod files disagree on the
 // go directive or any line does not parse (ADR-0014).
-func CheckSameGoModLine(root string) ([]string, error) {
-	out, err := git(root, "ls-files")
+func trackedGoModFiles(root string) ([]string, error) {
+	paths, err := gitPathsUnquoted(root, "ls-files", "-z")
 	if err != nil {
 		return nil, err
 	}
 	var mods []string
-	for _, f := range strings.Split(out, "\n") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
+	for _, f := range paths {
 		if f == "go.mod" || strings.HasSuffix(f, "/go.mod") {
 			mods = append(mods, f)
 		}
+	}
+	sort.Strings(mods)
+	return mods, nil
+}
+
+// ModuleRoots lists the directory of each tracked go.mod (for govulncheck scans).
+func ModuleRoots(root string) ([]string, error) {
+	mods, err := trackedGoModFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var roots []string
+	for _, f := range mods {
+		dir := filepath.Dir(f)
+		if dir == "." {
+			dir = "."
+		}
+		if !seen[dir] {
+			seen[dir] = true
+			roots = append(roots, dir)
+		}
+	}
+	sort.Strings(roots)
+	return roots, nil
+}
+
+// VulnScopeErrors reports tracked go.mod trees missing from moduleRoots.
+func VulnScopeErrors(root string, moduleRoots []string) ([]string, error) {
+	mods, err := trackedGoModFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, r := range moduleRoots {
+		want[r] = true
+	}
+	var errs []string
+	for _, f := range mods {
+		dir := filepath.Dir(f)
+		if dir == "." {
+			dir = "."
+		}
+		if !want[dir] {
+			errs = append(errs, fmt.Sprintf("go.mod %s: module root %q is not scanned by govulncheck", f, dir))
+		}
+	}
+	return errs, nil
+}
+
+func CheckSameGoModLine(root string) ([]string, error) {
+	mods, err := trackedGoModFiles(root)
+	if err != nil {
+		return nil, err
 	}
 	if len(mods) == 0 {
 		return nil, nil
@@ -175,14 +226,4 @@ func modContentAtRef(root, ref, file string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	return b, true, nil
-}
-
-func gitBytes(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
 }

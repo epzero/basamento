@@ -93,12 +93,18 @@ func TestPlanReviewGoModTiers(t *testing.T) {
 			return strings.Replace(m, "go 1.26.10", "go 1.26.11", 1) + "tool example.com/tool\n"
 		}, "high"},
 		{"not a go.mod", "README.md", func(_ string) string { return "hi\n" }, "low"},
+		{"non-ASCII go.mod diverge", "nested/é/go.mod", func(m string) string {
+			return strings.Replace(m, "go 1.26.10", "go 1.26.11", 1) + "require z.com/w v1\n"
+		}, "high"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := seedReviewRepo(t)
 			commitBytes(t, root, "go.mod", []byte(mod))
 			commitBytes(t, root, "runtime/foo/go.mod", []byte(mod))
+			if tc.path == "nested/é/go.mod" {
+				commitBytes(t, root, tc.path, []byte(mod))
+			}
 			base := gitHead(t, root)
 
 			var body string

@@ -148,6 +148,21 @@ func isObjectID(s string) bool {
 	return true
 }
 
+// GoModPatchBumpConsistency reports when a go_mod_patch_bump glob is missing from tiers.high.
+func (r ReviewRules) GoModPatchBumpConsistency() []string {
+	high := map[string]bool{}
+	for _, g := range r.Tiers["high"] {
+		high[g] = true
+	}
+	var errs []string
+	for _, g := range r.GoModPatchBump {
+		if !high[g] {
+			errs = append(errs, fmt.Sprintf("review.yaml: go_mod_patch_bump %q must also appear under tiers.high", g))
+		}
+	}
+	return errs
+}
+
 func (r ReviewRules) goModPatchBumpApplies(file string) bool {
 	for _, g := range r.GoModPatchBump {
 		if globRegexp(g).MatchString(file) {
@@ -252,19 +267,9 @@ func ChangedFiles(root, base, head string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"diff", "--name-only", from}
+	args := []string{"diff", "--name-only", "-z", from}
 	if head != "" {
 		args = append(args, head)
 	}
-	out, err := git(root, args...)
-	if err != nil {
-		return nil, err
-	}
-	var files []string
-	for _, f := range strings.Split(out, "\n") {
-		if f = strings.TrimSpace(f); f != "" {
-			files = append(files, f)
-		}
-	}
-	return files, nil
+	return gitPathsUnquoted(root, args...)
 }
