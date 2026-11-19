@@ -199,6 +199,19 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    BUS-012-03:
+        hash: sha256:2b7d5989fd88b3b53ac83116abe3a9d3d1b20225a4a7a7ed714830dfd14a0248
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-012
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
     BUS-013-01:
         hash: sha256:112b2f2d4521c00e48f4f81d998d14b1a8abda2453d5e089dd14dfe86baf810b
         reqs:
@@ -522,5 +535,92 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'New behavior: a call with a cancelled context fails cancelled and one past its deadline fails timeout, storing nothing; already-cancelled context and an epoch deadline keep the gate deterministic; no data loss or contract change.'
         ref: https://github.com/epzero/basamento/pull/56
+        human:
+            status: pending
+    BUS-029-01:
+        hash: sha256:fba0392c219dfb9d14e5339548157dda1e7df55908268445f5a69103e1c8ccd1
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-029
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: '@security: credentials in the open URL are refused off loopback with an error that echoes neither the URL nor the host'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-030-01:
+        hash: sha256:d19df0d9144b95ef5747c115e259a7d15c16ecc8a7c5cd11846fc1639bfc47e4
+        reqs:
+            - REQ-BUS-030
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-030-02:
+        hash: sha256:b863bb9da0dcf0232b341280b0145f75b2c7c37ddd5b96c600d0db747c3fdaff
+        reqs:
+            - REQ-BUS-030
+        tier: P0
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: '@contract restored: the scenario guards shared operator assets and fixes the asset error detail, so the tier does not follow the tag history'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-030-03:
+        hash: sha256:142f76ab0a73b00c468ff8b7a72d85f77961210324a138b14eb3ca44b1182460
+        reqs:
+            - REQ-BUS-030
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-031-01:
+        hash: sha256:92d4871ede813a82a8840bc1d8759c7efc91d5c14e23763720407122877c739e
+        reqs:
+            - REQ-BUS-031
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-032-01:
+        hash: sha256:9d1546c4d75073dd20e5cfca17702da64b88aeb5dd8b650d583d8a0bd015a74d
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-032
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
+        human:
+            status: pending
+    BUS-032-02:
+        hash: sha256:a54e7ae234bfc8439e1f2a9a156e39c45213f6fecbb42df0979156c861733ed8
+        reqs:
+            - REQ-BUS-001
+            - REQ-BUS-032
+        tier: P2
+        author: claude-code:spec-author:8aaeb8
+        reviewer: opencode:spec-reviewer:26d51f
+        approved_at: "2026-11-19"
+        note: 'Round 3: design text and scenarios from the bus implementation review; no critical tag, no mapping or public-contract change'
+        ref: https://github.com/epzero/basamento/pull/64
         human:
             status: pending
