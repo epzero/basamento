@@ -25,28 +25,28 @@ import (
 )
 
 type blobWorld struct {
-	store      *blob.Store
-	altStore   *blob.Store
-	blob       platform.Blob
-	handler    http.Handler
-	handlerSrv *httptest.Server
-	s3         *s3sim.Server
-	locURL     string
-	dataDir    string
-	signKey    []byte
-	altSignKey []byte
-	maxTTL     time.Duration
-	content    map[string][]byte
-	lastErr    error
-	blobURL    string
-	httpResp   fetchResp
-	subdirRoot string
+	store        *blob.Store
+	altStore     *blob.Store
+	blob         platform.Blob
+	handler      http.Handler
+	handlerSrv   *httptest.Server
+	s3           *s3sim.Server
+	locURL       string
+	dataDir      string
+	signKey      []byte
+	altSignKey   []byte
+	maxTTL       time.Duration
+	content      map[string][]byte
+	lastErr      error
+	blobURL      string
+	httpResp     fetchResp
+	subdirRoot   string
 	backend      string
 	matrixID     string
 	scenarioName string
 	openErr      error
-	lastExists bool
-	hasExists  bool
+	lastExists   bool
+	hasExists    bool
 }
 
 type fetchResp struct {
@@ -152,7 +152,11 @@ func registerBlob(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
 		w := world(ctx).Blob
 		w.scenarioName = scn.Name
-		w.matrixID = matrixIDFromGodogScenario(scn)
+		var err error
+		w.matrixID, err = matrixIDFromGodogScenario(scn, w.backend)
+		if err != nil {
+			return ctx, err
+		}
 		return ctx, nil
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
