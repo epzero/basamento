@@ -333,6 +333,14 @@ func registerExpr(sc *godog.ScenarioContext) {
 		return exprMsgContains(ctx, name)
 	})
 
+	sc.Step(`^the error names "([^"]*)" and says the name is reserved$`, func(ctx context.Context, name string) error {
+		return exprMsgContains(ctx, name, "reserved")
+	})
+
+	sc.Step(`^the error names the reserved variable "([^"]*)"$`, func(ctx context.Context, name string) error {
+		return exprMsgContains(ctx, name, "reserved")
+	})
+
 	sc.Step(`^the error names the step limit (\d+)$`, func(ctx context.Context, limit int) error {
 		return exprMsgContains(ctx, strconv.Itoa(limit))
 	})

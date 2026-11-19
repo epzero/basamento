@@ -131,6 +131,12 @@ func (r *mappingRewriter) query(q *gojq.Query) error {
 		*q = *replacement
 		return r.query(q)
 	case gojq.OpAdd, gojq.OpSub, gojq.OpMul:
+		// A def in front of the operator belongs to this query node, and
+		// flattenArithmetic cannot walk past a node that carries it. Hoist the
+		// definitions onto the call built below; with them still here, the
+		// operands would be this same node and the walk would not terminate.
+		defs := q.FuncDefs
+		q.FuncDefs = nil
 		op, operands := flattenArithmetic(q)
 		for _, operand := range operands {
 			if err := r.query(operand); err != nil {
@@ -145,7 +151,7 @@ func (r *mappingRewriter) query(q *gojq.Query) error {
 			name = boundedMul
 		}
 		call := boundedChain(name, operands)
-		call.Meta, call.Imports, call.FuncDefs = q.Meta, q.Imports, q.FuncDefs
+		call.Meta, call.Imports, call.FuncDefs = q.Meta, q.Imports, defs
 		*q = *call
 		return nil
 	default:

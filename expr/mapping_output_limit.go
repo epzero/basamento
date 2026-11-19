@@ -34,6 +34,21 @@ func outputLimitError(limit int) error {
 	return mappingEvalErr(fmt.Sprintf("output over the output limit %d", limit))
 }
 
+// The sizing helpers return these two causes; the callers turn them into the
+// mapping errors: a value that is over the limit, or one that has no canonical
+// JSON form at all, is not blamed on the limit.
+var (
+	errOutputLimit = errors.New("output over the output limit")
+	errNoJSONForm  = errors.New("no JSON form")
+)
+
+func mappingSizeError(err error, limit int) error {
+	if errors.Is(err, errNoJSONForm) {
+		return mappingEvalErr("no JSON form")
+	}
+	return outputLimitError(limit)
+}
+
 // outputLimitCompilerOptions registers the bounded functions. The rewrite
 // above is the only caller: a mapping source cannot reach these names.
 func outputLimitCompilerOptions(limit int) []gojq.CompilerOption {
@@ -54,7 +69,7 @@ func outputLimitCompilerOptions(limit int) []gojq.CompilerOption {
 // value a mapping yields passes through it, top-level or inside a container.
 func measureMappingValue(v any, limit int) error {
 	if err := addJSONSize(v, new(int), limit); err != nil {
-		return outputLimitError(limit)
+		return mappingSizeError(err, limit)
 	}
 	return nil
 }
@@ -64,7 +79,7 @@ func boundedAddFunc(limit int) func(any, []any) any {
 		acc := args[0]
 		for _, next := range args[1:] {
 			if err := checkAddSize(acc, next, limit); err != nil {
-				return err
+				return mappingSizeError(err, limit)
 			}
 			acc = gojqFuncOpAdd(nil, acc, next)
 			if err, ok := acc.(error); ok {
@@ -99,7 +114,7 @@ func boundedMulFunc(limit int) func(any, []any) any {
 		acc := args[0]
 		for _, next := range args[1:] {
 			if err := checkMulSize(acc, next, limit); err != nil {
-				return err
+				return mappingSizeError(err, limit)
 			}
 			acc = gojqFuncOpMul(nil, acc, next)
 			if err, ok := acc.(error); ok {
@@ -153,22 +168,21 @@ func checkAddSize(l, r any, limit int) error {
 		if !ok {
 			return nil
 		}
-		switch {
-		case len(lv) == 0:
-			return addJSONSize(rv, &n, limit)
-		case len(rv) == 0:
-			return addJSONSize(lv, &n, limit)
+		// gojq's + on objects is a shallow, right-wins merge; the deep merge
+		// belongs to *, where checkMulSize sizes it.
+		size, over, err := addedObjectSize(lv, rv, limit)
+		if err != nil {
+			return err
 		}
-		size, over := mergedObjectSize(lv, rv, limit)
 		if over {
-			return outputLimitError(limit)
+			return errOutputLimit
 		}
 		n = size
 	default:
 		return nil
 	}
 	if n > limit {
-		return outputLimitError(limit)
+		return errOutputLimit
 	}
 	return nil
 }
@@ -191,12 +205,12 @@ func checkMulSize(l, r any, limit int) error {
 	if !lok || !rok {
 		return nil
 	}
-	size, over := mergedObjectSize(lv, rv, limit)
-	if over {
-		return outputLimitError(limit)
+	size, over, err := mergedObjectSize(lv, rv, limit)
+	if err != nil {
+		return err
 	}
-	if size > limit {
-		return outputLimitError(limit)
+	if over || size > limit {
+		return errOutputLimit
 	}
 	return nil
 }
@@ -209,7 +223,7 @@ func checkRepeatSize(s string, n float64, limit int) error {
 	body := stringJSONSize(s) - 2
 	size := int64(count)*int64(body) + 2
 	if size > int64(limit) {
-		return outputLimitError(limit)
+		return errOutputLimit
 	}
 	return nil
 }
@@ -267,7 +281,9 @@ func boundedImplodeFunc(limit int) func(any, []any) any {
 			if !ok {
 				return fmt.Errorf("implode cannot be applied to: %v", args[0])
 			}
-			if r < 0 || r > utf8.MaxRune {
+			// A surrogate is not a code point: WriteRune writes U+FFFD, three
+			// bytes, and RuneLen would count it as -1.
+			if r < 0 || r > utf8.MaxRune || (r >= 0xd800 && r <= 0xdfff) {
 				r = utf8.RuneError
 			}
 			size += utf8.RuneLen(rune(r))
@@ -361,7 +377,7 @@ func mappingToString(v any) string {
 // limit. A negative limit means no bound.
 func addJSONSize(v any, size *int, limit int) error {
 	if limit >= 0 && *size > limit {
-		return errors.New("output over the output limit")
+		return errOutputLimit
 	}
 	switch t := v.(type) {
 	case nil:
@@ -396,7 +412,7 @@ func addJSONSize(v any, size *int, limit int) error {
 				return err
 			}
 			if limit >= 0 && *size > limit {
-				return errors.New("output over the output limit")
+				return errOutputLimit
 			}
 		}
 		*size++ // ]
@@ -416,15 +432,15 @@ func addJSONSize(v any, size *int, limit int) error {
 				return err
 			}
 			if limit >= 0 && *size > limit {
-				return errors.New("output over the output limit")
+				return errOutputLimit
 			}
 		}
 		*size++ // }
 	default:
-		return fmt.Errorf("no JSON form")
+		return errNoJSONForm
 	}
 	if limit >= 0 && *size > limit {
-		return errors.New("output over the output limit")
+		return errOutputLimit
 	}
 	return nil
 }
@@ -439,77 +455,134 @@ func exactJSONSize(v any) (int, error) {
 }
 
 // stringJSONSize is the size of s encoded as an RFC 8785 string: its UTF-8
-// bytes, escapes included, and two quotes.
+// bytes, escapes included, and two quotes. An invalid byte has no UTF-8 form;
+// the canonicalizer writes U+FFFD in its place, three bytes, so it counts as
+// three rather than as one.
 func stringJSONSize(s string) int {
 	n := 2
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			n += 3
+			i++
+			continue
+		}
 		switch {
-		case c == '"' || c == '\\':
+		case r == '"' || r == '\\':
 			n += 2
-		case c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t':
+		case r == '\b' || r == '\f' || r == '\n' || r == '\r' || r == '\t':
 			n += 2
-		case c < 0x20:
+		case r < 0x20:
 			n += 6
 		default:
-			n++
+			n += size
 		}
+		i += size
 	}
 	return n
+}
+
+// objectSizer accumulates the RFC 8785 size of the members of one object,
+// separators included. Every member goes through addJSONSize, so the limit and
+// a value with no JSON form are reported the same way as for any other value.
+type objectSizer struct {
+	size  int
+	first bool
+	limit int
+}
+
+func newObjectSizer(limit int) *objectSizer {
+	return &objectSizer{size: 2, first: true, limit: limit} // braces
+}
+
+func (s *objectSizer) add(k string, v any) error {
+	if !s.first {
+		s.size++
+	}
+	s.first = false
+	s.size += stringJSONSize(k) + 1
+	return addJSONSize(v, &s.size, s.limit)
+}
+
+func (s *objectSizer) addSized(k string, n int) bool {
+	if !s.first {
+		s.size++
+	}
+	s.first = false
+	s.size += stringJSONSize(k) + 1 + n
+	return s.limit >= 0 && s.size > s.limit
+}
+
+func (s *objectSizer) over() bool { return s.limit >= 0 && s.size > s.limit }
+
+// addedObjectSize is the size of the object gojq's + produces: a shallow,
+// right-wins merge. It is exact, so the pre-check never rejects a result that
+// fits; mergedObjectSize keeps the deep merge of *.
+func addedObjectSize(a, b map[string]any, limit int) (int, bool, error) {
+	s := newObjectSizer(limit)
+	for _, k := range sortedStringKeys(a) {
+		if _, overwritten := b[k]; overwritten {
+			continue
+		}
+		if err := s.add(k, a[k]); err != nil {
+			return 0, false, err
+		}
+		if s.over() {
+			return 0, true, nil
+		}
+	}
+	for _, k := range sortedStringKeys(b) {
+		if err := s.add(k, b[k]); err != nil {
+			return 0, false, err
+		}
+		if s.over() {
+			return 0, true, nil
+		}
+	}
+	return s.size, s.over(), nil
 }
 
 // mergedObjectSize is the size of the object gojq's deep merge produces,
 // computed without building it.
-func mergedObjectSize(a, b map[string]any, limit int) (int, bool) {
-	size := 2
-	first := true
-	for k, va := range a {
-		if !first {
-			size++
-		}
-		first = false
-		size += stringJSONSize(k) + 1
-		if vb, ok := b[k]; ok {
-			if ma, ok := va.(map[string]any); ok {
-				if mb, ok := vb.(map[string]any); ok {
-					n, over := mergedObjectSize(ma, mb, limit)
-					if over {
-						return 0, true
-					}
-					size += n
-					continue
+func mergedObjectSize(a, b map[string]any, limit int) (int, bool, error) {
+	s := newObjectSizer(limit)
+	for _, k := range sortedStringKeys(a) {
+		va := a[k]
+		if vb, inB := b[k]; inB {
+			ma, aok := va.(map[string]any)
+			mb, bok := vb.(map[string]any)
+			if aok && bok {
+				n, over, err := mergedObjectSize(ma, mb, limit)
+				if err != nil {
+					return 0, false, err
 				}
+				if over || s.addSized(k, n) {
+					return 0, true, nil
+				}
+				continue
 			}
-			size += objectValueSize(vb)
+			if err := s.add(k, vb); err != nil {
+				return 0, false, err
+			}
+		} else if err := s.add(k, va); err != nil {
+			return 0, false, err
+		}
+		if s.over() {
+			return 0, true, nil
+		}
+	}
+	for _, k := range sortedStringKeys(b) {
+		if _, inA := a[k]; inA {
 			continue
 		}
-		size += objectValueSize(va)
-		if limit >= 0 && size > limit {
-			return 0, true
+		if err := s.add(k, b[k]); err != nil {
+			return 0, false, err
+		}
+		if s.over() {
+			return 0, true, nil
 		}
 	}
-	for k, vb := range b {
-		if _, ok := a[k]; ok {
-			continue
-		}
-		if !first {
-			size++
-		}
-		first = false
-		size += stringJSONSize(k) + 1 + objectValueSize(vb)
-		if limit >= 0 && size > limit {
-			return 0, true
-		}
-	}
-	return size, limit >= 0 && size > limit
-}
-
-func objectValueSize(v any) int {
-	n, err := exactJSONSize(v)
-	if err != nil {
-		return 0
-	}
-	return n
+	return s.size, s.over(), nil
 }
 
 // formatJSONFloat is the ECMAScript Number::toString form RFC 8785 requires,

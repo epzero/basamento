@@ -152,6 +152,55 @@ func TestRootChainedRefObjectFields(t *testing.T) {
 	}
 }
 
+// TestRootArrayOfInlineObjectFields pins that a root array whose items are an
+// inline object builds the element type from the items document, not from the
+// array document: design.md §2 maps it to list(object{v:int}).
+func TestRootArrayOfInlineObjectFields(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type": "array",
+		"items": {"type": "object", "properties": {"v": {"type": "integer"}}, "required": ["v"]}
+	}`)
+	env, err := NewEnv([]Var{{Name: "xs", Schema: schema}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := env.Compile(`xs[0].v`, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	res, err := p.Eval(map[string]any{"xs": []any{map[string]any{"v": int64(7)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != int64(7) {
+		t.Fatalf("got %v want 7", res)
+	}
+}
+
+// TestRootNestedArrayOfInlineObjectFields pins the same normalization through
+// nested inline arrays.
+func TestRootNestedArrayOfInlineObjectFields(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type": "array",
+		"items": {"type": "array", "items": {"type": "object", "properties": {"v": {"type": "integer"}}}}
+	}`)
+	env, err := NewEnv([]Var{{Name: "xs", Schema: schema}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := env.Compile(`xs[0][0].v`, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	res, err := p.Eval(map[string]any{"xs": []any{[]any{map[string]any{"v": int64(7)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != int64(7) {
+		t.Fatalf("got %v want 7", res)
+	}
+}
+
 // TestRootArrayOfObjectRefFields pins that a root $ref to an array of objects
 // builds the element object type with its fields.
 func TestRootArrayOfObjectRefFields(t *testing.T) {

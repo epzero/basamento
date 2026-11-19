@@ -185,8 +185,9 @@ type mapKey struct {
 	u    uint64
 	d    float64
 	s    string
-	// unordered sorts keys of keyUnordered deterministically; it is not
-	// observable because such a map cannot be iterated.
+	// unordered sorts keys of keyUnordered deterministically. It is only a
+	// sort key, never an identity: distinct values can render alike, so
+	// mapKeysEqual compares these keys by CEL equality instead.
 	unordered string
 	key       ref.Val
 }
@@ -268,29 +269,98 @@ type sortedAnyMap struct {
 	entries []sortedEntry
 }
 
-// mapKeysEqual compares map keys within one kind only. Keys of different
-// kinds never compare equal (REQ-EXPR-021): an int key and a double key are
-// separate entries, so the mixed ladder cannot make one shadow the other.
+// mapKeysEqual is key identity for lookup, membership and map equality
+// (REQ-EXPR-021). An int, uint or double key and a key of another of those
+// kinds with the same value are the same key; the conversion is lossless, so a
+// double key of 1.5 or a uint beyond int64 matches no int. A key of no order is
+// compared by CEL equality, not by the display string that only orders it.
 func mapKeysEqual(a, b mapKey) bool {
-	if a.kind != b.kind {
-		return false
+	if a.kind == b.kind {
+		switch a.kind {
+		case keyBool:
+			return a.b == b.b
+		case keyInt:
+			return a.i == b.i
+		case keyUint:
+			return a.u == b.u
+		case keyDouble:
+			return a.d == b.d
+		case keyString:
+			return a.s == b.s
+		case keyUnordered:
+			if a.key == nil || b.key == nil {
+				return false
+			}
+			return a.key.Equal(b.key) == types.True
+		default:
+			return false
+		}
 	}
-	switch a.kind {
-	case keyBool:
-		return a.b == b.b
-	case keyInt:
-		return a.i == b.i
-	case keyUint:
-		return a.u == b.u
-	case keyDouble:
-		return a.d == b.d
-	case keyString:
-		return a.s == b.s
-	case keyUnordered:
-		return a.unordered == b.unordered
+	equal, numeric := numericKeysEqual(a, b)
+	return numeric && equal
+}
+
+// numericKeysEqual compares keys of the three numeric kinds, in either
+// direction, when the conversion between them is lossless.
+func numericKeysEqual(a, b mapKey) (equal, numeric bool) {
+	switch {
+	case a.kind == keyInt && b.kind == keyUint:
+		u, ok := intToUintLossless(a.i)
+		return ok && u == b.u, true
+	case a.kind == keyUint && b.kind == keyInt:
+		i, ok := uintToIntLossless(a.u)
+		return ok && i == b.i, true
+	case a.kind == keyDouble && b.kind == keyInt:
+		i, ok := doubleToIntLossless(a.d)
+		return ok && i == b.i, true
+	case a.kind == keyInt && b.kind == keyDouble:
+		i, ok := doubleToIntLossless(b.d)
+		return ok && i == a.i, true
+	case a.kind == keyDouble && b.kind == keyUint:
+		u, ok := doubleToUintLossless(a.d)
+		return ok && u == b.u, true
+	case a.kind == keyUint && b.kind == keyDouble:
+		u, ok := doubleToUintLossless(b.d)
+		return ok && u == a.u, true
 	default:
-		return false
+		return false, false
 	}
+}
+
+func intToUintLossless(i int64) (uint64, bool) {
+	if i < 0 {
+		return 0, false
+	}
+	return uint64(i), true
+}
+
+func uintToIntLossless(u uint64) (int64, bool) {
+	if u > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(u), true
+}
+
+func doubleToIntLossless(f float64) (int64, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < -0x1p63 || f >= 0x1p63 {
+		return 0, false
+	}
+	i := int64(f)
+	if float64(i) != f {
+		return 0, false
+	}
+	return i, true
+}
+
+func doubleToUintLossless(f float64) (uint64, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f >= 0x1p64 {
+		return 0, false
+	}
+	u := uint64(f)
+	if float64(u) != f {
+		return 0, false
+	}
+	return u, true
 }
 
 func nativeAnyMapEntries(a *sortedAdapter, m map[any]any) ([]sortedEntry, error) {
@@ -322,7 +392,9 @@ func nativeMapEntries(a *sortedAdapter, rv reflect.Value) ([]sortedEntry, error)
 }
 
 func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMap {
-	sort.Slice(entries, func(i, j int) bool {
+	// Stable: keys of no order share one display sort key, and a map holding
+	// one cannot be iterated, so their relative order only has to stay fixed.
+	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].key.less(entries[j].key)
 	})
 	return &sortedAnyMap{adapter: adapter, entries: entries}
@@ -446,17 +518,41 @@ func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
 			return types.Bool(false)
 		}
 		// Keys can sort into different positions when their kinds differ
-		// (int < uint < double), so match by lookup, not by index.
+		// (int < uint < double), so match by key, not by index. Each right
+		// entry is consumed once: a lookup that left it matchable would let
+		// two left keys share one right entry, so two different key sets could
+		// compare equal.
+		used := make([]bool, len(ov.entries))
 		for _, e := range m.entries {
-			v, found := ov.Find(e.key.key)
-			if !found || e.val.Equal(v) != types.True {
+			match := consumeMatchingEntry(ov.entries, used, e.key)
+			if match < 0 || e.val.Equal(ov.entries[match].val) != types.True {
 				return types.Bool(false)
 			}
+			used[match] = true
 		}
 		return types.Bool(true)
 	default:
 		return types.Bool(false)
 	}
+}
+
+// consumeMatchingEntry returns the index of the first unused entry whose key
+// equals key, preferring one of the same kind, or -1. Callers mark it used, so
+// two left keys can never share one right entry.
+func consumeMatchingEntry(entries []sortedEntry, used []bool, key mapKey) int {
+	for i, oe := range entries {
+		if used[i] || oe.key.kind != key.kind || !mapKeysEqual(key, oe.key) {
+			continue
+		}
+		return i
+	}
+	for i, oe := range entries {
+		if used[i] || !mapKeysEqual(key, oe.key) {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 func (m *sortedAnyMap) Type() ref.Type {
@@ -474,6 +570,14 @@ func (m *sortedAnyMap) Find(key ref.Val) (ref.Val, bool) {
 	mk, ok := classifyMapKey(key)
 	if !ok {
 		return types.NewErr("no such key"), false
+	}
+	// A key of the same kind wins over a numerically equal key of another
+	// kind, as in stock cel-go: a literal can hold both although they are the
+	// same key (REQ-EXPR-021).
+	for _, e := range m.entries {
+		if e.key.kind == mk.kind && mapKeysEqual(e.key, mk) {
+			return e.val, true
+		}
 	}
 	for _, e := range m.entries {
 		if mapKeysEqual(e.key, mk) {

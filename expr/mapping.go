@@ -22,8 +22,12 @@ func WithStepLimit(limit uint64) MappingOption {
 }
 
 // WithOutputLimit sets the output limit in RFC 8785 bytes (default 1_048_576).
+// The limit must be positive: there is no way to disable it.
 func WithOutputLimit(limit int) MappingOption {
 	return func(m *Mapping) error {
+		if limit <= 0 {
+			return fmt.Errorf("output limit %d must be positive", limit)
+		}
 		m.outputLimit = limit
 		return nil
 	}
@@ -52,7 +56,7 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 	}
 	for _, o := range opts {
 		if err := o(m); err != nil {
-			return nil, err
+			return nil, mappingCompileErr(src, err.Error())
 		}
 	}
 	for _, v := range varNames {
@@ -194,6 +198,8 @@ func mapGoJQCause(msg string) string {
 		return "mapping produced more than one value"
 	case strings.Contains(msg, "output over the output limit"):
 		return "output over the output limit"
+	case strings.Contains(msg, "no JSON form"):
+		return "no JSON form"
 	case strings.Contains(msg, "division by zero"):
 		return "division by zero"
 	case strings.Contains(strings.ToLower(msg), "overflow"):
