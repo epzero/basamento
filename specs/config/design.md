@@ -13,44 +13,22 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 
 | Package | Role | Owned by |
 | --- | --- | --- |
-| `internal/config` | load, validate, effective report, schema of known keys | WP-L1-05 |
+| `internal/config` | load, validate, effective report, schema of known keys, and the port-agnostic serve lifecycle (`serve.go`) | WP-L1-05 |
 | `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
 
-`internal/gate/layering.go` fails the gate for every package `layering.yaml`
-does not assign to a layer (`package not assigned to a layer in
-layering.yaml`). `layering.yaml` has no line for `internal/config` today, so
-`gate layering` fails as soon as the package exists with the current graph:
-the statement that the current graph needs no change is not true. Before
-WP-L1-05 is implemented, a prerequisite move adds `internal/config: [core]`
-to `layering.yaml`, through its own ADR and layering pull request (changing
-the graph needs an ADR, AGENTS.md). Until that lands, the implementer does
-not create `internal/config`.
+`layering.yaml` assigns `internal/config` the layer `[core]` and a
+`deny_external` list for the port vendor families; `cmd/kit` and
+`internal/bdd` may import it (ADR-0016). The package imports `core` and the
+standard library only. It returns validated values and lets `cmd/kit` import
+the port implementations.
 
-The same prerequisite move lets `cmd/kit` and `internal/bdd` import
-`internal/config`: the `layers` entry is the only place `internal/gate/layering.go`
-reads what a layer may import (it forbids an import only when the imported
-layer is neither the importing layer nor in its list), so their existing
-lines each gain `internal`, named with the top-level package on purpose.
-Every `layers` value names a layer, so no value may say `internal/config`
-(that exact key would be a layer that `deny_external` cannot attach to), and
-two layers in `internal/` (`internal/bdd`, `internal/gate`) outside a shared
-enclosing layer make the whole `internal` directory the only entry that lets
-`internal/bdd` reach `internal/config`. As a consequence `cmd/kit`,
-`internal/bdd`, `internal/gate` and `tools/gate` (whose list names
-`internal/gate`) may each import any nested package under `internal/` that
-`layers` does not name, and `internal/gate` itself may now import the
-repository's public packages (`core`, `platform`, …). `internal/gate` and
-`internal/bdd` stay layers of their own and keep their current lists,
-because the longest match wins. Keep untrusted code out of `internal/`: such
-a package is importable by those four layers without another graph change.
-
-Keep `internal/config` free of every port implementation and of
-`go.temporal.io/`: it returns validated values and lets `cmd/kit` import the
-implementations, and it imports `core` only. `cmd/kit` may already import
-`platform` and `runtime`; with the prerequisite move it also imports
-`internal/config`.
+`serve.go` holds the part of `kit serve` that does not know a port: it opens
+the ports it is given in order, binds the listener, prints the ready line and
+drains requests on shutdown. `cmd/kit` supplies the openers; the component
+suite supplies fakes and a timer, so `CONFIG-023-01` and `CONFIG-024-01` drive
+the same code as the binary without a sleep.
 
 ## 2. Keys, types and defaults
 

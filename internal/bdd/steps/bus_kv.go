@@ -3,6 +3,9 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -362,12 +365,60 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return nil
 	})
 
+	sc.Step(`^the embedded bus is opened$`, func(ctx context.Context) error {
+		return world(ctx).Bus.ensureOpen(ctx)
+	})
+	sc.Step(`^the open succeeds$`, func(ctx context.Context) error {
+		if err := world(ctx).Bus.lastErr; err != nil {
+			return err
+		}
+		return nil
+	})
+	sc.Step(`^the store directory of the embedded data directory has mode "([^"]*)"$`, func(ctx context.Context, mode string) error {
+		w := world(ctx).Bus
+		if w.dataDir == "" {
+			dir, err := os.MkdirTemp("", "bus-embed-*")
+			if err != nil {
+				return err
+			}
+			w.dataDir = dir
+		}
+		storeDir := filepath.Join(w.dataDir, "nats")
+		if err := os.MkdirAll(storeDir, 0o755); err != nil {
+			return err
+		}
+		perm, err := strconv.ParseUint(mode, 8, 32)
+		if err != nil {
+			return err
+		}
+		return os.Chmod(storeDir, os.FileMode(perm))
+	})
+	sc.Step(`^the store directory has mode "([^"]*)"$`, func(ctx context.Context, mode string) error {
+		w := world(ctx).Bus
+		info, err := os.Stat(filepath.Join(w.dataDir, "nats"))
+		if err != nil {
+			return err
+		}
+		if got := fmt.Sprintf("%04o", info.Mode().Perm()); got != mode {
+			return fmt.Errorf("store directory mode = %s, want %s", got, mode)
+		}
+		return nil
+	})
+
 	sc.Step(`^(.+?) pass(?:es)?$`, func(ctx context.Context, raw string) error {
 		d, err := parseDurationPass(raw)
 		if err != nil {
 			return err
 		}
 		world(ctx).Core.clock.Advance(d)
+		// A component server times its shutdown drain from the same frozen
+		// clock; firing its timer here is what "the seconds pass" means.
+		if w := world(ctx).Config; w.after != nil {
+			select {
+			case w.after <- world(ctx).Core.clock.Now():
+			default:
+			}
+		}
 		return nil
 	})
 }

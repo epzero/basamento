@@ -410,22 +410,35 @@ func parseDurationPass(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	s = strings.TrimSuffix(s, " passes")
 	s = strings.TrimSuffix(s, " pass")
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
 	fields := strings.Fields(s)
-	if len(fields) == 2 {
-		n, err := strconv.Atoi(fields[0])
+	if len(fields) == 0 || len(fields)%2 != 0 {
+		return 0, fmt.Errorf("bad duration %q", s)
+	}
+	var total time.Duration
+	for i := 0; i < len(fields); i += 2 {
+		n, err := strconv.Atoi(fields[i])
 		if err != nil {
 			return 0, err
 		}
-		switch fields[1] {
-		case "millisecond", "milliseconds":
-			return time.Duration(n) * time.Millisecond, nil
-		case "second", "seconds":
-			return time.Duration(n) * time.Second, nil
-		case "day", "days":
-			return time.Duration(n) * 24 * time.Hour, nil
+		switch {
+		case strings.HasPrefix(fields[i+1], "millisecond"):
+			total += time.Duration(n) * time.Millisecond
+		case strings.HasPrefix(fields[i+1], "second"):
+			total += time.Duration(n) * time.Second
+		case strings.HasPrefix(fields[i+1], "minute"):
+			total += time.Duration(n) * time.Minute
+		case strings.HasPrefix(fields[i+1], "hour"):
+			total += time.Duration(n) * time.Hour
+		case strings.HasPrefix(fields[i+1], "day"):
+			total += time.Duration(n) * 24 * time.Hour
+		default:
+			return 0, fmt.Errorf("unknown unit %q", fields[i+1])
 		}
 	}
-	return time.ParseDuration(s)
+	return total, nil
 }
 
 func (w *busWorld) stopServer() {

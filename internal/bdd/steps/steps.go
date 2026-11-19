@@ -23,6 +23,7 @@ type World struct {
 	Blob    *blobWorld
 	Bus     *busWorld
 	Secrets *secretsWorld
+	Config  *configWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -37,6 +38,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Blob:    newBlobWorld(),
 			Bus:     newBusWorld(),
 			Secrets: newSecretsWorld(),
+			Config:  newConfigWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -45,8 +47,14 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlob(sc)
 	registerBus(sc)
 	registerSecrets(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
 	registerOpeningSteps(sc)
 	registerSharedSteps(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
