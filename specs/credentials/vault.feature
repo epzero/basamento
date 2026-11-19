@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: Credential values
   A tenant's vault holds named secrets. A value is put, replaced and deleted,
   and it is never read back: a caller holds a `cred://` reference and resolves

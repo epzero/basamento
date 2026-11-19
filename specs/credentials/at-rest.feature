@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: Credential storage at rest
   A value is stored only as ciphertext produced by the Secrets port. The
   store keeps no plaintext, survives a restart, refuses a stored row it

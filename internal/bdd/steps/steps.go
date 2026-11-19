@@ -6,18 +6,22 @@ package steps
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cucumber/godog"
+
+	"github.com/epzero/basamento/core"
 )
 
 type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core    *coreWorld
-	SQL     *sqlWorld
-	Prompt  *promptWorld
-	Secrets *secretsWorld
+	Core        *coreWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Secrets     *secretsWorld
+	Credentials *credentialsWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -34,4 +38,29 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerSecrets(sc)
+	registerCredentials(sc)
+	registerShared(sc)
+}
+
+// registerShared holds phrases used by more than one domain. The SQL store and
+// the Secrets port both report an open failure with the same phrase; one
+// handler reads whichever domain opened in the scenario.
+func registerShared(sc *godog.ScenarioContext) {
+	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		w := world(ctx)
+		var err error
+		if w.SQL != nil {
+			err = w.SQL.openErr
+		}
+		if err == nil && w.Secrets != nil {
+			err = w.Secrets.lastErr
+		}
+		if err == nil {
+			return fmt.Errorf("opening succeeded, want %s", code)
+		}
+		if got := core.CodeOf(err); string(got) != code {
+			return fmt.Errorf("got code %s, want %s: %v", got, code, err)
+		}
+		return nil
+	})
 }
