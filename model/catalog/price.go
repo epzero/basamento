@@ -71,20 +71,36 @@ func (c *Catalog) evalCondition(src, modelID string, params json.RawMessage, usa
 	return ok, nil
 }
 
-func validateUsage(usage model.Usage) error {
+func validateUsage(modelID string, usage model.Usage) error {
+	if usage.InputTokens < 0 {
+		return negativeUsageField(modelID, "input_tokens")
+	}
+	if usage.OutputTokens < 0 {
+		return negativeUsageField(modelID, "output_tokens")
+	}
+	if usage.CachedTokens < 0 {
+		return negativeUsageField(modelID, "cached_tokens")
+	}
+	if usage.ReasoningTokens < 0 {
+		return negativeUsageField(modelID, "reasoning_tokens")
+	}
 	if usage.CachedTokens > usage.InputTokens {
 		return core.NewError(core.CodeInvalidArgument, "cached tokens exceed input tokens", nil)
 	}
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CachedTokens < 0 || usage.ReasoningTokens < 0 {
-		return core.NewError(core.CodeInvalidArgument, "usage token counts must not be negative", nil)
-	}
 	return nil
+}
+
+func negativeUsageField(modelID, field string) error {
+	return core.NewError(core.CodeInvalidArgument,
+		fmt.Sprintf("model %q: usage %s must not be negative", modelID, field),
+		map[string]any{"model": modelID, "field": field})
 }
 
 func ensureNonNegativeAmount(modelID string, amount int64) error {
 	if amount < 0 {
 		return core.NewError(core.CodeInvalidArgument,
-			fmt.Sprintf("price model %q: amount must not be negative", modelID), nil)
+			fmt.Sprintf("price model %q: amount must not be negative", modelID),
+			map[string]any{"model": modelID})
 	}
 	return nil
 }
@@ -94,7 +110,7 @@ func ensureNonNegativeAmount(modelID string, amount int64) error {
 func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params json.RawMessage, usage model.Usage, rates Rates, at time.Time, tenant core.TenantID) (int64, error) {
 	// Token usage is checked before any formula, the default one or a model's
 	// own, so bad provider data cannot turn into a credit (REQ-MODEL-082).
-	if err := validateUsage(usage); err != nil {
+	if err := validateUsage(modelID, usage); err != nil {
 		return 0, err
 	}
 	formula := exprSource(entry.Formula)

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,25 @@ func TestSnapshotBlockScalarFormulaPrices(t *testing.T) {
 	}
 	if got != 2000 {
 		t.Fatalf("estimate = %d, want 2000", got)
+	}
+}
+
+func TestParseSnapshotNegativeRateCarriesDetails(t *testing.T) {
+	raw := []byte(`sim-chat:
+  rules:
+    - rates:
+        cached: -1
+`)
+	_, err := parseSnapshot(raw)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code=%s err=%v", core.CodeOf(err), err)
+	}
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		t.Fatalf("not core.Error: %v", err)
+	}
+	if pe.Details["model"] != "sim-chat" || pe.Details["rate"] != "cached" {
+		t.Fatalf("details=%v", pe.Details)
 	}
 }
 

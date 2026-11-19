@@ -39,13 +39,20 @@ var pricingVars = []expr.Var{
 	{Name: "rates", Schema: json.RawMessage(`{"type":"object","additionalProperties":{"type":"integer"}}`)},
 }
 
-// New returns a catalog with the shipped price snapshot loaded. The clock is
-// read when a call starts and recorded with its quote.
+// New returns a catalog with the shipped price snapshot embedded in the
+// binary. The clock is read when a call starts and recorded with its quote.
 func New(clock core.Clock) (*Catalog, error) {
+	return NewWithSnapshot(clock, snapshotYAML)
+}
+
+// NewWithSnapshot returns a catalog whose snapshot layer is snapshotYAML
+// instead of the bytes embedded in the binary. A deployment build may pass its
+// own generated snapshot at startup.
+func NewWithSnapshot(clock core.Clock, snapshotYAML []byte) (*Catalog, error) {
 	if clock == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "catalog needs a clock", nil)
 	}
-	snapshot, err := loadSnapshot()
+	snapshot, err := parseSnapshot(snapshotYAML)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +211,7 @@ func (c *Catalog) Start(ctx context.Context, req Request) (Quote, error) {
 		return Quote{}, unsupportedPrice(req.Model)
 	}
 	usage := model.Usage{InputTokens: req.InputTokens, OutputTokens: req.OutputLimit}
-	if err := validateUsage(usage); err != nil {
+	if err := validateUsage(req.Model, usage); err != nil {
 		return Quote{}, err
 	}
 	rule, err := c.chooseRule(entry, req.Model, req.Params, usage, at, tenant)
@@ -250,7 +257,7 @@ func (c *Catalog) Settle(q Quote, usage model.Usage) (Charge, error) {
 	if !q.pinned.entry.valid() {
 		return Charge{}, core.NewError(core.CodeInvalidArgument, "quote was not produced by Start", nil)
 	}
-	if err := validateUsage(usage); err != nil {
+	if err := validateUsage(q.Model, usage); err != nil {
 		return Charge{}, err
 	}
 	rule, err := c.chooseRule(q.pinned.entry, q.Model, q.pinned.params, usage, q.pinned.at, q.pinned.tenant)
@@ -302,12 +309,10 @@ func internalError(what string, err error) error {
 	return e
 }
 
-func invalidArgument(what string, err error) error {
-	e := core.NewError(core.CodeInvalidArgument, what, nil)
+func amountError(modelID string, err error) error {
+	e := core.NewError(core.CodeInvalidArgument,
+		fmt.Sprintf("price model %q: %v", modelID, err),
+		map[string]any{"model": modelID})
 	e.Cause = err
 	return e
-}
-
-func amountError(modelID string, err error) error {
-	return invalidArgument(fmt.Sprintf("price model %q: %v", modelID, err), err)
 }

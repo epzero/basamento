@@ -18,10 +18,6 @@ import (
 //go:embed snapshot.yaml
 var snapshotYAML []byte
 
-func loadSnapshot() (map[string]Price, error) {
-	return parseSnapshot(snapshotYAML)
-}
-
 // parseSnapshot loads a price snapshot from YAML. An empty document or one
 // that holds only comments is an empty table with no entries.
 func parseSnapshot(data []byte) (map[string]Price, error) {

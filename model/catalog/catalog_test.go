@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -151,6 +152,51 @@ func TestWhenWithSurroundingWhitespaceSelectsRule(t *testing.T) {
 	}
 	if charge.MilliPoints != 1000 {
 		t.Fatalf("charge = %d, want 1000", charge.MilliPoints)
+	}
+}
+
+func TestNegativeRateErrorCarriesDetails(t *testing.T) {
+	c, _ := newCatalog(t)
+	err := c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": -1}}}})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code=%s err=%v", core.CodeOf(err), err)
+	}
+	assertErrorDetail(t, err, "model", "sim-chat")
+	assertErrorDetail(t, err, "rate", "input")
+}
+
+func TestNegativeUsageFieldErrorCarriesDetails(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens"})
+	_, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: -1, OutputLimit: 0})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code=%s err=%v", core.CodeOf(err), err)
+	}
+	assertErrorDetail(t, err, "model", "sim-chat")
+	assertErrorDetail(t, err, "field", "input_tokens")
+}
+
+func TestFormulaNonWholeDoubleErrorNamesModel(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "double(usage.input_tokens) * 0.145"})
+	_, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 100, OutputLimit: 0})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code=%s err=%v", core.CodeOf(err), err)
+	}
+	assertErrorDetail(t, err, "model", "sim-chat")
+}
+
+func assertErrorDetail(t *testing.T, err error, key, want string) {
+	t.Helper()
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		t.Fatalf("not core.Error: %v", err)
+	}
+	got, _ := pe.Details[key].(string)
+	if got != want {
+		t.Fatalf("detail %q = %q, want %q (%v)", key, got, want, err)
 	}
 }
 

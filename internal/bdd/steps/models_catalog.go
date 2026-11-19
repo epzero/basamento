@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -31,6 +32,10 @@ type catalogWorld struct {
 	quotes   map[string]catalog.Quote
 	charges  map[string]catalog.Charge
 	lastErr  error
+
+	setPriceErr  error
+	loadErr      error
+	snapshotYAML []byte
 }
 
 func newCatalogWorld() *catalogWorld {
@@ -368,6 +373,143 @@ func registerCatalog(sc *godog.ScenarioContext) {
 		world(ctx).Core.clock = coretest.NewFakeClock(t)
 		return nil
 	})
+
+	sc.Step(`^tenant "([^"]*)" sets the rate "([^"]*)" of "([^"]*)" to -(\d+) per million tokens$`,
+		func(ctx context.Context, tenant, rateKey, modelID string, magnitude int64) error {
+			return world(ctx).Catalog.setLayerRate(ctx, "tenant", tenant, modelID, rateKey, -magnitude)
+		})
+	sc.Step(`^the deployment sets the rate "([^"]*)" of "([^"]*)" to -(\d+) per million tokens$`,
+		func(ctx context.Context, rateKey, modelID string, magnitude int64) error {
+			return world(ctx).Catalog.setLayerRate(ctx, "deployment", "", modelID, rateKey, -magnitude)
+		})
+	sc.Step(`^the shipped snapshot sets the rate "([^"]*)" of "([^"]*)" to -(\d+) per million tokens$`,
+		func(ctx context.Context, rateKey, modelID string, magnitude int64) error {
+			return world(ctx).Catalog.setLayerRate(ctx, "snapshot", "", modelID, rateKey, -magnitude)
+		})
+	sc.Step(`^the price is refused with code "([^"]*)" naming model "([^"]*)" and rate "([^"]*)"$`,
+		func(ctx context.Context, code, modelID, rateKey string) error {
+			return assertCatalogErr(world(ctx).Catalog.setPriceErr, code, map[string]string{
+				"model": modelID, "rate": rateKey,
+			})
+		})
+
+	sc.Step(`^a price snapshot that sets the rate "([^"]*)" of "([^"]*)" to -(\d+) per million tokens$`,
+		func(ctx context.Context, rateKey, modelID string, magnitude int64) error {
+			world(ctx).Catalog.snapshotYAML = []byte(fmt.Sprintf(`%s:
+  rules:
+    - rates:
+        %s: %d
+`, modelID, rateKey, -magnitude))
+			return nil
+		})
+	sc.Step(`^a catalog loads that price snapshot$`, func(ctx context.Context) error {
+		w := world(ctx).Catalog
+		w.loadErr = nil
+		c, err := catalog.NewWithSnapshot(scenarioClock{w: world(ctx)}, w.snapshotYAML)
+		if err != nil {
+			w.loadErr = err
+			return nil
+		}
+		for _, d := range w.held {
+			if err := c.AddDescriptor(d); err != nil {
+				w.loadErr = err
+				return nil
+			}
+		}
+		w.catalog = c
+		return nil
+	})
+	sc.Step(`^loading fails with code "([^"]*)" naming model "([^"]*)" and rate "([^"]*)"$`,
+		func(ctx context.Context, code, modelID, rateKey string) error {
+			return assertCatalogErr(world(ctx).Catalog.loadErr, code, map[string]string{
+				"model": modelID, "rate": rateKey,
+			})
+		})
+
+	sc.Step(`^a call of "([^"]*)" reports a usage with an? (.+) of -1$`,
+		func(ctx context.Context, modelID, countPhrase string) error {
+			return world(ctx).Catalog.reportBadUsage(ctx, modelID, countPhrase)
+		})
+	sc.Step(`^pricing fails with code "([^"]*)" naming model "([^"]*)" and field "([^"]*)"$`,
+		func(ctx context.Context, code, modelID, field string) error {
+			return assertCatalogErr(world(ctx).Catalog.lastErr, code, map[string]string{
+				"model": modelID, "field": field,
+			})
+		})
+	sc.Step(`^pricing fails with code "([^"]*)" naming model "([^"]*)"$`,
+		func(ctx context.Context, code, modelID string) error {
+			return assertCatalogErr(world(ctx).Catalog.lastErr, code, map[string]string{
+				"model": modelID,
+			})
+		})
+}
+
+func assertCatalogErr(err error, code string, want map[string]string) error {
+	if err == nil {
+		return fmt.Errorf("succeeded, want code %s", code)
+	}
+	if got := core.CodeOf(err); string(got) != code {
+		return fmt.Errorf("code %s, want %s: %w", got, code, err)
+	}
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		return fmt.Errorf("not a core error: %w", err)
+	}
+	for k, v := range want {
+		got, _ := pe.Details[k].(string)
+		if got != v {
+			return fmt.Errorf("detail %q = %q, want %q: %w", k, got, v, err)
+		}
+	}
+	return nil
+}
+
+func (w *catalogWorld) setLayerRate(ctx context.Context, layer, tenant, modelID, rateKey string, value int64) error {
+	c, err := w.cat(ctx)
+	if err != nil {
+		w.setPriceErr = err
+		return nil
+	}
+	p := catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{rateKey: value}}}}
+	switch layer {
+	case "tenant":
+		w.setPriceErr = c.SetTenantPrice(core.TenantID(tenant), modelID, p)
+	case "deployment":
+		w.setPriceErr = c.SetDeploymentPrice(modelID, p)
+	case "snapshot":
+		w.setPriceErr = c.SetSnapshotPrice(modelID, p)
+	default:
+		return fmt.Errorf("unknown price layer %q", layer)
+	}
+	return nil
+}
+
+func (w *catalogWorld) reportBadUsage(ctx context.Context, modelID, countPhrase string) error {
+	c, err := w.cat(ctx)
+	if err != nil {
+		return err
+	}
+	usage := model.Usage{InputTokens: 100, OutputTokens: 10}
+	switch countPhrase {
+	case "input count":
+		usage.InputTokens = -1
+	case "output count":
+		usage.OutputTokens = -1
+	case "cached count":
+		usage.CachedTokens = -1
+	case "reasoning count":
+		usage.ReasoningTokens = -1
+	default:
+		return fmt.Errorf("unknown usage count %q", countPhrase)
+	}
+	w.lastErr = nil
+	q, err := c.Start(ctx, catalog.Request{Model: modelID, InputTokens: 100, OutputLimit: 10})
+	if err != nil {
+		w.lastErr = err
+		return nil
+	}
+	_, w.lastErr = c.Settle(q, usage)
+	return nil
 }
 
 func (w *catalogWorld) setSnapshotFormula(ctx context.Context, id, formula string) error {

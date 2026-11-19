@@ -116,7 +116,8 @@ func validatePrice(modelID string, p Price) error {
 		for _, key := range keys {
 			if rule.Rates[key] < 0 {
 				return core.NewError(core.CodeInvalidArgument,
-					fmt.Sprintf("model %q: rate %q must not be negative", modelID, key), nil)
+					fmt.Sprintf("model %q: rate %q must not be negative", modelID, key),
+					map[string]any{"model": modelID, "rate": key})
 			}
 		}
 	}
