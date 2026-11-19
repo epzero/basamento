@@ -522,21 +522,6 @@ func registerSQL(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the call fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		w := world(ctx).SQL
-		err := w.lastErr
-		if err == nil {
-			err = w.lastTxErr
-		}
-		if err == nil {
-			return fmt.Errorf("call succeeded, want %s", code)
-		}
-		if string(core.CodeOf(err)) != code {
-			return fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
-		}
-		return nil
-	})
-
 	registerSQLFailureSteps(sc)
 
 	sc.Step(`^no tenant has an item with key "([^"]*)"$`, func(ctx context.Context, key string) error {

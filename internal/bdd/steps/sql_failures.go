@@ -108,19 +108,12 @@ func writeWhileRefused(ctx context.Context, tenant, refusal string) error {
 
 // holdSQLiteWriteLock takes the database's write lock from a second connection
 // and turns the store's busy timeout off, so the next write fails at once with
-// SQLITE_BUSY (or SQLITE_LOCKED) instead of waiting for the timeout. A busy
-// refusal holds an immediate transaction; a locked one holds an exclusive
-// lock. The store runs the database in WAL mode, where SQLite treats EXCLUSIVE
-// and IMMEDIATE alike, so both refusals reach the SQLITE_BUSY mapping; the
-// SQLITE_LOCKED mapping is covered by TestSQLiteLockedMapping in platform/sql.
+// SQLITE_BUSY instead of waiting for the timeout. Busy is the only SQLite
+// refusal a scenario names: the store's WAL connections never yield
+// SQLITE_LOCKED, whose mapping is covered by TestSQLiteLockedMapping in
+// platform/sql.
 func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld, refusal string) (func(), error) {
-	begin := ""
-	switch refusal {
-	case "busy":
-		begin = `BEGIN IMMEDIATE`
-	case "locked":
-		begin = `BEGIN EXCLUSIVE`
-	default:
+	if refusal != "busy" {
 		return nil, fmt.Errorf("unknown sqlite refusal %q", refusal)
 	}
 	if w.dataDir == "" {
@@ -139,7 +132,7 @@ func holdSQLiteWriteLock(ctx context.Context, w *sqlWorld, refusal string) (func
 		_ = blocker.Close()
 		return nil, err
 	}
-	if _, err := conn.ExecContext(ctx, begin); err != nil {
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		_ = conn.Close()
 		_ = blocker.Close()
 		return nil, err

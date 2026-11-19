@@ -6,8 +6,11 @@ package steps
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cucumber/godog"
+
+	"github.com/epzero/basamento/core"
 )
 
 type worldKey struct{}
@@ -18,6 +21,7 @@ type World struct {
 	Expr   *exprWorld
 	SQL    *sqlWorld
 	Prompt *promptWorld
+	Blob   *blobWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -28,11 +32,39 @@ func Initialize(sc *godog.ScenarioContext) {
 		return context.WithValue(ctx, worldKey{}, &World{
 			Core:   newCoreWorld(),
 			Expr:   &exprWorld{bindings: map[string]any{}},
+			SQL:    newSQLWorld(),
 			Prompt: newPromptWorld(),
+			Blob:   newBlobWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerExpr(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
+	registerBlob(sc)
+	registerSharedSteps(sc)
+}
+
+func registerSharedSteps(sc *godog.ScenarioContext) {
+	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+}
+
+func assertCallFailsWithCode(ctx context.Context, code string) error {
+	w := world(ctx)
+	if w.SQL != nil {
+		err := w.SQL.lastErr
+		if err == nil {
+			err = w.SQL.lastTxErr
+		}
+		if err != nil {
+			if string(core.CodeOf(err)) != code {
+				return fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
+			}
+			return nil
+		}
+	}
+	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
+		return assertBlobCallCode(ctx, code)
+	}
+	return fmt.Errorf("call succeeded, want %s", code)
 }

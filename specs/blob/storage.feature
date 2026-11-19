@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-02 @level:component
+@wp:WP-L1-02 @level:component
 Feature: Storing, reading and deleting blobs
   Blobs are immutable and named by their content key, so the same content is
   stored once per tenant and a reader can verify what it got. Every scenario
@@ -183,7 +183,7 @@ Feature: Storing, reading and deleting blobs
     And the blob of tenant "acme" under the content key of "hello" has content type "text/plain"
     And tenant "acme" has no blob under the content key of "world"
 
-  @REQ-BLOB-046 @REQ-BLOB-047 @planned @wp:WP-L1-02 @id:BLOB-046-01
+  @REQ-BLOB-046 @REQ-BLOB-047 @wp:WP-L1-02 @id:BLOB-046-01
   Scenario Outline: A failed write fails with its class and keeps nothing
     Given content "big" of 8 MiB generated from seed 7
     When tenant "acme" stores content "big" and <failure> after 1 MiB

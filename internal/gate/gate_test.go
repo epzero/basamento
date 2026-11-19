@@ -408,7 +408,7 @@ func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
 		if _, err := ChangedFiles(root, base, ""); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
 			t.Errorf("ChangedFiles must refuse %q before git reads it as an option: %v", base, err)
 		}
-		if _, err := PlanReview(root, base, nil); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+		if _, err := PlanReview(root, base, "", nil); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
 			t.Errorf("PlanReview must refuse %q before git reads it as an option: %v", base, err)
 		}
 		if _, _, err := RedGreen(root, base); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
@@ -417,7 +417,7 @@ func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
 	}
 	for _, fn := range []func(string) error{
 		func(base string) error { _, err := ChangedFiles(root, base, ""); return err },
-		func(base string) error { _, err := PlanReview(root, base, nil); return err },
+		func(base string) error { _, err := PlanReview(root, base, "", nil); return err },
 		func(base string) error { _, _, err := RedGreen(root, base); return err },
 	} {
 		// A revision-set negation exits 0 in rev-parse and prints ^<sha>; if
@@ -438,7 +438,7 @@ func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, base := range []string{"main", sha} {
-		if _, err := PlanReview(root, base, []string{"a.go"}); err != nil {
+		if _, err := PlanReview(root, base, "", []string{"a.go"}); err != nil {
 			t.Errorf("review plan still accepts %q: %v", base, err)
 		}
 	}

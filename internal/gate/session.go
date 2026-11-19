@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,14 +94,48 @@ var issueKey = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-\d+$`)
 
 const sessionFile = "basamento-agent.json"
 
-func git(dir string, args ...string) (string, error) {
+// gitBytes runs git in dir and returns raw combined output.
+func gitBytes(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+func git(dir string, args ...string) (string, error) {
+	out, err := gitBytes(dir, args...)
+	if err != nil {
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// gitPathsUnquoted lists paths from git with C-style quoting disabled and NUL delimiters.
+func gitPathsUnquoted(dir string, args ...string) ([]string, error) {
+	prefix := []string{"-c", "core.quotePath=false"}
+	out, err := gitBytes(dir, append(prefix, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	return splitGitNUL(out), nil
+}
+
+func splitGitNUL(out []byte) []string {
+	if len(out) == 0 {
+		return nil
+	}
+	parts := bytes.Split(out, []byte{0})
+	var paths []string
+	for _, p := range parts {
+		if len(p) == 0 {
+			continue
+		}
+		paths = append(paths, string(p))
+	}
+	return paths
 }
 
 func sessionPath(dir string) (string, error) {

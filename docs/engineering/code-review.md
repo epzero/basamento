@@ -48,7 +48,10 @@ Without `-head` it plans the working tree. The change is what the branch
 added since it left the base, so commits that landed on the base in the
 meantime do not count. It prints:
 - the change's **risk tier**: the highest tier of any path it touches,
-  defined in `review.yaml`;
+  defined in `review.yaml`, with a **content rule** for `go.mod` files listed
+  under `go_mod_patch_bump`: a patch-only bump of the `go` directive
+  (`ADR-0014`) rates **medium**, and every other change to those files stays
+  **high**;
 - every changed file with its tier;
 - the `REVIEW.md` files that apply.
 
@@ -66,7 +69,7 @@ ordinary package, a new dependency), never lower it.
 
 | Tier | Typical paths | Depth | Person |
 | --- | --- | --- | --- |
-| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` | Deep (§3–§4); finder groups per §3 (reviewer column for the reviewer's review, self-review column for the self-review) | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
+| **high** | CI, the gate, `Makefile`, lint configuration, contracts, auth, secrets, the model node (money), runtimes, rule files (`AGENTS.md`, the constitution, ADRs, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent role definitions), `go.mod` **except** a patch-only `go` bump (`ADR-0014`) | Deep (§3–§4); finder groups per §3 (reviewer column for the reviewer's review, self-review column for the self-review) | Yes: the owner's approval in the tracker before it is merged (`agent-workflow.md` §5) |
 | **medium** | Other Go code, specs (requirements, scenarios, glossary, approval ledgers: their own tiers decide when a person looks, `spec-review.md` §4) | Standard (§3–§4); finder groups per §3 (reviewer column for the reviewer's review, self-review column for the self-review) | No |
 | **low** | Other docs | Quick (§3–§4), no verifier | No |
 

@@ -66,6 +66,9 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	if _, statErr := os.Stat(filepath.Join(wt, "internal", "bdd")); statErr != nil {
 		return activated, nil, nil // no harness at base: every scenario is red
 	}
+	if err := buildBaseForRedGreen(wt); err != nil {
+		return nil, nil, err
+	}
 	if err := os.RemoveAll(filepath.Join(wt, "specs")); err != nil {
 		return nil, nil, err
 	}
@@ -75,12 +78,29 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	for _, id := range activated {
 		cmd := exec.Command("go", "test", "./internal/bdd/", "-count=1", "-run", "TestFeatures")
 		cmd.Dir = wt
-		cmd.Env = append(os.Environ(), "BDD_TAGS=@id:"+id)
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto", "BDD_TAGS=@id:"+id)
 		if out, err := cmd.CombinedOutput(); err == nil {
 			errs = append(errs, fmt.Sprintf("%s passes against %s without this change: the scenario does not test the new behavior\n%s", id, baseRef, tail(out, 20)))
 		}
 	}
 	return activated, errs, nil
+}
+
+// buildBaseForRedGreen compiles the base worktree's BDD test package under
+// GOTOOLCHAIN=auto without running it: go test -c builds the test binary but
+// writes it to os.DevNull, so internal/bdd compiles even though it holds only
+// _test.go files, which go build refuses, and no init or TestMain executes.
+// The per-scenario check that follows still runs TestFeatures. A base whose go
+// directive the toolchain cannot satisfy, or whose test file does not compile,
+// therefore fails closed instead of producing vacuous red→green.
+func buildBaseForRedGreen(wt string) error {
+	cmd := exec.Command("go", "test", "-c", "-o", os.DevNull, "./internal/bdd/")
+	cmd.Dir = wt
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("redgreen: base worktree did not build: %w\n%s", err, tail(out, 20))
+	}
+	return nil
 }
 
 func run(dir string, name string, args ...string) (string, error) {
