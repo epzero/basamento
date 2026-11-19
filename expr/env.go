@@ -75,6 +75,17 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 			if _, err := e.objectFromSchema(st, adapter); err != nil {
 				return nil, err
 			}
+		} else if st.schema != nil {
+			// A variable whose root is a map still needs the object types
+			// nested in it: a map's values keep the fields of their
+			// properties (design.md §2, EXPR-003-05).
+			visiting := map[string]bool{}
+			if st.rootDef != "" {
+				visiting[st.rootDef] = true
+			}
+			if err := e.registerNestedObjects(st.schema, st.path, st, adapter, visiting); err != nil {
+				return nil, exprErr(fmt.Sprintf("schema %q: %s", v.Name, err.Error()), map[string]any{"variable": v.Name})
+			}
 		}
 		celOpts = append(celOpts, cel.Variable(v.Name, st.celType))
 	}
@@ -129,27 +140,13 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		if !ok {
 			continue
 		}
-		t, objName, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
+		t, _, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
 		if err != nil {
 			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
-		if objName != "" {
-			objSchema, defName, err := objectSchemaForBuild(pm, st)
-			if err != nil {
-				return nil, exprErr(err.Error(), map[string]any{"variable": typeName})
-			}
-			if defName != "" && visiting[defName] {
-				continue
-			}
-			next := visiting
-			if defName != "" {
-				next = cloneVisiting(visiting)
-				next[defName] = true
-			}
-			if _, err := e.buildObjectType(objSchema, objName, st, adapter, next); err != nil {
-				return nil, exprErr(fmt.Sprintf("schema %q: %s", objName, err.Error()), map[string]any{"variable": typeName})
-			}
+		if err := e.registerNestedObjects(pm, typeName+"."+pname, st, adapter, visiting); err != nil {
+			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 	}
 	obj := &jsonObjectType{typeName: typeName, fields: fields, adapter: adapter, objects: e.objects}
@@ -167,6 +164,54 @@ func cloneVisiting(visiting map[string]bool) map[string]bool {
 		out[name] = true
 	}
 	return out
+}
+
+// registerNestedObjects registers the object types nested in a schema value:
+// the fields of an object, the element type of a list's items and the value
+// type of a map's additionalProperties, at any depth. An object type keeps the
+// fields of its properties wherever it appears (design.md §2, EXPR-003-05), so
+// an object reached only as a map value must be registered before an expression
+// types and reads one of its fields.
+func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) error {
+	if ref, ok := doc["$ref"].(string); ok {
+		resolved, names, err := defRefChain(ref, st.defs)
+		if err != nil {
+			return err
+		}
+		defName := names[len(names)-1]
+		if visiting[defName] {
+			return nil
+		}
+		next := cloneVisiting(visiting)
+		for _, name := range names {
+			next[name] = true
+		}
+		return e.registerNestedObjects(resolved, path, st, adapter, next)
+	}
+	switch typ, _ := doc["type"].(string); typ {
+	case "object":
+		if props, ok := doc["properties"].(map[string]any); ok {
+			for _, pname := range sortedStringKeys(props) {
+				pm, ok := props[pname].(map[string]any)
+				if !ok {
+					continue
+				}
+				if err := e.registerNestedObjects(pm, path+"."+pname, st, adapter, visiting); err != nil {
+					return err
+				}
+			}
+			_, err := e.buildObjectType(doc, "expr.obj."+sanitizeTypeName(path), st, adapter, visiting)
+			return err
+		}
+		if ap, ok := doc["additionalProperties"].(map[string]any); ok {
+			return e.registerNestedObjects(ap, path+"*", st, adapter, visiting)
+		}
+	case "array":
+		if items, ok := doc["items"].(map[string]any); ok {
+			return e.registerNestedObjects(items, path+"[]", st, adapter, visiting)
+		}
+	}
+	return nil
 }
 
 // objectSchemaForBuild follows $ref chains and array items to the schema

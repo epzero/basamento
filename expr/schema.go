@@ -13,6 +13,7 @@ import (
 type schemaType struct {
 	schema   map[string]any
 	defs     map[string]map[string]any
+	path     string // schema path used to name the object types it declares
 	typeName string // struct object type name when applicable
 	rootDef  string // $defs entry name when the variable schema is a local $ref
 	celType  *cel.Type
@@ -35,6 +36,7 @@ func parseSchema(raw json.RawMessage, varName string) (*schemaType, error) {
 		return &schemaType{celType: cel.DynType}, nil
 	case map[string]any:
 		st.schema = v
+		st.path = varName
 		if defs, ok := v["$defs"].(map[string]any); ok {
 			st.defs = make(map[string]map[string]any, len(defs))
 			for k, d := range defs {
@@ -67,7 +69,7 @@ func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
 	for _, n := range names {
 		visiting[n] = true
 	}
-	child := &schemaType{schema: def, defs: st.defs}
+	child := &schemaType{schema: def, defs: st.defs, path: varName + "." + names[0]}
 	t, objName, err := child.mapSchemaVisit(def, varName+"."+names[0], visiting)
 	if err != nil {
 		return nil, err
