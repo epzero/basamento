@@ -515,6 +515,14 @@ func registerMiddleware(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the provider accepted (\d+) invocations?$`, func(ctx context.Context, n int) error {
+		if p := world(ctx).Node; p != nil && p.provider != nil {
+			p.provider.mu.Lock()
+			defer p.provider.mu.Unlock()
+			if p.provider.accepted != n {
+				return fmt.Errorf("the provider accepted %d invocations, want %d", p.provider.accepted, n)
+			}
+			return nil
+		}
 		cw := callOf(ctx)
 		if got := len(cw.invocations()); got != n {
 			return fmt.Errorf("the provider accepted %d invocations, want %d", got, n)

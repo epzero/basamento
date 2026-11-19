@@ -303,15 +303,6 @@ func registerMiddlewareCalls(sc *godog.ScenarioContext) {
 		cw.provider.set(0, cw.provider.everyFrom(0, time.Duration(every)*time.Second, "x"))
 		return nil
 	})
-	sc.Step(`^a model "([^"]*)" priced at "(.*)" milli-points$`, func(ctx context.Context, _, formula string) error {
-		if normalizeSpace(formula) != normalizeSpace("(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000") {
-			return fmt.Errorf("unsupported fixture price formula %q", formula)
-		}
-		callOf(ctx).price = func(u model.Usage) int64 {
-			return (u.InputTokens*1 + u.OutputTokens*8) / 1000
-		}
-		return nil
-	})
 	sc.Step(`^a scripted chat model that fails attempt (\d+) with code "([^"]*)" marked retryable, using (\d+) input tokens and (\d+) output tokens$`, func(ctx context.Context, attempt int, code string, input, output int) error {
 		cw := callOf(ctx)
 		usage := &model.Usage{InputTokens: int64(input), OutputTokens: int64(output)}

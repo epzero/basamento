@@ -546,10 +546,17 @@ func registerNode(sc *godog.ScenarioContext) {
 		})
 		return nil
 	})
-	sc.Step(`^a model "([^"]*)" priced at "([^"]*)" milli-points$`, func(ctx context.Context, id, formula string) error {
+	sc.Step(`^a model "([^"]*)" priced at "(.*)" milli-points$`, func(ctx context.Context, id, formula string) error {
 		w := world(ctx).Node
 		w.update(ctx, func(d *model.Descriptor) { d.ID = id })
 		w.ensureCatalog(ctx).SetSnapshotPrice(id, catalog.Price{Formula: formula})
+		// The same phrase prices the middleware's scripted call when the
+		// middleware formula is the one in use.
+		if normalizeSpace(formula) == normalizeSpace("(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000") {
+			callOf(ctx).price = func(u model.Usage) int64 {
+				return (u.InputTokens*1 + u.OutputTokens*8) / 1000
+			}
+		}
 		return nil
 	})
 
@@ -606,15 +613,7 @@ func registerNode(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the provider accepted (\d+) invocations?$`, func(ctx context.Context, accepted int) error {
-		p := world(ctx).Node.provider
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.accepted != accepted {
-			return fmt.Errorf("the provider accepted %d invocations, want %d", p.accepted, accepted)
-		}
-		return nil
-	})
+
 	sc.Step(`^the model node finds the invocation by lookup$`, func(ctx context.Context) error {
 		w := world(ctx).Node
 		if err := w.waitLookup(); err != nil {

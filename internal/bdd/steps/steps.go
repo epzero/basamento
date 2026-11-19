@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
 
@@ -19,25 +18,26 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core        *coreWorld
-	Expr        *exprWorld
-	SQL         *sqlWorld
-	Prompt      *promptWorld
-	Blob        *blobWorld
-	Secrets     *secretsWorld
-	Credentials *credentialsWorld
-	Schema      *schemaWorld
-	Model       *modelWorld
-	Catalog     *catalogWorld
-	Node        *nodeWorld
-	Agent       *agentWorld
-	Flow        *flowWorld
-	Machine     *machineWorld
-	Host        *hostWorld
-	Local       *localWorld
-	Bus         *busWorld
-	Eventlog    *eventlogWorld
-	Stream      *streamWorld
+	Core         *coreWorld
+	Expr         *exprWorld
+	SQL          *sqlWorld
+	Prompt       *promptWorld
+	Blob         *blobWorld
+	Secrets      *secretsWorld
+	Credentials  *credentialsWorld
+	Schema       *schemaWorld
+	Model        *modelWorld
+	Catalog      *catalogWorld
+	Node         *nodeWorld
+	Agent        *agentWorld
+	Conversation *convWorld
+	Flow         *flowWorld
+	Machine      *machineWorld
+	Host         *hostWorld
+	Local        *localWorld
+	Bus          *busWorld
+	Eventlog     *eventlogWorld
+	Stream       *streamWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -46,21 +46,22 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:    newCoreWorld(),
-			Expr:    &exprWorld{bindings: map[string]any{}},
-			SQL:     newSQLWorld(),
-			Prompt:  newPromptWorld(),
-			Blob:    newBlobWorld(),
-			Schema:  newSchemaWorld(),
-			Model:   newModelWorld(),
-			Catalog: newCatalogWorld(),
-			Node:    newNodeWorld(),
-			Agent:   newAgentWorld(),
-			Flow:    newFlowWorld(),
-			Machine: newMachineWorld(),
-			Host:    newHostWorld(),
-			Local:   newLocalWorld(),
-			Bus:     newBusWorld(),
+			Core:         newCoreWorld(),
+			Expr:         &exprWorld{bindings: map[string]any{}},
+			SQL:          newSQLWorld(),
+			Prompt:       newPromptWorld(),
+			Blob:         newBlobWorld(),
+			Schema:       newSchemaWorld(),
+			Model:        newModelWorld(),
+			Catalog:      newCatalogWorld(),
+			Node:         newNodeWorld(),
+			Agent:        newAgentWorld(),
+			Conversation: newConvWorld(),
+			Flow:         newFlowWorld(),
+			Machine:      newMachineWorld(),
+			Host:         newHostWorld(),
+			Local:        newLocalWorld(),
+			Bus:          newBusWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -76,6 +77,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCatalog(sc)
 	registerNode(sc)
 	registerAgent(sc)
+	registerConversation(sc)
 	registerMiddleware(sc)
 	registerMiddlewareCalls(sc)
 	registerFlowCompile(sc)
@@ -125,30 +127,6 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 // the one that is active settles.
 func registerShared(sc *godog.ScenarioContext) {
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, assertPutOutcome)
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?:es)?$`, func(ctx context.Context, count int, unit string) error {
-		var duration time.Duration
-		switch strings.TrimSuffix(unit, "s") {
-		case "second":
-			duration = time.Duration(count) * time.Second
-		case "minute":
-			duration = time.Duration(count) * time.Minute
-		case "hour":
-			duration = time.Duration(count) * time.Hour
-		}
-		w := world(ctx)
-		if w.Host != nil && w.Host.dc != nil {
-			w.Core.clock.Advance(duration)
-			w.Host.dc.advance(duration)
-			w.Host.signal()
-			return w.Host.settle()
-		}
-		if w.Model != nil && w.Model.call != nil {
-			w.Model.call.rt.Advance(duration)
-			return nil
-		}
-		w.Core.clock.Advance(duration)
-		return nil
-	})
 	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)
 		var err error

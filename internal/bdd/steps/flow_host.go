@@ -1113,30 +1113,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass without the gate "([^"]*)" being resolved$`,
-		func(ctx context.Context, count int, unit, gate string) error {
-			var duration time.Duration
-			switch strings.TrimSuffix(unit, "s") {
-			case "second":
-				duration = time.Duration(count) * time.Second
-			case "minute":
-				duration = time.Duration(count) * time.Minute
-			case "hour":
-				duration = time.Duration(count) * time.Hour
-			}
-			// The scenario clock drives every runtime under test; the recording
-			// fake of the host keeps its own clock, so advance both when it is
-			// the one in use.
-			world(ctx).Core.clock.Advance(duration)
-			w := world(ctx).Host
-			if w.dc == nil {
-				return nil
-			}
-			w.dc.advance(duration)
-			w.signal()
-			return w.settle()
-		})
-
 	// FLOW-036: pure nodes.
 	sc.Step(`^a flow routing node "([^"]*)" of kind "set" to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)" when "([^"]*)", otherwise to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)"$`,
 		func(ctx context.Context, from, first, firstKey, firstValue, when, second, secondKey, secondValue string) error {
