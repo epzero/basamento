@@ -203,21 +203,30 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 	return g.future
 }
 
-// Select waits for the lowest-index ready future (REQ-RT-011).
+// Select waits for the first pending operation to complete (REQ-RT-011). A
+// future that is already ready at call time wins by lowest index; otherwise the
+// first future to complete after the call wins, even when a lower-index future
+// completes shortly after it. Two futures that become ready together resolve by
+// their completion order, which the run records.
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	if len(fs) == 0 {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
 	}
-	for {
-		for i, f := range fs {
-			if f.Ready() {
-				return i, nil
-			}
+	r := dc.run
+	marked := r.seqs.Load()
+	for i, f := range fs {
+		if f.Ready() {
+			return i, nil
 		}
-		changed := dc.run.wake()
+	}
+	for {
+		changed := r.wake()
+		if index := r.firstCompletedSince(fs, marked); index >= 0 {
+			return index, nil
+		}
 		select {
 		case <-changed:
-		case <-dc.run.ctx.Done():
+		case <-r.ctx.Done():
 			for i, f := range fs {
 				if f.Ready() {
 					return i, nil
@@ -226,6 +235,31 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 			return 0, cancelledErr("select cancelled")
 		}
 	}
+}
+
+// firstCompletedSince returns the lowest-index future that completed after the
+// run's seqs counter passed marked, or -1 when none did. Among futures that
+// completed after the call the earliest completion wins, not the lowest index.
+func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
+	index := -1
+	var earliest uint64
+	for i, f := range fs {
+		local, ok := f.(*future)
+		if !ok {
+			if f.Ready() {
+				return i
+			}
+			continue
+		}
+		seq, done := local.completedSeq()
+		if !done || seq <= marked {
+			continue
+		}
+		if index < 0 || seq < earliest {
+			index, earliest = i, seq
+		}
+	}
+	return index
 }
 
 // Emit appends to the run's ordered outbox (REQ-RT-006).

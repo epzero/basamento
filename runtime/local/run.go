@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -26,6 +27,7 @@ type run struct {
 	mu      sync.Mutex
 	wakeMu  sync.Mutex
 	changed chan struct{} // closed and replaced on every completion
+	seqs    atomic.Uint64 // completion order of this run's futures
 
 	state     string
 	startedAt time.Time
