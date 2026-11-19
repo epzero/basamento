@@ -51,46 +51,45 @@ func TestURLProbeErrorsSecretFree(t *testing.T) {
 	cases := []struct {
 		name      string
 		admin     string
-		ctx       func() context.Context
+		cancelled bool
 		wantClass urlProbeClass
 		wantIs    error
 	}{
 		{
 			name:      "invalid url",
 			admin:     "://%3Aleakuser:leakpass@leak-host.invalid/leakdb",
-			ctx:       func() context.Context { return context.Background() },
 			wantClass: urlClassInvalidURL,
 		},
 		{
 			name:      "connection refused",
 			admin:     refused,
-			ctx:       func() context.Context { return context.Background() },
 			wantClass: urlClassConnRefused,
 			wantIs:    syscall.ECONNREFUSED,
 		},
 		{
-			name:  "timeout/cancelled",
-			admin: fmt.Sprintf("postgres://%s:%s@%s:9/%s?connect_timeout=1", leakUser, leakPass, leakHost, leakDB),
-			ctx: func() context.Context {
-				c, cancel := context.WithCancel(context.Background())
-				cancel()
-				return c
-			},
+			name:      "timeout/cancelled",
+			admin:     fmt.Sprintf("postgres://%s:%s@%s:9/%s?connect_timeout=1", leakUser, leakPass, leakHost, leakDB),
+			cancelled: true,
 			wantClass: urlClassTimeout,
 			wantIs:    context.Canceled,
 		},
 		{
 			name:      "open with garbage driver args",
 			admin:     fmt.Sprintf("postgres://%s:%s@%s:9/%s", leakUser, leakPass, "0.0.0.0", leakDB),
-			ctx:       func() context.Context { return context.Background() },
 			wantClass: urlClassConnRefused,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := captureProbeOutput(t, tc.admin, tc.ctx())
-			err := probeAdminURL(tc.ctx(), tc.admin)
+			ctx := context.Background()
+			if tc.cancelled {
+				c, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = c
+			}
+			out := captureProbeOutput(t, tc.admin, ctx)
+			err := probeAdminURL(ctx, tc.admin)
 			if err == nil {
 				t.Fatal("expected probe error")
 			}
