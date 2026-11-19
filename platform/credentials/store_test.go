@@ -263,6 +263,36 @@ func TestWriteOnlyOperationsDoNotDecrypt(t *testing.T) {
 	}
 }
 
+func TestNamesMapsRowErrors(t *testing.T) {
+	ts := newTestStore(t)
+	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-4f9a2c")
+	if _, err := ts.sql.Execer().Exec(context.Background(),
+		`UPDATE credentials SET created_at = ? WHERE tenant_id = ? AND name = ?`,
+		"not-a-timestamp", "acme", "vendor/anthropic"); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+	names, err := ts.store.Names(tenantCtx("acme"))
+	wantCode(t, err, core.CodeInternal)
+	if names != nil {
+		t.Fatalf("names %v, want none", names)
+	}
+	assertNoDriverText(t, err)
+}
+
+// assertNoDriverText checks that a row error was mapped by platform/sql
+// instead of reaching the caller as the driver wrote it.
+func assertNoDriverText(t *testing.T, err error) {
+	t.Helper()
+	for _, leak := range []string{"Scan error", "not-a-timestamp", "unsupported Scan"} {
+		if bytes.Contains([]byte(err.Error()), []byte(leak)) {
+			t.Fatalf("driver text reached the caller: %v", err)
+		}
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("sql: ")) {
+		t.Fatalf("error not mapped by platform/sql: %v", err)
+	}
+}
+
 func TestNamesNeverReturnValues(t *testing.T) {
 	ts := newTestStore(t)
 	mustPut(t, ts.store, "acme", "vendor/a", "sk-secret")

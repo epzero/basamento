@@ -136,3 +136,21 @@ func TestAuditEventsNeverReplaced(t *testing.T) {
 		t.Fatalf("events %+v", events)
 	}
 }
+
+func TestAuditReadMapsRowErrors(t *testing.T) {
+	db, _ := openTestDB(t)
+	a := NewSQLAudit(db)
+	if err := a.Record(tenantCtx("acme"), recEvent("acme", "s1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Execer().Exec(context.Background(),
+		`UPDATE audit_events SET at = ?`, "not-a-timestamp"); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+	events, err := a.Read(tenantCtx("acme"))
+	wantCode(t, err, core.CodeInternal)
+	if events != nil {
+		t.Fatalf("events %+v, want none", events)
+	}
+	assertNoDriverText(t, err)
+}

@@ -73,13 +73,13 @@ ORDER BY at, id`, string(tenant))
 		)
 		if err := rows.Scan(&tenantID, &event.Time, &event.Principal, &event.Action,
 			&event.Resource, &event.Outcome, &event.RunID, &event.Step, &event.Reason); err != nil {
-			return nil, err
+			return nil, psql.MapError(err)
 		}
 		event.Tenant = core.TenantID(tenantID)
 		out = append(out, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, psql.MapError(err)
 	}
 	return out, nil
 }
