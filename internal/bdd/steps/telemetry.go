@@ -379,7 +379,7 @@ func attrAt(attrs map[string]any, path string) (any, bool) {
 	return current, true
 }
 
-func parseQuotedList(text string) []string {
+func parseQuotedNames(text string) []string {
 	var out []string
 	for {
 		start := strings.Index(text, `"`)

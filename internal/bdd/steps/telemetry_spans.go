@@ -275,7 +275,7 @@ func registerTelemetrySpans(sc *godog.ScenarioContext) {
 		w := world(ctx).Telemetry
 		spans, err := w.readSpans(tenant, w.run)
 		w.lastRead, w.lastErr = spans, err
-		return compareSpanNames(spans, err, parseQuotedList(names))
+		return compareSpanNames(spans, err, parseQuotedNames(names))
 	})
 	sc.Step(`^tenant "([^"]*)" reads the spans in span id order$`, func(ctx context.Context, tenant string) error {
 		w := world(ctx).Telemetry
@@ -295,7 +295,7 @@ func registerTelemetrySpans(sc *godog.ScenarioContext) {
 		w := world(ctx).Telemetry
 		spans, err := w.readSpans(tenant, w.run)
 		w.lastRead, w.lastErr = spans, err
-		want := parseQuotedList(names)
+		want := parseQuotedNames(names)
 		if len(want) != count {
 			return fmt.Errorf("step names %d spans but says %d", len(want), count)
 		}

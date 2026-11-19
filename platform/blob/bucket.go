@@ -15,5 +15,8 @@ type bucketBackend interface {
 	NewWriter(ctx context.Context, key string, opts *blob.WriterOptions) (*blob.Writer, error)
 	Attributes(ctx context.Context, key string) (*blob.Attributes, error)
 	SignedURL(ctx context.Context, key string, opts *blob.SignedURLOptions) (string, error)
+	ListKeys(ctx context.Context, prefix string) ([]string, error)
+	ListTenantPrefixes(ctx context.Context) ([]string, error)
+	ListKeysCallback(ctx context.Context, prefix string, fn func(string) error) error
 	Close() error
 }
