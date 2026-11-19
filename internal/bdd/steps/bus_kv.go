@@ -315,6 +315,11 @@ func registerBusKV(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^the put fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		// The KV store and the credential vault both report a failed put with
+		// this phrase; the one that put is the one that failed.
+		if w := world(ctx); w.Credentials != nil && w.Credentials.putErr != nil {
+			return credentialsCode(w.Credentials.putErr, code)
+		}
 		return world(ctx).Bus.checkCode(world(ctx).Bus.lastErr, code)
 	})
 
@@ -405,20 +410,4 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(.+?) pass(?:es)?$`, func(ctx context.Context, raw string) error {
-		d, err := parseDurationPass(raw)
-		if err != nil {
-			return err
-		}
-		world(ctx).Core.clock.Advance(d)
-		// A component server times its shutdown drain from the same frozen
-		// clock; firing its timer here is what "the seconds pass" means.
-		if w := world(ctx).Config; w.after != nil {
-			select {
-			case w.after <- world(ctx).Core.clock.Now():
-			default:
-			}
-		}
-		return nil
-	})
 }

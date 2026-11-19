@@ -1,4 +1,4 @@
-@planned @wp:WP-L10-01 @runtime:any @level:component
+@wp:WP-L10-01 @runtime:any @level:component
 Feature: Generated code quality
   `@eval` scenarios: an LLM judge scores, over N runs, the outputs a codegen
   run produces for a fixture. Nightly scores live models; the PR gate replays

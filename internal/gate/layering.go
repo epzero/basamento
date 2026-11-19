@@ -50,7 +50,7 @@ func Layering(root string) ([]string, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}
-	var errs []string
+	var pkgs []goPkg
 	dec := json.NewDecoder(&out)
 	for {
 		var p goPkg
@@ -59,6 +59,17 @@ func Layering(root string) ([]string, error) {
 		} else if err != nil {
 			return nil, err
 		}
+		pkgs = append(pkgs, p)
+	}
+	// A nested module under the module path (for example presets/codegen) is
+	// not part of ./...'s package list, so its packages are not layers of this
+	// module. They are external to this graph, like any other dependency.
+	known := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		known[p.ImportPath] = true
+	}
+	var errs []string
+	for _, p := range pkgs {
 		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, r.Module), "/")
 		layer := matchLayer(rel, keys(r.Layers))
 		if layer == "" {
@@ -66,7 +77,7 @@ func Layering(root string) ([]string, error) {
 			continue
 		}
 		for _, imp := range p.Imports {
-			if strings.HasPrefix(imp, r.Module+"/") {
+			if strings.HasPrefix(imp, r.Module+"/") && known[imp] {
 				dep := strings.TrimPrefix(imp, r.Module+"/")
 				if matchLayer(dep, r.TestOnly) != "" && matchLayer(rel, r.TestOnlyOK) == "" {
 					errs = append(errs, fmt.Sprintf("%s imports test-only package %s", rel, dep))

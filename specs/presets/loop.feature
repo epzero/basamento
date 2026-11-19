@@ -1,4 +1,4 @@
-@planned @wp:WP-L10-01 @runtime:any @level:component
+@wp:WP-L10-01 @runtime:any @level:component
 Feature: The codegen loop
   Both codegen flows run one loop: plan, implement each planned module, verify
   in a sandbox, repair under a guard, self-review, commit. The loop mirrors the

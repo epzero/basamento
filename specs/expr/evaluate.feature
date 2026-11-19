@@ -25,19 +25,19 @@ Feature: Evaluating expressions deterministically
     When the expression "{'delta': 4, 'alpha': 1, 'charlie': 3, 'bravo': 2}.filter(k, k != 'charlie')" is evaluated 100 times
     Then every result is ["alpha", "bravo", "delta"]
 
-  @REQ-EXPR-021 @id:EXPR-021-01
+  @planned @REQ-EXPR-021 @id:EXPR-021-01
   Scenario: A map with keys of several kinds iterates them in kind order
     Given an expression environment declaring no variables
     When the expression "{'b': 1, 2.5: 2, 3u: 3, -1: 4, true: 5, 'a': 6}.map(k, k)" is evaluated 100 times
     Then every result is [true, -1, 3, 2.5, "a", "b"]
 
-  @REQ-EXPR-021 @id:EXPR-021-02
+  @planned @REQ-EXPR-021 @id:EXPR-021-02
   Scenario: A map with keys of three kinds sorts each kind by value
     Given an expression environment declaring no variables
     When the expression "{'beta': 1, 'alpha': 2, 10: 3, 9: 4, 1.5: 5}.map(k, k)" is evaluated 100 times
     Then every result is [9, 10, 1.5, "alpha", "beta"]
 
-  @REQ-EXPR-021 @id:EXPR-021-03
+  @planned @REQ-EXPR-021 @id:EXPR-021-03
   Scenario Outline: A map whose keys are all doubles orders them numerically
     Given an expression environment declaring no variables
     When the expression "<expression>" is evaluated 100 times
@@ -48,13 +48,13 @@ Feature: Evaluating expressions deterministically
       | {1.5: 'a', -2.5: 'd', 0.0: 'b'}.map(k, k)         | [-2.5, 0, 1.5]              |
       | {1.5: 'a', -5.0 / 0.0: 'd', 0.0: 'b', 5.0 / 0.0: 'e'}.map(k, string(k)) | ["-Inf", "0", "1.5", "+Inf"] |
 
-  @REQ-EXPR-021 @id:EXPR-021-04
+  @planned @REQ-EXPR-021 @id:EXPR-021-04
   Scenario: A map whose keys include a NaN orders the NaN after every other number
     Given an expression environment declaring no variables
     When the expression "[{1.5: 1, 0.0 / 0.0: 2, -2.5: 3}.map(k, string(k)), {1.5: 1, 0.0 / 0.0: 2, -5.0 / 0.0: 3, 0.0: 4}.map(k, string(k))]" is evaluated 100 times
     Then every result is [["-2.5", "1.5", "NaN"], ["-Inf", "0", "1.5", "NaN"]]
 
-  @REQ-EXPR-022 @id:EXPR-022-01
+  @planned @REQ-EXPR-022 @id:EXPR-022-01
   Scenario Outline: A map with a key of no order fails when it is iterated, keeping every entry
     Given an expression environment declaring no variables
     When the expression "<expression>" is evaluated
@@ -68,7 +68,7 @@ Feature: Evaluating expressions deterministically
       | {timestamp('2026-11-16T09:00:00Z'): 1}.map(k, k)      |
       | {[1, 2]: 'a'}.all(k, true)                            |
 
-  @REQ-EXPR-022 @id:EXPR-022-02
+  @planned @REQ-EXPR-022 @id:EXPR-022-02
   Scenario: A map with a key of no order succeeds when its keys are not iterated
     Given an expression environment declaring no variables
     When the expression "{1: 'a', duration('1s'): 'b'}.size()" is evaluated

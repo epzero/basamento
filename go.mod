@@ -177,3 +177,9 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+require github.com/epzero/basamento/presets/codegen v0.0.0
+
+replace github.com/epzero/basamento/presets/codegen => ./presets/codegen
+
+tool github.com/epzero/basamento/tools/gate

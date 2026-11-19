@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
 
@@ -36,6 +35,7 @@ type World struct {
 	Host        *hostWorld
 	Local       *localWorld
 	Tool        *toolWorld
+	Codegen     *codegenWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -60,6 +60,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Host:    newHostWorld(),
 			Local:   newLocalWorld(),
 			Tool:    newToolWorld(),
+			Codegen: newCodegenWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -82,6 +83,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowHost(sc)
 	registerLocal(sc)
 	registerTool(sc)
+	registerCodegen(sc)
 	registerOpeningSteps(sc)
 	registerSharedSteps(sc)
 	registerClockSteps(sc)
@@ -115,18 +117,15 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	return fmt.Errorf("call succeeded, want %s", code)
 }
 
-// registerClockSteps holds the shared clock step used by the flow host and the
-// model middleware: both worlds advance, and the one that is active settles.
+// registerClockSteps holds the shared "N <unit> pass" step. A duration belongs
+// to whichever world is active: a pending tool call, a flow host run, a model
+// middleware call, or the core clock. The pattern names its units so it never
+// swallows a longer phrase such as "a run of "timer" starts and 29 minutes pass".
 func registerClockSteps(sc *godog.ScenarioContext) {
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?:es)?$`, func(ctx context.Context, count int, unit string) error {
-		var duration time.Duration
-		switch strings.TrimSuffix(unit, "s") {
-		case "second":
-			duration = time.Duration(count) * time.Second
-		case "minute":
-			duration = time.Duration(count) * time.Minute
-		case "hour":
-			duration = time.Duration(count) * time.Hour
+	sc.Step(`^((?:\d+ (?:milliseconds?|seconds?|minutes?|hours?|days?)\s*)+)pass(?:es)?$`, func(ctx context.Context, phrase string) error {
+		duration, err := parseDurationPass(strings.TrimSpace(phrase))
+		if err != nil {
+			return err
 		}
 		w := world(ctx)
 		if w.Tool != nil && w.Tool.pending != nil {
@@ -143,6 +142,14 @@ func registerClockSteps(sc *godog.ScenarioContext) {
 			return nil
 		}
 		w.Core.clock.Advance(duration)
+		// A component server times its shutdown drain from the same frozen
+		// clock; firing its timer here is what "the seconds pass" means.
+		if w.Config != nil && w.Config.after != nil {
+			select {
+			case w.Config.after <- w.Core.clock.Now():
+			default:
+			}
+		}
 		return nil
 	})
 }
