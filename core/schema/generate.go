@@ -2,7 +2,6 @@ package schema
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 
 	gjschema "github.com/google/jsonschema-go/jsonschema"
@@ -30,7 +29,14 @@ func ForType(t reflect.Type) (*Schema, error) {
 	if path, ok := invalidFieldPath(t); ok {
 		return nil, invalidArg("type has no JSON form", map[string]any{"field": path})
 	}
-	s, err := gjschema.ForType(t, forOptions(t))
+	if err := validateMapKeys(t); err != nil {
+		return nil, err
+	}
+	opts, err := generationOptions(t)
+	if err != nil {
+		return nil, err
+	}
+	s, err := gjschema.ForType(t, opts)
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}
@@ -39,6 +45,10 @@ func ForType(t reflect.Type) (*Schema, error) {
 		return nil, invalidArgf("marshal generated schema: %v", err)
 	}
 	raw = patchNullTypesInGeneratedSchema(raw)
+	raw, err = patchGeneratedSchema(raw, t, opts)
+	if err != nil {
+		return nil, err
+	}
 	canonical, err := Canonicalize(raw)
 	if err != nil {
 		return nil, err
@@ -75,15 +85,6 @@ func patchNullTypesInGeneratedSchema(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-func forOptions(root reflect.Type) *gjschema.ForOptions {
-	ts := map[reflect.Type]*gjschema.Schema{
-		byteSliceReflectType:  byteSliceSchema(),
-		rawMessageReflectType: rawMessageSchema(),
-	}
-	collectAliasByteSliceTypes(root, ts)
-	return &gjschema.ForOptions{TypeSchemas: ts}
-}
-
 func byteSliceSchema() *gjschema.Schema {
 	return &gjschema.Schema{
 		Types:           []string{"null", "string"},
@@ -94,41 +95,6 @@ func byteSliceSchema() *gjschema.Schema {
 // rawMessageSchema accepts any JSON value encoding/json may store in RawMessage.
 func rawMessageSchema() *gjschema.Schema {
 	return &gjschema.Schema{}
-}
-
-func collectAliasByteSliceTypes(t reflect.Type, ts map[reflect.Type]*gjschema.Schema) {
-	seen := map[reflect.Type]bool{}
-	var walk func(reflect.Type)
-	walk = func(typ reflect.Type) {
-		for typ.Kind() == reflect.Pointer {
-			typ = typ.Elem()
-		}
-		if seen[typ] {
-			return
-		}
-		seen[typ] = true
-		if isByteSliceAlias(typ) {
-			ts[typ] = byteSliceSchema().CloneSchemas()
-		}
-		switch typ.Kind() {
-		case reflect.Struct:
-			for _, f := range reflect.VisibleFields(typ) {
-				if f.Anonymous || !f.IsExported() {
-					continue
-				}
-				if jsonName(f) == "" {
-					continue
-				}
-				walk(f.Type)
-			}
-		case reflect.Slice, reflect.Array:
-			walk(typ.Elem())
-		case reflect.Map:
-			walk(typ.Key())
-			walk(typ.Elem())
-		}
-	}
-	walk(t)
 }
 
 func isByteSliceAlias(typ reflect.Type) bool {
@@ -262,17 +228,61 @@ func walkInvalidField(t reflect.Type, prefix string, seen map[reflect.Type]bool)
 			return p, true
 		}
 	case reflect.Map:
-		if t.Key().Kind() != reflect.String {
-			if prefix == "" {
-				return fmt.Sprintf("map key %s", t.Key().Kind()), true
-			}
-			return prefix, true
-		}
 		if p, ok := walkInvalidField(t.Elem(), prefix, seen); ok {
 			return p, true
 		}
 	}
 	return "", false
+}
+
+// validateMapKeys rejects a map whose key type encoding/json cannot write as a
+// string, naming the field that holds it and the key type (REQ-SCHEMA-049).
+func validateMapKeys(t reflect.Type) error {
+	return walkMapKeys(t, "", map[reflect.Type]bool{})
+}
+
+func walkMapKeys(t reflect.Type, prefix string, seen map[reflect.Type]bool) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if seen[t] {
+		return nil
+	}
+	seen[t] = true
+	switch t.Kind() {
+	case reflect.Struct:
+		for _, f := range reflect.VisibleFields(t) {
+			if !f.IsExported() || jsonName(f) == "" {
+				continue
+			}
+			next := f.Name
+			if prefix != "" {
+				next = prefix + "." + f.Name
+			}
+			if err := walkMapKeys(f.Type, next, seen); err != nil {
+				return err
+			}
+		}
+	case reflect.Array, reflect.Slice:
+		return walkMapKeys(t.Elem(), prefix, seen)
+	case reflect.Map:
+		if !mapKeyHasJSONText(t.Key()) {
+			return invalidArg("map key type has no JSON text",
+				map[string]any{"field": prefix, "key": t.Key().String()})
+		}
+		return walkMapKeys(t.Elem(), prefix, seen)
+	}
+	return nil
+}
+
+func mapKeyHasJSONText(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	}
+	return t.Implements(textMarshalerReflectType)
 }
 
 func jsonName(f reflect.StructField) string {

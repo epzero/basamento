@@ -272,6 +272,79 @@ func registerSchema(sc *godog.ScenarioContext) {
 		return nil
 	})
 
+	sc.Step(`^a Go type "([^"]*)"$`, func(ctx context.Context, name string) error {
+		t, ok := declaredNamedTypes[name]
+		if !ok {
+			return fmt.Errorf("no declared Go type %q", name)
+		}
+		schemaCtx(ctx).types[name] = t
+		return nil
+	})
+
+	sc.Step(`^the type "([^"]*)" appears as a field named "([^"]*)" in "([^"]*)"$`, func(ctx context.Context, typeName, fieldName, holder string) error {
+		t, err := schemaType(schemaCtx(ctx), typeName)
+		if err != nil {
+			return err
+		}
+		schemaCtx(ctx).types[holder] = reflect.StructOf([]reflect.StructField{{
+			Name: "V",
+			Type: t,
+			Tag:  reflect.StructTag(fmt.Sprintf(`json:"%s"`, fieldName)),
+		}})
+		return nil
+	})
+	sc.Step(`^the type "([^"]*)" appears as an embedded field in "([^"]*)"$`, func(ctx context.Context, typeName, holder string) error {
+		t, err := schemaType(schemaCtx(ctx), typeName)
+		if err != nil {
+			return err
+		}
+		schemaCtx(ctx).types[holder] = embeddedHolder(t)
+		return nil
+	})
+	sc.Step(`^the type "([^"]*)" appears as the whole type in "([^"]*)"$`, func(ctx context.Context, typeName, holder string) error {
+		t, err := schemaType(schemaCtx(ctx), typeName)
+		if err != nil {
+			return err
+		}
+		schemaCtx(ctx).types[holder] = t
+		return nil
+	})
+
+	sc.Step(`^the address of the value is encoded with encoding/json$`, func(ctx context.Context) error {
+		w := schemaCtx(ctx)
+		if w.structVal == nil {
+			return fmt.Errorf("no struct value")
+		}
+		ptr := reflect.New(reflect.TypeOf(w.structVal))
+		ptr.Elem().Set(reflect.ValueOf(w.structVal))
+		b, err := json.Marshal(ptr.Interface())
+		if err != nil {
+			return err
+		}
+		w.structVal = ptr.Interface()
+		w.encodedJSON = b
+		return nil
+	})
+
+	sc.Step(`^the generation fails with code "([^"]*)" naming the field path "([^"]*)" and the key type "([^"]*)"$`, func(ctx context.Context, code, path, key string) error {
+		w := schemaCtx(ctx)
+		if w.lastErr == nil {
+			return fmt.Errorf("succeeded")
+		}
+		if string(core.CodeOf(w.lastErr)) != code {
+			return fmt.Errorf("code %s", core.CodeOf(w.lastErr))
+		}
+		var pe *core.Error
+		if errors.As(w.lastErr, &pe) && pe.Details != nil {
+			if fp, ok := pe.Details["field"].(string); ok && fp == path {
+				if kt, ok := pe.Details["key"].(string); ok && kt == key {
+					return nil
+				}
+			}
+		}
+		return fmt.Errorf("details mismatch")
+	})
+
 	sc.Step(`^the generation fails with code "([^"]*)" naming the field path "([^"]*)"$`, func(ctx context.Context, code, path string) error {
 		w := schemaCtx(ctx)
 		if w.lastErr == nil {
@@ -342,6 +415,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
+		w.generated[typeName] = sch
 		c, err := schema.Compile(sch.Raw)
 		if err != nil {
 			return err
