@@ -328,6 +328,10 @@ func parseSchemaObject(raw json.RawMessage) (map[string]any, error) {
 	return m, nil
 }
 
+func instanceRejected(err error) bool {
+	return err != nil && len(schema.Violations(err)) > 0
+}
+
 func rejectFromErr(err error, loc, kw string) error {
 	vs := schema.Violations(err)
 	for _, v := range vs {
