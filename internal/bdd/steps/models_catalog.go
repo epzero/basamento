@@ -113,11 +113,10 @@ func registerCatalog(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		c.SetSnapshotPrice(id, catalog.Price{Rules: []catalog.Rule{{
+		return c.SetSnapshotPrice(id, catalog.Price{Rules: []catalog.Rule{{
 			When:  when,
 			Rates: catalog.Rates{"input": 1, "output": 8},
 		}}})
-		return nil
 	})
 	sc.Step(`^the catalog holds a "([^"]*)" model "([^"]*)" with no price in any layer$`, func(ctx context.Context, capability, id string) error {
 		return world(ctx).Catalog.hold(ctx, capability, id)
@@ -134,8 +133,7 @@ func registerCatalog(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		c.SetDeploymentPrice(id, catalog.Price{Formula: formula})
-		return nil
+		return c.SetDeploymentPrice(id, catalog.Price{Formula: formula})
 	})
 	sc.Step(`^tenant "([^"]*)" overrides the price of "([^"]*)" at "([^"]*)" milli-points$`, func(ctx context.Context, tenant, id, formula string) error {
 		c, err := world(ctx).Catalog.cat(ctx)
@@ -161,8 +159,7 @@ func registerCatalog(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		c.SetSnapshotPrice(id, catalog.Price{Rules: rules})
-		return nil
+		return c.SetSnapshotPrice(id, catalog.Price{Rules: rules})
 	})
 	sc.Step(`^tenant "([^"]*)" overrides the rate rules of "([^"]*)" with:$`, func(ctx context.Context, tenant, id string, table *godog.Table) error {
 		rules, err := parseRuleTable(table)
@@ -184,8 +181,7 @@ func registerCatalog(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		c.SetSnapshotPrice(id, catalog.Price{Rules: []catalog.Rule{{Rates: rates}}})
-		return nil
+		return c.SetSnapshotPrice(id, catalog.Price{Rules: []catalog.Rule{{Rates: rates}}})
 	})
 
 	sc.Step(`^the descriptor of "([^"]*)" declares the input slots "([^"]*)" and "([^"]*)"$`, func(ctx context.Context, id, first, second string) error {
@@ -379,8 +375,7 @@ func (w *catalogWorld) setSnapshotFormula(ctx context.Context, id, formula strin
 	if err != nil {
 		return err
 	}
-	c.SetSnapshotPrice(id, catalog.Price{Formula: formula})
-	return nil
+	return c.SetSnapshotPrice(id, catalog.Price{Formula: formula})
 }
 
 func (w *catalogWorld) estimateFor(scenarioCtx, callCtx context.Context, id string, input, limit int64, params json.RawMessage) error {

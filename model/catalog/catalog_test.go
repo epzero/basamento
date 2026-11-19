@@ -29,6 +29,20 @@ func mustAdd(t *testing.T, c *catalog.Catalog, d model.Descriptor) {
 	}
 }
 
+func mustSetSnapshot(t *testing.T, c *catalog.Catalog, modelID string, p catalog.Price) {
+	t.Helper()
+	if err := c.SetSnapshotPrice(modelID, p); err != nil {
+		t.Fatalf("SetSnapshotPrice: %v", err)
+	}
+}
+
+func mustSetDeployment(t *testing.T, c *catalog.Catalog, modelID string, p catalog.Price) {
+	t.Helper()
+	if err := c.SetDeploymentPrice(modelID, p); err != nil {
+		t.Fatalf("SetDeploymentPrice: %v", err)
+	}
+}
+
 func chatDescriptor(id string) model.Descriptor {
 	return model.Descriptor{
 		ID:       id,
@@ -73,7 +87,7 @@ func TestLookupUnknownModelIsNotFound(t *testing.T) {
 func TestPriceLayersPrecedence(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
 
 	req := catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 500}
 
@@ -85,7 +99,7 @@ func TestPriceLayersPrecedence(t *testing.T) {
 		t.Fatalf("snapshot estimate = %d, want 5000", snapshot)
 	}
 
-	c.SetDeploymentPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 2 + usage.output_tokens * 8"})
+	mustSetDeployment(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 2 + usage.output_tokens * 8"})
 	if err := c.SetTenantPrice("acme", "sim-chat", catalog.Price{Formula: "usage.input_tokens * 3 + usage.output_tokens * 8"}); err != nil {
 		t.Fatalf("SetTenantPrice: %v", err)
 	}
@@ -110,7 +124,7 @@ func TestPriceLayersPrecedence(t *testing.T) {
 func TestTenantOverrideIsIsolated(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
 	if err := c.SetTenantPrice("acme", "sim-chat", catalog.Price{Formula: "usage.input_tokens * 3 + usage.output_tokens * 8"}); err != nil {
 		t.Fatalf("SetTenantPrice: %v", err)
 	}
@@ -136,7 +150,7 @@ func TestTenantOverrideIsIsolated(t *testing.T) {
 func TestFirstHoldingRateRuleWins(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
 		{When: "at.getHours('UTC') >= 17", Rates: catalog.Rates{"input": 140, "output": 550}},
 		{When: "usage.input_tokens > 200000", Rates: catalog.Rates{"input": 560, "output": 2200}},
 		{Rates: catalog.Rates{"input": 280, "output": 1100}},
@@ -163,7 +177,7 @@ func TestFirstHoldingRateRuleWins(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	mustAdd(t, c2, chatDescriptor("sim-chat"))
-	c2.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+	mustSetSnapshot(t, c2, "sim-chat", catalog.Price{Rules: []catalog.Rule{
 		{When: "at.getHours('UTC') >= 17", Rates: catalog.Rates{"input": 140, "output": 550}},
 		{When: "usage.input_tokens > 200000", Rates: catalog.Rates{"input": 560, "output": 2200}},
 		{Rates: catalog.Rates{"input": 280, "output": 1100}},
@@ -184,7 +198,7 @@ func TestFirstHoldingRateRuleWins(t *testing.T) {
 func TestRateRuleSeesTenant(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
 		{When: `tenant == "acme"`, Rates: catalog.Rates{"input": 1000, "output": 0}},
 		{Rates: catalog.Rates{"input": 5000, "output": 0}},
 	}})
@@ -209,7 +223,7 @@ func TestRateRuleSeesTenant(t *testing.T) {
 func TestOverrideRulesDoNotFallThrough(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
 	if err := c.SetTenantPrice("acme", "sim-chat", catalog.Price{Rules: []catalog.Rule{
 		{When: "usage.input_tokens > 1000000", Rates: catalog.Rates{"input": 560, "output": 2200}},
 	}}); err != nil {
@@ -284,7 +298,7 @@ func TestDefaultTokenFormula(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := newCatalog(t)
 			mustAdd(t, c, chatDescriptor("sim-chat"))
-			c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: tt.rates}}})
+			mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: tt.rates}}})
 			q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: tt.usage.InputTokens, OutputLimit: tt.usage.OutputTokens})
 			if err != nil {
 				t.Fatalf("Start: %v", err)
@@ -303,7 +317,7 @@ func TestDefaultTokenFormula(t *testing.T) {
 func TestMoreCachedThanInputFails(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 4000, "output": 10000}}}})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 4000, "output": 10000}}}})
 	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 3000, OutputLimit: 400})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -317,7 +331,7 @@ func TestMoreCachedThanInputFails(t *testing.T) {
 func TestUsageCheckRunsBeforeOwnFormula(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1"})
 	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 10})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -331,7 +345,7 @@ func TestUsageCheckRunsBeforeOwnFormula(t *testing.T) {
 func TestEstimateUsesParamsAndOutputLimit(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8 + (params.tier == 'priority' ? 100 : 0)"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8 + (params.tier == 'priority' ? 100 : 0)"})
 
 	got, err := c.Estimate(context.Background(), catalog.Request{
 		Model:       "sim-chat",
@@ -353,7 +367,7 @@ func TestDescriptorFormulaUsesChosenRates(t *testing.T) {
 	d.Caps = []model.Capability{model.CapVideoGenerate}
 	d.Price = "usage.output_tokens * rates.output"
 	mustAdd(t, c, d)
-	c.SetSnapshotPrice("sim-video", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 10, "output": 200}}}})
+	mustSetSnapshot(t, c, "sim-video", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 10, "output": 200}}}})
 	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-video", InputTokens: 0, OutputLimit: 10})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -370,12 +384,12 @@ func TestDescriptorFormulaUsesChosenRates(t *testing.T) {
 func TestPriceChangeAfterStartDoesNotReprice(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
 	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 500})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: "usage.input_tokens * 9 + usage.output_tokens * 8"})
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 9 + usage.output_tokens * 8"})
 
 	charge, err := c.Settle(q, model.Usage{InputTokens: 1000, OutputTokens: 200})
 	if err != nil {
@@ -400,7 +414,7 @@ func TestSettlementUsesStartTime(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	mustAdd(t, c, chatDescriptor("sim-chat"))
-	c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
 		{When: "at.getHours('UTC') >= 17", Rates: catalog.Rates{"input": 140, "output": 550}},
 		{Rates: catalog.Rates{"input": 280, "output": 1100}},
 	}})
@@ -418,5 +432,120 @@ func TestSettlementUsesStartTime(t *testing.T) {
 	}
 	if charge.MilliPoints != 92 {
 		t.Fatalf("charge = %d, want 92", charge.MilliPoints)
+	}
+}
+
+func TestNegativeRateRefusedAtSetNotStored(t *testing.T) {
+	good := catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 1000, "output": 0}}}}
+	bad := catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": -1000, "output": 0}}}}
+	req := catalog.Request{Model: "sim-chat", InputTokens: 1_000_000, OutputLimit: 0}
+
+	t.Run("snapshot", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		mustSetSnapshot(t, c, "sim-chat", good)
+		if err := c.SetSnapshotPrice("sim-chat", bad); core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("SetSnapshotPrice bad: code=%s err=%v", core.CodeOf(err), err)
+		}
+		got, err := c.Estimate(context.Background(), req)
+		if err != nil || got != 1000 {
+			t.Fatalf("Estimate after rejected set = %d, %v; want 1000, nil", got, err)
+		}
+	})
+
+	t.Run("deployment", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		mustSetSnapshot(t, c, "sim-chat", good)
+		mustSetDeployment(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 2000, "output": 0}}}})
+		if err := c.SetDeploymentPrice("sim-chat", bad); core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("SetDeploymentPrice bad: code=%s err=%v", core.CodeOf(err), err)
+		}
+		got, err := c.Estimate(context.Background(), req)
+		if err != nil || got != 2000 {
+			t.Fatalf("Estimate after rejected set = %d, %v; want 2000, nil", got, err)
+		}
+	})
+
+	t.Run("tenant", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		mustSetSnapshot(t, c, "sim-chat", good)
+		if err := c.SetTenantPrice("acme", "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 3000, "output": 0}}}}); err != nil {
+			t.Fatalf("SetTenantPrice good: %v", err)
+		}
+		if err := c.SetTenantPrice("acme", "sim-chat", bad); core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("SetTenantPrice bad: code=%s err=%v", core.CodeOf(err), err)
+		}
+		got, err := c.Estimate(core.WithTenant(context.Background(), "acme"), req)
+		if err != nil || got != 3000 {
+			t.Fatalf("Estimate after rejected set = %d, %v; want 3000, nil", got, err)
+		}
+	})
+}
+
+func TestNegativeUsageAndAmountRefused(t *testing.T) {
+	tests := []struct {
+		name  string
+		price catalog.Price
+		start catalog.Request
+		usage model.Usage
+	}{
+		{
+			name:  "negative input tokens",
+			price: catalog.Price{Formula: "usage.input_tokens * 1"},
+			start: catalog.Request{Model: "sim-chat", InputTokens: 100, OutputLimit: 0},
+			usage: model.Usage{InputTokens: -1},
+		},
+		{
+			name:  "negative output tokens offset charge",
+			price: catalog.Price{Formula: "usage.input_tokens * 10"},
+			start: catalog.Request{Model: "sim-chat", InputTokens: 100, OutputLimit: 0},
+			usage: model.Usage{InputTokens: 100, OutputTokens: -100},
+		},
+		{
+			name:  "negative formula result",
+			price: catalog.Price{Formula: "-usage.input_tokens"},
+			start: catalog.Request{Model: "sim-chat", InputTokens: 100, OutputLimit: 0},
+			usage: model.Usage{InputTokens: 100},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newCatalog(t)
+			mustAdd(t, c, chatDescriptor("sim-chat"))
+			mustSetSnapshot(t, c, "sim-chat", tt.price)
+			q, err := c.Start(context.Background(), tt.start)
+			if tt.name == "negative formula result" {
+				if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+					t.Fatalf("Start code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			_, err = c.Settle(q, tt.usage)
+			if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+				t.Fatalf("code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+			}
+		})
+	}
+}
+
+func TestZeroAmountAccepted(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "0"})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 500})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	charge, err := c.Settle(q, model.Usage{InputTokens: 1000, OutputTokens: 500})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 0 {
+		t.Fatalf("charge = %d, want 0", charge.MilliPoints)
 	}
 }

@@ -23,5 +23,10 @@ func loadSnapshot() (map[string]Price, error) {
 	if prices == nil {
 		prices = map[string]Price{}
 	}
+	for modelID, p := range prices {
+		if err := validatePrice(modelID, p); err != nil {
+			return nil, err
+		}
+	}
 	return prices, nil
 }

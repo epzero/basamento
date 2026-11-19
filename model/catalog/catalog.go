@@ -86,18 +86,18 @@ func (c *Catalog) Lookup(_ context.Context, modelID string) (model.Descriptor, e
 
 // SetSnapshotPrice sets modelID's price in the snapshot shipped with the
 // binary. An empty Price removes the entry.
-func (c *Catalog) SetSnapshotPrice(modelID string, p Price) {
+func (c *Catalog) SetSnapshotPrice(modelID string, p Price) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	setPrice(c.snapshot, modelID, p)
+	return setPrice(c.snapshot, modelID, p)
 }
 
 // SetDeploymentPrice sets modelID's price in the deployment layer. An empty
 // Price removes the entry.
-func (c *Catalog) SetDeploymentPrice(modelID string, p Price) {
+func (c *Catalog) SetDeploymentPrice(modelID string, p Price) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	setPrice(c.deployment, modelID, p)
+	return setPrice(c.deployment, modelID, p)
 }
 
 // SetTenantPrice sets modelID's price in tenant's layer. An empty Price removes
@@ -114,19 +114,25 @@ func (c *Catalog) SetTenantPrice(tenant core.TenantID, modelID string, p Price) 
 		m = map[string]Price{}
 		c.tenants[tenant] = m
 	}
-	setPrice(m, modelID, p)
+	if err := setPrice(m, modelID, p); err != nil {
+		return err
+	}
 	if len(m) == 0 {
 		delete(c.tenants, tenant)
 	}
 	return nil
 }
 
-func setPrice(layer map[string]Price, modelID string, p Price) {
+func setPrice(layer map[string]Price, modelID string, p Price) error {
 	if !p.valid() {
 		delete(layer, modelID)
-		return
+		return nil
+	}
+	if err := validatePrice(modelID, p); err != nil {
+		return err
 	}
 	layer[modelID] = p.clone()
+	return nil
 }
 
 // Start prices a call before it starts, records the start time and returns the

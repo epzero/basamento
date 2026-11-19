@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -93,6 +94,23 @@ func (r Rates) clone() Rates {
 		cp[k] = v
 	}
 	return cp
+}
+
+// validatePrice checks every rate in every rule. Empty prices are deletion
+// and need no check.
+func validatePrice(modelID string, p Price) error {
+	if !p.valid() {
+		return nil
+	}
+	for _, rule := range p.Rules {
+		for key, rate := range rule.Rates {
+			if rate < 0 {
+				return core.NewError(core.CodeInvalidArgument,
+					fmt.Sprintf("model %q: rate %q must not be negative", modelID, key), nil)
+			}
+		}
+	}
+	return nil
 }
 
 func cloneDescriptor(d model.Descriptor) model.Descriptor {

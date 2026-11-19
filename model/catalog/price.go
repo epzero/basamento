@@ -60,34 +60,62 @@ func (c *Catalog) evalCondition(src, modelID string, params json.RawMessage, usa
 	return ok, nil
 }
 
+func validateUsage(usage model.Usage) error {
+	if usage.CachedTokens > usage.InputTokens {
+		return core.NewError(core.CodeInvalidArgument, "cached tokens exceed input tokens", nil)
+	}
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CachedTokens < 0 || usage.ReasoningTokens < 0 {
+		return core.NewError(core.CodeInvalidArgument, "usage token counts must not be negative", nil)
+	}
+	return nil
+}
+
+func ensureNonNegativeAmount(modelID string, amount int64) error {
+	if amount < 0 {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("price model %q: amount must not be negative", modelID), nil)
+	}
+	return nil
+}
+
 // amount prices usage with the entry's formula, else the descriptor's, else
 // the default token formula over the chosen rule's rates (REQ-MODEL-074).
 func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params json.RawMessage, usage model.Usage, rates Rates, at time.Time, tenant core.TenantID) (int64, error) {
-	// The usage check runs before any formula, the default one or a model's
+	// Token usage is checked before any formula, the default one or a model's
 	// own, so bad provider data cannot turn into a credit (REQ-MODEL-082).
-	if usage.CachedTokens > usage.InputTokens {
-		return 0, core.NewError(core.CodeInvalidArgument, "cached tokens exceed input tokens", nil)
+	if err := validateUsage(usage); err != nil {
+		return 0, err
 	}
 	formula := entry.Formula
 	if formula == "" {
 		formula = descriptorFormula
 	}
+	var amount int64
+	var err error
 	if formula == "" {
-		return defaultTokenCost(rates, usage)
+		amount, err = defaultTokenCost(rates, usage)
+	} else {
+		vars, berr := bindings(modelID, at, params, usage, rates, tenant)
+		if berr != nil {
+			return 0, berr
+		}
+		program, perr := c.program(formula)
+		if perr != nil {
+			return 0, perr
+		}
+		out, eerr := program.Eval(vars)
+		if eerr != nil {
+			return 0, eerr
+		}
+		amount, err = amountFromCEL(modelID, out)
 	}
-	vars, err := bindings(modelID, at, params, usage, rates, tenant)
 	if err != nil {
 		return 0, err
 	}
-	program, err := c.program(formula)
-	if err != nil {
+	if err := ensureNonNegativeAmount(modelID, amount); err != nil {
 		return 0, err
 	}
-	out, err := program.Eval(vars)
-	if err != nil {
-		return 0, err
-	}
-	return amountFromCEL(modelID, out)
+	return amount, nil
 }
 
 func (c *Catalog) program(src string) (*expr.Program, error) {
@@ -156,9 +184,6 @@ func ratesObject(rates Rates) map[string]any {
 // tokens; the total is divided by one million once and rounded half away from
 // zero.
 func defaultTokenCost(rates Rates, usage model.Usage) (int64, error) {
-	if usage.CachedTokens > usage.InputTokens {
-		return 0, core.NewError(core.CodeInvalidArgument, "cached tokens exceed input tokens", nil)
-	}
 	inputRate := rates["input"]
 	outputRate := rates["output"]
 	total := new(big.Int)
