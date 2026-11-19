@@ -36,7 +36,7 @@ func (f *fakeDriverKeeper) Decrypt(context.Context, []byte) ([]byte, error) {
 	if f.dec != gcerrors.OK {
 		return nil, &codeErr{code: f.dec}
 	}
-	return FrameValuePlaintext([]byte("plain")), nil
+	return frameValuePlaintext([]byte("plain")), nil
 }
 
 func (f *fakeDriverKeeper) Close() error                           { return nil }

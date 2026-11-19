@@ -60,7 +60,7 @@ func (k *keeperKeyService) Unwrap(ctx context.Context, tenant string, ciphertext
 }
 
 func (k *keeperKeyService) encryptValue(ctx context.Context, plaintext []byte) ([]byte, error) {
-	inner := FrameValuePlaintext(plaintext)
+	inner := frameValuePlaintext(plaintext)
 	ct, err := k.keeper.Encrypt(ctx, inner)
 	if err != nil {
 		return nil, classifyKeeperErr(ctx, err, k.scheme, opEncryptValue)
@@ -73,7 +73,7 @@ func (k *keeperKeyService) decryptValue(ctx context.Context, ciphertext []byte) 
 	if err != nil {
 		return nil, classifyKeeperErr(ctx, err, k.scheme, opDecryptValue)
 	}
-	return ParseValuePlaintext(inner)
+	return parseValuePlaintext(inner)
 }
 
 func masterKeyID(raw, scheme string, localKey []byte) (string, error) {
