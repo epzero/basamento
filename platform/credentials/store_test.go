@@ -34,6 +34,7 @@ type xorSecrets struct {
 	mu         sync.Mutex
 	encryptErr error
 	decryptErr error
+	decrypts   int
 
 	reached chan struct{}
 	release chan struct{}
@@ -58,6 +59,9 @@ func (s *xorSecrets) Encrypt(_ context.Context, plaintext []byte) ([]byte, error
 }
 
 func (s *xorSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte, error) {
+	s.mu.Lock()
+	s.decrypts++
+	s.mu.Unlock()
 	if s.reached != nil {
 		s.once.Do(func() { close(s.reached) })
 		<-s.release
@@ -231,6 +235,26 @@ func TestNamesScopedAndOrdered(t *testing.T) {
 		if names[i] != want[i] {
 			t.Fatalf("names %v want %v", names, want)
 		}
+	}
+}
+
+func (s *xorSecrets) decryptCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.decrypts
+}
+
+func TestWriteOnlyOperationsDoNotDecrypt(t *testing.T) {
+	ts := newTestStore(t)
+	mustPut(t, ts.store, "acme", "vendor/a", "v")
+	if _, err := ts.store.Names(tenantCtx("acme")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.store.Delete(tenantCtx("acme"), "vendor/a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ts.secrets.decryptCount(); got != 0 {
+		t.Fatalf("Put, Names and Delete called Decrypt %d times", got)
 	}
 }
 
