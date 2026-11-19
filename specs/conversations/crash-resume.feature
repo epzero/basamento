@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-04 @runtime:temporal @level:system
+@wp:WP-L7-04 @runtime:temporal @level:system
 Feature: A conversation on the temporal runtime survives a crash
   The conversation logic does not depend on the runtime (WP-L7-03): on the
   temporal runtime, a turn interrupted by the process stopping is resumed

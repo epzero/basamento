@@ -36,6 +36,7 @@ type temporalWorld struct {
 	fault  *temporalFaultCodec
 	sim    *simKeyRegistry
 
+	scenario   bool
 	version    string
 	threshold  int
 	checkpoint int
@@ -522,6 +523,16 @@ func optionalTenant(s string) core.TenantID {
 }
 
 func registerTemporal(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
+		for _, tag := range scn.Tags {
+			if tag.Name == "@runtime:temporal" {
+				if w := world(ctx).Temporal; w != nil {
+					w.scenario = true
+				}
+			}
+		}
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Temporal; w != nil {
 			w.close()
@@ -539,44 +550,8 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^the runtime is "temporal"$`, func(ctx context.Context) error {
 		return temporalW(ctx).ensureRuntime()
 	})
-	sc.Step(`^the runtime reports capability "([^"]*)" as (true|false)$`, func(ctx context.Context, name, want string) error {
-		if err := temporalW(ctx).ensureRuntime(); err != nil {
-			return err
-		}
-		caps := temporalW(ctx).rt.Capabilities()
-		var got bool
-		switch name {
-		case "durable":
-			got = caps.Durable
-		case "sync_gate_updates":
-			got = caps.SyncGateUpdates
-		case "continue_as_new":
-			got = caps.ContinueAsNew
-		case "polyglot_queues":
-			got = caps.PolyglotQueues
-		default:
-			return fmt.Errorf("unknown capability %q", name)
-		}
-		if fmt.Sprint(got) != want {
-			return fmt.Errorf("capability %q is %v, want %s", name, got, want)
-		}
-		return nil
-	})
 
 	// Step behavior.
-	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" marked retryable (true|false)$`, func(ctx context.Context, name, code, retryable string) error {
-		w := temporalW(ctx)
-		if err := w.ensureStep(name); err != nil {
-			return err
-		}
-		w.mu.Lock()
-		b := w.behaviors[name]
-		b.code = core.Code(code)
-		b.retryable = retryable == "true"
-		b.failFirst = -1
-		w.mu.Unlock()
-		return nil
-	})
 	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" marked retryable (true|false) on its first (\d+) executions$`, func(ctx context.Context, name, code, retryable string, times int) error {
 		w := temporalW(ctx)
 		if err := w.ensureStep(name); err != nil {
@@ -589,19 +564,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		b.failFirst = times
 		w.mu.Unlock()
 		return nil
-	})
-	sc.Step(`^the step allows (\d+) attempts$`, func(ctx context.Context, n int) error {
-		temporalW(ctx).attempts = n
-		return nil
-	})
-	sc.Step(`^step "([^"]*)" was executed (\d+) times$`, func(ctx context.Context, name string, want int) error {
-		if got := temporalW(ctx).stepCalls(name); got != want {
-			return fmt.Errorf("step %q ran %d times, want %d", name, got, want)
-		}
-		return nil
-	})
-	sc.Step(`^the step fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return temporalStepFailure(temporalW(ctx), code)
 	})
 	sc.Step(`^step "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, name, code string) error {
 		return temporalStepFailure(temporalW(ctx), code)
@@ -632,29 +594,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		}
 		return w.wait(tenant, ref)
 	})
-	sc.Step(`^the run is "([^"]*)"$`, func(ctx context.Context, want string) error {
-		w := temporalW(ctx)
-		got, err := w.state(string(w.lastRef.TenantID), w.lastRef)
-		if err != nil {
-			return err
-		}
-		if got != want {
-			return fmt.Errorf("run state %q, want %q", got, want)
-		}
-		return nil
-	})
-	sc.Step(`^the run returns (.+)$`, func(ctx context.Context, want string) error {
-		w := temporalW(ctx)
-		got, err := w.result(string(w.lastRef.TenantID), w.lastRef)
-		if err != nil {
-			return err
-		}
-		expected := temporalValue(want)
-		if !jsonEquivalent(got, expected) {
-			return fmt.Errorf("run returns %s, want %s", got, expected)
-		}
-		return nil
-	})
 
 	// Flows that call one step.
 	sc.Step(`^a flow calls step "([^"]*)" whose result is (\d+) bytes of seed (\d+) and returns "([^"]*)"$`, func(ctx context.Context, step string, size, seed int, literal string) error {
@@ -664,9 +603,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		return temporalW(ctx).addStepFlow("fetch", step, seedJSON(size, seed), true, nil)
 	})
 	sc.Step(`^a flow calls step "([^"]*)" whose result is (\{.*\}) and returns it$`, func(ctx context.Context, step, result string) error {
-		return temporalW(ctx).addStepFlow("fetch", step, json.RawMessage(result), true, nil)
-	})
-	sc.Step(`^a flow calls step "([^"]*)" that returns (\{.*\})$`, func(ctx context.Context, step, result string) error {
 		return temporalW(ctx).addStepFlow("fetch", step, json.RawMessage(result), true, nil)
 	})
 	sc.Step(`^a flow calls step "([^"]*)" that returns (\{.*\}) and returns it$`, func(ctx context.Context, step, result string) error {
@@ -756,14 +692,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^a run of "([^"]*)" without a tenant is started on the temporal runtime$`, func(ctx context.Context, flow string) error {
 		w := temporalW(ctx)
 		_, _ = w.start(context.Background(), "", flow, "r1", "")
-		return nil
-	})
-	sc.Step(`^starting the run fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		if err := temporalW(ctx).lastErr; err == nil {
-			return fmt.Errorf("start succeeded, want %s", code)
-		} else if got := string(core.CodeOf(err)); got != code {
-			return fmt.Errorf("start code %q, want %q", got, code)
-		}
 		return nil
 	})
 	sc.Step(`^the Temporal test server holds no run history for that start$`, func(ctx context.Context) error {
@@ -932,17 +860,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^run "([^"]*)" is "([^"]*)"$`, func(ctx context.Context, runID, want string) error {
-		w := temporalW(ctx)
-		got, err := w.state("acme", runtime.RunRef{RunID: runID})
-		if err != nil {
-			return err
-		}
-		if got != want {
-			return fmt.Errorf("run %q is %q, want %q", runID, got, want)
-		}
-		return nil
-	})
 
 	// Emitted events.
 	sc.Step(`^a flow emits "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)" and "([^"]*)", calls (\d+) steps "([^"]*)" to "([^"]*)", checkpoints, calls (\d+) steps "([^"]*)" to "([^"]*)", then returns "([^"]*)"$`,
@@ -1061,9 +978,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	})
 
 	// Tenancy.
-	sc.Step(`^flow "([^"]*)" waits at gate "([^"]*)"$`, func(ctx context.Context, flow, gate string) error {
-		return temporalW(ctx).ensureNamedFlow(flow)
-	})
 	sc.Step(`^tenant "([^"]*)" has run "([^"]*)" of flow "([^"]*)" on the temporal runtime waiting at gate "([^"]*)"$`, func(ctx context.Context, tenant, runID, flow, gate string) error {
 		w := temporalW(ctx)
 		ref, err := w.start(context.Background(), tenant, flow, runID, "")
@@ -1074,10 +988,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		if err := w.rt.WaitForGate(core.WithTenant(context.Background(), core.TenantID(tenant)), ref, gate); err != nil {
 			return err
 		}
-		return nil
-	})
-	sc.Step(`^the request names a run reference of tenant "([^"]*)" to run "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
-		temporalW(ctx).lastRef = runtime.RunRef{RunID: runID, TenantID: core.TenantID(tenant)}
 		return nil
 	})
 	sc.Step(`^run "([^"]*)" is started on the temporal runtime with context tenant "([^"]*)" and request tenant "([^"]*)"$`, func(ctx context.Context, runID, contextTenant, requestTenant string) error {
@@ -1134,20 +1044,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		w.lastErr = err
 		return nil
 	})
-	sc.Step(`^describing run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
-		return temporalFailure(temporalW(ctx).lastErr, code)
-	})
-	sc.Step(`^the run reference the description returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
-		w := temporalW(ctx)
-		status, err := w.rt.Describe(core.WithTenant(context.Background(), core.TenantID(tenant)), runtime.RunRef{RunID: runID})
-		if err != nil {
-			return err
-		}
-		if status.Ref.RunID != runID || string(status.Ref.TenantID) != tenant {
-			return fmt.Errorf("ref %+v, want run %q of tenant %q", status.Ref, runID, tenant)
-		}
-		return nil
-	})
 	sc.Step(`^run "([^"]*)" is cancelled on the temporal runtime with context tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
 		w := temporalW(ctx)
 		w.lastErr = w.rt.Cancel(core.WithTenant(context.Background(), core.TenantID(tenant)), w.lastRef, "test")
@@ -1156,20 +1052,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^run "([^"]*)" is cancelled on the temporal runtime without a context tenant and with reference tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
 		w := temporalW(ctx)
 		w.lastErr = w.rt.Cancel(context.Background(), runtime.RunRef{RunID: runID, TenantID: optionalTenant(tenant)}, "test")
-		return nil
-	})
-	sc.Step(`^cancelling run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
-		return temporalFailure(temporalW(ctx).lastErr, code)
-	})
-	sc.Step(`^tenant "([^"]*)" describes run "([^"]*)" as "([^"]*)"$`, func(ctx context.Context, tenant, runID, want string) error {
-		w := temporalW(ctx)
-		got, err := w.state(tenant, runtime.RunRef{RunID: runID})
-		if err != nil {
-			return err
-		}
-		if got != want {
-			return fmt.Errorf("tenant %q sees run %q as %q, want %q", tenant, runID, got, want)
-		}
 		return nil
 	})
 	sc.Step(`^gate "([^"]*)" of run "([^"]*)" is resolved on the temporal runtime with context tenant "([^"]*)" and payload (\{.*\})$`, func(ctx context.Context, gate, runID, tenant, payload string) error {
@@ -1181,9 +1063,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		w := temporalW(ctx)
 		w.lastErr = w.rt.Resolve(context.Background(), runtime.RunRef{RunID: runID, TenantID: optionalTenant(tenant)}, gate, json.RawMessage(payload))
 		return nil
-	})
-	sc.Step(`^resolving the gate fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return temporalFailure(temporalW(ctx).lastErr, code)
 	})
 	sc.Step(`^runs of flow "([^"]*)" are listed on the temporal runtime for request tenant "([^"]*)" with context tenant "([^"]*)"$`, func(ctx context.Context, flow, requestTenant, contextTenant string) error {
 		w := temporalW(ctx)
@@ -1198,30 +1077,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^runs of flow "([^"]*)" are listed on the temporal runtime without a context tenant and with query tenant "([^"]*)"$`, func(ctx context.Context, flow, requestTenant string) error {
 		w := temporalW(ctx)
 		_, _, w.lastErr = w.rt.List(context.Background(), runtime.RunQuery{Flow: flow, TenantID: optionalTenant(requestTenant)})
-		return nil
-	})
-	sc.Step(`^listing runs fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return temporalFailure(temporalW(ctx).lastErr, code)
-	})
-	sc.Step(`^tenant "([^"]*)" lists (\d+) run for tenant "([^"]*)" with run id "([^"]*)"$`, func(ctx context.Context, listTenant string, want int, refTenant, runID string) error {
-		w := temporalW(ctx)
-		statuses, _, err := w.rt.List(core.WithTenant(context.Background(), core.TenantID(listTenant)), runtime.RunQuery{Flow: "review"})
-		if err != nil {
-			return err
-		}
-		if len(statuses) != want {
-			return fmt.Errorf("listed %d runs, want %d", len(statuses), want)
-		}
-		if len(statuses) > 0 && (statuses[0].Ref.RunID != runID || string(statuses[0].Ref.TenantID) != refTenant) {
-			return fmt.Errorf("listed ref %+v, want run %q of tenant %q", statuses[0].Ref, runID, refTenant)
-		}
-		return nil
-	})
-	sc.Step(`^the run reference the start returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
-		w := temporalW(ctx)
-		if w.lastRef.RunID != runID || string(w.lastRef.TenantID) != tenant {
-			return fmt.Errorf("ref %+v, want run %q of tenant %q", w.lastRef, runID, tenant)
-		}
 		return nil
 	})
 }

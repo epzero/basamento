@@ -404,6 +404,12 @@ func registerBlob(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
+		// A scripted model middleware drives its own timers off this same
+		// clock; advancing both would count the time twice.
+		if m := world(ctx).Model; m != nil && m.call != nil {
+			m.call.rt.Advance(d)
+			return nil
+		}
 		world(ctx).Core.clock.Advance(d)
 		// A component server times its shutdown drain from the same frozen
 		// clock; firing its timer here is what "the seconds pass" means.
@@ -415,16 +421,10 @@ func registerBlob(sc *godog.ScenarioContext) {
 		}
 		h := world(ctx).Host
 		if h != nil && h.dc != nil {
-			world(ctx).Core.clock.Advance(d)
 			h.dc.advance(d)
 			h.signal()
 			return h.settle()
 		}
-		if m := world(ctx).Model; m != nil && m.call != nil {
-			m.call.rt.Advance(d)
-			return nil
-		}
-		world(ctx).Core.clock.Advance(d)
 		return nil
 	})
 	sc.Step(`^the blob store is closed and opened again on the same location$`, func(ctx context.Context) error {

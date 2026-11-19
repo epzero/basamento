@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -154,6 +155,69 @@ func TestEndTurnRecordsInterruptedAndCompletesInPlace(t *testing.T) {
 	}
 	if models != 1 {
 		t.Fatalf("model messages = %d, want 1", models)
+	}
+}
+
+func TestRecordModelMessageIsIdempotent(t *testing.T) {
+	rec := newTestRecord()
+	if _, err := rec.Accept(Message{ID: "m1", Text: "Tell me a story"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rec.BeginTurn(); !ok {
+		t.Fatal("no turn")
+	}
+	if !rec.RecordModelMessage(1, 1, ModelMessage{Text: "Once upon a time"}) {
+		t.Fatal("the first recording was not recorded")
+	}
+	if rec.RecordModelMessage(1, 1, ModelMessage{Text: "Once upon a time"}) {
+		t.Fatal("the replayed recording appended a second message")
+	}
+	models := 0
+	for _, m := range rec.Messages {
+		if m.Role == RoleModel {
+			models++
+		}
+	}
+	if models != 1 {
+		t.Fatalf("model messages = %d, want 1", models)
+	}
+}
+
+// TestRecordWithQueueSurvivesMarshalling is the coordinator's ContinueAsNew and
+// crash-resume contract: the record that carries the running turn, the queue,
+// the handled ids and the continuation count survives an encode and decode.
+func TestRecordWithQueueSurvivesMarshalling(t *testing.T) {
+	rec := newTestRecord()
+	if _, err := rec.Accept(Message{ID: "m1", Text: "Write a poem"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rec.BeginTurn(); !ok {
+		t.Fatal("no turn")
+	}
+	for _, msg := range []Message{{ID: "m2", Text: "Then translate it"}, {ID: "m3", Text: "And add a title"}} {
+		if _, err := rec.Accept(msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec.DurableCall()
+	rec.Checkpointed()
+
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumed Record
+	if err := json.Unmarshal(raw, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Running != 1 || len(resumed.Queue) != 2 || len(resumed.Handled) != 3 || resumed.Continued != 1 {
+		t.Fatalf("resumed record = %+v, want the running turn, two queued messages, three handled ids and one continuation", resumed)
+	}
+	if _, err := resumed.Accept(Message{ID: "m2", Text: "Then translate it"}); err != nil {
+		t.Fatalf("redelivered queued message: %v", err)
+	}
+	if len(resumed.Queue) != 2 {
+		t.Fatalf("queue = %d, want the duplicate to be a no-op", len(resumed.Queue))
 	}
 }
 

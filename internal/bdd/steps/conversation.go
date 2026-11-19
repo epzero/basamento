@@ -9,7 +9,10 @@ import (
 
 	"github.com/epzero/basamento/agent/conversation"
 	"github.com/epzero/basamento/core"
+	psql "github.com/epzero/basamento/platform/sql"
 	"github.com/epzero/basamento/runtime"
+	"github.com/epzero/basamento/stream"
+	"github.com/epzero/basamento/stream/eventlog"
 )
 
 // convWorld is the in-process conversation harness (design §7). It drives the
@@ -40,6 +43,23 @@ type convState struct {
 	results   map[string]string   // user -> last turn result code
 	delivered map[string][]string // user -> model messages delivered
 	checks    []convCheck
+
+	// Durable temporal harness (WP-L7-04): the record and the stream live in
+	// the scenario's data directory, so a simulated process kill and restart
+	// loads them back.
+	runtimeName string
+	dir         string
+	store       *psql.Store
+	log         *eventlog.Log
+	broker      *stream.Broker
+	clock       core.Clock
+	client      *stream.Attachment
+	frames      []stream.Frame
+	cursor      stream.Cursor
+	msgID       string
+	attempt     int
+	killed      bool
+	turnAnswers map[int]string
 }
 
 type convRun struct {
@@ -236,6 +256,9 @@ func (c *convState) startTurn(hold bool) {
 	turn := &convTurn{child: child, script: c.next, step: 1}
 	c.next = convScript{}
 	c.running = turn
+	if err := c.startTemporalMessage(start.Index); err != nil {
+		return
+	}
 	c.callModel(turn, turn.script.partial, false)
 	if !hold {
 		c.completeTurn()
@@ -374,6 +397,9 @@ func (c *convState) endTurn(state, code string) {
 	if _, ok := c.rec.LastTurn(); ok && state == conversation.TurnCompleted {
 		last := c.rec.Messages[len(c.rec.Messages)-1]
 		if last.Role == conversation.RoleModel {
+			if c.delivered == nil {
+				c.delivered = map[string][]string{}
+			}
 			c.delivered[c.user] = append(c.delivered[c.user], last.Text)
 		}
 	}
@@ -391,6 +417,11 @@ func (c *convState) afterTurn() {
 	if len(c.rec.Queue) > 0 {
 		hold := false
 		if last, ok := c.rec.LastTurn(); ok && last.State == conversation.TurnCancelled {
+			hold = true
+		}
+		// On the durable runtime the scenario drives each queued turn's model
+		// attempt, so a turn that starts after another one is held.
+		if c.runtimeName == "temporal" {
 			hold = true
 		}
 		c.startTurn(hold)
@@ -463,6 +494,7 @@ func (c *convState) lastTurn() (conversation.Turn, bool) { return c.rec.LastTurn
 // --- step definitions ------------------------------------------------------
 
 func registerConversation(sc *godog.ScenarioContext) {
+	registerConversationCrash(sc)
 	sc.Step(`^tenant "([^"]*)" has a conversation "([^"]*)" of user "([^"]*)" on an "([^"]*)" flow$`, func(ctx context.Context, tenant, id, user, flow string) error {
 		w := world(ctx).Conversation
 		if w.convs[tenant] == nil {
@@ -651,6 +683,9 @@ func registerConversation(sc *godog.ScenarioContext) {
 		if c.running == nil {
 			c.next = convScript{partial: text, hasPartial: true}
 			return nil
+		}
+		if err := c.streamDeltas(text, deltas, false); err != nil {
+			return err
 		}
 		c.running.partial = text
 		c.running.script.partial = text
@@ -1048,9 +1083,6 @@ func registerConversation(sc *godog.ScenarioContext) {
 		return checkConvErr(world(ctx).Conversation, code)
 	})
 	sc.Step(`^the steer fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return checkConvErr(world(ctx).Conversation, code)
-	})
-	sc.Step(`^the action fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		return checkConvErr(world(ctx).Conversation, code)
 	})
 

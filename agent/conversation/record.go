@@ -282,6 +282,39 @@ func (r *Record) ModelMessage(m ModelMessage) {
 	})
 }
 
+// RecordModelMessage records one model message of turn at position in the
+// conversation history. It is the turn's recording step: called again for the
+// same turn and position, it appends nothing, completes an interrupted message
+// in place, and reports false (REQ-CONV-023, design §8).
+func (r *Record) RecordModelMessage(turn, position int, m ModelMessage) bool {
+	if turn <= 0 || position <= 0 {
+		return false
+	}
+	status := m.Status
+	if status == "" {
+		status = StatusComplete
+	}
+	for i := range r.Messages {
+		if r.Messages[i].Turn == turn && r.Messages[i].Role == RoleModel && r.Messages[i].Position == position {
+			if r.Messages[i].Status == StatusInterrupted && status == StatusComplete {
+				r.Messages[i].Status = StatusComplete
+			}
+			if r.Messages[i].Text == "" {
+				r.Messages[i].Text = m.Text
+			}
+			return false
+		}
+	}
+	r.Messages = append(r.Messages, MessageRecord{
+		Turn:     turn,
+		Role:     RoleModel,
+		Text:     m.Text,
+		Position: position,
+		Status:   status,
+	})
+	return true
+}
+
 // EndTurn records the running turn's result and its model messages. A model
 // message already recorded for the same turn and position is completed in
 // place instead of appended again, so a replayed recording step records it at
@@ -299,36 +332,8 @@ func (r *Record) EndTurn(result TurnOutput) {
 	turn := &r.Turns[r.Running-1]
 	turn.State = state
 	turn.Code = result.Code
-	position := 0
-	for _, m := range result.Messages {
-		status := m.Status
-		if status == "" {
-			status = StatusComplete
-		}
-		position++
-		existing := -1
-		for i := range r.Messages {
-			if r.Messages[i].Turn == turn.Index && r.Messages[i].Role == RoleModel && r.Messages[i].Position == position {
-				existing = i
-				break
-			}
-		}
-		if existing >= 0 {
-			if r.Messages[existing].Status == StatusInterrupted && status == StatusComplete {
-				r.Messages[existing].Status = StatusComplete
-			}
-			if r.Messages[existing].Text == "" {
-				r.Messages[existing].Text = m.Text
-			}
-			continue
-		}
-		r.Messages = append(r.Messages, MessageRecord{
-			Turn:     turn.Index,
-			Role:     RoleModel,
-			Text:     m.Text,
-			Position: position,
-			Status:   status,
-		})
+	for position, m := range result.Messages {
+		r.RecordModelMessage(turn.Index, position+1, m)
 	}
 	r.Running = 0
 }

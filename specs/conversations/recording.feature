@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-04 @runtime:any @level:component
+@wp:WP-L7-04 @runtime:any @level:component
 Feature: A turn's messages are recorded once
   A durable runtime may execute a turn's model call or its message-recording
   step again, after a restart or a retry. The conversation history then holds

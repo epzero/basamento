@@ -105,7 +105,13 @@ func registerAuthz(sc *godog.ScenarioContext) {
 		})
 	})
 	sc.Step(`^the action fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		err := world(ctx).Authz.lastErr
+		w := world(ctx)
+		var err error
+		if w.Conversation != nil && w.Conversation.lastErr != nil {
+			err = w.Conversation.lastErr
+		} else {
+			err = w.Authz.lastErr
+		}
 		if err == nil {
 			return fmt.Errorf("action succeeded, want code %s", code)
 		}

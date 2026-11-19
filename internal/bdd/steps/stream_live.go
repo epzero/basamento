@@ -146,6 +146,9 @@ func userDetaches(ctx context.Context, user string) error {
 }
 
 func userReattaches(ctx context.Context, user string) error {
+	if c := world(ctx).Conversation.temporalFor(user); c != nil {
+		return c.reattachStream()
+	}
 	w, err := streamWorldOrError(ctx)
 	if err != nil {
 		return err
@@ -229,6 +232,9 @@ func receivesDurableOnce(ctx context.Context, user string) error {
 }
 
 func streamHasTextOnce(ctx context.Context, user, text string) error {
+	if c := world(ctx).Conversation.temporalFor(user); c != nil {
+		return c.streamHasTextOnce(text)
+	}
 	w, err := streamWorldOrError(ctx)
 	if err != nil {
 		return err
@@ -338,6 +344,9 @@ func sameDurableOrder(ctx context.Context, first, second string) error {
 }
 
 func resetBeforeAttempt(ctx context.Context, user string, attempt int) error {
+	if c := world(ctx).Conversation.temporalFor(user); c != nil {
+		return c.resetBeforeAttempt(attempt)
+	}
 	w, err := streamWorldOrError(ctx)
 	if err != nil {
 		return err

@@ -1,7 +1,8 @@
 # Streaming: runs outlive connections
 
 Status: **Partly implemented** (WP-L6-01, WP-L6-02, the API surface of
-WP-L6-03 and WP-L7-03; WP-L6-04 is planned). Decisions: ADR-0005, ADR-0007.
+WP-L6-03, WP-L7-03 and the durable-runtime resume of WP-L7-04; WP-L6-04 is
+planned). Decisions: ADR-0005, ADR-0007.
 Specs: `specs/streaming`, `specs/conversations`.
 
 ## 1. Two layers
@@ -78,6 +79,13 @@ durable calls and checkpoints at a turn boundary on a runtime that supports
 continuing as new. Isolation is per tenant and per user: another tenant's
 conversation is `not_found`, another user's is `permission_denied`. The turn
 itself is the agent loop of WP-L7-01, run as a child of the coordinator.
+
+On the durable runtime the record survives a process kill: the restarted
+coordinator resumes the running turn, runs the queued messages in arrival
+order, and records each user and model message once even when the turn's model
+call or recording step executes again (`REQ-CONV-022`, `REQ-CONV-023`). A
+reattached client receives the reset of the retried attempt before its deltas
+and the completed message once.
 
 ## 7. Client protocols
 
