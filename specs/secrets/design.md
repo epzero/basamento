@@ -7,10 +7,15 @@ Decisions the implementer of WP-L1-04 follows. Package: `platform/secrets`
 
 | Part | What it is |
 | --- | --- |
-| Key service | Holds the master key and wraps and unwraps with it. Opened from a URL through `gocloud.dev/secrets`: `localsecrets://<base64 32-byte key>` (embedded; mapped onto gocloud's `localsecrets` keeper, whose own scheme is `base64key`), `awskms://`, `gcpkms://`, and `hashivault://` (Vault Transit), which ADR-0004 lists. Any other scheme is refused (REQ-SECRET-019). The gocloud version in use has no Vault Transit driver, so until a key service for it is added the store refuses `hashivault://` with `invalid_argument` as well. |
+| Key service | Holds the master key and wraps and unwraps with it. Opened from a URL through `gocloud.dev/secrets`: `localsecrets://<base64 32-byte key>` (embedded; mapped onto gocloud's `localsecrets` keeper, whose own scheme is `base64key`), `awskms://` and `gcpkms://`. Any other scheme is refused (REQ-SECRET-019). ADR-0004 and the config contract list `hashivault://` (Vault Transit), but no Vault Transit driver exists in the gocloud version in use, so the store refuses it with `invalid_argument`; whether it stays is an open architecture decision. |
 | Secrets port | Implements `platform.Secrets` (`Encrypt`/`Decrypt` of small values) over the key service, and owns tenants' keysets: creation, wrapping, rotation, rewrap. |
 | Keyset store | Port declared by `platform/secrets` that persists one wrapped keyset record per tenant with compare-and-swap. This WP ships a file-backed store for the embedded profile; a SQL store can follow behind the same port without a spec change. |
 | Payload codec | Encodes and decodes the runtimes' payloads with the tenant's keyset. The tenant comes from the context (`ctx`), as for every repository call. |
+
+The key-service port and the keyset store sit below the codec and therefore
+take the tenant as an argument. The codec is the only public entry for
+payloads and takes the tenant only from the context (REQ-SECRET-022); tenant
+separation (constitution article 8) is enforced at that boundary.
 
 The cloud key services arrive with their vendor client stacks. The package
 imports `gocloud.dev/secrets/awskms` and `gocloud.dev/secrets/gcpkms` for
@@ -83,18 +88,20 @@ done with the master key, and the keeper's own code says why it failed.
 | --- | --- | --- |
 | Context cancelled | `cancelled` | `cancelled` |
 | Deadline exceeded | `timeout`, retryable | `timeout`, retryable |
-| `InvalidArgument`, `FailedPrecondition` | Wrapping or unwrapping a keyset, or encrypting a value: `internal`, `keyset of the tenant cannot be unwrapped`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset or encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
-| `PermissionDenied`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
-| Any other code | `unavailable`, retryable, the message is the scheme only | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset or encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
+| `InvalidArgument`, `FailedPrecondition` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `keyset of the tenant cannot be wrapped`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
+| `PermissionDenied`, `Unauthenticated`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
+| Any other code | `unavailable`, retryable, the message is the scheme only | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
 
 A cloud keeper that cannot be reached therefore fails a value decrypt with
 `unavailable`, retryable, never with `invalid_argument`. `localsecrets` holds
 the key in the process and has no unreachable state, so none of its failures
-is `unavailable`. Opening a cloud key service URL goes through the same
-classification; a failure there that is neither `unavailable` nor a cancelled
-context is a configuration error and becomes `invalid_argument` with `invalid
-key service URL for scheme "<scheme>"`, while an outage keeps its `unavailable`
-code.
+is `unavailable`. `Unauthenticated` sits with `PermissionDenied`: expired
+credentials are a configuration fault, not an outage, so the failure is
+`internal` and not retryable. Opening a cloud key service URL goes through the
+same classification: a cancelled context or an exceeded deadline keeps
+`cancelled` or `timeout`, an outage keeps `unavailable`, and any other failure
+is a configuration error and becomes `invalid_argument` with `invalid key
+service URL for scheme "<scheme>"`.
 
 ### 2.3 The keyset cache and what it costs
 
@@ -111,8 +118,8 @@ code.
   the store is not read and nothing is unwrapped. Otherwise the record is read
   once: a cached entry at the same revision rejects the payload without an
   unwrap, and a different revision, or no cached entry, unwraps once and looks
-  for the key id again. An authentication failure never causes a reload or an
-  unwrap (REQ-SECRET-024).
+  for the key id again. An authentication failure never causes a further reload
+  or unwrap beyond the one a cold codec needs (REQ-SECRET-024).
 - There is no time-based expiry. A TTL would let a codec keep using a keyset
   older than the one stored until the entry expired, which is exactly the
   window after a rotation or a revocation in which the newer keyset must
@@ -121,9 +128,11 @@ code.
 ### 2.4 Master-key rotation
 
 - Before any record is touched, the new master key proves itself: the codec
-  wraps and unwraps a canary under a tenant id no real tenant uses, and a
-  failure stops the rotation before the first write. A broken new key would
-  otherwise rewrap records into something no configured key can open.
+  wraps and unwraps a canary under the tenant id `__basamento_canary__`, a
+  legal tenant id, and a failure stops the rotation before the first write. A
+  broken new key would otherwise rewrap records into something no configured
+  key can open. The canary is only wrapped and unwrapped in memory and is
+  never stored, so a tenant with the same id is unaffected.
 - The new key becomes the current master key and the previous ones stay
   configured, so every record still unwraps with the master key it names. The
   codec accepts a current master key and optional previous ones.
@@ -203,8 +212,8 @@ helper the scenarios use for deterministic payloads and keys lives beside it in
 tests in `platform/secrets` use fakes defined in their own `_test.go` files.
 `core/coretest` remains the only package listed as test-only in
 `layering.yaml` and belongs to another work package, so this WP adds none.
-Live keepers (`awskms`, `gcpkms`) are exercised only in `@live` checks,
-outside this spec.
+No check exercises the live keepers yet; the gate uses `localsecrets` and the
+simulator.
 
 Three behaviors stay in unit tests because the gate cannot drive them
 deterministically with the simulator:
