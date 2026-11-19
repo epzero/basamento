@@ -498,6 +498,18 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/46
         human:
             status: pending
+    EXPR-021-05:
+        hash: sha256:597e3c230f42631796cd19380d445c3cca043c69689346bc83fbdd6259090c58
+        reqs:
+            - REQ-EXPR-021
+        tier: P1
+        author: claude-code:spec-author:b58551
+        reviewer: opencode:spec-reviewer:55941c
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: map key identity for == and [key] is CEL numeric equality across int, uint and double, symmetric in both directions, and a numeric key never equals a string key. Verified against cel-go v0.33.4: stock is asymmetric (int/uint lookups miss double entries) and operand-order-dependent, so this deliberately goes beyond its accessor; iteration order (EXPR-021-01..04) is unchanged.'
+        ref: https://github.com/epzero/basamento/pull/84
+        human:
+            status: pending
     EXPR-022-01:
         hash: sha256:ae3c9fc45a96a51fd4e3b89ced86a23dc173b09ece1b47dbf322b0c3bc1fab0e
         reqs:
