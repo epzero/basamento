@@ -69,7 +69,7 @@ func (s *sweepSlotFailBucket) ListKeysCallback(ctx context.Context, prefix strin
 func (s *sweepSlotFailBucket) Close() error { return s.inner.Close() }
 
 func plantExpiredSlot(ctx context.Context, st *Store, tenant, stageKey string, expired time.Time) error {
-	meta := slotMeta{Max: 10, ContentType: "text/plain", Expires: expired.Unix()}
+	meta := slotMeta{Max: 10, ContentType: "text/plain", Expires: expired.UnixNano()}
 	raw, err := encodeSlotMeta(meta)
 	if err != nil {
 		return err
