@@ -101,7 +101,10 @@ func generationOptions(root reflect.Type) (*gjschema.ForOptions, error) {
 		switch t.Kind() {
 		case reflect.Struct:
 			for _, f := range reflect.VisibleFields(t) {
-				if !f.IsExported() || jsonName(f) == "" {
+				if !f.IsExported() && (!f.Anonymous || !embedStructKind(f.Type)) {
+					continue
+				}
+				if jsonName(f) == "" && (!f.Anonymous || !embedStructKind(f.Type)) {
 					continue
 				}
 				if err := visit(f.Type); err != nil {
@@ -172,7 +175,10 @@ func subtreeHasPendingMap(t reflect.Type, pending map[reflect.Type]bool) bool {
 		switch t.Kind() {
 		case reflect.Struct:
 			for _, f := range reflect.VisibleFields(t) {
-				if f.IsExported() && walk(f.Type) {
+				if !f.IsExported() && (!f.Anonymous || !embedStructKind(f.Type)) {
+					continue
+				}
+				if walk(f.Type) {
 					return true
 				}
 			}
@@ -242,13 +248,23 @@ func patchObjectNode(node map[string]any, t reflect.Type, opts *gjschema.ForOpti
 		if name == "" {
 			continue
 		}
-		// encoding/json flattens an embedded struct; its promoted fields are
-		// in VisibleFields and get their own properties.
-		if f.Anonymous && f.Type.Kind() == reflect.Struct {
+		// encoding/json flattens an embedded struct or pointer to one; its
+		// promoted fields are in VisibleFields and get their own properties.
+		if f.Anonymous && embedStructKind(f.Type) {
 			continue
 		}
 		settings := jsonFieldSettings(f)
 		if _, ok := props[name]; !ok {
+			// Only an anonymous non-struct field is still missing by design;
+			// any other absent property was a shape decision made above.
+			if !f.Anonymous {
+				continue
+			}
+			// A struct that embeds json.RawMessage promotes its MarshalJSON and
+			// writes any JSON value, so it has no member for the embedded field.
+			if rawMessageFieldType(f.Type) {
+				continue
+			}
 			// The library skips anonymous fields, but encoding/json writes an
 			// embedded non-struct value as a member named after the field.
 			sub, err := generateSubSchema(f.Type, opts)

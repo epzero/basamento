@@ -583,7 +583,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		if verdict == "accepted" && err != nil {
 			return err
 		}
-		if verdict == "rejected" && err == nil {
+		if verdict == "rejected" && !instanceRejected(err) {
 			return fmt.Errorf("accepted")
 		}
 		return nil

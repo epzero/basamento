@@ -45,6 +45,10 @@ func ForType(t reflect.Type) (*Schema, error) {
 		return nil, invalidArgf("marshal generated schema: %v", err)
 	}
 	raw = patchNullTypesInGeneratedSchema(raw)
+	raw, err = patchEmbeddedJSONFields(raw, t, opts)
+	if err != nil {
+		return nil, err
+	}
 	raw, err = patchGeneratedSchema(raw, t, opts)
 	if err != nil {
 		return nil, err
@@ -209,10 +213,10 @@ func walkInvalidField(t reflect.Type, prefix string, seen map[reflect.Type]bool)
 		return prefix, true
 	case reflect.Struct:
 		for _, f := range reflect.VisibleFields(t) {
-			if f.Anonymous || !f.IsExported() {
+			if !f.IsExported() {
 				continue
 			}
-			if jsonName(f) == "" {
+			if jsonName(f) == "" && (!f.Anonymous || !embedStructKind(f.Type)) {
 				continue
 			}
 			next := f.Name
