@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-05 @level:component
+@wp:WP-L3-05 @level:component
 Feature: Prompt lint
   Prompt lint checks a template before it is registered, so a cacheable
   prefix holds no variable or untrusted text and fixed text fits its budget,

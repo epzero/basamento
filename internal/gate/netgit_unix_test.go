@@ -14,6 +14,45 @@ import (
 	"time"
 )
 
+// TestOriginHasBranchKeepsTheLSRemoteExitCode proves the bounded helper still
+// lets originHasBranch tell "no such ref" (exit 2) from a reachability error:
+// the *exec.ExitError must survive the wrapping gitRemote adds.
+func TestOriginHasBranchKeepsTheLSRemoteExitCode(t *testing.T) {
+	bin := t.TempDir()
+	gitPath := filepath.Join(bin, "git")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cases := []struct {
+		name    string
+		script  string
+		want    bool
+		wantErr string
+	}{
+		{"present", "#!/bin/sh\necho 0123456789012345678901234567890123456789\trefs/heads/topic\n", true, ""},
+		{"absent", "#!/bin/sh\nexit 2\n", false, ""},
+		{"unreachable", "#!/bin/sh\necho 'fatal: unable to access' >&2\nexit 128\n", false, "cannot reach origin"},
+	}
+	for _, c := range cases {
+		if err := os.WriteFile(gitPath, []byte(c.script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got, err := originHasBranch(t.TempDir(), "topic")
+		if c.wantErr == "" {
+			if err != nil || got != c.want {
+				t.Fatalf("%s: originHasBranch = %v, %v; want %v, nil", c.name, got, err, c.want)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Fatalf("%s: want a reachability error, got %v", c.name, err)
+		}
+		for _, want := range []string{"git remote get-url origin", "network", "credentials"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the error must say what to check (%q): %v", c.name, want, err)
+			}
+		}
+	}
+}
+
 // TestGitPipeHolderProcess is a helper, not a test: the fake git below starts
 // it. It leaves git's process group so the kill at the deadline misses it, and
 // then holds the stdout and stderr pipes inherited from git, the way

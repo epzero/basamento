@@ -2,7 +2,7 @@
 
 Identifiers: **Implemented** (`core/ids.go`). Design: ULIDs with cryptographic
 entropy, monotonic within a millisecond in one process; fakes in `core/coretest`
-are test-only. Tenant context: **Planned** (`core/tenant.go`), design
+are test-only. Tenant context: **Implemented** (`core/tenant.go`), design
 [`design.md`](design.md).
 
 ### REQ-CORE-001 — Unique across restarts

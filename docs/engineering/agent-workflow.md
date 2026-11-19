@@ -30,9 +30,21 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
 - **One branch per change.** The first session gets a new worktree and
   branch from `main`. Every later session and review round runs `gate agent
   new` with the same `-issue`, which places it in that worktree to take its
-  turn on the branch.
+  turn on the branch. When the branch was pushed and `origin` has newer
+  commits, the command `git fetch`es and fast-forwards only; it refuses if the
+  local branch diverged or has unpushed commits `origin` lacks (never reset,
+  never discard commits). With no `origin` or nothing on `origin` for that
+  branch yet, the checkout is left as-is.
+- **Starting inside the issue worktree.** A harness may run `gate agent new`
+  from the worktree path instead of the main checkout; the previous session's
+  hand-off is kept and printed like any other turn on the branch, including
+  across an intermediate session that never called `gate agent status`.
 - **Code reviewers get a detached snapshot** of that branch, so several can
-  run in parallel and none commits.
+  run in parallel and none commits, even when the command is started from
+  inside the working issue worktree.
+- **`-branch`** names are validated in pure Go before any `git` call: letters,
+  digits, `-` and `_` only, not starting with `-`, and not `HEAD` (no `/`,
+  spaces, refspecs, or path components).
 - **Leads stay in the main checkout**, as do sessions started with
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
@@ -45,11 +57,11 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   take no lock. A second `agent new` waits up to 80 seconds (two bounded
   remote calls plus local work), then reports that the first call may still be
   running.
-- **Remote git calls are bounded.** A `fetch` gives up after 30 seconds and
-  says what to check (the remote, the network, the credentials). git is killed
-  at the deadline, and the call is force-closed a few seconds later even if a
-  transport helper inherited the output pipes and survived the kill, so an
-  unreachable origin does not hang the command.
+- **Remote git calls are bounded.** A `fetch` or `ls-remote` gives up after 30
+  seconds and says what to check (the remote, the network, the credentials). git
+  is killed at the deadline, and the call is force-closed a few seconds later
+  even if a transport helper inherited the output pipes and survived the kill,
+  so an unreachable origin does not hang the command.
 
 A person is `human:<github-login>`; when no personal login is given, the
 default owner identity is `human:epzero` (§5). An identity is a convention,
