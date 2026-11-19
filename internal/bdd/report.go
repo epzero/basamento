@@ -9,8 +9,6 @@ import (
 	"github.com/epzero/basamento/internal/bdd/sqltest"
 )
 
-const bddReportPath = ".gate/bdd.json"
-
 // bddReport is the Postgres pass summary written for the gate (no secrets).
 type bddReport struct {
 	Outcome        string         `json:"outcome"`

@@ -14,7 +14,6 @@ func resetPostgresSession() {
 	pgMu.Lock()
 	pgInit = sync.Once{}
 	pgFailed = false
-	pgMode = ""
 	reportedSource = ""
 	pgMu.Unlock()
 }

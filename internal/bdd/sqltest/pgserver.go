@@ -25,7 +25,6 @@ const (
 var (
 	pgInit         sync.Once
 	pgMu           sync.Mutex
-	pgMode         PostgresServerMode
 	pgAdmin        string
 	pgReady        bool
 	pgFailed       bool
@@ -73,7 +72,6 @@ func PostgresServerSource() string {
 func initPostgres(ctx context.Context) error {
 	envURL := strings.TrimSpace(os.Getenv("BDD_POSTGRES_URL"))
 	if envURL != "" {
-		pgMode = PostgresServerURL
 		if err := probeAdminURL(ctx, envURL); err != nil {
 			pgFailed = true
 			if GateStrict() {
