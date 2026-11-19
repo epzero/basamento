@@ -2,12 +2,42 @@ package machine
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/flow"
 	"github.com/epzero/basamento/flow/ir"
 )
+
+func TestStartReturnsZeroSnapshotWhenAdvanceFails(t *testing.T) {
+	def := &flow.IR{
+		Name:    "bad-map",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object","properties":{"items":{}}}`)},
+		Nodes: map[string]flow.Node{
+			"prep": {Kind: "set", Spec: json.RawMessage(`{"items":"not-an-array"}`)},
+			"mapn": {Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"work"}`)},
+			"work": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "prep"},
+			{From: "prep", To: "mapn"},
+			{From: "mapn", To: "work"},
+		},
+	}
+	m := requireMachine(t, def)
+	snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("error %v, want invalid_argument", err)
+	}
+	if !reflect.DeepEqual(snapshot, flow.Snapshot{}) {
+		t.Fatalf("snapshot %+v, want zero", snapshot)
+	}
+	if commands != nil {
+		t.Fatalf("commands %+v, want nil", commands)
+	}
+}
 
 func TestApplyLeavesInputSnapshotUnchangedOnSuccess(t *testing.T) {
 	m := requireMachine(t, triageFlow())

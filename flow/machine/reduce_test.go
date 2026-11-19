@@ -161,6 +161,17 @@ func TestSumAtMaxInt64StillWorks(t *testing.T) {
 	}
 }
 
+func TestSumAtMinInt64StillWorks(t *testing.T) {
+	m := reducerMachine(t, map[string]string{"n": "sum"})
+	state := map[string]any{"n": json.Number("-9223372036854775807")}
+	if err := m.reduceKey(state, "n", json.Number("-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := state["n"].(json.Number).String(); got != "-9223372036854775808" {
+		t.Fatalf("n = %s, want MinInt64", got)
+	}
+}
+
 func assertJSON(t *testing.T, value any, want string) {
 	t.Helper()
 	encoded, err := json.Marshal(value)

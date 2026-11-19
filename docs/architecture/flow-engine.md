@@ -111,6 +111,10 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   host.
 - **Guards**: a `while` that does not hold skips the node and ends its branch;
   a visit or cost bound that is reached fails the run with `budget_exceeded`.
+  `cost_mpts` is compared with `Snapshot.Cost`, the run's total settled cost,
+  when the node is about to start; a node does not start once the cost has
+  reached the budget (`cost >= cost_mpts`), like `max_visits` after the last
+  allowed visit.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
   (`cost_mpts`). The host puts each node's settled milli-points on
   `Event.cost_mpts` for `node_completed` and `node_failed`; `Apply` adds them

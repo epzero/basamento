@@ -135,13 +135,69 @@ func TestCostMptsAcceptsMaxInt64OnNodeCompleted(t *testing.T) {
 	}
 }
 
-func TestCostGuardFailsAfterBudgetIsSpent(t *testing.T) {
-	def := &flow.IR{
+func TestCostGuardBudgetBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		guard          int64
+		wantWorkRuns   int
+		wantCostAtFail int64
+	}{
+		{"reached at third entry", 80, 2, 80},
+		{"third visit still runs", 81, 3, 120},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			def := costLoopDefinition(tc.guard)
+			m := requireMachine(t, def)
+			snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			workRuns := 0
+			const maxSteps = 20
+			for step := 0; len(commands) != 1 || commands[0].Type != "fail"; step++ {
+				if step >= maxSteps {
+					t.Fatalf("loop did not fail within %d steps; commands %+v", maxSteps, commands)
+				}
+				if len(commands) == 0 {
+					t.Fatal("no commands to execute")
+				}
+				switch commands[0].Node {
+				case "work":
+					workRuns++
+					snapshot, commands, err = m.Apply(snapshot, flow.Event{
+						Type:     "node_completed",
+						Node:     "work",
+						CostMpts: 40,
+					})
+				case "check":
+					snapshot, commands, err = m.Apply(snapshot, flow.Event{Type: "node_completed", Node: "check"})
+				default:
+					t.Fatalf("unexpected commands %+v", commands)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code := commandCode(t, commands[0]); code != string(core.CodeBudgetExceeded) {
+				t.Fatalf("code %q, want budget_exceeded", code)
+			}
+			if workRuns != tc.wantWorkRuns {
+				t.Fatalf("completed work %d times, want %d", workRuns, tc.wantWorkRuns)
+			}
+			if snapshot.Cost != tc.wantCostAtFail {
+				t.Fatalf("cost %d, want %d at guard failure", snapshot.Cost, tc.wantCostAtFail)
+			}
+		})
+	}
+}
+
+func costLoopDefinition(costGuard int64) *flow.IR {
+	return &flow.IR{
 		Name:    "cost-loop",
 		Version: 1,
 		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
 		Nodes: map[string]flow.Node{
-			"work":  {Kind: "task", Guard: &flow.Guard{CostMpts: 100}},
+			"work":  {Kind: "task", Guard: &flow.Guard{CostMpts: costGuard}},
 			"check": {Kind: "task"},
 		},
 		Edges: []flow.Edge{
@@ -150,7 +206,10 @@ func TestCostGuardFailsAfterBudgetIsSpent(t *testing.T) {
 			{From: "check", To: "work"},
 		},
 	}
-	m := requireMachine(t, def)
+}
+
+func TestCostGuardFailsAfterBudgetIsSpent(t *testing.T) {
+	m := requireMachine(t, costLoopDefinition(100))
 	snapshot, commands, err := m.Start(json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
