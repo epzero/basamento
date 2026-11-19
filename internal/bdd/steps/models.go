@@ -18,14 +18,12 @@ import (
 type modelWorld struct {
 	invoker    model.Invoker
 	capability model.Capability
-	protocol   model.Protocol
 	modelID    string
 
 	streamText   string
 	streamChunks int
 	hold         bool
 
-	handle model.Handle
 	events []model.Event
 	result model.Result
 }
@@ -123,7 +121,6 @@ func (w *modelWorld) provider(capability, protocol string) error {
 		return err
 	}
 	w.capability = model.Capability(capability)
-	w.protocol = proto
 	w.modelID = "sim-" + capability
 	if w.streamText == "" {
 		w.streamText, w.streamChunks = "Hello there", 3
@@ -193,7 +190,6 @@ func (w *modelWorld) follow(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	w.handle = h
 	ch, err := w.invoker.Events(ctx, h, 0)
 	if err != nil {
 		return err
@@ -215,7 +211,6 @@ func (w *modelWorld) cancelAfterFirst(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	w.handle = h
 	ch, err := w.invoker.Events(ctx, h, 0)
 	if err != nil {
 		return err
