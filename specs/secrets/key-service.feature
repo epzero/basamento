@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-04 @level:component
+@wp:WP-L1-04 @level:component
 Feature: Key service and value encryption
   The secrets port opens its key service from a URL: a local key in the
   embedded profile, a KMS or Vault Transit in the cloud one. It encrypts small
