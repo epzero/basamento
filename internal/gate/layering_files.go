@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -82,8 +83,30 @@ func dirPathSkipped(root, dir string) bool {
 	return relPathSkipped(filepath.ToSlash(rel))
 }
 
+// goModHasModule reports whether path's go.mod has a module directive with a path.
+func goModHasModule(path string) (bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	for _, raw := range strings.Split(string(b), "\n") {
+		line := strings.TrimSpace(raw)
+		if before, _, ok := strings.Cut(line, "//"); ok {
+			line = strings.TrimSpace(before)
+		}
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" && fields[1] != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // layeringWalkExtra parses and checks .go files go list did not attribute to a package.
-func layeringWalkExtra(root string, r LayeringRules, attributed map[string]bool, check func(rel, layer string, imports []string, ctx importCheck)) error {
+func layeringWalkExtra(root string, r LayeringRules, attributed map[string]bool, check func(rel, layer string, imports []string, ctx importCheck), add func(string)) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -97,8 +120,21 @@ func layeringWalkExtra(root string, r LayeringRules, attributed map[string]bool,
 				return filepath.SkipDir
 			}
 			if path != root {
-				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
-					return filepath.SkipDir
+				modPath := filepath.Join(path, "go.mod")
+				if _, err := os.Stat(modPath); err == nil {
+					has, err := goModHasModule(modPath)
+					if err != nil {
+						return err
+					}
+					if has {
+						return filepath.SkipDir
+					}
+					rel, err := filepath.Rel(root, modPath)
+					if err != nil {
+						return err
+					}
+					add(fmt.Sprintf("%s: no module directive; a nested module needs one (or delete the file)",
+						filepath.ToSlash(rel)))
 				}
 			}
 			return nil

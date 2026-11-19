@@ -135,7 +135,7 @@ func Layering(root string) ([]string, error) {
 			add(checkImport(r, rel, layer, imp, importCheck{kind: kindTest}))
 		}
 	}
-	if err := layeringWalkExtra(root, r, attributed, checkOne); err != nil {
+	if err := layeringWalkExtra(root, r, attributed, checkOne, add); err != nil {
 		return nil, err
 	}
 	sort.Strings(errs)
