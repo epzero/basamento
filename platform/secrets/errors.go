@@ -14,6 +14,7 @@ const (
 	msgTenantRequired         = "tenant is required"
 	msgTenantNoKeyset         = "tenant has no keyset"
 	msgKeysetCannotUnwrap     = "keyset of the tenant cannot be unwrapped"
+	msgKeysetCannotWrap       = "keyset of the tenant cannot be wrapped"
 	msgValueCannotDecrypt     = "value cannot be decrypted"
 	msgKeyServiceRefused      = "key service refused the request"
 	msgKeysetRevisionConflict = "keyset was changed by another writer"
@@ -116,10 +117,16 @@ func classifyLocalKeeperErr(op keeperOp, err error) error {
 func classifyCloudKeeperErr(code gcerrors.ErrorCode, scheme string, op keeperOp) error {
 	switch code {
 	case gcerrors.InvalidArgument, gcerrors.FailedPrecondition:
-		if op == opDecryptValue {
+		switch op {
+		case opDecryptValue:
 			return errInvalidArgument(msgValueCannotDecrypt)
+		case opUnwrapKeyset:
+			return errInternal(msgKeysetCannotUnwrap)
+		case opWrapKeyset:
+			return errInternal(msgKeysetCannotWrap)
+		default:
+			return errInternal(msgKeyServiceRefused)
 		}
-		return errInternal(msgKeysetCannotUnwrap)
 	case gcerrors.PermissionDenied, gcerrors.NotFound, gcerrors.Unimplemented, gcerrors.AlreadyExists:
 		if op == opUnwrapKeyset {
 			return errInternal(msgKeysetCannotUnwrap)
