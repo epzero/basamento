@@ -92,7 +92,9 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
 
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
   snapshot and commands. The snapshot passed to `Apply` is never modified; on
-  error the host keeps it. No I/O and no clock.
+  error the host keeps it. Raw JSON in snapshots, events and commands shares
+  backing arrays across return values; callers must treat them as read-only. No
+  I/O and no clock.
 - **Supersteps**: every ready node runs. Updates merge through reducers **in
   node-id order** at the barrier, so the result does not depend on completion
   order (REQ-FLOW-002). A map node's attempts merge in attempt order after the
@@ -118,7 +120,8 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
   (`cost_mpts`). The host puts each node's settled milli-points on
   `Event.cost_mpts` for `node_completed` and `node_failed`; `Apply` adds them
-  to `Snapshot.Cost`. Reserving and settling is the model node's work
+  to `Snapshot.Cost`. A `node_failed` accrues its cost once, for the pending
+  step it names. Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.
 - **Large values** are blob references in state.
 

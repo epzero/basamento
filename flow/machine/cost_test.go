@@ -113,6 +113,123 @@ func TestCostMptsAccruesOnNodeFailed(t *testing.T) {
 	if len(commands) != 1 || commands[0].Type != "fail" {
 		t.Fatalf("commands %+v, want fail", commands)
 	}
+	if !next.Steps[0].Done {
+		t.Fatal("pending step should be marked done")
+	}
+}
+
+func TestNodeFailedCostAccruesOnceForPendingStep(t *testing.T) {
+	m := requireMachine(t, triageFlow())
+	held, _, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := flow.Event{
+		Type:     "node_failed",
+		Node:     "verify",
+		CostMpts: 50,
+		Payload:  json.RawMessage(`{"code":"x"}`),
+	}
+	snapshot, commands, err := m.Apply(held, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Cost != 50 {
+		t.Fatalf("cost %d, want 50", snapshot.Cost)
+	}
+	if commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail", commands)
+	}
+	again, commands2, err := m.Apply(snapshot, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Cost != 50 {
+		t.Fatalf("duplicate apply cost %d, want 50", again.Cost)
+	}
+	if commands2[0].Type != "fail" {
+		t.Fatalf("second commands %+v, want fail", commands2)
+	}
+}
+
+func TestStaleNodeFailedDoesNotAccrueCost(t *testing.T) {
+	m := requireMachine(t, triageFlow())
+	held, _, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _, err := m.Apply(held, flow.Event{
+		Type:     "node_completed",
+		Node:     "verify",
+		Payload:  verifyPayload(),
+		CostMpts: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, commands, err := m.Apply(snapshot, flow.Event{
+		Type:     "node_failed",
+		Node:     "verify",
+		CostMpts: 99,
+		Payload:  json.RawMessage(`{"code":"x"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Cost != 10 {
+		t.Fatalf("cost %d, want 10", next.Cost)
+	}
+	if commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail", commands)
+	}
+}
+
+func TestNodeFailedForUnknownNodeDoesNotAccrueCost(t *testing.T) {
+	m := requireMachine(t, triageFlow())
+	held, _, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, commands, err := m.Apply(held, flow.Event{
+		Type:     "node_failed",
+		Node:     "missing",
+		CostMpts: 50,
+		Payload:  json.RawMessage(`{"code":"x"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Cost != 0 {
+		t.Fatalf("cost %d, want 0", next.Cost)
+	}
+	if commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail", commands)
+	}
+}
+
+func TestMapAttemptNodeFailedAccruesCostOnce(t *testing.T) {
+	def := mapFanoutFlow(3)
+	m := requireMachine(t, def)
+	held, _, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, commands, err := m.Apply(held, flow.Event{
+		Type:     "node_failed",
+		Node:     "work",
+		Attempt:  2,
+		CostMpts: 25,
+		Payload:  json.RawMessage(`{"code":"x"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Cost != 25 {
+		t.Fatalf("cost %d, want 25", next.Cost)
+	}
+	if commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail", commands)
+	}
 }
 
 func TestCostMptsAcceptsMaxInt64OnNodeCompleted(t *testing.T) {

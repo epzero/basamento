@@ -173,19 +173,16 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 	}
 	switch ev.Type {
 	case "node_failed":
-		accrueCostMpts(&work, ev)
-		return work, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
+		failCmd := []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}
+		if index := pendingStepIndex(work.Steps, ev.Node, ev.Attempt); index >= 0 {
+			accrueCostMpts(&work, ev)
+			work.Steps[index].Done = true
+		}
+		return work, failCmd, nil
 	case "cancelled":
 		return work, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
 	}
-	index := -1
-	for i := range work.Steps {
-		step := &work.Steps[i]
-		if step.Node == ev.Node && step.Attempt == ev.Attempt && !step.Done {
-			index = i
-			break
-		}
-	}
+	index := pendingStepIndex(work.Steps, ev.Node, ev.Attempt)
 	if index < 0 {
 		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
 	}
@@ -219,6 +216,16 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 		return flow.Snapshot{}, nil, err
 	}
 	return work, commands, nil
+}
+
+func pendingStepIndex(steps []flow.Step, node string, attempt int) int {
+	for i := range steps {
+		step := &steps[i]
+		if step.Node == node && step.Attempt == attempt && !step.Done {
+			return i
+		}
+	}
+	return -1
 }
 
 func validateCostMpts(current int64, ev flow.Event) error {
