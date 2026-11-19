@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -536,23 +537,121 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		slog.Any("raw", []byte("sk-live-7f3a9c1b")),
 		slog.Any("stringerField", stringerCredential{Password: "S3cretField"}),
 		slog.Any("errorField", errorCredential{Secret: "S3cretField"}),
+		slog.Any("wrapped", fmt.Errorf("auth: %w", errorCredential{Secret: "S3cretField"})),
+		slog.Any("joined", errors.Join(errors.New("plain"), errorCredential{Secret: "S3cretField"})),
 	)
+	// OTel attribute values are primitives, so the structured maps go through
+	// the same redactor at the record boundary and then the OTLP encoder.
+	structured := setup.redact.Map(map[string]any{
+		"stringerField": stringerCredential{Password: "S3cretField"},
+		"errorField":    errorCredential{Secret: "S3cretField"},
+	})
+	setup.recordSpan(SpanData{
+		TraceID:    "0102030405060708090a0b0c0d0e0f10",
+		SpanID:     "0102030405060708",
+		Name:       "redaction",
+		Start:      clock.Now(),
+		End:        clock.Now(),
+		Status:     StatusOK,
+		Attributes: structured,
+	})
+	setup.recordMetric(MetricPoint{
+		Name:   "redaction",
+		Kind:   KindCounter,
+		Value:  1,
+		IsInt:  true,
+		Time:   clock.Now(),
+		Labels: structured,
+	})
 	if err := setup.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 
+	spans, logs, metrics := collector.counts()
+	if spans == 0 || logs == 0 || metrics == 0 {
+		t.Fatalf("collector got spans=%d logs=%d metrics=%d, want all three", spans, logs, metrics)
+	}
+	for _, secret := range []string{"sk-live-7f3a9c1b", "hunter2", "S3cretField"} {
+		if collectorLeaks(collector, secret) {
+			t.Fatalf("an exported OTLP signal contains %q", secret)
+		}
+	}
+}
+
+func collectorLeaks(collector *testCollector, text string) bool {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
-	if len(collector.bodies) == 0 {
-		t.Fatal("collector received no OTLP batch")
+	for _, rec := range collector.logs {
+		if anyValueContains(rec.Body, text) || keyValuesContain(rec.Attributes, text) {
+			return true
+		}
 	}
-	for _, body := range collector.bodies {
-		for _, secret := range []string{"sk-live-7f3a9c1b", "hunter2", "S3cretField"} {
-			if bytes.Contains(body, []byte(secret)) {
-				t.Fatalf("an exported OTLP batch contains %q", secret)
+	for _, span := range collector.spans {
+		if keyValuesContain(span.Attributes, text) {
+			return true
+		}
+	}
+	for _, metric := range collector.metrics {
+		for _, attrs := range metricAttributes(metric) {
+			if keyValuesContain(attrs, text) {
+				return true
 			}
 		}
 	}
+	return false
+}
+
+func anyValueContains(value *commonv1.AnyValue, text string) bool {
+	if value == nil {
+		return false
+	}
+	if strings.Contains(value.GetStringValue(), text) {
+		return true
+	}
+	if array := value.GetArrayValue(); array != nil {
+		for _, item := range array.Values {
+			if anyValueContains(item, text) {
+				return true
+			}
+		}
+	}
+	if list := value.GetKvlistValue(); list != nil {
+		for _, item := range list.Values {
+			if strings.Contains(item.Key, text) || anyValueContains(item.Value, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func keyValuesContain(items []*commonv1.KeyValue, text string) bool {
+	for _, item := range items {
+		if strings.Contains(item.Key, text) || anyValueContains(item.Value, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func metricAttributes(metric *metricsv1.Metric) [][]*commonv1.KeyValue {
+	var out [][]*commonv1.KeyValue
+	if sum := metric.GetSum(); sum != nil {
+		for _, point := range sum.DataPoints {
+			out = append(out, point.Attributes)
+		}
+	}
+	if gauge := metric.GetGauge(); gauge != nil {
+		for _, point := range gauge.DataPoints {
+			out = append(out, point.Attributes)
+		}
+	}
+	if histogram := metric.GetHistogram(); histogram != nil {
+		for _, point := range histogram.DataPoints {
+			out = append(out, point.Attributes)
+		}
+	}
+	return out
 }
 
 func TestMarshalRequestIsAnOTLPExportRequest(t *testing.T) {

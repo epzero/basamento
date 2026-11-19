@@ -8,6 +8,10 @@ Environment: Linux x86-64, 4 vCPU, Go 1.26.10 (measured), `go.temporal.io/server
 `go.temporal.io/sdk` v1.47.0, `go.temporal.io/api` v1.63.5, `modernc.org/sqlite`
 v1.51.0, built with `CGO_ENABLED=0`.
 
+These numbers predate the Go 1.26.11 patch bump. The `net/http` fix in that
+patch (GO-2026-6859, ADR-0014) does not touch the embedded server or worker
+paths these benchmarks exercise, so the results still describe this module.
+
 ```bash
 cd runtime/temporal/embedded
 go build -o bench-cli ./bench

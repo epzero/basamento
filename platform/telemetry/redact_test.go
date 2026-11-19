@@ -36,6 +36,18 @@ type errorCredential struct{ Secret string }
 
 func (e errorCredential) Error() string { return "secret=" + e.Secret }
 
+// innerCreds is the unexported payload reached through an embedded or named
+// unexported field.
+type innerCreds struct{ Password string }
+
+type embeddedCreds struct{ innerCreds }
+
+func (e embeddedCreds) String() string { return "password=" + e.Password }
+
+type namedCreds struct{ inner innerCreds }
+
+func (n namedCreds) String() string { return "password=" + n.inner.Password }
+
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
 	cases := []string{
@@ -169,6 +181,66 @@ func TestRedactorDoesNotLetStringerBypassFieldRedaction(t *testing.T) {
 		if text, ok := value.(string); ok && text == "S3cretField" {
 			t.Errorf("%s still carries the field value", key)
 		}
+	}
+}
+
+func TestRedactorWalksWrappedErrors(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Map(map[string]any{
+		"wrapped": fmt.Errorf("auth: %w", errorCredential{Secret: "S3cretField"}),
+		"joined":  errors.Join(errors.New("plain"), errorCredential{Secret: "S3cretField"}),
+		"slice":   []error{errorCredential{Secret: "S3cretField"}},
+	})
+	if got["wrapped"] != Redacted {
+		t.Errorf("wrapped error = %v, want redacted", got["wrapped"])
+	}
+	if got["joined"] != Redacted {
+		t.Errorf("joined error = %v, want redacted", got["joined"])
+	}
+	slice, ok := got["slice"].([]any)
+	if !ok || len(slice) != 1 {
+		t.Fatalf("[]error = %#v, want one canonicalised item", got["slice"])
+	}
+	item, ok := slice[0].(map[string]any)
+	if !ok {
+		t.Fatalf("[]error item = %T, want a canonicalised struct", slice[0])
+	}
+	if item["Secret"] != Redacted {
+		t.Errorf("[]error Secret = %v, want redacted", item["Secret"])
+	}
+}
+
+func TestRedactorReadsUnexportedStructPayload(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Map(map[string]any{
+		"embeddedStringer": embeddedCreds{innerCreds{Password: "S3cretField"}},
+		"namedStringer":    namedCreds{inner: innerCreds{Password: "S3cretField"}},
+	})
+
+	embedded, ok := got["embeddedStringer"].(map[string]any)
+	if !ok {
+		t.Fatalf("embedded struct = %T, want a canonicalised struct", got["embeddedStringer"])
+	}
+	inner, ok := embedded["innerCreds"].(map[string]any)
+	if !ok || inner["Password"] != Redacted {
+		t.Errorf("embedded Password = %#v, want redacted", embedded)
+	}
+
+	named, ok := got["namedStringer"].(map[string]any)
+	if !ok {
+		t.Fatalf("named struct = %T, want a canonicalised struct", got["namedStringer"])
+	}
+	inner, ok = named["inner"].(map[string]any)
+	if !ok || inner["Password"] != Redacted {
+		t.Errorf("named Password = %#v, want redacted", named)
+	}
+}
+
+func TestRedactorKeepsOpaqueStringersAsText(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if got := r.Value("at", at); got != at.String() {
+		t.Errorf("time.Time = %v, want its text form %q", got, at.String())
 	}
 }
 

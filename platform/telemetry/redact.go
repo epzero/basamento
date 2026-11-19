@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -150,10 +151,16 @@ func (r redactor) valueAt(key string, v any, depth int) any {
 		if nilValue(v) {
 			return nil
 		}
-		if opaqueTextValue(v) {
-			return r.String(x.Error())
+		if !opaqueTextValue(v) {
+			return r.reflectValueAt(v, depth+1)
 		}
-		return r.reflectValueAt(v, depth+1)
+		// A wrapper such as fmt.wrapError or errors.joinError has only
+		// unexported fields, so it looks opaque. Its text would render the
+		// wrapped error, which may be a struct with a sensitive field.
+		if wrappedNonOpaque(x, 0) {
+			return Redacted
+		}
+		return r.String(x.Error())
 	case fmt.Stringer:
 		if nilValue(v) {
 			return nil
@@ -193,27 +200,89 @@ func (r redactor) mapAt(m map[string]any, depth int) map[string]any {
 // opaqueTextValue reports whether v must be rendered through its Error or
 // String method instead of reflection. A struct with an exported or
 // sensitive-named field is not opaque: reflection must see that field's name,
-// or a Stringer would bypass field-name redaction. time.Time and similar
-// structs with only unexported fields keep their text form.
+// or a Stringer would bypass field-name redaction. Unexported embedded or
+// struct-typed fields are inspected too, so a payload hidden behind them is
+// not declared opaque. time.Time and similar structs with only unexported,
+// non-sensitive fields keep their text form.
 func opaqueTextValue(v any) bool {
-	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Pointer {
+	return opaqueReflectValue(reflect.ValueOf(v))
+}
+
+func opaqueReflectValue(rv reflect.Value) bool {
+	for rv.IsValid() && rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return true
 		}
 		rv = rv.Elem()
 	}
-	if rv.Kind() != reflect.Struct {
+	if !rv.IsValid() || rv.Kind() != reflect.Struct {
 		return true
 	}
-	typ := rv.Type()
+	return opaqueType(rv.Type(), 0, map[reflect.Type]bool{})
+}
+
+// opaqueType reports whether every field of typ is unexported and neither
+// sensitive-named nor a struct that could carry such a field. It descends into
+// embedded fields and unexported value structs, but not unexported named
+// pointers: time.Time's *time.Location must stay opaque.
+func opaqueType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
+	if depth > maxRedactDepth {
+		return false
+	}
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		return true
+	}
+	if seen[typ] {
+		return true
+	}
+	seen[typ] = true
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		if field.PkgPath == "" || sensitiveKey(field.Name) {
 			return false
 		}
+		if field.Anonymous || field.Type.Kind() == reflect.Struct {
+			if !opaqueType(field.Type, depth+1, seen) {
+				return false
+			}
+		}
 	}
 	return true
+}
+
+// wrappedNonOpaque reports whether any error in the unwrap chain is a struct
+// with exported or sensitive fields. The wrapper's own text is not safe in that
+// case, because it would render that struct through its Error method.
+func wrappedNonOpaque(err error, depth int) bool {
+	if depth > maxRedactDepth {
+		return true
+	}
+	var single interface{ Unwrap() error }
+	if errors.As(err, &single) {
+		inner := single.Unwrap()
+		if inner == nil {
+			return false
+		}
+		if !opaqueTextValue(inner) {
+			return true
+		}
+		return wrappedNonOpaque(inner, depth+1)
+	}
+	var multi interface{ Unwrap() []error }
+	if errors.As(err, &multi) {
+		for _, inner := range multi.Unwrap() {
+			if inner == nil {
+				continue
+			}
+			if !opaqueTextValue(inner) || wrappedNonOpaque(inner, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func nilValue(v any) bool {
@@ -227,21 +296,42 @@ func nilValue(v any) bool {
 }
 
 func (r redactor) reflectValueAt(v any, depth int) any {
-	rv := reflect.ValueOf(v)
-	if !rv.IsValid() {
-		return nil
+	return r.reflectValue(reflect.ValueOf(v), depth)
+}
+
+// reflectValue walks a value without calling Interface on a field the caller
+// cannot address. That lets it read an exported Password inside an unexported
+// embedded struct or named unexported struct field instead of falling back to
+// a String method that would leak it.
+func (r redactor) reflectValue(rv reflect.Value, depth int) any {
+	if depth > maxRedactDepth || !rv.IsValid() {
+		return Redacted
 	}
 	switch rv.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if rv.IsNil() {
 			return nil
 		}
-		return r.valueAt("", rv.Elem().Interface(), depth+1)
+		return r.reflectValue(rv.Elem(), depth+1)
+	case reflect.String:
+		return r.String(rv.String())
 	case reflect.Bool,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64:
-		return rv.Interface()
+		if rv.CanInterface() {
+			return rv.Interface()
+		}
+		switch rv.Kind() {
+		case reflect.Bool:
+			return rv.Bool()
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return rv.Int()
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			return rv.Uint()
+		default:
+			return rv.Float()
+		}
 	case reflect.Map:
 		if rv.Type().Key().Kind() != reflect.String {
 			return Redacted
@@ -250,18 +340,26 @@ func (r redactor) reflectValueAt(v any, depth int) any {
 		iter := rv.MapRange()
 		for iter.Next() {
 			k := iter.Key().String()
-			out[k] = r.valueAt(k, iter.Value().Interface(), depth+1)
+			if r.Key(k) {
+				out[k] = Redacted
+				continue
+			}
+			out[k] = r.itemValue(iter.Value(), k, depth)
 		}
 		return out
 	case reflect.Slice:
 		if rv.Type().Elem().Kind() == reflect.Uint8 {
-			return r.String(string(rv.Bytes()))
+			raw := make([]byte, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				raw[i] = byte(rv.Index(i).Uint())
+			}
+			return r.String(string(raw))
 		}
 		fallthrough
 	case reflect.Array:
 		out := make([]any, rv.Len())
 		for i := 0; i < rv.Len(); i++ {
-			out[i] = r.valueAt("", rv.Index(i).Interface(), depth+1)
+			out[i] = r.itemValue(rv.Index(i), "", depth)
 		}
 		return out
 	case reflect.Struct:
@@ -269,18 +367,38 @@ func (r redactor) reflectValueAt(v any, depth int) any {
 		typ := rv.Type()
 		for i := 0; i < rv.NumField(); i++ {
 			field := typ.Field(i)
-			if field.PkgPath != "" {
-				// Unexported: never hand the raw value to an exporter. A
-				// sensitive name cannot be read safely, so redact the struct.
-				if sensitiveKey(field.Name) {
+			value := rv.Field(i)
+			if sensitiveKey(field.Name) {
+				if field.PkgPath != "" {
+					// An unexported sensitive field cannot be rendered
+					// partially without risking the rest of the struct.
 					return Redacted
 				}
+				out[field.Name] = Redacted
 				continue
 			}
-			out[field.Name] = r.valueAt(field.Name, rv.Field(i).Interface(), depth+1)
+			if field.PkgPath == "" && value.CanInterface() {
+				out[field.Name] = r.valueAt(field.Name, value.Interface(), depth+1)
+				continue
+			}
+			if field.Type.Kind() == reflect.Struct || (field.Type.Kind() == reflect.Pointer && field.Type.Elem().Kind() == reflect.Struct) {
+				if opaqueReflectValue(value) {
+					// No text method can be called safely here.
+					out[field.Name] = Redacted
+					continue
+				}
+			}
+			out[field.Name] = r.itemValue(value, field.Name, depth)
 		}
 		return out
 	default:
 		return Redacted
 	}
+}
+
+func (r redactor) itemValue(value reflect.Value, key string, depth int) any {
+	if value.CanInterface() {
+		return r.valueAt(key, value.Interface(), depth+1)
+	}
+	return r.reflectValue(value, depth+1)
 }
