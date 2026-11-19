@@ -16,6 +16,7 @@ type future struct {
 	done   chan struct{}
 	result json.RawMessage
 	err    error
+	seq    uint64
 }
 
 func newFuture(r *run) *future {
@@ -34,10 +35,24 @@ func (f *future) complete(result json.RawMessage, err error) bool {
 	}
 	f.result = append(json.RawMessage(nil), result...)
 	f.err = err
+	f.seq = f.run.seqs.Add(1)
 	close(f.done)
 	f.mu.Unlock()
 	f.run.notify()
 	return true
+}
+
+// completedSeq returns the future's completion order (1-based, per run) and
+// whether it has completed at all.
+func (f *future) completedSeq() (uint64, bool) {
+	select {
+	case <-f.done:
+	default:
+		return 0, false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seq, true
 }
 
 // Get waits for the future and decodes its result into out.

@@ -283,6 +283,26 @@ func TestSelectIsDeterministicOverReadySubsets(t *testing.T) {
 	}
 }
 
+func TestSelectPrefersTheFutureThatCompletedFirst(t *testing.T) {
+	rt := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	first, second := newFuture(r), newFuture(r)
+	marked := r.seqs.Load()
+
+	second.complete(nil, nil)
+	first.complete(nil, nil)
+
+	// first (index 0) completed after second (index 1): the first completion
+	// after the call wins, not the lowest index.
+	if index := r.firstCompletedSince([]runtime.Future{first, second}, marked); index != 1 {
+		t.Fatalf("firstCompletedSince = %d, want 1", index)
+	}
+	// Futures already complete at the mark are not candidates.
+	if index := r.firstCompletedSince([]runtime.Future{first, second}, r.seqs.Load()); index != -1 {
+		t.Fatalf("firstCompletedSince with no new completion = %d, want -1", index)
+	}
+}
+
 func TestGateResolutionAndConflict(t *testing.T) {
 	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 	defer f.close(t)
