@@ -33,7 +33,7 @@ func TestSlotMetaFitsReadCap(t *testing.T) {
 	meta := slotMeta{
 		Max:         1 << 50,
 		ContentType: "application/" + strings.Repeat("z", maxUploadContentTypeLen-len("application/")),
-		Expires:     time.Now().Add(7 * 24 * time.Hour).UnixNano(),
+		Expires:     time.Unix(1700000000, 0).Add(7 * 24 * time.Hour).UnixNano(),
 	}
 	raw, err := encodeSlotMeta(meta)
 	if err != nil {
