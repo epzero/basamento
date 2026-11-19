@@ -42,9 +42,14 @@ ordered event log with replay from a cursor, the result, cancellation and
 lookup. Bounding memory for ended invocations is ticketed as EP0-140. The chat
 adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
 eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
-values, so the contract itself stays free of the dependency. Provider
-construction is WP-L3-04's, including the OpenAI-compatible mode MiniMax and
-GLM use.
+values, so the contract itself stays free of the dependency. The chat adapter
+caps one vendor stream at 8 MiB of payload and 262144 chunks; exceeding either
+limit ends the invocation with `vendor_error`. A vendor panic inside the
+adapter's execute goroutine is converted to `internal` at that boundary without
+crashing the process. Unmapped `Request.Params` keys (for example `tier` for
+pricing) are ignored; the adapter maps `temperature`, `top_p`, `max_tokens` and
+`stop`. Provider construction is WP-L3-04's, including the OpenAI-compatible
+mode MiniMax and GLM use.
 
 ## 2. Descriptors
 

@@ -1,5 +1,9 @@
 // Package chat adapts an eino chat model to the model.Invoker contract.
 //
+// One stream is capped at 8 MiB of payload and 262144 chunks; exceeding either
+// ends the invocation with vendor_error. Vendor panics at the stream boundary
+// are converted to internal failures without ending the process.
+//
 // One Start drives one vendor stream. Each chunk is normalized into an event
 // in the order the vendor produced it: content into a text event, reasoning
 // into a reasoning event, tool-call deltas into tool-call events. The result
