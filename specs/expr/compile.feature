@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: Compiling expressions against declared variables
   An expression is compiled once, against the JSON Schemas of the variables
   its expression environment declares, so that a flow, a price table or an
