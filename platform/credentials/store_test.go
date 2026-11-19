@@ -38,6 +38,7 @@ type xorSecrets struct {
 
 	reached chan struct{}
 	release chan struct{}
+	abort   chan struct{}
 	once    sync.Once
 }
 
@@ -64,7 +65,11 @@ func (s *xorSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte, erro
 	s.mu.Unlock()
 	if s.reached != nil {
 		s.once.Do(func() { close(s.reached) })
-		<-s.release
+		select {
+		case <-s.release:
+		case <-s.abort:
+			return nil, core.NewError(core.CodeUnavailable, "resolution aborted", nil)
+		}
 	}
 	s.mu.Lock()
 	err := s.decryptErr
@@ -451,6 +456,9 @@ func TestRotationDuringResolution(t *testing.T) {
 	ts := newTestStore(t)
 	ts.secrets.reached = make(chan struct{})
 	ts.secrets.release = make(chan struct{})
+	ts.secrets.abort = make(chan struct{})
+	// A resolution that never reaches the secrets port must not hang the test.
+	defer close(ts.secrets.abort)
 	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-old")
 
 	type result struct {
@@ -464,7 +472,11 @@ func TestRotationDuringResolution(t *testing.T) {
 			"cred://vendor/anthropic")
 		done <- result{string(value), err}
 	}()
-	<-ts.secrets.reached
+	select {
+	case <-ts.secrets.reached:
+	case got := <-done:
+		t.Fatalf("resolution finished before it reached the secrets port: (%q, %v)", got.value, got.err)
+	}
 
 	if err := ts.store.Put(tenantCtx("acme"), "vendor/anthropic", []byte("sk-live-new")); err != nil {
 		t.Fatalf("replace: %v", err)
