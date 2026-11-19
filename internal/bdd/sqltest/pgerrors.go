@@ -21,6 +21,7 @@ const (
 	urlClassConnRefused     urlProbeClass = "connection refused"
 	urlClassTimeout         urlProbeClass = "timeout"
 	urlClassAuthFailed      urlProbeClass = "authentication failed"
+	urlClassNoCreateDB      urlProbeClass = "role lacks CREATEDB"
 	urlClassUnknown         urlProbeClass = "unknown"
 	embeddedClassSupervisor embeddedClass = "supervisor missing"
 	embeddedClassBundle     embeddedClass = "bundle not cached"
@@ -28,6 +29,9 @@ const (
 )
 
 type embeddedClass string
+
+// errRoleLacksCreateDB is the cause when the URL path's role cannot create databases.
+var errRoleLacksCreateDB = errors.New("role lacks CREATEDB")
 
 // urlProbeError is returned when a non-empty BDD_POSTGRES_URL cannot be reached.
 type urlProbeError struct {
@@ -70,6 +74,9 @@ func newEmbeddedInitError(cause error) error {
 func classifyURLProbeErr(err error) urlProbeClass {
 	if err == nil {
 		return urlClassUnknown
+	}
+	if errors.Is(err, errRoleLacksCreateDB) {
+		return urlClassNoCreateDB
 	}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {

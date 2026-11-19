@@ -2,7 +2,9 @@ package sqltest
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -26,19 +28,25 @@ const (
 var (
 	pgInit         sync.Once
 	pgMu           sync.Mutex
+	pgInitErr      error
 	pgAdmin        string
 	pgReady        bool
 	pgEmb          *embeddedpostgres.EmbeddedPostgres
 	reportedSource string
 )
 
-// InitPostgres resolves BDD_POSTGRES_URL or starts embedded Postgres 16 once per process.
+// InitPostgres resolves BDD_POSTGRES_URL or starts embedded Postgres 16 once per
+// process (ADR-0015 G3). Every later call returns the first call's outcome.
 func InitPostgres(ctx context.Context) error {
-	var err error
 	pgInit.Do(func() {
-		err = initPostgres(ctx)
+		err := initPostgres(ctx)
+		pgMu.Lock()
+		pgInitErr = err
+		pgMu.Unlock()
 	})
-	return err
+	pgMu.Lock()
+	defer pgMu.Unlock()
+	return pgInitErr
 }
 
 // ResetPostgresForTest clears per-process InitPostgres state; tests call this between cases.
@@ -46,6 +54,7 @@ func ResetPostgresForTest() {
 	_ = ClosePostgres()
 	pgMu.Lock()
 	pgInit = sync.Once{}
+	pgInitErr = nil
 	reportedSource = ""
 	pgMu.Unlock()
 }
@@ -129,7 +138,26 @@ func probeAdminURL(ctx context.Context, admin string) error {
 	if err := conn.PingContext(ctx); err != nil {
 		return newURLProbeError(err)
 	}
-	return nil
+	return probeRoleCanCreateDB(ctx, conn)
+}
+
+// probeRoleCanCreateDB rejects a URL path whose role cannot create databases
+// (ADR-0015 URL path): every scenario would otherwise fail on CREATE DATABASE
+// with SQLSTATE 42501 after init called the server available.
+func probeRoleCanCreateDB(ctx context.Context, conn *sql.DB) error {
+	var createdb bool
+	if err := conn.QueryRowContext(ctx, `SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user`).Scan(&createdb); err != nil {
+		return newURLProbeError(err)
+	}
+	return requireCreateDB(createdb)
+}
+
+// requireCreateDB maps the role's CREATEDB attribute to the probe's outcome.
+func requireCreateDB(createdb bool) error {
+	if createdb {
+		return nil
+	}
+	return newURLProbeError(errRoleLacksCreateDB)
 }
 
 func gateDownloadProvider() embeddedpostgres.DownloadProvider {
@@ -138,12 +166,12 @@ func gateDownloadProvider() embeddedpostgres.DownloadProvider {
 }
 
 // gateEmbeddedConfig builds loopback embedded settings for the gate (ADR-0015).
-func gateEmbeddedConfig(supervisor string) embeddedpostgres.Config {
+func gateEmbeddedConfig(supervisor, password string) embeddedpostgres.Config {
 	cache := PostgresCacheDir()
 	cfg := embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.V16).
 		Port(0).
-		Password(processPostgresPassword()).
+		Password(password).
 		Storage(embeddedpostgres.Storage{CacheDir: cache}).
 		Provider(gateDownloadProvider()).
 		Supervisor(supervisor)
@@ -158,7 +186,11 @@ func startEmbedded(ctx context.Context) (string, *embeddedpostgres.EmbeddedPostg
 	if err != nil {
 		return "", nil, err
 	}
-	cfg := gateEmbeddedConfig(supervisor)
+	password, err := processPostgresPassword()
+	if err != nil {
+		return "", nil, err
+	}
+	cfg := gateEmbeddedConfig(supervisor, password)
 	emb := embeddedpostgres.NewDatabase(cfg)
 	if err := emb.StartContext(ctx); err != nil {
 		return "", nil, err
@@ -175,8 +207,14 @@ func normalizePostgresScheme(raw string) string {
 	return raw
 }
 
-func processPostgresPassword() string {
-	return fmt.Sprintf("bddpw_%d", os.Getpid())
+// processPostgresPassword returns a random password for this process's embedded
+// server (ADR-0015: random password per process, loopback listener only).
+func processPostgresPassword() (string, error) {
+	b := make([]byte, 16)
+	if _, err := cryptorand.Read(b); err != nil {
+		return "", fmt.Errorf("embedded postgres password: %w", err)
+	}
+	return "bddpw_" + hex.EncodeToString(b), nil
 }
 
 const supervisorRel = ".gate/bin/embedded-postgres"

@@ -161,9 +161,12 @@ func TestInitPostgresStrictURLLeakFree(t *testing.T) {
 }
 
 func TestEmbeddedInitErrorSecretFree(t *testing.T) {
-	pw := processPostgresPassword()
+	pw, err := processPostgresPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cause := errors.New("start " + pw + " postgresql://ignored")
-	err := newEmbeddedInitError(cause)
+	err = newEmbeddedInitError(cause)
 	assertNoSecretLeak(t, err.Error(), []string{pw})
 	if !strings.Contains(err.Error(), "make pg-prefetch") {
 		t.Fatalf("want prefetch hint: %q", err.Error())
@@ -243,4 +246,31 @@ func TestClassifyEmbeddedInitErr(t *testing.T) {
 	if classifyEmbeddedInitErr(errors.New("not cached (offline mode)")) != embeddedClassBundle {
 		t.Fatal("bundle")
 	}
+}
+
+// TestRequireCreateDB pins ADR-0015's URL-path row: a role without CREATEDB is
+// unavailable at init, not a failed run on the first CREATE DATABASE (42501).
+func TestRequireCreateDB(t *testing.T) {
+	if err := requireCreateDB(true); err != nil {
+		t.Fatalf("a role with CREATEDB is available: %v", err)
+	}
+	err := requireCreateDB(false)
+	if err == nil {
+		t.Fatal("a role without CREATEDB must make the URL path unavailable")
+	}
+	var pe *urlProbeError
+	if !errors.As(err, &pe) {
+		t.Fatalf("want *urlProbeError, got %T", err)
+	}
+	if pe.class != urlClassNoCreateDB {
+		t.Fatalf("class %q, want %q", pe.class, urlClassNoCreateDB)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "BDD_POSTGRES_URL is set but the server is unavailable") {
+		t.Fatalf("unexpected operator message: %q", msg)
+	}
+	if !strings.Contains(msg, string(urlClassNoCreateDB)) {
+		t.Fatalf("missing class %q in %q", urlClassNoCreateDB, msg)
+	}
+	assertNoSecretLeak(t, msg, nil)
 }
