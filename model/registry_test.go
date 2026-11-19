@@ -26,6 +26,16 @@ func TestBeginRejectsEmptyClientRef(t *testing.T) {
 	}
 }
 
+func TestLookupRejectsEmptyClientRef(t *testing.T) {
+	reg := NewRegistry("test")
+	if _, err := reg.Lookup(context.Background(), ""); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("no tenant: code = %q, want invalid_argument", core.CodeOf(err))
+	}
+	if _, err := reg.Lookup(testCtx(t), ""); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("empty ref: code = %q, want invalid_argument", core.CodeOf(err))
+	}
+}
+
 func TestRegistryEmptyProviderHandleResolves(t *testing.T) {
 	reg := NewRegistry("alpha")
 	run := mustBegin(t, reg, testCtx(t), "ref-empty-prov")
