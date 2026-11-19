@@ -121,7 +121,7 @@ flowchart TD
 | `stream` | Durable event log, deltas, snapshots, cursors. |
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
-| `api` | Run routes, SSE native stream and AG-UI adapter, authentication and tenant wiring, error mapping. Connect services, the OpenAI-compatible endpoint and the MCP server land with their contracts. |
+| `api` | Run routes, SSE native stream and AG-UI adapter, authentication and tenant wiring, error mapping, and the run inspector (`api/inspector`). Connect services, the OpenAI-compatible endpoint and the MCP server land with their contracts. |
 | `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
 | `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). |
 
@@ -166,6 +166,7 @@ ADR-0012 §10, constitution §7–8).
 | Model layer, prices, workers | [`model-layer.md`](model-layer.md) | 0006, 0012 |
 | Auth | [`auth.md`](auth.md) | 0008 |
 | Browser runner | [`browser-runner.md`](browser-runner.md) | 0009 |
+| Run inspector | [`inspector.md`](inspector.md) | 0005, 0009 |
 | How it compares with LangGraph, Dify and others | [`comparison.md`](comparison.md) | |
 | Specs and the gate | [`../engineering/bdd-convention.md`](../engineering/bdd-convention.md) | 0010 |
 

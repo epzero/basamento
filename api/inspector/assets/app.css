@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light dark;
+  --fg: #16181d;
+  --muted: #5b6472;
+  --bg: #fbfbfd;
+  --line: #d9dee7;
+  --accent: #2f5eea;
+  --alert: #b3261e;
+  --ok: #1f7a3f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e9ef;
+    --muted: #9aa4b2;
+    --bg: #111318;
+    --line: #2a2f3a;
+    --accent: #8fa8ff;
+    --alert: #ff8a80;
+    --ok: #6ddc95;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.bar {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar h1 { font-size: 1.1rem; margin: 0; }
+.bar a { color: var(--accent); text-decoration: none; }
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h2 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+
+table.runs { width: 100%; border-collapse: collapse; }
+table.runs th, table.runs td {
+  text-align: left;
+  padding: .45rem .6rem;
+  border-bottom: 1px solid var(--line);
+}
+table.runs th { color: var(--muted); font-weight: 600; }
+
+.state { font-variant: small-caps; }
+.state-failed { color: var(--alert); }
+.state-completed { color: var(--ok); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+
+.events { list-style: none; margin: 0; padding: 0; }
+.events li {
+  padding: .3rem .6rem;
+  border-bottom: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .85rem;
+}
+.events .seq { color: var(--muted); }
+
+.gates { list-style: none; margin: 0; padding: 0; }
+.gates li {
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  padding: .75rem 1rem;
+  margin-bottom: .75rem;
+}
+.gates h3 { margin: 0 0 .25rem; font-size: .95rem; }
+.gates code { font-size: .85rem; }
+textarea { width: 100%; min-height: 4rem; margin-top: .35rem; font-family: ui-monospace, monospace; }
+button {
+  margin-top: .5rem;
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: .35rem;
+  padding: .45rem .9rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.alert {
+  border: 1px solid var(--alert);
+  color: var(--alert);
+  border-radius: .5rem;
+  padding: .6rem .9rem;
+}
+
+.replay { color: var(--muted); font-size: .85rem; }
+[data-denied] { max-width: 32rem; margin: 4rem auto; padding: 0 1.5rem; }

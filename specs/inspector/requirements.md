@@ -1,11 +1,12 @@
 # Inspector: the run inspector web UI
 
-Status: **Planned** (WP-L6-04). The run inspector is a web UI (`web/inspector`,
-TypeScript) that reads runs through the API of WP-L6-03: it lists the runs a
-principal may see, shows one run's durable events as they arrive, resolves the
-run's open gates, and replays the rrweb recording of a browser session
-attached to the run. Design: ADR-0005, ADR-0009,
-`docs/architecture/streaming.md` §2, §3, `docs/architecture/browser-runner.md` §3.
+Status: **Implemented** (WP-L6-04). The run inspector is a web UI
+(`api/inspector`, server-rendered with embedded assets) that reads runs through
+the API of WP-L6-03: it lists the runs a principal may see, shows one run's
+durable events as they arrive, resolves the run's open gates, and replays the
+rrweb recording of a browser session attached to the run. Design: ADR-0005,
+ADR-0009, `docs/architecture/streaming.md` §2, §3,
+`docs/architecture/browser-runner.md` §3.
 
 The inspector shows; it does not decide. Authorization, tenant isolation and
 the payload rules of a gate stay in the API (`specs/auth`,

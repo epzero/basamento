@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Runs · Basamento inspector</title>
+  <link rel="stylesheet" href="{{.Prefix}}/assets/app.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>Runs</h1>
+  </header>
+  <main data-page="runs">
+    {{if .Runs}}
+    <table class="runs">
+      <thead><tr><th>Run</th><th>Flow</th><th>State</th></tr></thead>
+      <tbody>
+        {{range .Runs}}
+        <tr data-run-id="{{.ID}}" data-flow="{{.Flow}}" data-state="{{.State}}">
+          <td><a href="{{$.Prefix}}/runs/{{.ID}}">{{.ID}}</a></td>
+          <td>{{.Flow}}</td>
+          <td><span class="state state-{{.State}}">{{.State}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p data-empty="true">No runs yet.</p>
+    {{end}}
+  </main>
+  <script id="inspector-runs" type="application/json">{{.JSON}}</script>
+  <script src="{{.Prefix}}/assets/app.js" defer></script>
+</body>
+</html>

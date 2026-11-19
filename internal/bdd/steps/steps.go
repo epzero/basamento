@@ -40,6 +40,7 @@ type World struct {
 	Auth        *authWorld
 	Authz       *authzWorld
 	API         *apiWorld
+	Inspector   *inspectorWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -70,6 +71,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Auth:        newAuthWorld(),
 			Authz:       newAuthzWorld(),
 			API:         newAPIWorld(),
+			Inspector:   newInspectorWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -95,12 +97,14 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerAuth(sc)
 	registerAuthz(sc)
 	registerAPI(sc)
+	registerInspector(sc)
 	registerOpeningSteps(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()
 		world(ctx).API.teardown()
+		world(ctx).Inspector.teardown()
 		return ctx, nil
 	})
 }

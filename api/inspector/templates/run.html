@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run {{.Run.ID}} · Basamento inspector</title>
+  <link rel="stylesheet" href="{{.Prefix}}/assets/app.css">
+</head>
+<body>
+  <header class="bar">
+    <a href="{{.Prefix}}/">Runs</a>
+    <h1>Run {{.Run.ID}}</h1>
+  </header>
+  <main data-page="run" data-run-id="{{.Run.ID}}" data-state="{{.Run.State}}"{{if .Run.ErrorCode}} data-error-code="{{.Run.ErrorCode}}"{{end}}>
+    {{if .Rejection}}
+    <p class="alert" role="alert" data-rejection-code="{{.Rejection.Code}}">
+      The gate rejected the payload ({{.Rejection.Code}}). The gate is still open.
+    </p>
+    {{end}}
+
+    <section aria-labelledby="summary">
+      <h2 id="summary">Summary</h2>
+      <dl class="facts">
+        <dt>Id</dt><dd>{{.Run.ID}}</dd>
+        <dt>Flow</dt><dd>{{.Run.Flow}}</dd>
+        <dt>State</dt><dd>{{.Run.State}}</dd>
+        {{if .Run.ErrorCode}}<dt>Error</dt><dd data-error-code="{{.Run.ErrorCode}}">{{.Run.ErrorCode}}</dd>{{end}}
+      </dl>
+    </section>
+
+    <section aria-labelledby="events">
+      <h2 id="events">Events</h2>
+      {{if .Events}}
+      <ol class="events" data-events>
+        {{range .Events}}
+        <li data-seq="{{.Seq}}" data-event-type="{{.Type}}"><span class="seq">{{.Seq}}</span> <span class="type">{{.Type}}</span></li>
+        {{end}}
+      </ol>
+      {{else}}
+      <p data-events="none">No events yet.</p>
+      {{end}}
+    </section>
+
+    <section aria-labelledby="gates">
+      <h2 id="gates">Open gates</h2>
+      {{if .Run.Gates}}
+      <ul class="gates" data-gates>
+        {{range .Run.Gates}}
+        <li data-gate="{{.Node}}" data-accepts="{{.Accepts}}">
+          <h3>{{.Node}}</h3>
+          <p>Accepts payloads where <code>{{.Accepts}}</code>.</p>
+          <form method="post" action="{{$.Prefix}}/runs/{{$.Run.ID}}/gates/{{.Node}}">
+            <label>Payload
+              <textarea name="payload" rows="3" spellcheck="false">{}</textarea>
+            </label>
+            <button type="submit">Resolve gate</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p data-gates="none">No open gates.</p>
+      {{end}}
+    </section>
+
+    <section aria-labelledby="recording">
+      <h2 id="recording">Recording</h2>
+      {{if eq .Recording.State "present"}}
+      <div data-recording="present" data-recording-events="{{.Recording.Count}}" data-replay="{{if .Recording.Stopped}}stopped{{end}}">
+        <p>{{.Recording.Count}} events in the rrweb recording.</p>
+        <ol class="replay" data-replay-events>
+          {{range .Recording.Frames}}<li data-replay-index="{{.Index}}"></li>{{end}}
+        </ol>
+        <p data-replay-state="stopped">The replay stopped at the end of the recording.</p>
+      </div>
+      {{else if eq .Recording.State "none"}}
+      <p data-recording="none">There is no recording to replay.</p>
+      {{else}}
+      <p data-recording="error">The recording cannot be replayed.</p>
+      {{end}}
+    </section>
+  </main>
+  <script id="inspector-run" type="application/json">{{.JSON}}</script>
+  <script src="{{.Prefix}}/assets/app.js" defer></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Streaming: runs outlive connections
 
-Status: **Partly implemented** (WP-L6-01, WP-L6-02 and the API surface of WP-L6-03; WP-L6-04 and WP-L7-03 are planned). Decisions: ADR-0005,
+Status: **Partly implemented** (WP-L6-01, WP-L6-02, the API surface of WP-L6-03 and the run inspector of WP-L6-04; WP-L7-03 is planned). Decisions: ADR-0005,
 ADR-0007. Specs: `specs/streaming`.
 
 ## 1. Two layers
