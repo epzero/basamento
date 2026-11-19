@@ -52,6 +52,11 @@ func TestMapKeyEqualityIsOperandOrderIndependent(t *testing.T) {
 		{`{1u: 'a', 2.0: 'b'}`, `{1: 'a', 2: 'b'}`, true},
 		{`{-1.0: 'a', 2: 'b'}`, `{-1: 'a', 2.0: 'b'}`, true},
 		{`{9223372036854775808u: 'a', 2.0: 'b'}`, `{9223372036854775808.0: 'a', 2: 'b'}`, true},
+		// Int and uint are the same key only where the conversion between them
+		// is lossless: a negative int is no uint, and a uint above MaxInt64 is
+		// no int.
+		{`{-1: 'a', 2: 'b'}`, `{18446744073709551615u: 'a', 2: 'b'}`, false},
+		{`{9223372036854775808u: 'a', 2: 'b'}`, `{-9223372036854775808: 'a', 2: 'b'}`, false},
 		{`{1: 'a', 'x': 0}`, `{'1': 'a', 'x': 0}`, false},
 	}
 	for _, tc := range tests {
@@ -64,9 +69,11 @@ func TestMapKeyEqualityIsOperandOrderIndependent(t *testing.T) {
 	}
 }
 
-// TestMapKeyContainsAcrossNumericKinds pins the membership and comprehension
-// halves of REQ-EXPR-021: `in`, exists and exists_one find a numeric key of
-// one kind with a key of another, and never a string key.
+// TestMapKeyContainsAcrossNumericKinds pins membership through `in`, which
+// per the design's "Key equality and lookup" note is one of the sorted map's
+// Find/Contains/Equal that compare keys by CEL numeric equality, and the
+// comprehension macros that iterate the same keys: a numeric key of one kind
+// is found by a key of another, and a string key never matches a numeric one.
 func TestMapKeyContainsAcrossNumericKinds(t *testing.T) {
 	tests := []struct {
 		expression string
