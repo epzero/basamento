@@ -1,6 +1,3 @@
-// Package telemtest is the deterministic OTLP collector used by the BDD
-// telemetry scenarios. It never reaches a vendor: it receives OTLP/HTTP
-// protobuf batches in process and records what arrived.
 package telemtest
 
 import (
@@ -85,8 +82,7 @@ func (c *Collector) SetUnreachable(unreachable bool) {
 
 // SetSlow makes export attempts wait until ReleaseSlow. The wait is a channel,
 // not wall time: a test can prove recording never touches the collector.
-func (c *Collector) SetSlow(answerAfter time.Duration) {
-	_ = answerAfter // the gate proves non-blocking, never that wall time passed
+func (c *Collector) SetSlow() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.release == nil {

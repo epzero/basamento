@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +12,16 @@ import (
 
 	"github.com/epzero/basamento/core/coretest"
 )
+
+type failingSpanStore struct{}
+
+func (failingSpanStore) Append(context.Context, SpanData) error { return errors.New("store is down") }
+func (failingSpanStore) ByRun(context.Context, string) ([]SpanData, error) {
+	return nil, errors.New("store is down")
+}
+func (failingSpanStore) Purge(context.Context, time.Time) (int64, error) {
+	return 0, errors.New("store is down")
+}
 
 func TestSpanTimesComeFromClock(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
@@ -89,6 +101,24 @@ func TestTraceContextCarrierRoundTrip(t *testing.T) {
 	}
 	if kept.ParentSpanID != parent.SpanContext().SpanID().String() {
 		t.Errorf("parent = %s, want %s", kept.ParentSpanID, parent.SpanContext().SpanID())
+	}
+}
+
+func TestSpanStoreAppendFailureIsCountedNotFatal(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	setup, err := New(Config{Profile: ProfileEmbedded, Clock: clock, Spans: failingSpanStore{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, span := setup.Tracer().Start(telemetryContext("acme", "run_01"), "step a")
+	span.End()
+
+	if got := setup.DroppedSpans(); got != 1 {
+		t.Errorf("dropped spans = %d, want 1", got)
+	}
+	if got := len(setup.Spans()); got != 1 {
+		t.Errorf("kept %d spans in process, want 1", got)
 	}
 }
 

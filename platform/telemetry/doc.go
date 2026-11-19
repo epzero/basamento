@@ -9,15 +9,15 @@
 // REQ-TELEM-007).
 //
 // In the embedded profile ended spans are kept in a SQL span store
-// (REQ-TELEM-010 through REQ-TELEM-014). The store creates its own
-// `telemetry_spans` table idempotently on the platform/sql store it is given,
-// so it needs no migration owned by another capability. In the cloud profile
-// spans, log records and metric points are exported over OTLP to
-// Config.CollectorURL without ever making the work wait, and an undeliverable
-// batch is dropped without a retry (REQ-TELEM-015 through REQ-TELEM-019).
-// Shutdown drains what was finished and then refuses new signals
+// (REQ-TELEM-010 through REQ-TELEM-014). Its `telemetry_spans` table and index
+// are the platform/sql migration 00001_telemetry_spans, so the span store only
+// queries and never creates schema at runtime. In the cloud profile spans, log
+// records and metric points are exported over OTLP to Config.CollectorURL
+// without ever making the work wait, and an undeliverable batch is dropped
+// without a retry (REQ-TELEM-015 through REQ-TELEM-019). Shutdown stops the
+// owned exporter, drains what was accepted and only then returns
 // (REQ-TELEM-022, REQ-TELEM-023).
 //
-// The setup carries no package-level mutable state: pass one *Setup through
+// A setup carries no mutable package-level state: pass one *Setup through
 // dependency injection.
 package telemetry

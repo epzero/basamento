@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -18,10 +17,7 @@ func newFakeClockAt(at time.Time) *coretest.FakeClock {
 
 func newTestSQLStore(t *testing.T) *psql.Store {
 	t.Helper()
-	migrations := fstest.MapFS{
-		"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n\n-- +goose Down\nSELECT 1;\n")},
-	}
-	store, err := psql.Open(t.Context(), "sqlite:///"+filepath.Join(t.TempDir(), "telemetry.db"), migrations)
+	store, err := psql.Open(t.Context(), "sqlite:///"+filepath.Join(t.TempDir(), "telemetry.db"), psql.Migrations())
 	if err != nil {
 		t.Fatalf("open SQL store: %v", err)
 	}

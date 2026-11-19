@@ -38,6 +38,72 @@ func TestSpanStoreReadsRunInStartThenSpanIDOrder(t *testing.T) {
 	}
 }
 
+func TestAppendTakesTheTenantFromTheContext(t *testing.T) {
+	store := newTestSpanStore(t)
+	span := SpanData{
+		TraceID: "t1", SpanID: "sid-a", Name: "step a",
+		Start:  time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC),
+		End:    time.Date(2026, 10, 1, 9, 0, 1, 0, time.UTC),
+		Tenant: "acme", RunID: "run_01",
+	}
+	if err := store.Append(tenantRun("globex", "run_01"), span); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	got, err := store.ByRun(tenantRun("globex", "run_01"), "run_01")
+	if err != nil {
+		t.Fatalf("ByRun: %v", err)
+	}
+	if len(got) != 1 || got[0].Tenant != "globex" {
+		t.Fatalf("globex read %v, want the span written under its context tenant", got)
+	}
+	if _, err := store.ByRun(tenantRun("acme", "run_01"), "run_01"); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("acme read error = %v, want not_found", err)
+	}
+}
+
+func TestSpanStoreErrorsAreInternal(t *testing.T) {
+	store := newTestSQLStore(t)
+	spans, err := NewSQLSpanStore(t.Context(), store)
+	if err != nil {
+		t.Fatalf("NewSQLSpanStore: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if err := spans.Append(tenantRun("acme", "run_01"), SpanData{Tenant: "acme", RunID: "run_01", SpanID: "sid-a", Start: at, End: at}); core.CodeOf(err) != core.CodeInternal {
+		t.Errorf("Append error = %v, want internal", err)
+	}
+	if _, err := spans.ByRun(tenantRun("acme", "run_01"), "run_01"); core.CodeOf(err) != core.CodeInternal {
+		t.Errorf("ByRun error = %v, want internal", err)
+	}
+	if _, err := spans.Purge(tenantRun("acme", "run_01"), at); core.CodeOf(err) != core.CodeInternal {
+		t.Errorf("Purge error = %v, want internal", err)
+	}
+}
+
+func TestByRunTiebreakIsByteOrder(t *testing.T) {
+	store := newTestSpanStore(t)
+	ctx := tenantRun("acme", "run_01")
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	for _, id := range []string{"sid-a", "sid-B"} {
+		if err := store.Append(ctx, SpanData{
+			TraceID: "t1", SpanID: id, Name: id,
+			Start: at, End: at.Add(time.Second), Tenant: "acme", RunID: "run_01",
+		}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	got, err := store.ByRun(ctx, "run_01")
+	if err != nil {
+		t.Fatalf("ByRun: %v", err)
+	}
+	if len(got) != 2 || got[0].SpanID != "sid-B" || got[1].SpanID != "sid-a" {
+		t.Fatalf("order = %v, want byte order sid-B before sid-a", got)
+	}
+}
+
 func TestSpanStoreKeepsAttributes(t *testing.T) {
 	store := newTestSpanStore(t)
 	ctx := tenantRun("acme", "run_01")

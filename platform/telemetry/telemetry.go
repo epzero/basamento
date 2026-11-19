@@ -44,8 +44,8 @@ type Config struct {
 	// RetentionPeriod is how long an embedded span stays readable. Zero means
 	// DefaultRetentionPeriod.
 	RetentionPeriod time.Duration
-	// Secrets supplies credential values to redact. When nil the setup keeps
-	// its own StaticSecrets, reachable through SetCredential.
+	// Secrets supplies extra credential values to redact. Values added through
+	// SetCredential are always redacted too; a nil source simply adds none.
 	Secrets SecretsSource
 	// Spans keeps ended spans in the embedded profile. It is required there and
 	// ignored in the cloud profile.

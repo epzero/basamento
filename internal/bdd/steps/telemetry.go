@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"testing/fstest"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -91,10 +90,7 @@ func (w *telemetryWorld) startEmbedded(ctx context.Context, coreWorld *coreWorld
 		return err
 	}
 	w.dataDir = dir
-	migrations := fstest.MapFS{
-		"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n\n-- +goose Down\nSELECT 1;\n")},
-	}
-	store, err := psql.Open(ctx, "sqlite:///"+filepath.Join(dir, "telemetry.db"), migrations)
+	store, err := psql.Open(ctx, "sqlite:///"+filepath.Join(dir, "telemetry.db"), psql.Migrations())
 	if err != nil {
 		return err
 	}
@@ -370,10 +366,6 @@ func registerTelemetry(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^a log record "([^"]*)" is written$`, func(ctx context.Context, message string) error {
-		world(ctx).Telemetry.setup.Logger().InfoContext(world(ctx).Telemetry.currentCtx(), message)
-		return nil
-	})
 	sc.Step(`^a log record is written inside a span "([^"]*)" of run "([^"]*)"$`, func(ctx context.Context, name, run string) error {
 		w := world(ctx).Telemetry
 		spanCtx := w.startSpan(w.ctxFor(w.tenant, run), name)
@@ -389,9 +381,6 @@ func registerTelemetry(sc *godog.ScenarioContext) {
 	sc.Step(`^a log record carrying "([^"]*)" is written$`, func(ctx context.Context, message string) error {
 		world(ctx).Telemetry.setup.Logger().InfoContext(world(ctx).Telemetry.currentCtx(), message)
 		return nil
-	})
-	sc.Step(`^metric "([^"]*)" is recorded with the value (-?\d+)$`, func(ctx context.Context, name string, value int64) error {
-		return world(ctx).Telemetry.metric(world(ctx).Telemetry.currentCtx(), name, value)
 	})
 	sc.Step(`^a log record "([^"]*)" is written and metric "([^"]*)" is recorded with the value (-?\d+)$`, func(ctx context.Context, message, name string, value int64) error {
 		w := world(ctx).Telemetry
@@ -829,8 +818,8 @@ func registerTelemetry(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the simulated collector answers after (\d+) seconds? of clock time$`, func(ctx context.Context, seconds int) error {
-		world(ctx).Telemetry.collector.SetSlow(time.Duration(seconds) * time.Second)
+	sc.Step(`^the simulated collector answers after (\d+) seconds? of clock time$`, func(ctx context.Context, _ int) error {
+		world(ctx).Telemetry.collector.SetSlow()
 		return nil
 	})
 	sc.Step(`^the simulated collector is unreachable$`, func(ctx context.Context) error {
@@ -887,18 +876,6 @@ func registerTelemetry(sc *godog.ScenarioContext) {
 		}
 		if n != count {
 			return fmt.Errorf("collector received %d metric points %q with value %d, want %d", n, name, value, count)
-		}
-		return nil
-	})
-	sc.Step(`^the collector received (\d+) metric points? named "([^"]*)"$`, func(ctx context.Context, count int, name string) error {
-		n := 0
-		for _, point := range world(ctx).Telemetry.collector.Metrics() {
-			if point.Name == name {
-				n++
-			}
-		}
-		if n != count {
-			return fmt.Errorf("collector received %d metric points %q, want %d", n, name, count)
 		}
 		return nil
 	})

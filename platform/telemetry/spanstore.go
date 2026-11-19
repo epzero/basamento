@@ -22,45 +22,29 @@ type SpanStore interface {
 	Purge(ctx context.Context, before time.Time) (int64, error)
 }
 
-// SQLSpanStore is the SpanStore over a platform/sql store. The same schema is
-// created idempotently for SQLite and Postgres.
+// SQLSpanStore is the SpanStore over a platform/sql store. Its table and index
+// are the platform/sql migration 00001_telemetry_spans, applied by Open.
 type SQLSpanStore struct {
 	store *psql.Store
 }
 
-const spanSchema = `CREATE TABLE IF NOT EXISTS telemetry_spans (
-	tenant_id TEXT NOT NULL,
-	run_id TEXT NOT NULL,
-	span_id TEXT NOT NULL,
-	trace_id TEXT NOT NULL,
-	parent_span_id TEXT NOT NULL,
-	name TEXT NOT NULL,
-	start_at BIGINT NOT NULL,
-	end_at BIGINT NOT NULL,
-	status TEXT NOT NULL,
-	attrs TEXT NOT NULL,
-	PRIMARY KEY (tenant_id, span_id)
-)`
-
-const spanIndex = `CREATE INDEX IF NOT EXISTS telemetry_spans_run ON telemetry_spans (run_id, tenant_id, start_at, span_id)`
-
-// NewSQLSpanStore returns a span store on store and creates its table when it
-// is missing. The caller owns store.
-func NewSQLSpanStore(ctx context.Context, store *psql.Store) (*SQLSpanStore, error) {
+// NewSQLSpanStore returns a span store on store. The caller owns store and must
+// have opened it with the platform/sql migrations; this constructor only reads
+// and writes spans.
+func NewSQLSpanStore(_ context.Context, store *psql.Store) (*SQLSpanStore, error) {
 	if store == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: nil SQL store", nil)
-	}
-	if _, err := store.Execer().Exec(ctx, spanSchema); err != nil {
-		return nil, err
-	}
-	if _, err := store.Execer().Exec(ctx, spanIndex); err != nil {
-		return nil, err
 	}
 	return &SQLSpanStore{store: store}, nil
 }
 
-// Append implements SpanStore.
+// Append implements SpanStore. The tenant comes from ctx when present, so a
+// caller cannot write a span under a tenant other than the one it is acting as.
 func (s *SQLSpanStore) Append(ctx context.Context, span SpanData) error {
+	tenant := span.Tenant
+	if fromContext, ok := core.TenantFrom(ctx); ok {
+		tenant = string(fromContext)
+	}
 	attrs, err := json.Marshal(span.Attributes)
 	if err != nil {
 		return core.NewError(core.CodeInvalidArgument, "telemetry: span attributes are not serializable", nil)
@@ -69,11 +53,11 @@ func (s *SQLSpanStore) Append(ctx context.Context, span SpanData) error {
 		`INSERT INTO telemetry_spans
 		 (tenant_id, run_id, span_id, trace_id, parent_span_id, name, start_at, end_at, status, attrs)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		span.Tenant, span.RunID, span.SpanID, span.TraceID, span.ParentSpanID, span.Name,
+		tenant, span.RunID, span.SpanID, span.TraceID, span.ParentSpanID, span.Name,
 		psql.TruncateMicrosecond(span.Start).UnixMicro(),
 		psql.TruncateMicrosecond(span.End).UnixMicro(),
 		span.Status, string(attrs))
-	return err
+	return spanStoreError("append span", err)
 }
 
 // ByRun implements SpanStore.
@@ -82,12 +66,16 @@ func (s *SQLSpanStore) ByRun(ctx context.Context, runID string) ([]SpanData, err
 	if !ok {
 		return nil, core.NewError(core.CodeNotFound, "telemetry: run not found", nil)
 	}
+	spanOrder, err := psql.TextOrderClause(s.store.Dialect(), "span_id")
+	if err != nil {
+		return nil, spanStoreError("read spans", err)
+	}
 	rows, err := s.store.Execer().Query(ctx,
 		`SELECT trace_id, span_id, parent_span_id, name, start_at, end_at, status, run_id, tenant_id, attrs
 		 FROM telemetry_spans WHERE tenant_id = ? AND run_id = ?
-		 ORDER BY start_at ASC, span_id ASC`, string(tenant), runID)
+		 ORDER BY start_at ASC, `+spanOrder, string(tenant), runID)
 	if err != nil {
-		return nil, err
+		return nil, spanStoreError("read spans", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -101,7 +89,7 @@ func (s *SQLSpanStore) ByRun(ctx context.Context, runID string) ([]SpanData, err
 		)
 		if err := rows.Scan(&span.TraceID, &span.SpanID, &span.ParentSpanID, &span.Name,
 			&startAt, &endAt, &span.Status, &span.RunID, &span.Tenant, &attrsJSON); err != nil {
-			return nil, err
+			return nil, spanStoreError("read spans", err)
 		}
 		span.Start = time.UnixMicro(startAt).UTC()
 		span.End = time.UnixMicro(endAt).UTC()
@@ -113,7 +101,7 @@ func (s *SQLSpanStore) ByRun(ctx context.Context, runID string) ([]SpanData, err
 		spans = append(spans, span)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, spanStoreError("read spans", err)
 	}
 	if len(spans) > 0 {
 		return spans, nil
@@ -124,7 +112,7 @@ func (s *SQLSpanStore) ByRun(ctx context.Context, runID string) ([]SpanData, err
 	var anyTenant int
 	if err := s.store.Execer().QueryRow(ctx,
 		`SELECT COUNT(*) FROM telemetry_spans WHERE run_id = ?`, runID).Scan(&anyTenant); err != nil {
-		return nil, err
+		return nil, spanStoreError("read spans", err)
 	}
 	if anyTenant > 0 {
 		return nil, core.NewError(core.CodeNotFound, "telemetry: run not found", nil)
@@ -138,11 +126,23 @@ func (s *SQLSpanStore) Purge(ctx context.Context, before time.Time) (int64, erro
 		`DELETE FROM telemetry_spans WHERE end_at < ?`,
 		psql.TruncateMicrosecond(before).UnixMicro())
 	if err != nil {
-		return 0, err
+		return 0, spanStoreError("purge spans", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, err
+		return 0, spanStoreError("purge spans", err)
 	}
 	return n, nil
+}
+
+// spanStoreError wraps a store failure at the telemetry boundary. Store errors
+// are internal to this package's contract: the caller of record or read sees a
+// stable code, not driver text.
+func spanStoreError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	wrapped := core.NewError(core.CodeInternal, "telemetry: "+op, nil)
+	wrapped.Cause = err
+	return wrapped
 }
