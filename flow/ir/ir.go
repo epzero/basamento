@@ -28,17 +28,38 @@ const (
 // Decode parses a flow definition from JSON, or from YAML when data does not
 // start with a JSON object. Unknown fields and duplicate object keys are
 // rejected: a misspelled field must not silently drop nodes or edges.
+//
+// A YAML flow-style mapping such as {name: x} also starts with "{", so input
+// that looks like JSON but does not parse as JSON is retried as YAML before the
+// JSON error is reported.
 func Decode(data []byte) (*flow.IR, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, invalid("flow: empty definition", nil)
 	}
-	text := data
 	if !isJSON(data) {
 		converted, err := yamlToJSON(data)
 		if err != nil {
 			return nil, err
 		}
-		text = converted
+		return decodeObject(converted)
+	}
+	f, err := decodeObject(data)
+	if err == nil || !startsWithBrace(data) {
+		return f, err
+	}
+	if converted, yamlErr := yamlToJSON(data); yamlErr == nil {
+		if f, yamlErr := decodeObject(converted); yamlErr == nil {
+			return f, nil
+		}
+	}
+	return nil, err
+}
+
+// decodeObject requires a top-level JSON object and checks its keys. A
+// top-level null, array or scalar is not a definition.
+func decodeObject(text []byte) (*flow.IR, error) {
+	if !startsWithBrace(text) {
+		return nil, invalid("flow: the definition must be a JSON object", nil)
 	}
 	dec := json.NewDecoder(bytes.NewReader(text))
 	dec.DisallowUnknownFields()
@@ -96,6 +117,11 @@ func isJSON(data []byte) bool {
 	return len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
 }
 
+func startsWithBrace(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
 func yamlToJSON(data []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -124,6 +150,9 @@ func checkYAMLDuplicateKeys(n *yaml.Node, path string) error {
 		seen := make(map[string]bool, len(n.Content)/2)
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i].Value
+			if isMergeKey(key, n.Content[i].Tag) {
+				return mergeKeyErr(path)
+			}
 			if seen[key] {
 				return duplicateErr(path, key)
 			}
@@ -166,6 +195,9 @@ func walkKeys(dec *json.Decoder, path string) error {
 				return invalid("flow: invalid JSON: "+err.Error(), nil)
 			}
 			key, _ := keyTok.(string)
+			if isMergeKey(key, "") {
+				return mergeKeyErr(path)
+			}
 			if seen[key] {
 				return duplicateErr(path, key)
 			}
@@ -186,6 +218,23 @@ func walkKeys(dec *json.Decoder, path string) error {
 		return err
 	}
 	return nil
+}
+
+// mergeKey is YAML's merge key. Decode expands it, so a key or a duplicate
+// merged through it would bypass the duplicate-key check; it is refused on the
+// JSON path too, where nothing expands it and a field named "<<" would
+// otherwise survive as data.
+const mergeKey = "<<"
+
+func isMergeKey(name, tag string) bool { return name == mergeKey || tag == "!!merge" }
+
+func mergeKeyErr(path string) error {
+	where := path
+	if where == "" {
+		where = "/"
+	}
+	return invalid(fmt.Sprintf("flow: merge key %q at %s is not allowed", mergeKey, where),
+		map[string]any{"location": path + "/" + escapePointer(mergeKey)})
 }
 
 func duplicateErr(path, key string) error {

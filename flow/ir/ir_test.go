@@ -211,3 +211,71 @@ nodes:
 		t.Fatalf("want duplicate-key error, got %v", err)
 	}
 }
+
+// A merge key is expanded by YAML after the duplicate check would see it, so a
+// key merged through "<<" could otherwise silently override a declared one.
+func TestDecodeRejectsYAMLMergeKey(t *testing.T) {
+	text := `
+name: x
+version: 1
+state:
+  schema: {type: object}
+nodes:
+  plan: &plan {kind: task}
+  copy:
+    <<: *plan
+    kind: tool
+edges:
+  - {from: START, to: plan}
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, `merge key "<<"`) || !strings.Contains(msg, "/nodes/copy") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestDecodeRejectsJSONMergeKey(t *testing.T) {
+	text := `{"name":"x","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"<<":{"kind":"task"}},
+		"edges":[{"from":"START","to":"<<"}]}`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, `merge key "<<"`) || !strings.Contains(msg, "/nodes") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestDecodeAcceptsFlowStyleYAMLMapping(t *testing.T) {
+	text := `{name: x, version: 1, state: {schema: {type: object, properties: {tests: {type: object}}}},
+		nodes: {plan: {kind: task}}, edges: [{from: START, to: plan}, {from: plan, to: FAIL}]}`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Name != "x" || f.Version != 1 || len(f.Nodes) != 1 || len(f.Edges) != 2 {
+		t.Fatalf("decoded %+v", f)
+	}
+}
+
+func TestDecodeRejectsNonObjectTopLevel(t *testing.T) {
+	for _, text := range []string{"null", `[{"name":"x"}]`, `"x"`, "42", "true"} {
+		_, err := Decode([]byte(text))
+		if err == nil {
+			t.Fatalf("%q: want error", text)
+		}
+		if core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("%q: code %s", text, core.CodeOf(err))
+		}
+	}
+}
