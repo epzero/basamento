@@ -93,9 +93,6 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqCT := r.Header.Get("Content-Type")
-	if reqCT == "" {
-		reqCT = "application/octet-stream"
-	}
 	if reqCT != meta.ContentType {
 		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
