@@ -199,7 +199,7 @@ func registerExpr(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the result is (.+)$`, func(ctx context.Context, raw string) error {
+	sc.Step(`^the result is ((?:[\[{"<]|true|false|null|-?[0-9]).*)$`, func(ctx context.Context, raw string) error {
 		want, err := parseJSONValue(strings.TrimSpace(raw))
 		if err != nil {
 			return err
@@ -262,6 +262,8 @@ func registerExpr(sc *godog.ScenarioContext) {
 	sc.Step(`^the mapping "(.+)" with a step limit of (\d+)$`, func(ctx context.Context, src string, limit uint64) error {
 		return exprMappingDeclare(ctx, src, nil, &limit)
 	})
+
+	sc.Step(`^the mapping "(.+)" with an output limit of (\d+) bytes$`, exprMappingDeclareOutput)
 
 	sc.Step(`^the mapping "(.+)" is compiled$`, func(ctx context.Context, src string) error {
 		e := world(ctx).Expr
@@ -333,6 +335,25 @@ func registerExpr(sc *godog.ScenarioContext) {
 
 	sc.Step(`^the error names the step limit (\d+)$`, func(ctx context.Context, limit int) error {
 		return exprMsgContains(ctx, strconv.Itoa(limit))
+	})
+
+	sc.Step(`^the error names the output limit (\d+)$`, func(ctx context.Context, limit int) error {
+		return exprMsgContains(ctx, "output limit", strconv.Itoa(limit))
+	})
+
+	sc.Step(`^the result is written compactly in (\d+) bytes$`, func(ctx context.Context, length int) error {
+		e := world(ctx).Expr
+		if e.lastErr != nil {
+			return fmt.Errorf("evaluation failed: %w", e.lastErr)
+		}
+		b, err := json.Marshal(e.result)
+		if err != nil {
+			return err
+		}
+		if len(b) != length {
+			return fmt.Errorf("result is %d bytes, want %d: %s", len(b), length, b)
+		}
+		return nil
 	})
 
 	sc.Step(`^the error names the mapping and the position of the error$`, func(ctx context.Context) error {

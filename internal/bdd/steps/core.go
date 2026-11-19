@@ -46,7 +46,7 @@ func registerCore(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		world(ctx).Core.clock = coretest.NewFakeClock(t)
+		world(ctx).Core.clock.Set(t)
 		world(ctx).Core.ids = nil
 		return nil
 	})
@@ -122,7 +122,11 @@ func registerCore(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the request fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		err := world(ctx).Core.lastErr
+		w := world(ctx)
+		if w.Core.lastErr == nil && w.Auth.lastErr != nil {
+			return assertAuthFailsWithCode(ctx, code)
+		}
+		err := w.Core.lastErr
 		if err == nil {
 			return fmt.Errorf("request succeeded, want code %s", code)
 		}

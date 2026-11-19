@@ -418,12 +418,20 @@ func registerBlob(sc *godog.ScenarioContext) {
 	// "without the gate ... being resolved" clause is the flow host's way of
 	// saying no person answered; the recording host keeps its own clock, so
 	// advance it too when it is the one under test.
-	sc.Step(`^(-?\d.*?) pass(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
+	sc.Step(`^(-?\d.*?) pass(?:es)?(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
 		d, err := parseElapsed(elapsed)
 		if err != nil {
 			return err
 		}
 		world(ctx).Core.clock.Advance(d)
+		// A component server times its shutdown drain from the same frozen
+		// clock; firing its timer here is what "the seconds pass" means.
+		if c := world(ctx).Config; c != nil && c.after != nil {
+			select {
+			case c.after <- world(ctx).Core.clock.Now():
+			default:
+			}
+		}
 		h := world(ctx).Host
 		if h == nil || h.dc == nil {
 			return nil
@@ -798,6 +806,8 @@ func parsePositiveDuration(s string) (time.Duration, error) {
 		}
 		unit := parts[i+1]
 		switch {
+		case strings.HasPrefix(unit, "millisecond"):
+			total += time.Duration(n) * time.Millisecond
 		case strings.HasPrefix(unit, "second"):
 			total += time.Duration(n) * time.Second
 		case strings.HasPrefix(unit, "minute"):

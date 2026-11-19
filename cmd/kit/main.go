@@ -1,5 +1,6 @@
-// Command kit is the single binary: serve, run, validate, replay.
-// Status: skeleton; subcommands land with their work packages.
+// Command kit is the single binary. It serves the embedded or cloud profile
+// and validates configuration; run, worker and replay land with their work
+// packages.
 package main
 
 import (
@@ -10,10 +11,30 @@ import (
 var version = "0.0.0-dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(version)
-		return
+	if len(os.Args) < 2 {
+		usage()
+		os.Exit(2)
 	}
-	fmt.Fprintln(os.Stderr, "kit: no subcommands yet; see docs/roadmap/README.md")
-	os.Exit(2)
+	switch os.Args[1] {
+	case "version":
+		fmt.Println(version)
+	case "serve":
+		runServe(os.Args[2:])
+	case "config":
+		if len(os.Args) < 3 || os.Args[2] != "validate" {
+			usage()
+			os.Exit(2)
+		}
+		runConfigValidate(os.Args[3:])
+	case "-h", "--help", "help":
+		usage()
+	default:
+		fmt.Fprintf(os.Stderr, "kit: unknown command %q\n", os.Args[1])
+		usage()
+		os.Exit(2)
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: kit <version|serve|config validate> [flags]")
 }

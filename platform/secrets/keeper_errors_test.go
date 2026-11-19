@@ -36,7 +36,7 @@ func (f *fakeDriverKeeper) Decrypt(context.Context, []byte) ([]byte, error) {
 	if f.dec != gcerrors.OK {
 		return nil, &codeErr{code: f.dec}
 	}
-	return FrameValuePlaintext([]byte("plain")), nil
+	return frameValuePlaintext([]byte("plain")), nil
 }
 
 func (f *fakeDriverKeeper) Close() error                           { return nil }
@@ -50,79 +50,167 @@ func keeperWithScheme(scheme string, enc, dec gcerrors.ErrorCode) *keeperKeyServ
 	return &keeperKeyService{keeper: k, scheme: scheme, id: scheme + "://test"}
 }
 
+func assertClassify(t *testing.T, ctx context.Context, scheme string, code gcerrors.ErrorCode, op keeperOp, wantCode core.Code, wantMsg string, wantRetry bool) {
+	t.Helper()
+	err := classifyKeeperErr(ctx, &codeErr{code: code}, scheme, op)
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		t.Fatalf("%s %v %v: not *core.Error: %v", scheme, code, op, err)
+	}
+	if pe.Code != wantCode || pe.Message != wantMsg || core.IsRetryable(err) != wantRetry {
+		t.Fatalf("%s %v %v: got code=%s msg=%q retry=%v want code=%s msg=%q retry=%v",
+			scheme, code, op, pe.Code, pe.Message, core.IsRetryable(err), wantCode, wantMsg, wantRetry)
+	}
+}
+
+// TestClassifyKeeperErrTable mirrors design §2.2 (scheme × keeper outcome × operation).
 func TestClassifyKeeperErrTable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cases := []struct {
-		scheme    string
-		enc, dec  gcerrors.ErrorCode
-		op        string
-		wantCode  core.Code
-		wantMsg   string
-		retryable bool
+	cloudSchemes := []string{"awskms", "gcpkms"}
+	localScheme := "localsecrets"
+	ops := []struct {
+		name string
+		op   keeperOp
 	}{
-		{"localsecrets", gcerrors.OK, gcerrors.Unknown, "decrypt", core.CodeInvalidArgument, msgValueCannotDecrypt, false},
-		{"awskms", gcerrors.OK, gcerrors.Unknown, "decrypt", core.CodeUnavailable, "awskms", true},
-		{"localsecrets", gcerrors.OK, gcerrors.Unknown, "unwrap", core.CodeInternal, msgKeysetCannotUnwrap, false},
-		{"awskms", gcerrors.OK, gcerrors.Unknown, "unwrap", core.CodeUnavailable, "awskms", true},
-		{"awskms", gcerrors.ResourceExhausted, gcerrors.OK, "wrap", core.CodeUnavailable, "awskms", true},
-		{"localsecrets", gcerrors.InvalidArgument, gcerrors.OK, "wrap", core.CodeInternal, msgKeyServiceRefused, false},
-		{"localsecrets", gcerrors.OK, gcerrors.InvalidArgument, "decrypt", core.CodeInvalidArgument, msgValueCannotDecrypt, false},
-		{"awskms", gcerrors.OK, gcerrors.FailedPrecondition, "decrypt", core.CodeInvalidArgument, msgValueCannotDecrypt, false},
+		{"unwrap", opUnwrapKeyset},
+		{"wrap", opWrapKeyset},
+		{"encrypt", opEncryptValue},
+		{"decrypt", opDecryptValue},
 	}
-	for _, tc := range cases {
-		var keeperOpVal keeperOp
-		switch tc.op {
-		case "decrypt":
-			keeperOpVal = opDecryptValue
-		case "encrypt":
-			keeperOpVal = opEncryptValue
-		case "unwrap":
-			keeperOpVal = opUnwrapKeyset
-		case "wrap":
-			keeperOpVal = opWrapKeyset
+
+	for _, scheme := range cloudSchemes {
+		for _, op := range ops {
+			assertClassify(t, ctx, scheme, gcerrors.InvalidArgument, op.op, cloudInvalidArgCode(op.op), cloudInvalidArgMsg(op.op), false)
+			assertClassify(t, ctx, scheme, gcerrors.FailedPrecondition, op.op, cloudInvalidArgCode(op.op), cloudInvalidArgMsg(op.op), false)
 		}
-		var code gcerrors.ErrorCode
-		if tc.dec != gcerrors.OK {
-			code = tc.dec
-		} else {
-			code = tc.enc
+		for _, code := range []gcerrors.ErrorCode{
+			gcerrors.PermissionDenied, gcerrors.NotFound, gcerrors.Unimplemented, gcerrors.AlreadyExists,
+		} {
+			for _, op := range ops {
+				assertClassify(t, ctx, scheme, code, op.op, deniedRowCode(op.op), deniedRowMsg(op.op), false)
+			}
 		}
-		err := classifyKeeperErr(ctx, &codeErr{code: code}, tc.scheme, keeperOpVal)
-		var pe *core.Error
-		if !errors.As(err, &pe) {
-			t.Fatalf("%s %s: %v", tc.scheme, tc.op, err)
-		}
-		if pe.Code != tc.wantCode || pe.Message != tc.wantMsg || core.IsRetryable(err) != tc.retryable {
-			t.Fatalf("%s %s: got %s %q retry=%v", tc.scheme, tc.op, pe.Code, pe.Message, core.IsRetryable(err))
+		for _, code := range []gcerrors.ErrorCode{gcerrors.Unknown, gcerrors.Internal, gcerrors.ResourceExhausted} {
+			for _, op := range ops {
+				assertClassify(t, ctx, scheme, code, op.op, core.CodeUnavailable, scheme, true)
+			}
 		}
 	}
+
+	for _, op := range ops {
+		assertClassify(t, ctx, localScheme, gcerrors.InvalidArgument, op.op, localInvalidArgCode(op.op), localInvalidArgMsg(op.op), false)
+		assertClassify(t, ctx, localScheme, gcerrors.FailedPrecondition, op.op, localInvalidArgCode(op.op), localInvalidArgMsg(op.op), false)
+	}
+	for _, code := range []gcerrors.ErrorCode{
+		gcerrors.PermissionDenied, gcerrors.NotFound, gcerrors.Unimplemented, gcerrors.AlreadyExists,
+	} {
+		for _, op := range ops {
+			assertClassify(t, ctx, localScheme, code, op.op, deniedRowCode(op.op), deniedRowMsg(op.op), false)
+		}
+	}
+	for _, code := range []gcerrors.ErrorCode{gcerrors.Unknown, gcerrors.Internal, gcerrors.ResourceExhausted} {
+		for _, op := range ops {
+			assertClassify(t, ctx, localScheme, code, op.op, localOtherCode(op.op), localOtherMsg(op.op), false)
+		}
+	}
+
+	for _, scheme := range append(cloudSchemes, localScheme) {
+		for _, op := range ops {
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := classifyKeeperErr(cancelled, &codeErr{code: gcerrors.Unknown}, scheme, op.op)
+			if core.CodeOf(err) != core.CodeCancelled {
+				t.Fatalf("%s %v cancelled: %v", scheme, op.op, err)
+			}
+			err = classifyKeeperErr(ctx, context.DeadlineExceeded, scheme, op.op)
+			if core.CodeOf(err) != core.CodeTimeout || !core.IsRetryable(err) {
+				t.Fatalf("%s %v deadline: %v", scheme, op.op, err)
+			}
+		}
+	}
+
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	ks := keeperWithScheme("awskms", gcerrors.OK, gcerrors.Unknown)
 	_, err := ks.decryptValue(cancelled, []byte("ct"))
 	if core.CodeOf(err) != core.CodeCancelled {
-		t.Fatalf("cancelled: %v", err)
+		t.Fatalf("cancelled via keeper: %v", err)
 	}
 	_, err = ks.decryptValue(ctx, []byte("ct"))
 	if core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("net path via unknown decrypt: %v", err)
 	}
-	err = classifyKeeperErr(ctx, context.Canceled, "awskms", opDecryptValue)
-	if core.CodeOf(err) != core.CodeCancelled {
-		t.Fatalf("ctx canceled err: %v", err)
-	}
-	err = classifyKeeperErr(ctx, context.DeadlineExceeded, "awskms", opDecryptValue)
-	if core.CodeOf(err) != core.CodeTimeout || !core.IsRetryable(err) {
-		t.Fatalf("deadline: %v", err)
-	}
 	err = classifyKeeperErr(ctx, &net.OpError{Op: "dial", Err: errors.New("refused")}, "awskms", opDecryptValue)
 	if core.CodeOf(err) != core.CodeUnavailable || !core.IsRetryable(err) {
 		t.Fatalf("net err: %v", err)
 	}
-	err = classifyKeeperErr(ctx, &codeErr{code: gcerrors.PermissionDenied}, "awskms", opEncryptValue)
-	if core.CodeOf(err) != core.CodeInternal {
-		t.Fatalf("permission denied encrypt: %v", err)
+}
+
+func cloudInvalidArgCode(op keeperOp) core.Code {
+	if op == opDecryptValue {
+		return core.CodeInvalidArgument
+	}
+	return core.CodeInternal
+}
+
+func cloudInvalidArgMsg(op keeperOp) string {
+	switch op {
+	case opDecryptValue:
+		return msgValueCannotDecrypt
+	case opUnwrapKeyset:
+		return msgKeysetCannotUnwrap
+	case opWrapKeyset:
+		return msgKeysetCannotWrap
+	default:
+		return msgKeyServiceRefused
+	}
+}
+
+func localInvalidArgCode(op keeperOp) core.Code {
+	if op == opDecryptValue {
+		return core.CodeInvalidArgument
+	}
+	return core.CodeInternal
+}
+
+func localInvalidArgMsg(op keeperOp) string {
+	switch op {
+	case opDecryptValue:
+		return msgValueCannotDecrypt
+	case opUnwrapKeyset:
+		return msgKeysetCannotUnwrap
+	default:
+		return msgKeyServiceRefused
+	}
+}
+
+func deniedRowCode(op keeperOp) core.Code {
+	return core.CodeInternal
+}
+
+func deniedRowMsg(op keeperOp) string {
+	if op == opUnwrapKeyset {
+		return msgKeysetCannotUnwrap
+	}
+	return msgKeyServiceRefused
+}
+
+func localOtherCode(op keeperOp) core.Code {
+	if op == opDecryptValue {
+		return core.CodeInvalidArgument
+	}
+	return core.CodeInternal
+}
+
+func localOtherMsg(op keeperOp) string {
+	switch op {
+	case opDecryptValue:
+		return msgValueCannotDecrypt
+	case opUnwrapKeyset:
+		return msgKeysetCannotUnwrap
+	default:
+		return msgKeyServiceRefused
 	}
 }
 

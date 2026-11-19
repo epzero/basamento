@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-05 @level:component
+@wp:WP-L1-05 @level:component
 Feature: Loading the configuration
   Every `kit` process builds one effective configuration from command-line
   flags, environment variables, a configuration file and the built-in

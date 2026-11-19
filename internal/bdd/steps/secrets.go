@@ -24,26 +24,28 @@ import (
 )
 
 type secretsWorld struct {
-	sim              *simKeyRegistry
-	store            secrets.KeysetStore
-	codec            *secrets.Codec
-	codec2           *secrets.Codec
-	port             *secrets.Port
-	portURL          string
-	payloads         map[string]secrets.Payload
-	encoded          map[string]secrets.Payload
-	decoded          map[string]secrets.Payload
-	lastErr          error
-	lastOp           string
-	logBuf           *bytes.Buffer
-	logHandler       slog.Handler
-	ciphertext       []byte
-	lastEnc          secrets.Payload
-	lastDec          secrets.Payload
-	valuePlain       []byte
-	unwrapAtRestart  int
-	lastCodecUnwraps int
-	storeSnaps       map[string]secrets.StoredKeyset
+	sim                    *simKeyRegistry
+	store                  secrets.KeysetStore
+	codec                  *secrets.Codec
+	codec2                 *secrets.Codec
+	port                   *secrets.Port
+	portURL                string
+	payloads               map[string]secrets.Payload
+	encoded                map[string]secrets.Payload
+	decoded                map[string]secrets.Payload
+	lastErr                error
+	lastOp                 string
+	logBuf                 *bytes.Buffer
+	logHandler             slog.Handler
+	ciphertext             []byte
+	lastEnc                secrets.Payload
+	lastDec                secrets.Payload
+	valuePlain             []byte
+	lastVal                []byte
+	lastDecodedPayloadName string
+	unwrapAtRestart        int
+	lastCodecUnwraps       int
+	storeSnaps             map[string]secrets.StoredKeyset
 }
 
 func newSecretsWorld() *secretsWorld {
@@ -101,8 +103,7 @@ func (s *simKeyService) MasterKeyID() string { return s.name }
 
 func (s *simKeyService) Close() error { return nil }
 
-func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
-	_ = ctx
+func (s *simKeyService) Wrap(_ context.Context, tenant string, plaintext []byte) ([]byte, error) {
 	if err := s.reg.checkAvailable(true, tenant); err != nil {
 		return nil, err
 	}
@@ -110,8 +111,7 @@ func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byt
 	return s.encrypt(tenant, plaintext)
 }
 
-func (s *simKeyService) Unwrap(ctx context.Context, tenant string, ciphertext []byte) ([]byte, error) {
-	_ = ctx
+func (s *simKeyService) Unwrap(_ context.Context, tenant string, ciphertext []byte) ([]byte, error) {
 	if err := s.reg.checkAvailable(false, tenant); err != nil {
 		return nil, err
 	}
@@ -355,6 +355,7 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^the stored keysets of tenants "([^"]*)" and "([^"]*)" name master key "([^"]*)" as the key that wrapped them$`, assertMastersTwo)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" is unchanged$`, assertStoredUnchanged)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" is replaced by the stored keyset of tenant "([^"]*)"$`, swapKeysets)
+	sc.Step(`^the stored keysets of tenants "([^"]*)" and "([^"]*)" are swapped$`, swapKeysets)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" contains the bytes of none of its data keys$`, assertNoDataKeyLeaks)
 	sc.Step(`^one stored keyset names master key "([^"]*)" and the other names master key "([^"]*)"$`, assertSplitMasters)
 	sc.Step(`^encoded payloads "([^"]*)" and "([^"]*)" name different data keys$`, assertDifferentKeys)
@@ -374,6 +375,7 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^(\d+) payloads are encoded and decoded for tenant "([^"]*)"$`, benchEncodeDecode)
 	sc.Step(`^the simulated key service received (\d+) unwrap request since the restart$`, assertUnwrapSinceRestart)
 	sc.Step(`^the first payload codec sent (\d+) unwrap request to the simulated key service for that decode$`, assertCodecUnwrap)
+	sc.Step(`^the payload codec sent (\d+) unwrap request to the simulated key service for that decode$`, assertCodecUnwrap)
 	sc.Step(`^the keyset of tenant "([^"]*)" holds (\d+) data keys$`, assertDataKeyCount)
 	sc.Step(`^encoded payload "([^"]*)" is tampered with: (.+)$`, tamperPayload)
 	sc.Step(`^decoding encoded payload "([^"]*)" for tenant "([^"]*)" has failed$`, decodePayloadMustFail)
@@ -543,6 +545,7 @@ func encodeNoTenant(ctx context.Context, name string) error {
 
 func decodePayload(ctx context.Context, name, tenant string) error {
 	sw := secretsW(ctx)
+	before := sw.sim.unwrapForCodec(sw.codec)
 	enc, ok := sw.encoded[name]
 	if !ok {
 		return fmt.Errorf("unknown encoded payload %s", name)
@@ -551,11 +554,16 @@ func decodePayload(ctx context.Context, name, tenant string) error {
 	sw.lastErr = err
 	sw.lastOp = "decode"
 	sw.lastDec = out
-	if err != nil {
-		return nil
+	if err == nil {
+		sw.recordDecoded(name, out)
 	}
-	sw.decoded[name] = out
+	sw.lastCodecUnwraps = sw.sim.unwrapForCodec(sw.codec) - before
 	return nil
+}
+
+func (sw *secretsWorld) recordDecoded(name string, out secrets.Payload) {
+	sw.decoded[name] = out
+	sw.lastDecodedPayloadName = name
 }
 
 func decodePayloadMustFail(ctx context.Context, name, tenant string) error {
@@ -577,7 +585,7 @@ func decodePayloadCodec1(ctx context.Context, name, tenant string) error {
 	sw.lastOp = "decode"
 	sw.lastDec = out
 	if err == nil {
-		sw.decoded[name] = out
+		sw.recordDecoded(name, out)
 	}
 	sw.lastCodecUnwraps = sw.sim.unwrapForCodec(sw.codec) - before
 	return nil
@@ -585,17 +593,19 @@ func decodePayloadCodec1(ctx context.Context, name, tenant string) error {
 
 func decodeNoTenant(ctx context.Context, name string) error {
 	sw := secretsW(ctx)
-	_, err := sw.codec.Decode(ctx, sw.encoded[name])
+	out, err := sw.codec.Decode(ctx, sw.encoded[name])
 	sw.lastErr = err
 	sw.lastOp = "decode"
+	sw.lastDec = out
 	return nil
 }
 
 func decodeRaw(ctx context.Context, name, tenant string) error {
 	sw := secretsW(ctx)
-	_, err := sw.codec.Decode(tenantCtx(ctx, tenant), sw.payloads[name])
+	out, err := sw.codec.Decode(tenantCtx(ctx, tenant), sw.payloads[name])
 	sw.lastErr = err
 	sw.lastOp = "decode"
+	sw.lastDec = out
 	return nil
 }
 
@@ -993,11 +1003,7 @@ func assertDecodedMeta(ctx context.Context, enc string) error {
 }
 
 func lastDecodedName(ctx context.Context) string {
-	// Most recent decode stored under same name as encoded step referenced.
-	for k := range secretsW(ctx).decoded {
-		return k
-	}
-	return ""
+	return secretsW(ctx).lastDecodedPayloadName
 }
 
 func assertDecodedEqualsPayload(ctx context.Context, name string) error {
@@ -1023,14 +1029,15 @@ func assertDecodedData(ctx context.Context, encName, tenant, data string) error 
 }
 
 func assertLastDecoded(ctx context.Context, data string) error {
-	sw := secretsW(ctx)
-	for _, p := range sw.decoded {
-		if string(p.Data) != data {
-			return fmt.Errorf("got %q", p.Data)
-		}
-		return nil
+	name := lastDecodedName(ctx)
+	if name == "" {
+		return fmt.Errorf("no decoded payload matching %q", data)
 	}
-	return fmt.Errorf("no decoded payload matching %q", data)
+	p := swDecoded(ctx, name)
+	if string(p.Data) != data {
+		return fmt.Errorf("got %q", p.Data)
+	}
+	return nil
 }
 
 func assertLastCode(ctx context.Context, code string) error {
@@ -1086,10 +1093,14 @@ func assertNoDecoded(ctx context.Context) error {
 }
 
 func assertNoValue(ctx context.Context) error {
-	if secretsW(ctx).lastErr != nil {
-		return nil
+	sw := secretsW(ctx)
+	if sw.lastErr == nil {
+		return fmt.Errorf("value returned without error")
 	}
-	return fmt.Errorf("value returned")
+	if len(sw.lastVal) != 0 {
+		return fmt.Errorf("value bytes returned with error")
+	}
+	return nil
 }
 
 func assertUnwrapSinceRestart(ctx context.Context, n int) error {
@@ -1144,6 +1155,7 @@ func encryptValue(ctx context.Context, v string) error {
 	sw.valuePlain = []byte(v)
 	ct, err := sw.port.Encrypt(ctx, sw.valuePlain)
 	sw.lastErr = err
+	sw.lastVal = ct
 	sw.ciphertext = ct
 	return nil
 }
@@ -1158,6 +1170,8 @@ func ciphertextLacks(ctx context.Context, sub string) error {
 func decryptCiphertext(ctx context.Context, want string) error {
 	sw := secretsW(ctx)
 	pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
+	sw.lastVal = pt
+	sw.lastErr = err
 	if err != nil {
 		return err
 	}
@@ -1182,21 +1196,24 @@ func decryptAfterChange(ctx context.Context, change string) error {
 		if err := openSecretsSeed(ctx, 4); err != nil {
 			return err
 		}
-		_, err := sw.port.Decrypt(ctx, sw.ciphertext)
+		pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
 		sw.lastErr = err
+		sw.lastVal = pt
 		return nil
 	default:
 		if strings.Contains(change, "seed 4") {
 			if err := openSecretsSeed(ctx, 4); err != nil {
 				return err
 			}
-			_, err := sw.port.Decrypt(ctx, sw.ciphertext)
+			pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
 			sw.lastErr = err
+			sw.lastVal = pt
 			return nil
 		}
 	}
-	_, err := sw.port.Decrypt(ctx, ct)
+	pt, err := sw.port.Decrypt(ctx, ct)
 	sw.lastErr = err
+	sw.lastVal = pt
 	return nil
 }
 

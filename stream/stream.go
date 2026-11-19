@@ -1,10 +1,3 @@
-// Package stream implements two-layer streaming: runs execute independently
-// of client connections (layer 1), and clients attach, detach and resume with
-// a cursor (layer 2). Durable events live in SQL and are relayed to the bus;
-// deltas live only on the bus with short retention. See ADR-0005 and
-// specs/streaming.
-//
-// Status: contract only (WP-L6-*).
 package stream
 
 import "encoding/json"

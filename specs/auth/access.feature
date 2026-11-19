@@ -1,20 +1,20 @@
 @security
 Feature: Authentication and tenancy
 
-  @planned @REQ-AUTH-001 @wp:WP-L8-01 @level:system @id:AUTH-001-01
+  @REQ-AUTH-001 @wp:WP-L8-01 @level:system @id:AUTH-001-01
   Scenario: The server refuses a public address without auth
     Given auth mode "none"
     When "kit serve" is asked to listen on "0.0.0.0:8080"
     Then the server does not start and explains that auth is required for non-loopback addresses
 
-  @planned @REQ-AUTH-002 @wp:WP-L6-03 @level:system @id:AUTH-002-01
+  @REQ-AUTH-002 @wp:WP-L6-03 @level:system @id:AUTH-002-01
   Scenario: A principal cannot read another tenant's run
     Given tenants "acme" and "globex" each have a run
     When a principal of "acme" lists runs and fetches the "globex" run by id
     Then the list contains only "acme" runs
     And the fetch fails with code "not_found"
 
-  @planned @REQ-AUTH-003 @wp:WP-L8-01 @level:component @id:AUTH-003-01
+  @REQ-AUTH-003 @wp:WP-L8-01 @level:component @id:AUTH-003-01
   Scenario Outline: Only valid issuer tokens are accepted
     Given auth mode "oidc" with issuer "https://id.example.test" and audience "kit"
     When a request carries a token that is <token>

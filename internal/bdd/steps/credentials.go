@@ -17,7 +17,6 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/credentials"
-	"github.com/epzero/basamento/platform/secrets"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -133,7 +132,7 @@ func (s *bddValueSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte,
 }
 
 func (s *bddValueSecrets) seal(plaintext []byte) ([]byte, error) {
-	inner := secrets.FrameValuePlaintext(plaintext)
+	inner := frameValuePlaintext(plaintext)
 	gcm, err := s.gcm()
 	if err != nil {
 		return nil, err
@@ -155,7 +154,28 @@ func (s *bddValueSecrets) open(ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
 	}
-	return secrets.ParseValuePlaintext(inner)
+	return parseValuePlaintext(inner)
+}
+
+// The value-domain frame below mirrors platform/secrets' Port.Encrypt/Decrypt
+// framing (bind.go). It is duplicated here because this simulator stands in
+// for the port inside BDD and the port does not export the frame helpers.
+const valueFrameV1 = "basamento.value.v1"
+
+func frameValuePlaintext(plaintext []byte) []byte {
+	buf := append([]byte(nil), valueFrameV1...)
+	buf = append(buf, 0)
+	return append(buf, plaintext...)
+}
+
+func parseValuePlaintext(inner []byte) ([]byte, error) {
+	if len(inner) < len(valueFrameV1)+1 {
+		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
+	}
+	if string(inner[:len(valueFrameV1)]) != valueFrameV1 || inner[len(valueFrameV1)] != 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
+	}
+	return append([]byte(nil), inner[len(valueFrameV1)+1:]...), nil
 }
 
 func (s *bddValueSecrets) gcm() (cipher.AEAD, error) {
@@ -638,9 +658,6 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return fmt.Errorf("resolution for %q returned %q, want %q", tenant, r.value, want)
 		}
 		return nil
-	})
-	sc.Step(`^the put fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return credentialsCode(credentialsW(ctx).putErr, code)
 	})
 	sc.Step(`^the deletion fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		return credentialsCode(credentialsW(ctx).deleteErr, code)

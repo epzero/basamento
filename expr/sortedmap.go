@@ -117,6 +117,16 @@ func (m *sortedStringMap) Size() ref.Val {
 	return types.Int(len(m.data))
 }
 
+// Fold visits the entries in key order. Comprehensions use it instead of
+// looking each key up again.
+func (m *sortedStringMap) Fold(f traits.Folder) {
+	for _, k := range sortedStringKeys(m.data) {
+		if !f.FoldEntry(types.String(k), m.adapter.NativeToValue(m.data[k])) {
+			return
+		}
+	}
+}
+
 type sortedMapIter struct {
 	keys []string
 	idx  int
@@ -162,6 +172,10 @@ const (
 	keyUint
 	keyDouble
 	keyString
+	// keyUnordered is a key whose CEL kind has no place in the ladder of
+	// REQ-EXPR-021. It keeps its entry in the map (REQ-EXPR-022); iterating
+	// over the map fails in the evaluator, not here.
+	keyUnordered
 )
 
 type mapKey struct {
@@ -171,7 +185,10 @@ type mapKey struct {
 	u    uint64
 	d    float64
 	s    string
-	key  ref.Val
+	// unordered sorts keys of keyUnordered deterministically; it is not
+	// observable because such a map cannot be iterated.
+	unordered string
+	key       ref.Val
 }
 
 func classifyMapKey(k ref.Val) (mapKey, bool) {
@@ -188,7 +205,14 @@ func classifyMapKey(k ref.Val) (mapKey, bool) {
 	case types.String:
 		return mapKey{kind: keyString, s: string(v), key: k}, true
 	default:
-		return mapKey{}, false
+		if k == nil {
+			return mapKey{}, false
+		}
+		return mapKey{
+			kind:      keyUnordered,
+			unordered: fmt.Sprintf("%T\x00%v", k, k.Value()),
+			key:       k,
+		}, true
 	}
 }
 
@@ -227,6 +251,8 @@ func (k mapKey) less(o mapKey) bool {
 		return mapKeyDoubleLess(k.d, o.d)
 	case keyString:
 		return k.s < o.s
+	case keyUnordered:
+		return k.unordered < o.unordered
 	default:
 		return false
 	}
@@ -242,67 +268,28 @@ type sortedAnyMap struct {
 	entries []sortedEntry
 }
 
+// mapKeysEqual compares map keys within one kind only. Keys of different
+// kinds never compare equal (REQ-EXPR-021): an int key and a double key are
+// separate entries, so the mixed ladder cannot make one shadow the other.
 func mapKeysEqual(a, b mapKey) bool {
-	if a.kind == b.kind {
-		switch a.kind {
-		case keyBool:
-			return a.b == b.b
-		case keyInt:
-			return a.i == b.i
-		case keyUint:
-			return a.u == b.u
-		case keyDouble:
-			return a.d == b.d
-		case keyString:
-			return a.s == b.s
-		default:
-			return false
-		}
+	if a.kind != b.kind {
+		return false
 	}
-	return mapKeysCrossEqual(a, b)
-}
-
-func mapKeysCrossEqual(a, b mapKey) bool {
-	ai, aok := mapKeyAsInt64(a)
-	bi, bok := mapKeyAsInt64(b)
-	if aok && bok {
-		return ai == bi
-	}
-	ad, adok := mapKeyAsDouble(a)
-	bd, bdok := mapKeyAsDouble(b)
-	if adok && bdok {
-		return ad == bd
-	}
-	return false
-}
-
-func mapKeyAsInt64(k mapKey) (int64, bool) {
-	switch k.kind {
+	switch a.kind {
+	case keyBool:
+		return a.b == b.b
 	case keyInt:
-		return k.i, true
+		return a.i == b.i
 	case keyUint:
-		if k.u <= uint64(math.MaxInt64) {
-			return int64(k.u), true
-		}
-		return 0, false
+		return a.u == b.u
 	case keyDouble:
-		i, ok := float64IntegralInt64(k.d)
-		return i, ok
+		return a.d == b.d
+	case keyString:
+		return a.s == b.s
+	case keyUnordered:
+		return a.unordered == b.unordered
 	default:
-		return 0, false
-	}
-}
-
-func mapKeyAsDouble(k mapKey) (float64, bool) {
-	switch k.kind {
-	case keyDouble:
-		return k.d, true
-	case keyInt:
-		return float64(k.i), true
-	case keyUint:
-		return float64(k.u), true
-	default:
-		return 0, false
+		return false
 	}
 }
 
@@ -342,6 +329,18 @@ func newSortedAnyMap(adapter *sortedAdapter, entries []sortedEntry) *sortedAnyMa
 }
 
 func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntry, error) {
+	if foldable, ok := m.(traits.Foldable); ok {
+		f := &mapEntryFolder{adapter: adapter}
+		foldable.Fold(f)
+		if f.err != nil {
+			return nil, f.err
+		}
+		sz, ok := m.Size().(types.Int)
+		if !ok || int(sz) != len(f.entries) {
+			return nil, fmt.Errorf("unsupported map key type")
+		}
+		return f.entries, nil
+	}
 	var entries []sortedEntry
 	it := m.Iterator()
 	for it.HasNext().Equal(types.True) == types.True {
@@ -367,6 +366,36 @@ func extractMapperEntries(m traits.Mapper, adapter *sortedAdapter) ([]sortedEntr
 	return entries, nil
 }
 
+// mapEntryFolder collects a map's entries from its Fold, which yields each
+// key with its value. Looking keys up again would lose a NaN key, which never
+// equals itself.
+type mapEntryFolder struct {
+	adapter *sortedAdapter
+	entries []sortedEntry
+	err     error
+}
+
+func (f *mapEntryFolder) FoldEntry(key, val any) bool {
+	if f.err != nil {
+		return false
+	}
+	k, ok := key.(ref.Val)
+	if !ok {
+		k = f.adapter.NativeToValue(key)
+	}
+	v, ok := val.(ref.Val)
+	if !ok {
+		v = f.adapter.NativeToValue(val)
+	}
+	mk, ok := classifyMapKey(k)
+	if !ok {
+		f.err = fmt.Errorf("unsupported map key type")
+		return false
+	}
+	f.entries = append(f.entries, sortedEntry{key: mk, val: v})
+	return true
+}
+
 func (m *sortedAnyMap) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	if typeDesc == nil || typeDesc == reflect.TypeOf(map[string]any{}) || typeDesc.Kind() == reflect.Interface {
 		if len(m.entries) == 0 {
@@ -380,7 +409,20 @@ func (m *sortedAnyMap) ConvertToType(typeVal ref.Type) ref.Val {
 	return types.NewErr("type conversion error")
 }
 
+// hasUnordered reports whether the map holds a key of no order (REQ-EXPR-022).
+func (m *sortedAnyMap) hasUnordered() bool {
+	for _, e := range m.entries {
+		if e.key.kind == keyUnordered {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
+	if m.hasUnordered() {
+		return types.NewErr("unordered key")
+	}
 	switch ov := other.(type) {
 	case *sortedStringMap:
 		if len(m.entries) != len(ov.data) {
@@ -397,6 +439,9 @@ func (m *sortedAnyMap) Equal(other ref.Val) ref.Val {
 		}
 		return types.Bool(true)
 	case *sortedAnyMap:
+		if ov.hasUnordered() {
+			return types.NewErr("unordered key")
+		}
 		if len(m.entries) != len(ov.entries) {
 			return types.Bool(false)
 		}
@@ -431,7 +476,7 @@ func (m *sortedAnyMap) Find(key ref.Val) (ref.Val, bool) {
 		return types.NewErr("no such key"), false
 	}
 	for _, e := range m.entries {
-		if mapKeysEqual(e.key, mk) || mapKeysCrossEqual(e.key, mk) {
+		if mapKeysEqual(e.key, mk) {
 			return e.val, true
 		}
 	}
@@ -456,6 +501,16 @@ func (m *sortedAnyMap) Iterator() traits.Iterator {
 
 func (m *sortedAnyMap) Size() ref.Val {
 	return types.Int(len(m.entries))
+}
+
+// Fold visits the entries in key order. Comprehensions use it instead of
+// looking each key up again, so a NaN key still yields its value.
+func (m *sortedAnyMap) Fold(f traits.Folder) {
+	for _, e := range m.entries {
+		if !f.FoldEntry(e.key.key, e.val) {
+			return
+		}
+	}
 }
 
 type sortedAnyMapIter struct {

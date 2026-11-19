@@ -139,6 +139,8 @@ func mapCELCause(msg string) string {
 		return "out of bounds"
 	case strings.Contains(msg, "no such key"), strings.Contains(msg, "does not exist"):
 		return "no such key"
+	case strings.Contains(msg, "unordered key"):
+		return "unordered key"
 	case strings.Contains(msg, "NaN"), strings.Contains(msg, "not a valid JSON"), strings.Contains(msg, "no JSON form"):
 		return "no JSON form"
 	default:
