@@ -111,7 +111,7 @@ flowchart TD
 | `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`), canonical JSON and JSON Schema (`core/schema`). `core/coretest` fakes are test-only. **Implemented.** |
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
-| `model` | The invocation contract, providers, routing, metering. Imports no runtime. Contract and adapters **implemented** (WP-L3-01); providers planned (WP-L3-04). |
+| `model` | The invocation contract, providers, routing, metering. Imports no runtime. Contract and adapters **implemented** (WP-L3-01); providers and routing **implemented** (WP-L3-04). |
 | `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. **Implemented** (WP-L3-06). |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). **Implemented** (WP-L3-03). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |

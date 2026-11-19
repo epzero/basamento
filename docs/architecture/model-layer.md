@@ -1,10 +1,11 @@
 # Model layer
 
 Status: the invocation contract and adapters in `model` and `model/chat`
-(WP-L3-01), the catalog and price table in `model/catalog` (WP-L3-06) and the
-model node in `model/node` (WP-L3-03) are implemented; structured output and
-middleware (WP-L3-02), provider construction and routing (WP-L3-04) are
-**Planned**. Decision: ADR-0006. Specs: `specs/models`.
+(WP-L3-01), the catalog and price table in `model/catalog` (WP-L3-06), the
+model node in `model/node` (WP-L3-03) and the manifest-driven providers and
+router in `model/providers` (WP-L3-04) are implemented; structured output and
+middleware (WP-L3-02) are **Planned**. Decision: ADR-0006. Specs:
+`specs/models`.
 
 ## 1. One invocation contract
 
@@ -59,10 +60,18 @@ Every model has a `Descriptor`:
 
 ## 3. Providers
 
+The generic HTTP and CLI drivers live in `model/providers`; a vendor is a
+manifest under `model/providers/manifests` (the format and the shipped
+manifests are documented there), or an adapter package when a manifest cannot
+express its protocol. Every provider has a simulator in
+`model/providers/sim` and the same contract tests. The router chooses a model
+by capability and locality; in the cloud profile it never selects a
+machine-local model (REQ-MODEL-011, WP-L3-04).
+
 | Provider | Notes |
 | --- | --- |
 | Chat and embeddings (OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Ark/Doubao, Qianfan, Ollama, OpenRouter) | `eino-ext` adapters and official SDKs behind `Invoker`. MiniMax and GLM use OpenAI-compatible mode. |
-| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling, webhook or WebSocket. Covers most cloud media vendors and local generation servers. |
+| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling or webhook. Covers most cloud media vendors and local generation servers; a WebSocket vendor gets an adapter until the driver carries it. |
 | **Generic CLI provider** | Configured by a manifest: command template, argument mapping, working directory, output file globs, progress parsing from stdout; `machine_local`. |
 | Workers | Models and tools that the workers of a pool declared (§6). |
 | Remote invokers | Any service implementing `basamento.invoke.v1.InvocationService` over connect (for example the browser runner, ADR-0009). |

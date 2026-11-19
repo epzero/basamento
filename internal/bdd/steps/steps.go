@@ -28,6 +28,7 @@ type World struct {
 	Model       *modelWorld
 	Catalog     *catalogWorld
 	Node        *nodeWorld
+	Providers   *providerWorld
 	Flow        *flowWorld
 	Machine     *machineWorld
 	Host        *hostWorld
@@ -40,19 +41,20 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:    newCoreWorld(),
-			Expr:    &exprWorld{bindings: map[string]any{}},
-			SQL:     newSQLWorld(),
-			Prompt:  newPromptWorld(),
-			Blob:    newBlobWorld(),
-			Schema:  newSchemaWorld(),
-			Model:   newModelWorld(),
-			Catalog: newCatalogWorld(),
-			Node:    newNodeWorld(),
-			Flow:    newFlowWorld(),
-			Machine: newMachineWorld(),
-			Host:    newHostWorld(),
-			Local:   newLocalWorld(),
+			Core:      newCoreWorld(),
+			Expr:      &exprWorld{bindings: map[string]any{}},
+			SQL:       newSQLWorld(),
+			Prompt:    newPromptWorld(),
+			Blob:      newBlobWorld(),
+			Schema:    newSchemaWorld(),
+			Model:     newModelWorld(),
+			Catalog:   newCatalogWorld(),
+			Node:      newNodeWorld(),
+			Providers: &providerWorld{},
+			Flow:      newFlowWorld(),
+			Machine:   newMachineWorld(),
+			Host:      newHostWorld(),
+			Local:     newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -66,6 +68,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerModel(sc)
 	registerCatalog(sc)
 	registerNode(sc)
+	registerProviders(sc)
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)

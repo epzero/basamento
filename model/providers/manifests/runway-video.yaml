@@ -1,0 +1,65 @@
+# Runway image-to-video. Submit, then poll the task: the generic HTTP driver's
+# poll protocol. The credential is a reference; the value stays in the vault.
+name: runway-video
+locality: cloud
+protocol: poll
+http:
+  base_url: https://api.dev.runwayml.com/v1
+  credential: cred://runway
+  auth:
+    header: Authorization
+    scheme: Bearer
+  start:
+    method: POST
+    path: /image_to_video
+    headers:
+      X-Runway-Version: "2024-11-06"
+    body: |
+      {
+        "model": "gen3a_turbo",
+        "promptImage": (.assets.first_frame[0].url // .text.first_frame // ""),
+        "promptText": (.text.prompt // .params.prompt // ""),
+        "duration": (.params.duration_s // 5),
+        "ratio": (.params.ratio // "1280:768")
+      }
+    response: {id: .id}
+  status:
+    path: /tasks/{id}
+    headers:
+      X-Runway-Version: "2024-11-06"
+    response:
+      state: .status
+      state_map:
+        PENDING: running
+        THROTTLED: running
+        RUNNING: running
+        SUCCEEDED: succeeded
+        FAILED: failed
+        CANCELLED: cancelled
+      progress: .progress
+      outputs: '(.output // []) | map({url: ., media: "video", mime: "video/mp4"})'
+      error: .failure
+  cancel:
+    method: DELETE
+    path: /tasks/{id}
+    headers:
+      X-Runway-Version: "2024-11-06"
+models:
+  - id: runway/gen3a_turbo
+    caps: [video.generate]
+    params_schema:
+      type: object
+      properties:
+        prompt:
+          type: string
+        duration_s:
+          type: integer
+          enum: [5, 10]
+        ratio:
+          type: string
+    inputs:
+      - name: first_frame
+        media: image
+        required: true
+      - name: prompt
+        media: text
