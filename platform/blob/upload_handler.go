@@ -19,9 +19,6 @@ type UploadHandler struct {
 	Store *Store
 }
 
-// UploadHandlerRoute is the path prefix for proxied upload URLs.
-const UploadHandlerRoute = "/blob/upload"
-
 func setUploadHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
