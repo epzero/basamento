@@ -245,8 +245,117 @@ func TestSameEntryNodeTwiceIsNotTwoNodes(t *testing.T) {
 		Edge("plan", Fail, "").
 		Entry("plan").
 		Entry("plan"))
-	if got := countEdges(built, Start, "plan"); got != 2 {
-		t.Fatalf("%d entry edges, want 2", got)
+	if got := countEdges(built, Start, "plan"); got != 1 {
+		t.Fatalf("%d entry edges, want 1", got)
+	}
+	if _, err := compile.Compile(built); err != nil {
+		t.Fatalf("compile built IR: %v", err)
+	}
+}
+
+func TestStartEdges(t *testing.T) {
+	state := json.RawMessage(`{"type":"object","properties":{"plan":{}}}`)
+	base := func() *Builder {
+		return New("codegen", 3).StateSchema(state)
+	}
+	addPlan := func(b *Builder) *Builder {
+		return b.Node("plan", KindAgent, nil).Edge("plan", Fail, "")
+	}
+
+	tests := []struct {
+		name    string
+		build   func() *Builder
+		wantErr bool
+		errIn   string
+	}{
+		{
+			name: "two different entry marks",
+			build: func() *Builder {
+				return addPlan(base().Node("verify", KindTool, nil)).
+					Entry("plan").
+					Entry("verify")
+			},
+			wantErr: true,
+			errIn:   `node "plan"`,
+		},
+		{
+			name: "two raw start edges different nodes",
+			build: func() *Builder {
+				return addPlan(base().Node("verify", KindTool, nil).Edge("verify", Fail, "")).
+					Edge(Start, "plan", "").
+					Edge(Start, "verify", "")
+			},
+			wantErr: true,
+			errIn:   `node "plan"`,
+		},
+		{
+			name: "same raw start edge twice",
+			build: func() *Builder {
+				return addPlan(base()).
+					Edge(Start, "plan", "").
+					Edge(Start, "plan", "")
+			},
+			wantErr: true,
+			errIn:   "more than one edge",
+		},
+		{
+			name: "raw start and entry on same node",
+			build: func() *Builder {
+				return addPlan(base()).
+					Edge(Start, "plan", "").
+					Entry("plan")
+			},
+			wantErr: false,
+		},
+		{
+			name: "raw start and entry on different nodes",
+			build: func() *Builder {
+				return addPlan(base().Node("verify", KindTool, nil).Edge("verify", Fail, "")).
+					Edge(Start, "plan", "").
+					Entry("verify")
+			},
+			wantErr: true,
+			errIn:   `node "plan"`,
+		},
+		{
+			name: "no start edge at all",
+			build: func() *Builder {
+				return base().Node("plan", KindAgent, nil).Edge("plan", Fail, "")
+			},
+			wantErr: true,
+			errIn:   "no entry",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			b := test.build()
+			built, err := b.Build()
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("Build succeeded, want error")
+				}
+				if test.errIn != "" && !strings.Contains(err.Error(), test.errIn) {
+					t.Fatalf("error %q does not contain %q", err.Error(), test.errIn)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			startCount := 0
+			for _, edge := range built.Edges {
+				if edge.From == Start {
+					startCount++
+				}
+			}
+			if startCount != 1 {
+				t.Fatalf("%d edges from START, want 1", startCount)
+			}
+			if _, err := compile.Compile(built); err != nil {
+				t.Fatalf("compile built IR: %v", err)
+			}
+		})
 	}
 }
 

@@ -183,9 +183,20 @@ func (b *Builder) Edge(from, to, when string) *Builder {
 }
 
 // Entry marks a node as the entry node, the same as an edge from Start with no
-// condition. Build rejects more than one marked node (REQ-FLOW-014,
-// REQ-FLOW-018).
+// condition. Marking the same node again is a no-op. Build rejects more than
+// one entry target (REQ-FLOW-018).
 func (b *Builder) Entry(node string) *Builder {
+	for _, marked := range b.entries {
+		if marked == node {
+			return b
+		}
+	}
+	for _, edge := range b.edges {
+		if edge.From == Start && edge.To == node {
+			b.entries = append(b.entries, node)
+			return b
+		}
+	}
 	b.entries = append(b.entries, node)
 	return b.Edge(Start, node, "")
 }
@@ -283,10 +294,21 @@ func (b *Builder) Build() (*flow.IR, error) {
 	}
 
 	entryEdges := 0
+	var startTargets []string
 	for _, edge := range b.edges {
 		if edge.From == Start {
 			entryEdges++
+			startTargets = append(startTargets, edge.To)
 		}
+	}
+	if entryEdges > 1 {
+		targets := distinctNames(startTargets)
+		if len(targets) > 1 {
+			return nil, b.errorf(map[string]any{"nodes": targets},
+				"more than one entry node: %s", quoteNodes(targets))
+		}
+		return nil, b.errorf(map[string]any{"node": targets[0]},
+			"more than one edge from %q to node %q", Start, targets[0])
 	}
 	if entryEdges == 0 {
 		return nil, b.errorf(nil,
