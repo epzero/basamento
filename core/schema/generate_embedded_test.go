@@ -22,6 +22,12 @@ type EmbedInner struct {
 	A int `json:"a"`
 }
 
+type zzstUnexp struct {
+	A int `json:"a"`
+}
+
+type zzEmbedInt int
+
 type EmbedHidden struct {
 	H int `json:"h"`
 }
@@ -143,7 +149,37 @@ func TestGenerateMarshalValidateEmbeddedFields(t *testing.T) {
 		EmbedDerived
 		Title string `json:"title"`
 	}
-
+	type unexpEmbed struct {
+		zzstUnexp
+		Note string `json:"note"`
+	}
+	type unexpPtrNil struct {
+		*zzstUnexp
+		Note string `json:"note"`
+	}
+	type unexpPtrSet struct {
+		*zzstUnexp
+		Note string `json:"note"`
+	}
+	type unexpTagged struct {
+		zzstUnexp `json:"x"`
+		Note      string `json:"note"`
+	}
+	type unexpHidden struct {
+		zzstUnexp `json:"-"`
+		Note      string `json:"note"`
+	}
+	type unexpMid struct {
+		zzstUnexp
+	}
+	type unexpTwoLevel struct {
+		unexpMid
+		Note string `json:"note"`
+	}
+	type zzEmbedIntWrap struct {
+		zzEmbedInt
+		Note string `json:"note"`
+	}
 	cases := []struct {
 		name string
 		v    any
@@ -168,6 +204,14 @@ func TestGenerateMarshalValidateEmbeddedFields(t *testing.T) {
 		{"embedded_hidden", hiddenWrap{EmbedHidden: EmbedHidden{H: 1}}},
 		{"embedded_tagged", taggedWrap{EmbedInnerTagged: EmbedInnerTagged{A: 1}}},
 		{"shadowing", shadowWrap{EmbedDerived: EmbedDerived{EmbedBase: EmbedBase{ID: 1}, ID: 2}}},
+		{"unexp_struct_set", unexpEmbed{zzstUnexp: zzstUnexp{A: 1}}},
+		{"unexp_struct_zero", unexpEmbed{}},
+		{"unexp_ptr_nil", unexpPtrNil{}},
+		{"unexp_ptr_set", unexpPtrSet{zzstUnexp: &zzstUnexp{A: 2}}},
+		{"unexp_tagged", unexpTagged{zzstUnexp: zzstUnexp{A: 1}}},
+		{"unexp_hidden", unexpHidden{}},
+		{"unexp_two_level", unexpTwoLevel{unexpMid: unexpMid{zzstUnexp: zzstUnexp{A: 1}}}},
+		{"unexp_nonstruct_ignored", zzEmbedIntWrap{zzEmbedInt: 3}},
 	}
 
 	for _, tc := range cases {

@@ -48,7 +48,7 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 	}
 
 	for _, f := range reflect.VisibleFields(t) {
-		if !f.IsExported() || !f.Anonymous {
+		if !anonymousEmbedJSONRelevant(f) {
 			continue
 		}
 		ft := f.Type
@@ -110,7 +110,7 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 	setRequired(obj, required)
 
 	for _, f := range reflect.VisibleFields(t) {
-		if !f.IsExported() || f.Anonymous {
+		if !f.IsExported() || !f.Anonymous {
 			continue
 		}
 		name := jsonName(f)
@@ -152,6 +152,17 @@ func typeSchemaMap(t reflect.Type, opts *gjschema.ForOptions) (map[string]any, e
 		}
 	}
 	return m, nil
+}
+
+// anonymousEmbedJSONRelevant is true when encoding/json considers an anonymous field.
+func anonymousEmbedJSONRelevant(f reflect.StructField) bool {
+	if !f.Anonymous {
+		return false
+	}
+	if f.IsExported() {
+		return true
+	}
+	return embedStructKind(f.Type)
 }
 
 func embedStructKind(ft reflect.Type) bool {
@@ -203,13 +214,13 @@ func jsonFieldNames(t reflect.Type) []string {
 	}
 	var names []string
 	for _, f := range reflect.VisibleFields(t) {
-		if !f.IsExported() {
-			continue
-		}
 		if f.Anonymous {
 			if embedPromotes(f) {
 				names = append(names, jsonFieldNames(f.Type)...)
 			}
+			continue
+		}
+		if !f.IsExported() {
 			continue
 		}
 		if n := jsonName(f); n != "" {
