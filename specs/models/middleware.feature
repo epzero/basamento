@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-02 @level:component
+@wp:WP-L3-02 @level:component
 Feature: Middleware around every chat call
   A chat call goes through the call log, the recording, the fallback, the
   metering, the retry middleware and the timeouts, in that order: logging and

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 
@@ -29,6 +30,7 @@ type World struct {
 	Model       *modelWorld
 	Catalog     *catalogWorld
 	Node        *nodeWorld
+	Agent       *agentWorld
 	Flow        *flowWorld
 	Machine     *machineWorld
 	Host        *hostWorld
@@ -53,6 +55,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Model:   newModelWorld(),
 			Catalog: newCatalogWorld(),
 			Node:    newNodeWorld(),
+			Agent:   newAgentWorld(),
 			Flow:    newFlowWorld(),
 			Machine: newMachineWorld(),
 			Host:    newHostWorld(),
@@ -72,6 +75,9 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerModel(sc)
 	registerCatalog(sc)
 	registerNode(sc)
+	registerAgent(sc)
+	registerMiddleware(sc)
+	registerMiddlewareCalls(sc)
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
@@ -114,9 +120,35 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 
 // registerShared holds phrases used by more than one domain. The SQL store and
 // the Secrets port both report an open failure with the same phrase; one
-// handler reads whichever domain opened in the scenario.
+// handler reads whichever domain opened in the scenario. The clock step is
+// shared by the flow host and the model middleware: both worlds advance, and
+// the one that is active settles.
 func registerShared(sc *godog.ScenarioContext) {
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, assertPutOutcome)
+	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?:es)?$`, func(ctx context.Context, count int, unit string) error {
+		var duration time.Duration
+		switch strings.TrimSuffix(unit, "s") {
+		case "second":
+			duration = time.Duration(count) * time.Second
+		case "minute":
+			duration = time.Duration(count) * time.Minute
+		case "hour":
+			duration = time.Duration(count) * time.Hour
+		}
+		w := world(ctx)
+		if w.Host != nil && w.Host.dc != nil {
+			w.Core.clock.Advance(duration)
+			w.Host.dc.advance(duration)
+			w.Host.signal()
+			return w.Host.settle()
+		}
+		if w.Model != nil && w.Model.call != nil {
+			w.Model.call.rt.Advance(duration)
+			return nil
+		}
+		w.Core.clock.Advance(duration)
+		return nil
+	})
 	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)
 		var err error

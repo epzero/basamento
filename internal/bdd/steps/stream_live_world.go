@@ -413,4 +413,4 @@ func (b *deltaBus) Purge(context.Context, string) error { return nil }
 
 var errStreamNoWorld = errors.New("stream world not opened")
 
-func textOf(chunks ...string) string { return strings.Join(chunks, "") }
+func joinText(chunks ...string) string { return strings.Join(chunks, "") }
