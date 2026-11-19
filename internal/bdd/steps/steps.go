@@ -45,6 +45,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlob(sc)
 	registerSharedSteps(sc)
 	registerSecrets(sc)
+	registerOpeningSteps(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
