@@ -114,6 +114,19 @@ nothing is coerced from strings.
   Go map order, including which error an evaluation reports first. A custom
   type adapter that returns a sorted map for every native map, and an AST
   or evaluation decorator for map literals, is one way to do it.
+- **Key equality and lookup** (REQ-EXPR-021): the kind ladder is the
+  iteration order only. Equality and lookup compare keys by CEL numeric
+  equality: an `int`, `uint` or `double` key is the same key as a key of
+  another of those kinds with the same value, in either direction, so
+  `{1: 'a', 2.0: 'b'} == {1u: 'a', 2: 'b'}` and
+  `{1: 'a', 2.0: 'b'} == {1.0: 'a', 2: 'b'}` are `true`, and
+  `{1: 'a', 2.0: 'b'}[1u]` and `{1.0: 'a', 2: 'b'}[1]` are `'a'`. A numeric
+  key and a key of a non-numeric kind are distinct. The `Find`, `Contains`
+  and `Equal` of the sorted map implement that equality, not one derived
+  from the ladder. Delegating them to cel-go's Go-map accessor is not
+  enough: it matches a `double` lookup key against an `int` or `uint` entry
+  key, but not the reverse, so `{1.0: 'a', 2: 'b'}[1]` would miss and map
+  equality would depend on operand order.
 - **Keys of no order** (REQ-EXPR-022): a map key with any
   other CEL type, such as a timestamp, a duration or a list, has no place in
   that order. An evaluation that iterates over such a map fails with the
