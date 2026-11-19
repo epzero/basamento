@@ -38,7 +38,8 @@ type Node struct {
 	Guard *Guard          `json:"guard,omitempty"`
 }
 
-// Guard bounds cycles and spend. Every cycle must pass through a guarded node.
+// Guard bounds cycles and spend. A cycle needs a node on it whose guard carries
+// a positive MaxVisits or CostMpts; a While condition alone does not bound it.
 type Guard struct {
 	MaxVisits int    `json:"max_visits,omitempty"`
 	CostMpts  int64  `json:"cost_mpts,omitempty"`
