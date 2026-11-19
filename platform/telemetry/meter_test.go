@@ -36,7 +36,7 @@ func TestMeterRecordsPointFromClock(t *testing.T) {
 
 func TestMeterRedactsLabelsBeforeKeeping(t *testing.T) {
 	setup := newEmbeddedTestSetup(t, coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)))
-	setup.SetCredential("openai", "sk-live-7f3a9c1b")
+	setup.SetCredential("sk-live-7f3a9c1b")
 	counter, err := setup.Meter().Int64Counter("runs")
 	if err != nil {
 		t.Fatalf("Int64Counter: %v", err)
