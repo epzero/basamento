@@ -61,10 +61,10 @@ If a type's method set includes neither `encoding.TextMarshaler` nor `json.Marsh
 ## The string tag option
 
 ### REQ-SCHEMA-046 — The string option on numbers and booleans
-When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is an integer, floating-point or boolean type, or is `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the JSON literal `encoding/json` writes for a value of that type, admitting `null` as well when the field is a pointer.
+When a struct field's `json` tag has the `string` option and the field's type, after following one unnamed pointer type, as `encoding/json` does, is an integer, floating-point or boolean type, or is `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the JSON literal `encoding/json` writes for a value of that type, admitting `null` as well when the field is a pointer.
 
 ### REQ-SCHEMA-047 — The string option on strings
-When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is a string type other than `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the quoted JSON string `encoding/json` writes for the field's value, admitting `null` as well when the field is a pointer.
+When a struct field's `json` tag has the `string` option and the field's type, after following one unnamed pointer type, as `encoding/json` does, is a string type other than `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the quoted JSON string `encoding/json` writes for the field's value, admitting `null` as well when the field is a pointer.
 
 ## Map keys
 
