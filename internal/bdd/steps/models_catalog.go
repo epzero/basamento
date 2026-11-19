@@ -383,12 +383,12 @@ func (w *catalogWorld) setSnapshotFormula(ctx context.Context, id, formula strin
 	return nil
 }
 
-func (w *catalogWorld) estimateFor(ctx, callCtx context.Context, id string, input, limit int64, params json.RawMessage) error {
-	return w.runEstimate(ctx, callCtx, catalog.Request{Model: id, Params: params, InputTokens: input, OutputLimit: limit})
+func (w *catalogWorld) estimateFor(scenarioCtx, callCtx context.Context, id string, input, limit int64, params json.RawMessage) error {
+	return w.runEstimate(scenarioCtx, callCtx, catalog.Request{Model: id, Params: params, InputTokens: input, OutputLimit: limit})
 }
 
-func (w *catalogWorld) runEstimate(ctx, callCtx context.Context, req catalog.Request) error {
-	c, err := w.cat(ctx)
+func (w *catalogWorld) runEstimate(scenarioCtx, callCtx context.Context, req catalog.Request) error {
+	c, err := w.cat(scenarioCtx)
 	if err != nil {
 		return err
 	}
