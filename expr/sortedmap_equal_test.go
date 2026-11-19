@@ -38,6 +38,55 @@ func TestMapKeyEqualityAcrossNumericKinds(t *testing.T) {
 	}
 }
 
+// TestMapKeyEqualityIsOperandOrderIndependent pins that == compares numeric
+// keys by value in either operand order (REQ-EXPR-021): a double entry key
+// matches an int or uint key exactly as the reverse does, so which side of ==
+// a literal is on cannot change the result.
+func TestMapKeyEqualityIsOperandOrderIndependent(t *testing.T) {
+	tests := []struct {
+		left, right string
+		want        bool
+	}{
+		{`{1: 'a', 2.0: 'b'}`, `{1u: 'a', 2: 'b'}`, true},
+		{`{1: 'a', 2.0: 'b'}`, `{1.0: 'a', 2: 'b'}`, true},
+		{`{1u: 'a', 2.0: 'b'}`, `{1: 'a', 2: 'b'}`, true},
+		{`{-1.0: 'a', 2: 'b'}`, `{-1: 'a', 2.0: 'b'}`, true},
+		{`{9223372036854775808u: 'a', 2.0: 'b'}`, `{9223372036854775808.0: 'a', 2: 'b'}`, true},
+		{`{1: 'a', 'x': 0}`, `{'1': 'a', 'x': 0}`, false},
+	}
+	for _, tc := range tests {
+		if got := evalBool(t, tc.left+" == "+tc.right); got != tc.want {
+			t.Fatalf("%s == %s: got %v want %v", tc.left, tc.right, got, tc.want)
+		}
+		if got := evalBool(t, tc.right+" == "+tc.left); got != tc.want {
+			t.Fatalf("%s == %s: got %v want %v", tc.right, tc.left, got, tc.want)
+		}
+	}
+}
+
+// TestMapKeyContainsAcrossNumericKinds pins the membership and comprehension
+// halves of REQ-EXPR-021: `in`, exists and exists_one find a numeric key of
+// one kind with a key of another, and never a string key.
+func TestMapKeyContainsAcrossNumericKinds(t *testing.T) {
+	tests := []struct {
+		expression string
+		want       bool
+	}{
+		{`1u in {1: 'a', 2.0: 'b'}`, true},
+		{`1.0 in {1: 'a', 2.0: 'b'}`, true},
+		{`1 in {1.0: 'a', 2u: 'b'}`, true},
+		{`1.0 in {1u: 'a', 2.0: 'b'}`, true},
+		{`'1' in {1: 'a', 2.0: 'b'}`, false},
+		{`{1: 'a', 2.0: 'b'}.exists(k, k == 1u)`, true},
+		{`{1.0: 'a', 2u: 'b'}.exists_one(k, k == 1)`, true},
+	}
+	for _, tc := range tests {
+		if got := evalBool(t, tc.expression); got != tc.want {
+			t.Fatalf("%s: got %v want %v", tc.expression, got, tc.want)
+		}
+	}
+}
+
 // TestMapLookupAcrossNumericKinds pins the lookup half of REQ-EXPR-021 and of
 // the reviewer's table.
 func TestMapLookupAcrossNumericKinds(t *testing.T) {
