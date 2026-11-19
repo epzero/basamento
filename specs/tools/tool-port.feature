@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-02 @level:component
+@wp:WP-L7-02 @level:component
 Feature: Calling a tool
   A tool has a name, a description and an input schema. A call with arguments
   that do not satisfy the schema never reaches the tool, and the caller's model

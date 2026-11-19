@@ -1,11 +1,3 @@
-// Package tool defines the Tool port (name, input JSON Schema, Run), per-agent
-// allowlists, the MCP client adapter (github.com/modelcontextprotocol/go-sdk),
-// tools served by workers on other machines (ADR-0012), and the sandbox-exec
-// port for generated code.
-//
-// Status: the port's types are implemented (contract-first, WP-L7-01); the
-// registry, RunStep, allowlists, MCP client and sandbox port are planned
-// (WP-L7-02). See specs/tools/design.md §2.
 package tool
 
 import (
@@ -102,7 +94,8 @@ func (o Outcome) Text() string {
 }
 
 // Runner runs one call as the side effect of a durable step. The agent loop
-// supplies it; WP-L7-02's RunStep is the production implementation. It must
-// not retry a failed call: an Outcome records the failure and the step
-// succeeds, and a Go error means the layer itself failed.
+// supplies it; a *Layer's Step is the production implementation (RunStep is
+// the package-level convenience). It must not retry a failed call: an Outcome
+// records the failure and the step succeeds, and a Go error means the layer
+// itself failed.
 type Runner func(ctx context.Context, set *Set, call Call) (Outcome, error)

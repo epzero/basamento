@@ -1,6 +1,6 @@
 # Tools: the tool port, allowlists, MCP and sandboxes
 
-Status: **Planned** (WP-L7-02). Roadmap: `docs/roadmap/L7-agents.md`. Design:
+Status: **Implemented** (WP-L7-02, `tool`). Roadmap: `docs/roadmap/L7-agents.md`. Design:
 `design.md`, ADR-0006, ADR-0011, ADR-0012.
 
 A **tool** is a named operation an agent or a flow's `tool` node may call:

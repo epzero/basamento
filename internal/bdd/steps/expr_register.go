@@ -199,7 +199,7 @@ func registerExpr(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the result is (.+)$`, func(ctx context.Context, raw string) error {
+	sc.Step(`^the result is (\{.*\}|\[.*\]|".*"|-?\d+(?:\.\d+)?|true|false|null|<.+>)$`, func(ctx context.Context, raw string) error {
 		want, err := parseJSONValue(strings.TrimSpace(raw))
 		if err != nil {
 			return err

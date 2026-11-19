@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-02 @level:component
+@wp:WP-L7-02 @level:component
 Feature: Running a command in a sandbox
   A flow runs a command, such as generated test code, in a sandbox: a
   simulated one in the gate, an isolated one in deployment. The command cannot

@@ -32,6 +32,7 @@ type World struct {
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
+	Tool        *toolWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -50,6 +51,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Machine: newMachineWorld(),
 			Host:    newHostWorld(),
 			Local:   newLocalWorld(),
+			Tool:    newToolWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -67,6 +69,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
 	registerLocal(sc)
+	registerTool(sc)
 	registerShared(sc)
 }
 
@@ -87,6 +90,9 @@ func registerShared(sc *godog.ScenarioContext) {
 			duration = time.Duration(count) * time.Hour
 		}
 		w := world(ctx)
+		if w.Tool != nil && w.Tool.pending != nil {
+			return w.Tool.advance(w, duration)
+		}
 		if w.Host != nil && w.Host.dc != nil {
 			w.Core.clock.Advance(duration)
 			w.Host.dc.advance(duration)
