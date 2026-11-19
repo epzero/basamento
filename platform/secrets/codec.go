@@ -34,7 +34,8 @@ type Codec struct {
 }
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
-// are previous keys still able to unwrap stored keysets.
+// are previous keys still able to unwrap stored keysets. Duplicate MasterKeyID
+// values are refused with invalid_argument.
 func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("master key is required")
@@ -464,16 +465,23 @@ func (c *Codec) keysetReadOnly(ctx context.Context, tenant string) (*keyset.Hand
 	return c.unwrapAndCache(ctx, tenant, rec)
 }
 
+type keyServiceOpener func(context.Context, string) (KeyService, error)
+
 // OpenCodec opens a payload codec with the current master key url and optional
-// previous master key urls (design §2).
+// previous master key urls (design §2). Duplicate master ids across those urls
+// are refused with invalid_argument.
 func OpenCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, opts ...Option) (*Codec, error) {
-	cur, err := OpenKeyService(ctx, currentURL)
+	return openCodec(ctx, store, currentURL, prevURLs, OpenKeyService, opts...)
+}
+
+func openCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, open keyServiceOpener, opts ...Option) (*Codec, error) {
+	cur, err := open(ctx, currentURL)
 	if err != nil {
 		return nil, err
 	}
 	keys := []KeyService{cur}
 	for _, u := range prevURLs {
-		ks, err := OpenKeyService(ctx, u)
+		ks, err := open(ctx, u)
 		if err != nil {
 			closeKeyServices(keys)
 			return nil, err

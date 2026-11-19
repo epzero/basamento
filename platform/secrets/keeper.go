@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/epzero/basamento/core"
 	"gocloud.dev/gcerrors"
 	"gocloud.dev/secrets"
 	"gocloud.dev/secrets/localsecrets"
@@ -132,17 +130,8 @@ func classifyOpenKeeperErr(ctx context.Context, err error, scheme string) error 
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: ctx.Err()}
-		}
-		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: ctx.Err(), Retryable: true}
-	}
-	if errors.Is(err, context.Canceled) {
-		return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: err}
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: err, Retryable: true}
+	if c, ok := classifyCtxErr(ctx, err); ok {
+		return c
 	}
 	if errorCode(err) == gcerrors.ResourceExhausted {
 		return errUnavailableRetry(scheme)

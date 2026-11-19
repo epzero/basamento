@@ -89,35 +89,65 @@ func (c *closeCountKey) Close() error {
 	return c.budgetKey.Close()
 }
 
+func TestOpenCodecClosesOnPreviousKeyOpenFailure(t *testing.T) {
+	t.Parallel()
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	var n atomic.Int32
+	k1 := &closeCountKey{budgetKey: budgetKey{id: "a"}, closes: &n}
+	open := func(_ context.Context, raw string) (KeyService, error) {
+		if raw == "url1" {
+			return k1, nil
+		}
+		return nil, errInvalidArgument("open failed")
+	}
+	_, err := openCodec(context.Background(), store, "url1", []string{"url2"}, open)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+	if n.Load() != 1 {
+		t.Fatalf("closes %d want 1", n.Load())
+	}
+}
+
 func TestOpenCodecClosesKeysWhenNewCodecFails(t *testing.T) {
 	t.Parallel()
 	store := &memKeysetStore{data: map[string]StoredKeyset{}}
 	var n atomic.Int32
 	k1 := &closeCountKey{budgetKey: budgetKey{id: "dup"}, closes: &n}
 	k2 := &closeCountKey{budgetKey: budgetKey{id: "dup"}, closes: &n}
-	_, err := NewCodec(store, []KeyService{k1, k2})
-	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("NewCodec: %v", err)
+	nOpen := 0
+	open := func(_ context.Context, _ string) (KeyService, error) {
+		nOpen++
+		if nOpen == 1 {
+			return k1, nil
+		}
+		return k2, nil
 	}
-	if n.Load() != 0 {
-		t.Fatalf("NewCodec alone must not close")
-	}
-	_, err = openCodecWithKeys(context.Background(), store, []KeyService{k1, k2}, nil)
+	_, err := openCodec(context.Background(), store, "u1", []string{"u2"}, open)
 	if err == nil {
-		t.Fatal("expected open failure")
+		t.Fatal("expected err")
 	}
 	if n.Load() != 2 {
 		t.Fatalf("closes %d want 2", n.Load())
 	}
 }
 
-func openCodecWithKeys(ctx context.Context, store KeysetStore, keys []KeyService, opts []Option) (*Codec, error) {
-	c, err := NewCodec(store, keys, opts...)
-	if err != nil {
-		closeKeyServices(keys)
-		return nil, err
+func TestOpenCodecSuccessNoPrematureClose(t *testing.T) {
+	t.Parallel()
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	var n atomic.Int32
+	k := &closeCountKey{budgetKey: budgetKey{id: "only"}, closes: &n}
+	open := func(_ context.Context, _ string) (KeyService, error) {
+		return k, nil
 	}
-	return c, nil
+	c, err := openCodec(context.Background(), store, "u1", nil, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if n.Load() != 0 {
+		t.Fatalf("closes during successful open %d", n.Load())
+	}
 }
 
 func TestOpenCodecRejectsDuplicateMasterURL(t *testing.T) {
