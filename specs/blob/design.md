@@ -32,10 +32,15 @@ and the read URLs, and WP-L1-08 adds the upload methods of §Uploads.
   context independent of the caller's, so a cancelled caller still cleans up.
   No failure path deletes or truncates an existing complete object, of this
   tenant's, another tenant's or another key's. A store failure mid-write
-  leaves nothing, and a retried `Put` re-reads and rewrites.
-  `TestPutWriterFailMidStreamUnavailable` covers the `unavailable` class; it
-  and `TestPutFailMidStreamNoObjectFile` assert that a failed write leaves no
-  object or sidecar and that the retry succeeds.
+  leaves no object and no sidecar, and a retried `Put` re-reads and rewrites.
+  On S3, a failed or cancelled `Put` large enough to use multipart can leave
+  the parts of the aborted upload at the provider until the bucket's
+  `AbortIncompleteMultipartUpload` lifecycle rule removes them (the same
+  operator step as for uploads); no part is readable as a blob.
+  `TestPutWriterFailMidStreamUnavailable` covers the `unavailable` class,
+  asserts that the failure is marked retryable and leaves no object or
+  sidecar; `TestPutFailMidStreamNoObjectFile` asserts that a failed write
+  leaves no object or sidecar and that the retry succeeds.
 - A `Put` for a key the tenant already holds still hashes the reader so a
   content mismatch fails with `invalid_argument` without touching the existing
   blob (REQ-BLOB-002); when the hash matches, `Put` succeeds without rewriting

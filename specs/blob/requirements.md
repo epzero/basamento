@@ -163,4 +163,4 @@ Where the profile is embedded, if a blob store is opened with a signing key that
 If a write fails because the caller's context is cancelled, its source fails, or its bucket or writer fails, then the blob store shall fail it with code `cancelled`, `invalid_argument` or `unavailable`, respectively, and the `unavailable` failure shall be marked retryable.
 
 ### REQ-BLOB-047 — A failed write leaves nothing
-If a write fails for any reason, then the blob store shall keep nothing under its content key: no object, partial or whole, and no content type sidecar that the write created.
+If a write returns a failure, then the blob store shall keep nothing under its content key: no object, partial or whole, and no content type sidecar that the write created.
