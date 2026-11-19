@@ -37,6 +37,7 @@ type World struct {
 	Schema      *schemaWorld
 	Secrets     *secretsWorld
 	SQL         *sqlWorld
+	Stream      *streamWorld
 	Telemetry   *telemetryWorld
 	Temporal    *temporalWorld
 	Tool        *toolWorld
@@ -87,6 +88,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSecrets(sc)
 	registerSharedSteps(sc)
 	registerSQL(sc)
+	registerStreamLive(sc)
 	registerTelemetry(sc)
 	registerTemporal(sc)
 	registerTemporalLocalRunSteps(sc)
