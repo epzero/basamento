@@ -525,27 +525,47 @@ scenarios:
         human:
             status: pending
     SCHEMA-046-01:
-        hash: sha256:8d6136ec80a40ac8688816017551593088815f5f1dd965ee5fb28c50fe44be6a
+        hash: sha256:9f4d9650fccb1b60c3f66ed09ed0b427565a44c2a8f35f3b827ce16239975156
         reqs:
             - REQ-SCHEMA-046
-        tier: P2
-        author: claude-code:spec-author:af0577
-        reviewer: opencode:spec-reviewer:313ebe
+        tier: P1
+        author: claude-code:spec-author:95b945
+        reviewer: opencode:spec-reviewer:5fb0e4
         approved_at: "2026-11-19"
-        note: 'Round 2: new encoding/json behavior family. SCHEMA-003-02 restructured with the tag column and pointer/composite rows; 042/045 mirror 041''s position enumeration; 046/047 admit null for pointer fields and route json.Number through 046; SCHEMA-045-01 gains the admits-every-JSON-value step.'
-        ref: https://github.com/epzero/basamento/pull/86
+        note: 'Round 3 (EP0-131): approved text of 046-01/047-01 changed, *int and *string pinning rows added; 046-02/047-02 pin the named-pointer boundary: a named pointer type keeps the ordinary pointer schema, only one unnamed pointer is followed for the string option. 046-02 now asserts the set value (accepts {"v": 3}), symmetric with 047-02.'
+        human:
+            status: pending
+    SCHEMA-046-02:
+        hash: sha256:b58e20bc1e778685ab611fa9c5114ab9804ab3af61c696745f872c7980ff4b74
+        reqs:
+            - REQ-SCHEMA-046
+        tier: P1
+        author: claude-code:spec-author:95b945
+        reviewer: opencode:spec-reviewer:5fb0e4
+        approved_at: "2026-11-19"
+        note: 'Round 3 (EP0-131): approved text of 046-01/047-01 changed, *int and *string pinning rows added; 046-02/047-02 pin the named-pointer boundary: a named pointer type keeps the ordinary pointer schema, only one unnamed pointer is followed for the string option. 046-02 now asserts the set value (accepts {"v": 3}), symmetric with 047-02.'
         human:
             status: pending
     SCHEMA-047-01:
-        hash: sha256:f5493220fc29c147a2665fcbdd3f5dc1f0ad973d3f8e6e8977983b10a4181aa6
+        hash: sha256:8db8b36aaf88df25cda15f57c8e964ba537e4dda619ec7b36ccaddeef702de3c
         reqs:
             - REQ-SCHEMA-047
-        tier: P2
-        author: claude-code:spec-author:af0577
-        reviewer: opencode:spec-reviewer:313ebe
+        tier: P1
+        author: claude-code:spec-author:95b945
+        reviewer: opencode:spec-reviewer:5fb0e4
         approved_at: "2026-11-19"
-        note: 'Round 2: new encoding/json behavior family. SCHEMA-003-02 restructured with the tag column and pointer/composite rows; 042/045 mirror 041''s position enumeration; 046/047 admit null for pointer fields and route json.Number through 046; SCHEMA-045-01 gains the admits-every-JSON-value step.'
-        ref: https://github.com/epzero/basamento/pull/86
+        note: 'Round 3 (EP0-131): approved text of 046-01/047-01 changed, *int and *string pinning rows added; 046-02/047-02 pin the named-pointer boundary: a named pointer type keeps the ordinary pointer schema, only one unnamed pointer is followed for the string option. 046-02 now asserts the set value (accepts {"v": 3}), symmetric with 047-02.'
+        human:
+            status: pending
+    SCHEMA-047-02:
+        hash: sha256:a6559b422a5d9ecbadd6b87415e9b4c54eb1eb708cda1d817e8d82a6665b968a
+        reqs:
+            - REQ-SCHEMA-047
+        tier: P1
+        author: claude-code:spec-author:95b945
+        reviewer: opencode:spec-reviewer:5fb0e4
+        approved_at: "2026-11-19"
+        note: 'Round 3 (EP0-131): approved text of 046-01/047-01 changed, *int and *string pinning rows added; 046-02/047-02 pin the named-pointer boundary: a named pointer type keeps the ordinary pointer schema, only one unnamed pointer is followed for the string option. 046-02 now asserts the set value (accepts {"v": 3}), symmetric with 047-02.'
         human:
             status: pending
     SCHEMA-048-01:

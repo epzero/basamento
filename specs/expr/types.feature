@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: Variable types from JSON Schema
   Each declared variable gets the CEL type its JSON Schema maps to
   (specs/expr/design.md §2), so expressions are checked against the shape of
@@ -67,7 +67,7 @@ Feature: Variable types from JSON Schema
       | false                       |
       | {"$ref": "#/$defs/missing"} |
 
-  @REQ-EXPR-003 @id:EXPR-003-05
+  @planned @REQ-EXPR-003 @wp:WP-L2-01 @id:EXPR-003-05
   Scenario Outline: An object reached through additionalProperties keeps its field access
     Given an expression environment declaring "x" with schema <schema>
     When the expression "x['k'].v" is compiled
@@ -79,13 +79,13 @@ Feature: Variable types from JSON Schema
       | {"$defs": {"item": {"type": "object", "properties": {"v": {"type": "integer"}}}}, "type": "object", "additionalProperties": {"$ref": "#/$defs/item"}} |
       | {"type": "object", "additionalProperties": {"type": "object", "properties": {"v": {"type": "integer"}}, "additionalProperties": {"type": "string"}}} |
 
-  @REQ-EXPR-003 @id:EXPR-003-06
+  @planned @REQ-EXPR-003 @wp:WP-L2-01 @id:EXPR-003-06
   Scenario: A field of an object reached through additionalProperties is read when evaluated
     Given an expression environment declaring "x" with schema {"type": "object", "additionalProperties": {"type": "object", "properties": {"v": {"type": "integer"}}}}
     When the expression "x['k'].v + 1" is evaluated with "x" bound to {"k": {"v": 41}}
     Then the result is 42
 
-  @REQ-EXPR-003 @id:EXPR-003-07
+  @planned @REQ-EXPR-003 @wp:WP-L2-01 @id:EXPR-003-07
   Scenario: A guard over an object reached through additionalProperties compiles to a boolean
     Given an expression environment declaring "x" with schema {"type": "object", "additionalProperties": {"type": "object", "properties": {"v": {"type": "integer"}}}}
     When the expression "x['k'].v > 0" is compiled expecting a result of schema {"type": "boolean"}
