@@ -41,6 +41,16 @@ func InitPostgres(ctx context.Context) error {
 	return err
 }
 
+// ResetPostgresForTest clears per-process InitPostgres state; tests call this between cases.
+func ResetPostgresForTest() {
+	_ = ClosePostgres()
+	pgMu.Lock()
+	pgInit = sync.Once{}
+	pgFailed = false
+	reportedSource = ""
+	pgMu.Unlock()
+}
+
 // ClosePostgres stops an embedded server started for this process.
 func ClosePostgres() error {
 	pgMu.Lock()
@@ -70,12 +80,12 @@ func PostgresServerSource() string {
 }
 
 func initPostgres(ctx context.Context) error {
-	envURL := strings.TrimSpace(os.Getenv("BDD_POSTGRES_URL"))
-	if envURL != "" {
+	if PostgresResolveSource() == PostgresServerURL {
+		envURL := strings.TrimSpace(os.Getenv("BDD_POSTGRES_URL"))
 		if err := probeAdminURL(ctx, envURL); err != nil {
 			pgFailed = true
 			if GateStrict() {
-				return fmt.Errorf("postgres url unavailable: %w", err)
+				return err
 			}
 			return nil
 		}
@@ -90,7 +100,7 @@ func initPostgres(ctx context.Context) error {
 	if err != nil {
 		pgFailed = true
 		if GateStrict() {
-			return fmt.Errorf("embedded postgres: %w; run make pg-prefetch", err)
+			return newEmbeddedInitError(err)
 		}
 		return nil
 	}
@@ -106,7 +116,7 @@ func initPostgres(ctx context.Context) error {
 func probeAdminURL(ctx context.Context, admin string) error {
 	u, err := url.Parse(admin)
 	if err != nil {
-		return err
+		return newURLProbeError(err)
 	}
 	q := u.Query()
 	if q.Get("connect_timeout") == "" {
@@ -116,10 +126,13 @@ func probeAdminURL(ctx context.Context, admin string) error {
 	}
 	conn, err := sql.Open("pgx", admin)
 	if err != nil {
-		return err
+		return newURLProbeError(err)
 	}
 	defer func() { _ = conn.Close() }()
-	return conn.PingContext(ctx)
+	if err := conn.PingContext(ctx); err != nil {
+		return newURLProbeError(err)
+	}
+	return nil
 }
 
 func gateDownloadProvider() embeddedpostgres.DownloadProvider {
