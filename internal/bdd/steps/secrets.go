@@ -1100,6 +1100,12 @@ func assertNoValue(ctx context.Context) error {
 	if len(sw.lastVal) != 0 {
 		return fmt.Errorf("value bytes returned with error")
 	}
+	// The credentials store reports through the same phrase: its Resolve
+	// returns (value, err), so a value alongside an error must fail here too.
+	if w := world(ctx); w.Credentials != nil && w.Credentials.lastOp == "resolve" &&
+		len(w.Credentials.lastValue) != 0 {
+		return fmt.Errorf("credential value bytes returned with error")
+	}
 	return nil
 }
 

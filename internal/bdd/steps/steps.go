@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -17,14 +18,15 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core    *coreWorld
-	Schema  *schemaWorld
-	Expr    *exprWorld
-	SQL     *sqlWorld
-	Prompt  *promptWorld
-	Blob    *blobWorld
-	Bus     *busWorld
-	Secrets *secretsWorld
+	Core        *coreWorld
+	Schema      *schemaWorld
+	Expr        *exprWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Blob        *blobWorld
+	Bus         *busWorld
+	Secrets     *secretsWorld
+	Credentials *credentialsWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -52,11 +54,29 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlobUploads(sc)
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
+	registerCredentials(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
 	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+}
+
+// matchPutOutcomeShared owns the put phrase for every capability, because godog
+// has one step namespace and both the bus and the credentials scenarios say
+// "the put fails with code ...". The KV world is created only for bus scenarios
+// (registerBus) and the credentials world only for credentials ones, so the
+// worlds tell the two apart without reading the text.
+func matchPutOutcomeShared(ctx context.Context, tail string) error {
+	if world(ctx).Bus != nil {
+		return matchPutOutcome(ctx, tail)
+	}
+	if strings.HasPrefix(tail, `fails with code "`) {
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(credentialsW(ctx).putErr, code)
+	}
+	return fmt.Errorf("unknown put outcome %q", tail)
 }
 
 func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {

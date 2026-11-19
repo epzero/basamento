@@ -39,6 +39,7 @@ make bdd                           # run scenarios
 go tool gate wp               # every work package: done, in-progress, ready or blocked
 go tool gate spec queue       # specs awaiting human review, P0 first
 go tool gate spec trace       # requirement → scenario matrix
+go tool gate nightly          # scheduled nightly ok, failed or stale (gh JSON on stdin)
 ```
 
 ## Layout
