@@ -17,12 +17,13 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core   *coreWorld
-	Schema *schemaWorld
-	Expr   *exprWorld
-	SQL    *sqlWorld
-	Prompt *promptWorld
-	Blob   *blobWorld
+	Core    *coreWorld
+	Schema  *schemaWorld
+	Expr    *exprWorld
+	SQL     *sqlWorld
+	Prompt  *promptWorld
+	Blob    *blobWorld
+	Secrets *secretsWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -46,6 +47,8 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerPrompt(sc)
 	registerBlob(sc)
 	registerSharedSteps(sc)
+	registerSecrets(sc)
+	registerOpeningSteps(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
