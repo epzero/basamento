@@ -1113,18 +1113,13 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (?:more )?(second|seconds|minute|minutes|hour|hours|day|days) pass(?: without the gate "([^"]*)" being resolved)?$`,
-		func(ctx context.Context, count int, unit, gate string) error {
-			var duration time.Duration
-			switch strings.TrimSuffix(unit, "s") {
-			case "second":
-				duration = time.Duration(count) * time.Second
-			case "minute":
-				duration = time.Duration(count) * time.Minute
-			case "hour":
-				duration = time.Duration(count) * time.Hour
-			case "day":
-				duration = time.Duration(count) * 24 * time.Hour
+	sc.Step(`^(\d+ (?:more )?[a-z]+(?: \d+ [a-z]+)*) pass(?:es| without the gate "([^"]*)" being resolved)?$`,
+		func(ctx context.Context, elapsed, gate string) error {
+			// "1 more second passes" is the same step as "1 second passes".
+			elapsed = strings.ReplaceAll(elapsed, " more ", " ")
+			duration, err := parseElapsed(elapsed)
+			if err != nil {
+				return err
 			}
 			w := world(ctx)
 			if w.Core != nil && w.Core.clock != nil {

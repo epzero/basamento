@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/flow"
 	"github.com/epzero/basamento/runtime"
 )
 
@@ -268,6 +269,10 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 	if g.resolved {
 		r.mu.Unlock()
 		return core.NewError(core.CodeConflict, "local: the gate was already resolved", map[string]any{"gate": name, "run": r.id})
+	}
+	if err := flow.ValidateGatePayload(g.spec.Schema, g.spec.AcceptIf, payload); err != nil {
+		r.mu.Unlock()
+		return err
 	}
 	g.resolved = true
 	g.payload = append(json.RawMessage(nil), payload...)

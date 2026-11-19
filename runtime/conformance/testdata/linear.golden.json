@@ -1,0 +1,46 @@
+{
+  "flow": "linear",
+  "state": "completed",
+  "output": {
+    "flow": "linear",
+    "total": 10
+  },
+  "events": [
+    {
+      "type": "started",
+      "data": {
+        "flow": "linear"
+      }
+    },
+    {
+      "type": "s1_done",
+      "data": {
+        "flow": "linear"
+      }
+    },
+    {
+      "type": "s2_done",
+      "data": {
+        "flow": "linear"
+      }
+    },
+    {
+      "type": "s3_done",
+      "data": {
+        "flow": "linear"
+      }
+    },
+    {
+      "type": "s4_done",
+      "data": {
+        "flow": "linear"
+      }
+    }
+  ],
+  "steps": {
+    "s1": 1,
+    "s2": 1,
+    "s3": 1,
+    "s4": 1
+  }
+}

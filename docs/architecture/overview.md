@@ -68,6 +68,7 @@ flowchart TD
   platform["platform"]
   prompt["prompt"]
   runtime["runtime"]
+  runtime_conformance["runtime/conformance"]
   runtime_local["runtime/local"]
   runtime_temporal["runtime/temporal"]
   stream["stream"]
@@ -96,6 +97,8 @@ flowchart TD
   platform --> core
   prompt --> core
   runtime --> core
+  runtime_conformance --> flow
+  runtime_conformance --> runtime
   runtime_local --> flow
   runtime_local --> runtime
   runtime_temporal --> flow

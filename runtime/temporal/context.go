@@ -321,6 +321,17 @@ func (dc *durableContext) Emit(ev runtime.ProgressEvent) error {
 		r.mu.Unlock()
 		return cancelledErr("emit after the run closed")
 	}
+	if r.replayEmitAt < r.replayEmits {
+		if r.replayEmitAt >= len(r.outbox) || r.outbox[r.replayEmitAt].Type != ev.Type {
+			r.mu.Unlock()
+			return core.NewError(core.CodeDeterminismBroken,
+				fmt.Sprintf("temporal: resumed run emitted %q where the outbox holds another event", ev.Type),
+				map[string]any{"run": r.id, "event": r.replayEmitAt})
+		}
+		r.replayEmitAt++
+		r.mu.Unlock()
+		return nil
+	}
 	r.outbox = append(r.outbox, runtime.ProgressEvent{Type: ev.Type, Data: append(json.RawMessage(nil), ev.Data...)})
 	r.recordLocked(eventEmitted, ev.Type, 0, encoded)
 	r.mu.Unlock()

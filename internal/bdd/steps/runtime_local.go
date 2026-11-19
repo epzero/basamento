@@ -639,23 +639,7 @@ func registerLocal(sc *godog.ScenarioContext) {
 	// Capabilities.
 	sc.Step(`^the runtime is "local"$`, func(ctx context.Context) error {
 		localStepWorld(ctx).runtime(ctx)
-		return nil
-	})
-	sc.Step(`^the runtime reports capability "([^"]*)" as (true|false)$`, func(ctx context.Context, name, want string) error {
-		caps := localStepWorld(ctx).runtime(ctx).Capabilities()
-		values := map[string]bool{
-			"durable":           caps.Durable,
-			"sync_gate_updates": caps.SyncGateUpdates,
-			"continue_as_new":   caps.ContinueAsNew,
-			"polyglot_queues":   caps.PolyglotQueues,
-		}
-		got, ok := values[name]
-		if !ok {
-			return fmt.Errorf("unknown capability %q", name)
-		}
-		if fmt.Sprintf("%t", got) != want {
-			return fmt.Errorf("capability %q is %t, want %s", name, got, want)
-		}
+		conformanceW(ctx).runtimeName = "local"
 		return nil
 	})
 
@@ -736,10 +720,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 			}
 			return nil
 		})
-	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" marked retryable (true|false)$`,
-		func(ctx context.Context, name, code, retryable string) error {
-			return localStepError(ctx, name, code, retryable, 0)
-		})
 	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" on execution (\d+) and with code "([^"]*)" on execution (\d+), each marked retryable (true|false)$`,
 		func(ctx context.Context, name, first string, firstN int, second string, secondN int, retryable string) error {
 			w := localStepWorld(ctx)
@@ -771,15 +751,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 		w.mu.Unlock()
 		return nil
 	})
-	sc.Step(`^the step allows (\d+) attempts$`, func(ctx context.Context, attempts int) error {
-		w := localStepWorld(ctx)
-		w.mu.Lock()
-		options := w.stepOptions["charge"]
-		options.MaxAttempts = attempts
-		w.stepOptions["charge"] = options
-		w.mu.Unlock()
-		return nil
-	})
 	sc.Step(`^the step leaves its attempt limit at 0$`, func(ctx context.Context) error {
 		w := localStepWorld(ctx)
 		w.mu.Lock()
@@ -789,14 +760,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 		w.mu.Unlock()
 		return nil
 	})
-	sc.Step(`^step "([^"]*)" was executed (\d+) times?$`, func(ctx context.Context, name string, want int) error {
-		w := localStepWorld(ctx)
-		if got := w.executionsOf(name); got != want {
-			return fmt.Errorf("step %q was executed %d times, want %d", name, got, want)
-		}
-		return nil
-	})
-	sc.Step(`^the step fails with code "([^"]*)"$`, localStepFailed)
 	sc.Step(`^the step fails with the error of its last attempt with code "([^"]*)"$`, localStepFailed)
 	sc.Step(`^no retry waited for the clock to advance$`, func(ctx context.Context) error {
 		w := localStepWorld(ctx)
@@ -813,15 +776,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^a flow calls step "([^"]*)" twice with the same name and returns both results$`, func(ctx context.Context, name string) error {
 		localStepWorld(ctx).setFlow("twice", localStepWorld(ctx).twiceFlow(name))
-		return nil
-	})
-	sc.Step(`^a flow calls step "([^"]*)" that returns (\{.*\})$`, func(ctx context.Context, name, result string) error {
-		w := localStepWorld(ctx)
-		if err := w.ensureStep(ctx, name); err != nil {
-			return err
-		}
-		w.behavior(name).defaultResult = json.RawMessage(result)
-		w.setFlow(name, w.stepFlow(name))
 		return nil
 	})
 	sc.Step(`^a flow runs step "([^"]*)" that blocks until cancelled$`, func(ctx context.Context, name string) error {
@@ -1035,37 +989,8 @@ func registerLocal(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the run returns (\{.*\})$`, func(ctx context.Context, want string) error {
-		w := localStepWorld(ctx)
-		exec := w.currentExec
-		if exec == nil {
-			return fmt.Errorf("no run has started")
-		}
-		exec.mu.Lock()
-		result := append(json.RawMessage(nil), exec.result...)
-		exec.mu.Unlock()
-		if !jsonEquivalent(result, json.RawMessage(want)) {
-			return fmt.Errorf("the run returns %s, want %s", result, want)
-		}
-		return nil
-	})
 	sc.Step(`^the run is still "([^"]*)"$`, localRunState)
-	sc.Step(`^the run is "([^"]*)"$`, localRunState)
 	sc.Step(`^the run is described as "([^"]*)"$`, localRunState)
-	sc.Step(`^run "([^"]*)" is "([^"]*)"$`, func(ctx context.Context, runID, want string) error {
-		w := localStepWorld(ctx)
-		state, err := w.stateOf(ctx, "acme", runID)
-		if localCode(err) == "not_found" {
-			state, err = w.stateOf(ctx, "globex", runID)
-		}
-		if err != nil {
-			return err
-		}
-		if state != want {
-			return fmt.Errorf("run %q is %q, want %q", runID, state, want)
-		}
-		return nil
-	})
 
 	// Gates.
 	sc.Step(`^a run waiting at gate "([^"]*)" that accepts payloads where "([^"]*)"$`, func(ctx context.Context, gate, accept string) error {
@@ -1140,7 +1065,8 @@ func registerLocal(sc *godog.ScenarioContext) {
 		exec.mu.Lock()
 		gate := exec.atGate
 		exec.mu.Unlock()
-		return w.runtime(ctx).Resolve(w.ctx(string(w.current.TenantID)), w.current, gate, json.RawMessage(payload))
+		w.noteError(w.runtime(ctx).Resolve(w.ctx(string(w.current.TenantID)), w.current, gate, json.RawMessage(payload)))
+		return nil
 	})
 	sc.Step(`^the gate "([^"]*)" is resolved again with payload (\{.*\})$`, func(ctx context.Context, gate, payload string) error {
 		w := localStepWorld(ctx)
@@ -1386,11 +1312,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 		localStepWorld(ctx).setChildFlow(name, out)
 		return nil
 	})
-	sc.Step(`^flow "([^"]*)" waits at gate "([^"]*)"$`, func(ctx context.Context, name, gate string) error {
-		w := localStepWorld(ctx)
-		w.setFlow(name, w.gateFlow(gate))
-		return nil
-	})
 	sc.Step(`^a run of "([^"]*)" completes without waiting for "([^"]*)"$`, func(ctx context.Context, flow, childID string) error {
 		w := localStepWorld(ctx)
 		ref, _, err := w.start(ctx, "acme", "", flow)
@@ -1475,25 +1396,11 @@ func registerLocal(sc *godog.ScenarioContext) {
 		w.lastStatus, w.lastErr = status, err
 		return nil
 	})
-	sc.Step(`^describing run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
-		return localLastError(localStepWorld(ctx), code)
-	})
 	sc.Step(`^tenant "([^"]*)" describing run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, tenant, runID, code string) error {
 		w := localStepWorld(ctx)
 		_, err := w.runtime(ctx).Describe(w.ctx(tenant), runtime.RunRef{RunID: runID})
 		if localCode(err) != code {
 			return fmt.Errorf("describing run %q from tenant %q failed with %q, want %q: %w", runID, tenant, localCode(err), code, err)
-		}
-		return nil
-	})
-	sc.Step(`^tenant "([^"]*)" describes run "([^"]*)" as "([^"]*)"$`, func(ctx context.Context, tenant, runID, want string) error {
-		w := localStepWorld(ctx)
-		state, err := w.stateOf(ctx, tenant, runID)
-		if err != nil {
-			return err
-		}
-		if state != want {
-			return fmt.Errorf("run %q of tenant %q is %q, want %q", runID, tenant, state, want)
 		}
 		return nil
 	})
@@ -1503,30 +1410,11 @@ func registerLocal(sc *godog.ScenarioContext) {
 		w.lastList, w.lastErr = runs, err
 		return nil
 	})
-	sc.Step(`^tenant "([^"]*)" lists (\d+) runs? for tenant "([^"]*)" with run id "([^"]*)"$`,
-		func(ctx context.Context, caller string, want int, tenant, runID string) error {
-			w := localStepWorld(ctx)
-			if w.lastErr != nil {
-				return w.lastErr
-			}
-			if len(w.lastList) != want {
-				return fmt.Errorf("tenant %q lists %d runs, want %d", caller, len(w.lastList), want)
-			}
-			for _, run := range w.lastList {
-				if run.Ref.RunID != runID || string(run.Ref.TenantID) != tenant {
-					return fmt.Errorf("listed run is %q of tenant %q, want %q of tenant %q", run.Ref.RunID, run.Ref.TenantID, runID, tenant)
-				}
-			}
-			return nil
-		})
 	sc.Step(`^tenant "([^"]*)" cancels run "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
 		w := localStepWorld(ctx)
 		err := w.runtime(ctx).Cancel(w.ctx(tenant), runtime.RunRef{RunID: runID}, "")
 		w.lastErr = err
 		return nil
-	})
-	sc.Step(`^cancelling run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
-		return localLastError(localStepWorld(ctx), code)
 	})
 	sc.Step(`^tenant "([^"]*)" resolves gate "([^"]*)" of run "([^"]*)" with payload (\{.*\})$`,
 		func(ctx context.Context, tenant, gate, runID, payload string) error {
@@ -1535,9 +1423,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 			w.lastErr = err
 			return nil
 		})
-	sc.Step(`^resolving the gate fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return localLastError(localStepWorld(ctx), code)
-	})
 	sc.Step(`^tenant "([^"]*)" has no run with id "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
 		w := localStepWorld(ctx)
 		_, err := w.runtime(ctx).Describe(w.ctx(tenant), runtime.RunRef{RunID: runID})
@@ -1563,13 +1448,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 		func(ctx context.Context, runID, flow, requestTenant string) error {
 			return localStartWithTenants(ctx, runID, flow, "", requestTenant)
 		})
-	sc.Step(`^starting the run fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return localLastError(localStepWorld(ctx), code)
-	})
-	sc.Step(`^the request names a run reference of tenant "([^"]*)" to run "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
-		localStepWorld(ctx).pendingRef = runtime.RunRef{RunID: runID, TenantID: core.TenantID(tenant)}
-		return nil
-	})
 	sc.Step(`^run "([^"]*)" is described with context tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
 		w := localStepWorld(ctx)
 		status, err := w.runtime(ctx).Describe(w.ctx(tenant), w.pendingRef)
@@ -1633,29 +1511,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 			w.lastList, w.lastErr = runs, err
 			return nil
 		})
-	sc.Step(`^listing runs fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return localLastError(localStepWorld(ctx), code)
-	})
-	sc.Step(`^the run reference the start returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
-		w := localStepWorld(ctx)
-		if w.lastErr != nil {
-			return fmt.Errorf("the start failed: %w", w.lastErr)
-		}
-		if w.lastStart.RunID != runID || string(w.lastStart.TenantID) != tenant {
-			return fmt.Errorf("the start returned %q of tenant %q, want %q of tenant %q", w.lastStart.RunID, w.lastStart.TenantID, runID, tenant)
-		}
-		return nil
-	})
-	sc.Step(`^the run reference the description returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
-		w := localStepWorld(ctx)
-		if w.lastErr != nil {
-			return fmt.Errorf("the description failed: %w", w.lastErr)
-		}
-		if w.lastStatus.Ref.RunID != runID || string(w.lastStatus.Ref.TenantID) != tenant {
-			return fmt.Errorf("the description returned %q of tenant %q, want %q of tenant %q", w.lastStatus.Ref.RunID, w.lastStatus.Ref.TenantID, runID, tenant)
-		}
-		return nil
-	})
 
 	// Shutdown.
 	sc.Step(`^a run of "([^"]*)" is in flight on a running local runtime$`, func(ctx context.Context, flow string) error {

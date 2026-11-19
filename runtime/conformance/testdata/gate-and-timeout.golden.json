@@ -1,0 +1,20 @@
+{
+  "flow": "gate-and-timeout",
+  "state": "completed",
+  "output": {
+    "flow": "gate-and-timeout",
+    "outcome": "timeout"
+  },
+  "events": [
+    {
+      "type": "gate_timeout",
+      "data": {
+        "flow": "gate-and-timeout"
+      }
+    }
+  ],
+  "steps": {
+    "s1": 1,
+    "s2": 1
+  }
+}

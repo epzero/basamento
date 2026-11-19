@@ -1,6 +1,6 @@
 # Runtime: one contract, several engines
 
-Status: **Planned** (WP-L5-01 … WP-L5-04). Design: ADR-0002, `docs/architecture/runtime.md`.
+Status: **Implemented** (WP-L5-01 … WP-L5-04). Design: ADR-0002, `docs/architecture/runtime.md`.
 
 ### REQ-RT-001 — Conformance
 Each runtime shall produce the same final state and the same durable events for every conformance flow.

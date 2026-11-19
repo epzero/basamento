@@ -1,4 +1,4 @@
-@planned @wp:WP-L5-04
+@wp:WP-L5-04
 Feature: Runtime conformance
 
   @REQ-RT-001 @level:component @id:RT-001-01

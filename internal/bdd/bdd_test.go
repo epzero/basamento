@@ -1,6 +1,7 @@
 package bdd
 
 import (
+	"flag"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,10 @@ import (
 	"github.com/epzero/basamento/internal/bdd/sqltest"
 	"github.com/epzero/basamento/internal/bdd/steps"
 )
+
+// updateGolden rewrites the conformance golden records. Golden files change only
+// with this flag and a reason in the commit body.
+var updateGolden = flag.Bool("update", false, "rewrite conformance golden records")
 
 // defaultTags excludes scenarios that are not part of the deterministic gate run.
 // @planned: approved but not implemented yet; @live/@eval/@journey/@slow: nightly lanes;
@@ -93,6 +98,7 @@ func TestBDDGateProfiles(t *testing.T) {
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
 // BDD_BUS_BACKEND selects the bus implementation: fake (default), embedded, or cloud.
 func TestFeatures(t *testing.T) {
+	steps.UpdateGolden = *updateGolden
 	tags := scenarioTags()
 	configured := sqltest.PostgresConfigured()
 	backends := []string{"fake", "embedded", "cloud"}

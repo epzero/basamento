@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/flow"
 	"github.com/epzero/basamento/runtime"
 )
 
@@ -39,6 +40,7 @@ type run struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	base   context.Context
 
 	mu      sync.Mutex
 	wakeMu  sync.Mutex
@@ -68,6 +70,14 @@ type run struct {
 	replaying bool
 	shutting  bool
 	stepWG    sync.WaitGroup
+
+	// done closes when the flow host has returned; Kill waits on it. Each
+	// Resume installs a fresh one.
+	done chan struct{}
+	// replayEmits is how many already-durable outbox events a resumed run must
+	// not write again, and replayEmitAt the next of them (REQ-RT-002).
+	replayEmits  int
+	replayEmitAt int
 }
 
 // stepRecord is the journal entry of one step name in a run.
@@ -112,7 +122,9 @@ func newRun(rt *Runtime, tenant core.TenantID, id string, flow runtime.FlowRef, 
 		input:     append(json.RawMessage(nil), input...),
 		ctx:       ctx,
 		cancel:    cancel,
+		base:      base,
 		changed:   make(chan struct{}),
+		done:      make(chan struct{}),
 		state:     stateRunning,
 		startedAt: rt.clock.Now(),
 		steps:     map[string]*stepRecord{},
@@ -129,6 +141,7 @@ func (r *run) ref() runtime.RunRef {
 
 // execute runs the registered flow host on this run's goroutine.
 func (r *run) execute() {
+	defer close(r.done)
 	out, err := r.rt.host(&durableContext{run: r}, r.flow, r.input)
 	r.finish(out, err)
 }
@@ -298,6 +311,10 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 	if r.state != stateRunning {
 		r.mu.Unlock()
 		return core.NewError(core.CodeConflict, "temporal: the run is not running", map[string]any{"run": r.id})
+	}
+	if err := flow.ValidateGatePayload(g.spec.Schema, g.spec.AcceptIf, payload); err != nil {
+		r.mu.Unlock()
+		return err
 	}
 	g.resolved = true
 	g.payload = append(json.RawMessage(nil), payload...)

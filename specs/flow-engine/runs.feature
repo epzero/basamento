@@ -1,4 +1,4 @@
-@planned @wp:WP-L5-04 @runtime:any @level:component
+@wp:WP-L5-04 @runtime:any @level:component
 Feature: Runs pin their definition and validate gates
 
   @REQ-FLOW-005 @id:FLOW-005-01

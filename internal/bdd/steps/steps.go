@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -17,43 +18,56 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core     *coreWorld
-	SQL      *sqlWorld
-	Prompt   *promptWorld
-	Blob     *blobWorld
-	Bus      *busWorld
-	Secrets  *secretsWorld
-	Config   *configWorld
-	Expr     *exprWorld
-	Schema   *schemaWorld
-	Flow     *flowWorld
-	Machine  *machineWorld
-	Host     *hostWorld
-	Temporal *temporalWorld
-	Local    *localWorld
+	Core        *coreWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Blob        *blobWorld
+	Bus         *busWorld
+	Secrets     *secretsWorld
+	Config      *configWorld
+	Expr        *exprWorld
+	Schema      *schemaWorld
+	Flow        *flowWorld
+	Machine     *machineWorld
+	Host        *hostWorld
+	Temporal    *temporalWorld
+	Local       *localWorld
+	Conformance *conformanceWorld
+	Definition  *definitionWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 
 // Initialize registers hooks and every domain's steps.
 func Initialize(sc *godog.ScenarioContext) {
-	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		return context.WithValue(ctx, worldKey{}, &World{
-			Core:     newCoreWorld(),
-			SQL:      newSQLWorld(),
-			Prompt:   newPromptWorld(),
-			Blob:     newBlobWorld(),
-			Bus:      newBusWorld(),
-			Secrets:  newSecretsWorld(),
-			Config:   newConfigWorld(),
-			Expr:     &exprWorld{bindings: map[string]any{}},
-			Schema:   newSchemaWorld(),
-			Flow:     newFlowWorld(),
-			Machine:  newMachineWorld(),
-			Host:     newHostWorld(),
-			Temporal: newTemporalWorld(),
-			Local:    newLocalWorld(),
-		}), nil
+	sc.Before(func(ctx context.Context, scenario *godog.Scenario) (context.Context, error) {
+		w := &World{
+			Core:        newCoreWorld(),
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Blob:        newBlobWorld(),
+			Bus:         newBusWorld(),
+			Secrets:     newSecretsWorld(),
+			Config:      newConfigWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			Schema:      newSchemaWorld(),
+			Flow:        newFlowWorld(),
+			Machine:     newMachineWorld(),
+			Host:        newHostWorld(),
+			Temporal:    newTemporalWorld(),
+			Local:       newLocalWorld(),
+			Conformance: newConformanceWorld(),
+			Definition:  newDefinitionWorld(),
+		}
+		// The runtime the scenario names is a tag, so steps shared by the
+		// local and temporal worlds dispatch without waiting for a run.
+		for _, tag := range scenario.Tags {
+			if strings.HasPrefix(tag.Name, "@runtime:") {
+				w.Conformance.runtimeName = strings.TrimPrefix(tag.Name, "@runtime:")
+				break
+			}
+		}
+		return context.WithValue(ctx, worldKey{}, w), nil
 	})
 	registerCore(sc)
 	registerSQL(sc)
@@ -72,6 +86,8 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerLocal(sc)
 	registerTemporal(sc)
 	registerEmbedded(sc)
+	registerConformance(sc)
+	registerRuntimeShared(sc)
 	registerSharedSteps(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()
@@ -103,6 +119,18 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	if w.Secrets != nil && w.Secrets.lastErr != nil {
 		if string(core.CodeOf(w.Secrets.lastErr)) != code {
 			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Secrets.lastErr), code)
+		}
+		return nil
+	}
+	if w.Local != nil && w.Local.lastErr != nil {
+		if string(core.CodeOf(w.Local.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Local.lastErr), code)
+		}
+		return nil
+	}
+	if w.Temporal != nil && w.Temporal.lastErr != nil {
+		if string(core.CodeOf(w.Temporal.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Temporal.lastErr), code)
 		}
 		return nil
 	}

@@ -19,6 +19,7 @@ layers:
   runtime:          [core]
   runtime/local:    [core, runtime, flow]
   runtime/temporal: [core, runtime, flow, platform]
+  runtime/conformance: [core, runtime, flow]
   tool:             [core, platform]
   agent:            [core, model, prompt, tool, runtime]
   auth:             [core, platform, expr]

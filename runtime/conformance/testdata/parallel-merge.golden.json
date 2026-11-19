@@ -1,0 +1,23 @@
+{
+  "flow": "parallel-merge",
+  "state": "completed",
+  "output": {
+    "flow": "parallel-merge",
+    "merged": true
+  },
+  "events": [
+    {
+      "type": "merged",
+      "data": {
+        "flow": "parallel-merge"
+      }
+    }
+  ],
+  "steps": {
+    "a": 1,
+    "b": 1,
+    "merge": 1,
+    "s1": 1,
+    "s2": 1
+  }
+}

@@ -50,10 +50,19 @@ adapt instead of faking semantics.
 ## 4. Conformance
 
 `runtime/conformance` (WP-L5-04) holds golden flows (linear, parallel merge,
-gate with timeout, cancel mid-step, continue-as-new) and their expected final
-states and durable events. Every runtime must reproduce them
-(`specs/runtime/conformance.feature`). Temporal histories recorded by the suite
-are replayed on every change to catch nondeterminism.
+gate with timeout, and continue-as-new, which checkpoints forty steps) and
+their expected final states and durable events. Every runtime must reproduce
+them (`specs/runtime/conformance.feature`). The records live in
+`runtime/conformance/testdata/<flow>.golden.json`; they change only with
+`-update` and a reason in the commit body.
+
+The suite also owns crash resume and replay. `Runtime.Kill` and
+`Runtime.Resume` on `runtime/temporal` stop a run as a killed process would
+(in-flight work cancelled, completed steps kept) and re-execute it from its
+journal, so `RT-002-01` can assert that steps 1 and 2 ran once. A recorded run
+replays through `Runtime.Replay`; a changed flow reports `determinism_violation`
+naming the first divergent durable call (`RT-004-01`). The gate runs both with
+the fake clock and no wall-clock waits.
 
 ## 5. Embedded server: measured
 
