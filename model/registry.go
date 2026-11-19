@@ -9,25 +9,31 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
-// Registry keeps the live invocations of one adapter. It supplies what every
-// adapter owes the contract regardless of its vendor: a start that is
-// idempotent per client ref, an ordered event log that can be followed from a
-// cursor, a result that waits for the end, cancellation and lookup (REQ-MODEL-001,
+// Registry keeps the live invocations of one adapter, scoped to the tenant
+// carried by each call's context. It supplies what every adapter owes the
+// contract regardless of its vendor: a start that is idempotent per client ref
+// within a tenant, an ordered event log that can be followed from a cursor, a
+// result that waits for the end, cancellation and lookup (REQ-MODEL-001,
 // ADR-0006). Adapters own the vendor call and publish into a Run.
 //
 // A Registry is safe for concurrent use. It never forgets an invocation, so a
-// retried Start with the same client ref returns the original handle and its
-// events and result stay readable.
+// retried Start with the same client ref in the same tenant returns the
+// original handle and its events and result stay readable.
 type Registry struct {
 	provider string
 
 	mu    sync.Mutex
-	byRef map[string]*Run
+	byRef map[invocationKey]*Run
+}
+
+type invocationKey struct {
+	tenant core.TenantID
+	ref    string
 }
 
 // NewRegistry returns an empty registry for the named provider.
 func NewRegistry(provider string) *Registry {
-	return &Registry{provider: provider, byRef: map[string]*Run{}}
+	return &Registry{provider: provider, byRef: map[invocationKey]*Run{}}
 }
 
 // Provider is the provider name the registry stamps on every handle.
@@ -41,11 +47,16 @@ func (g *Registry) Provider() string { return g.provider }
 // The run's context is detached from ctx's cancellation but keeps its values,
 // because an invocation outlives the request that started it (ADR-0005) and
 // ends through Cancel, not through the caller's start context.
-func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool) {
+func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool, error) {
+	tid, ok := core.TenantFrom(ctx)
+	if !ok {
+		return nil, false, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
+	key := invocationKey{tenant: tid, ref: clientRef}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if r, ok := g.byRef[clientRef]; ok {
-		return r, true
+	if r, ok := g.byRef[key]; ok {
+		return r, true, nil
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Run{
@@ -55,14 +66,14 @@ func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool) {
 		changed: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	g.byRef[clientRef] = r
-	return r, false
+	g.byRef[key] = r
+	return r, false, nil
 }
 
 // Events follows the invocation's output with Seq > after. The channel closes
 // when the invocation ends and every remaining event has been delivered.
 func (g *Registry) Events(ctx context.Context, h Handle, after int64) (<-chan Event, error) {
-	r, err := g.run(h)
+	r, err := g.run(ctx, h)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +84,7 @@ func (g *Registry) Events(ctx context.Context, h Handle, after int64) (<-chan Ev
 // cancelled invocation returns that state in the result, not an error; the
 // error is reserved for an unknown handle and for the caller's own context.
 func (g *Registry) Result(ctx context.Context, h Handle) (Result, error) {
-	r, err := g.run(h)
+	r, err := g.run(ctx, h)
 	if err != nil {
 		return Result{}, err
 	}
@@ -83,7 +94,7 @@ func (g *Registry) Result(ctx context.Context, h Handle) (Result, error) {
 // Cancel ends the invocation as cancelled and cancels the vendor call's
 // context. Cancelling an invocation that already ended is a no-op.
 func (g *Registry) Cancel(ctx context.Context, h Handle) error {
-	r, err := g.run(h)
+	r, err := g.run(ctx, h)
 	if err != nil {
 		return err
 	}
@@ -94,8 +105,12 @@ func (g *Registry) Cancel(ctx context.Context, h Handle) error {
 // Lookup resolves a client ref to its invocation. It returns (nil, nil) when
 // this adapter has no invocation for the ref.
 func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error) {
+	tid, ok := core.TenantFrom(ctx)
+	if !ok {
+		return nil, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	g.mu.Lock()
-	r, ok := g.byRef[clientRef]
+	r, ok := g.byRef[invocationKey{tenant: tid, ref: clientRef}]
 	g.mu.Unlock()
 	if !ok {
 		return nil, nil
@@ -104,12 +119,16 @@ func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error
 	return &h, nil
 }
 
-func (g *Registry) run(h Handle) (*Run, error) {
+func (g *Registry) run(ctx context.Context, h Handle) (*Run, error) {
 	if h.ClientRef == "" {
 		return nil, core.NewError(core.CodeInvalidArgument, "handle has no client ref", nil)
 	}
+	tid, ok := core.TenantFrom(ctx)
+	if !ok {
+		return nil, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	g.mu.Lock()
-	r, ok := g.byRef[h.ClientRef]
+	r, ok := g.byRef[invocationKey{tenant: tid, ref: h.ClientRef}]
 	g.mu.Unlock()
 	if !ok {
 		return nil, core.NewError(core.CodeNotFound,

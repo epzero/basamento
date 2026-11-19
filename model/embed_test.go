@@ -52,7 +52,7 @@ func TestEmbeddingReturnsVectorsInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	res, err := Invoke(t.Context(), adapter, Request{
+	res, err := Invoke(testCtx(t), adapter, Request{
 		Model:     "sim-embed",
 		Op:        CapEmbed,
 		Texts:     []string{"one", "two"},
@@ -76,14 +76,14 @@ func TestEmbeddingReturnsVectorsInOrder(t *testing.T) {
 func TestEmbeddingPublishesNoEvents(t *testing.T) {
 	f := &fakeEmbedder{vecs: [][]float64{{1}}}
 	adapter, _ := NewEmbedding(embedConfig(f))
-	h, err := adapter.Start(t.Context(), Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"})
+	h, err := adapter.Start(testCtx(t), Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := adapter.Result(t.Context(), h); err != nil {
+	if _, err := adapter.Result(testCtx(t), h); err != nil {
 		t.Fatalf("result: %v", err)
 	}
-	ch, err := adapter.Events(t.Context(), h, 0)
+	ch, err := adapter.Events(testCtx(t), h, 0)
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -100,18 +100,18 @@ func TestEmbeddingStartIsIdempotent(t *testing.T) {
 	f := &fakeEmbedder{vecs: [][]float64{{1}}}
 	adapter, _ := NewEmbedding(embedConfig(f))
 	req := Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"}
-	first, err := adapter.Start(t.Context(), req)
+	first, err := adapter.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	second, err := adapter.Start(t.Context(), req)
+	second, err := adapter.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
 	if first != second {
 		t.Fatalf("handles differ: %+v and %+v", first, second)
 	}
-	if _, err := adapter.Result(t.Context(), first); err != nil {
+	if _, err := adapter.Result(testCtx(t), first); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	if f.calls != 1 {
@@ -133,7 +133,7 @@ func TestEmbeddingRejectsRequestsItCannotServe(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := adapter.Start(t.Context(), tc.req); core.CodeOf(err) != tc.code {
+			if _, err := adapter.Start(testCtx(t), tc.req); core.CodeOf(err) != tc.code {
 				t.Fatalf("code = %q, want %q: %v", core.CodeOf(err), tc.code, err)
 			}
 		})
@@ -142,7 +142,7 @@ func TestEmbeddingRejectsRequestsItCannotServe(t *testing.T) {
 
 func TestEmbeddingVendorFailure(t *testing.T) {
 	adapter, _ := NewEmbedding(embedConfig(&fakeEmbedder{err: errors.New("boom")}))
-	res, err := Invoke(t.Context(), adapter, Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "r"})
+	res, err := Invoke(testCtx(t), adapter, Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "r"})
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestEmbeddingRejectsVectorCountMismatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeEmbedder{vecs: tc.vecs}
 			adapter, _ := NewEmbedding(embedConfig(f))
-			res, err := Invoke(t.Context(), adapter, Request{
+			res, err := Invoke(testCtx(t), adapter, Request{
 				Model: "sim-embed", Op: CapEmbed, Texts: tc.texts, ClientRef: "ref-mismatch",
 			})
 			if err != nil {
@@ -210,7 +210,7 @@ func TestEmbeddingRejectsVectorCountMismatch(t *testing.T) {
 func TestEmbeddingAcceptsExactVectorCount(t *testing.T) {
 	f := &fakeEmbedder{vecs: [][]float64{{0.1}, {0.2}, {0.3}}}
 	adapter, _ := NewEmbedding(embedConfig(f))
-	res, err := Invoke(t.Context(), adapter, Request{
+	res, err := Invoke(testCtx(t), adapter, Request{
 		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x", "y", "z"}, ClientRef: "ref-ok",
 	})
 	if err != nil {
@@ -227,7 +227,7 @@ func TestEmbeddingAcceptsExactVectorCount(t *testing.T) {
 
 func TestEmbeddingDescribe(t *testing.T) {
 	adapter, _ := NewEmbedding(embedConfig(&fakeEmbedder{}))
-	ds, err := adapter.Describe(t.Context())
+	ds, err := adapter.Describe(testCtx(t))
 	if err != nil || len(ds) != 1 || ds[0].ID != "sim-embed" {
 		t.Fatalf("describe = (%+v, %v)", ds, err)
 	}

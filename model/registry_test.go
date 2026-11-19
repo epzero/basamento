@@ -17,11 +17,17 @@ func testHandle(clientRef string) Handle {
 
 func TestRegistryStartIsIdempotent(t *testing.T) {
 	reg := NewRegistry("test")
-	first, existing := reg.Begin(t.Context(), "ref-1")
+	first, existing, err := reg.Begin(testCtx(t), "ref-1")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
 	if existing {
 		t.Fatal("first begin reported an existing run")
 	}
-	second, existing := reg.Begin(t.Context(), "ref-1")
+	second, existing, err := reg.Begin(testCtx(t), "ref-1")
+	if err != nil {
+		t.Fatalf("second begin: %v", err)
+	}
 	if !existing {
 		t.Fatal("second begin did not report the existing run")
 	}
@@ -35,7 +41,7 @@ func TestRegistryStartIsIdempotent(t *testing.T) {
 
 func TestEventsAreOrderedAndReplayable(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "a"})
 	run.Publish(Event{Kind: EventText, Text: "b"})
 	run.Publish(Event{Kind: EventText, Text: "c"})
@@ -58,7 +64,7 @@ func TestEventsAreOrderedAndReplayable(t *testing.T) {
 
 func TestEventsChannelClosesAtTheEnd(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventProgress, Progress: 0.5})
 	run.Succeed(Result{})
 
@@ -71,11 +77,11 @@ func TestEventsChannelClosesAtTheEnd(t *testing.T) {
 
 func TestResultAfterSuccess(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "hi"})
 	run.Succeed(Result{Vectors: [][]float32{{1, 2}}})
 
-	res, err := reg.Result(t.Context(), run.Handle())
+	res, err := reg.Result(testCtx(t), run.Handle())
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -90,10 +96,10 @@ func TestResultAfterSuccess(t *testing.T) {
 func TestFailStripsRawVendorTextFromStoredError(t *testing.T) {
 	const secret = "401: invalid key sk-secret"
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(errors.New(secret))
 
-	res, err := reg.Result(t.Context(), run.Handle())
+	res, err := reg.Result(testCtx(t), run.Handle())
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -114,10 +120,10 @@ func TestFailStripsRawVendorTextFromStoredError(t *testing.T) {
 
 func TestFailRecordsPlatformCoreError(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(core.NewError(core.CodeRateLimited, "slow down", nil))
 
-	res, _ := reg.Result(t.Context(), run.Handle())
+	res, _ := reg.Result(testCtx(t), run.Handle())
 	var failure Failure
 	if err := json.Unmarshal(res.Error, &failure); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -129,10 +135,10 @@ func TestFailRecordsPlatformCoreError(t *testing.T) {
 
 func TestFailMapsContextErrorsBeforePersisting(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(context.Canceled)
 
-	res, _ := reg.Result(t.Context(), run.Handle())
+	res, _ := reg.Result(testCtx(t), run.Handle())
 	var failure Failure
 	if err := json.Unmarshal(res.Error, &failure); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -144,13 +150,13 @@ func TestFailMapsContextErrorsBeforePersisting(t *testing.T) {
 
 func TestCancelEndsTheInvocation(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventProgress, Progress: 0.5})
 
-	if err := reg.Cancel(t.Context(), run.Handle()); err != nil {
+	if err := reg.Cancel(testCtx(t), run.Handle()); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	res, err := reg.Result(t.Context(), run.Handle())
+	res, err := reg.Result(testCtx(t), run.Handle())
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -169,12 +175,12 @@ func TestCancelEndsTheInvocation(t *testing.T) {
 
 func TestCancelAfterEndIsANoop(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Succeed(Result{})
-	if err := reg.Cancel(t.Context(), run.Handle()); err != nil {
+	if err := reg.Cancel(testCtx(t), run.Handle()); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	res, _ := reg.Result(t.Context(), run.Handle())
+	res, _ := reg.Result(testCtx(t), run.Handle())
 	if res.State != StateSucceeded {
 		t.Fatalf("state = %q, want succeeded", res.State)
 	}
@@ -182,11 +188,11 @@ func TestCancelAfterEndIsANoop(t *testing.T) {
 
 func TestLookupFindsTheInvocation(t *testing.T) {
 	reg := NewRegistry("test")
-	if h, err := reg.Lookup(t.Context(), "missing"); err != nil || h != nil {
+	if h, err := reg.Lookup(testCtx(t), "missing"); err != nil || h != nil {
 		t.Fatalf("lookup missing = (%v, %v), want (nil, nil)", h, err)
 	}
-	run, _ := reg.Begin(t.Context(), "ref-1")
-	h, err := reg.Lookup(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
+	h, err := reg.Lookup(testCtx(t), "ref-1")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
@@ -197,7 +203,7 @@ func TestLookupFindsTheInvocation(t *testing.T) {
 
 func TestEventsReplayFromCursor(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	for i := 0; i < 5; i++ {
 		run.Publish(Event{Kind: EventText, Text: fmt.Sprintf("%d", i)})
 	}
@@ -219,7 +225,7 @@ func TestEventsReplayFromCursor(t *testing.T) {
 
 func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "a"})
 	run.Publish(Event{Kind: EventText, Text: "b"})
 	run.Succeed(Result{})
@@ -231,7 +237,7 @@ func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
 
 func TestEventsCursorBeyondEndWaitsForLaterEvents(t *testing.T) {
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "first"})
 
 	ch := mustEvents(t, reg, run.Handle(), 1)
@@ -256,7 +262,7 @@ func TestEventsCursorBeyondEndWaitsForLaterEvents(t *testing.T) {
 func TestEventsLongStreamLateAndEarlyFollowers(t *testing.T) {
 	const n = 5000
 	reg := NewRegistry("test")
-	run, _ := reg.Begin(t.Context(), "ref-1")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	early := mustEvents(t, reg, run.Handle(), 0)
 	var lateCh <-chan Event
 	const lateStart = 2500
@@ -292,20 +298,24 @@ func TestEventsLongStreamLateAndEarlyFollowers(t *testing.T) {
 
 func TestUnknownHandle(t *testing.T) {
 	reg := NewRegistry("test")
-	if _, err := reg.Result(t.Context(), testHandle("missing")); core.CodeOf(err) != core.CodeNotFound {
+	if _, err := reg.Result(testCtx(t), testHandle("missing")); core.CodeOf(err) != core.CodeNotFound {
 		t.Fatalf("result code = %q, want not_found", core.CodeOf(err))
 	}
-	if _, err := reg.Events(t.Context(), testHandle("missing"), 0); core.CodeOf(err) != core.CodeNotFound {
+	if _, err := reg.Events(testCtx(t), testHandle("missing"), 0); core.CodeOf(err) != core.CodeNotFound {
 		t.Fatalf("events code = %q, want not_found", core.CodeOf(err))
 	}
-	if err := reg.Cancel(t.Context(), Handle{}); core.CodeOf(err) != core.CodeInvalidArgument {
+	if err := reg.Cancel(testCtx(t), Handle{}); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("cancel code = %q, want invalid_argument", core.CodeOf(err))
 	}
 }
 
 func mustEvents(t *testing.T, reg *Registry, h Handle, after int64) <-chan Event {
+	return mustEventsCtx(t, reg, testCtx(t), h, after)
+}
+
+func mustEventsCtx(t *testing.T, reg *Registry, ctx context.Context, h Handle, after int64) <-chan Event {
 	t.Helper()
-	ch, err := reg.Events(t.Context(), h, after)
+	ch, err := reg.Events(ctx, h, after)
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}

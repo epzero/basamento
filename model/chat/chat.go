@@ -63,6 +63,9 @@ func (a *Adapter) Describe(context.Context) ([]model.Descriptor, error) {
 // idempotent per ClientRef: a repeated start returns the original handle and
 // publishes nothing more.
 func (a *Adapter) Start(ctx context.Context, r model.Request) (model.Handle, error) {
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	if _, err := model.Select(a.descriptors, r.Model, r.Op); err != nil {
 		return model.Handle{}, err
 	}
@@ -87,7 +90,10 @@ func (a *Adapter) Start(ctx context.Context, r model.Request) (model.Handle, err
 		return model.Handle{}, err
 	}
 
-	run, existing := a.runs.Begin(ctx, r.ClientRef)
+	run, existing, err := a.runs.Begin(ctx, r.ClientRef)
+	if err != nil {
+		return model.Handle{}, err
+	}
 	if existing {
 		return run.Handle(), nil
 	}

@@ -30,6 +30,13 @@ type modelWorld struct {
 
 func newModelWorld() *modelWorld { return &modelWorld{} }
 
+func (w *modelWorld) tenantCtx(ctx context.Context) context.Context {
+	if _, ok := core.TenantFrom(ctx); ok {
+		return ctx
+	}
+	return core.WithTenant(ctx, "bdd-models")
+}
+
 func registerModel(sc *godog.ScenarioContext) {
 	sc.Step(`^a simulated "([^"]*)" provider whose vendor protocol is "([^"]*)"$`, func(ctx context.Context, capability, protocol string) error {
 		return world(ctx).Model.provider(capability, protocol)
@@ -54,7 +61,7 @@ func registerModel(sc *godog.ScenarioContext) {
 			return err
 		}
 		w.result = model.Result{}
-		res, err := model.Invoke(ctx, w.invoker, req)
+		res, err := model.Invoke(w.tenantCtx(ctx), w.invoker, req)
 		w.result = res
 		return err
 	})
@@ -186,6 +193,7 @@ func (w *modelWorld) follow(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ctx = w.tenantCtx(ctx)
 	h, err := w.invoker.Start(ctx, req)
 	if err != nil {
 		return err
@@ -207,6 +215,7 @@ func (w *modelWorld) cancelAfterFirst(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ctx = w.tenantCtx(ctx)
 	h, err := w.invoker.Start(ctx, req)
 	if err != nil {
 		return err
@@ -338,10 +347,16 @@ func (p *simProvider) Describe(context.Context) ([]model.Descriptor, error) {
 }
 
 func (p *simProvider) Start(ctx context.Context, r model.Request) (model.Handle, error) {
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	if r.ClientRef == "" {
 		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "request has no client ref", nil)
 	}
-	run, existing := p.runs.Begin(ctx, r.ClientRef)
+	run, existing, err := p.runs.Begin(ctx, r.ClientRef)
+	if err != nil {
+		return model.Handle{}, err
+	}
 	if existing {
 		return run.Handle(), nil
 	}

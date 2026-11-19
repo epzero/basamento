@@ -37,8 +37,8 @@ cancellation, reattach and replay. Small calls such as embeddings use the
 blocking `Invoke` in process.
 
 `model.Registry` holds what every adapter owes regardless of protocol:
-idempotent starts per client ref, the ordered event log with replay from a
-cursor, the result, cancellation and lookup. The chat adapter (`model/chat`)
+idempotent starts per client ref within the tenant of the call's context, the
+ordered event log with replay from a cursor, the result, cancellation and lookup. The chat adapter (`model/chat`)
 and the embedding adapter (`model.NewEmbedding`) drive eino models;
 `Request.Messages` and `Request.Tools` are JSON of `eino/schema` values, so the
 contract itself stays free of the dependency. Provider construction is

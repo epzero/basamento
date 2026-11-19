@@ -14,6 +14,23 @@ import (
 	"github.com/epzero/basamento/model"
 )
 
+func testCtx(t *testing.T) context.Context {
+	t.Helper()
+	return core.WithTenant(context.Background(), "acme")
+}
+
+func TestChatRequiresTenantOnStart(t *testing.T) {
+	adapter, err := New(chatConfig(&fakeChat{chunks: []*schema.Message{{Role: schema.Assistant, Content: "hi"}}}))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	data, _ := json.Marshal([]*schema.Message{{Role: schema.User, Content: "hi"}})
+	req := model.Request{Model: "sim-chat", Op: model.CapChat, Messages: data, ClientRef: "r"}
+	if _, err := adapter.Start(context.Background(), req); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument", core.CodeOf(err))
+	}
+}
+
 type fakeChat struct {
 	mu        sync.Mutex
 	streams   int
@@ -116,14 +133,14 @@ func TestStreamNormalizedIntoEvents(t *testing.T) {
 		}}},
 	}}
 	a := newAdapter(t, f)
-	h, err := a.Start(t.Context(), model.Request{
+	h, err := a.Start(testCtx(t), model.Request{
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	ch, err := a.Events(t.Context(), h, 0)
+	ch, err := a.Events(testCtx(t), h, 0)
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -131,7 +148,7 @@ func TestStreamNormalizedIntoEvents(t *testing.T) {
 	for e := range ch {
 		got = append(got, e)
 	}
-	res, err := a.Result(t.Context(), h)
+	res, err := a.Result(testCtx(t), h)
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -180,7 +197,7 @@ func TestInvokeReturnsTheFinalMessage(t *testing.T) {
 		{Role: schema.Assistant, Content: " there"},
 	}}
 	a := newAdapter(t, f)
-	res, err := model.Invoke(t.Context(), a, model.Request{
+	res, err := model.Invoke(testCtx(t), a, model.Request{
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	})
@@ -206,7 +223,7 @@ func TestRequestMapping(t *testing.T) {
 	params, _ := json.Marshal(map[string]any{
 		"temperature": 0.3, "top_p": 0.9, "max_tokens": 100, "stop": []string{"x"},
 	})
-	h, err := a.Start(t.Context(), model.Request{
+	h, err := a.Start(testCtx(t), model.Request{
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 		Tools:    tools,
@@ -215,7 +232,7 @@ func TestRequestMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := a.Result(t.Context(), h); err != nil {
+	if _, err := a.Result(testCtx(t), h); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	f.mu.Lock()
@@ -261,7 +278,7 @@ func TestStartRejectsRequestsItCannotServe(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := valid
 			tc.mutate(&req)
-			if _, err := a.Start(t.Context(), req); core.CodeOf(err) != tc.code {
+			if _, err := a.Start(testCtx(t), req); core.CodeOf(err) != tc.code {
 				t.Fatalf("code = %q, want %q: %v", core.CodeOf(err), tc.code, err)
 			}
 		})
@@ -276,17 +293,17 @@ func TestOutputSchemaNeedsAModelThatCarriesIt(t *testing.T) {
 	}
 
 	plain := newAdapter(t, &fakeChat{chunks: []*schema.Message{{Content: "x"}}})
-	if _, err := plain.Start(t.Context(), req); core.CodeOf(err) != core.CodeUnsupported {
+	if _, err := plain.Start(testCtx(t), req); core.CodeOf(err) != core.CodeUnsupported {
 		t.Fatalf("plain model code = %q, want unsupported", core.CodeOf(err))
 	}
 
 	f := &fakeChat{chunks: []*schema.Message{{Content: "x"}}}
 	withSchema := newAdapter(t, &schemaChat{fakeChat: f})
-	h, err := withSchema.Start(t.Context(), req)
+	h, err := withSchema.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("start with schema: %v", err)
 	}
-	if _, err := withSchema.Result(t.Context(), h); err != nil {
+	if _, err := withSchema.Result(testCtx(t), h); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	if string(f.gotSchema) != `{"type":"object"}` {
@@ -302,17 +319,17 @@ func TestSeedNeedsAModelThatCarriesIt(t *testing.T) {
 		Seed:     &seed,
 	}
 	plain := newAdapter(t, &fakeChat{chunks: []*schema.Message{{Content: "x"}}})
-	if _, err := plain.Start(t.Context(), req); core.CodeOf(err) != core.CodeUnsupported {
+	if _, err := plain.Start(testCtx(t), req); core.CodeOf(err) != core.CodeUnsupported {
 		t.Fatalf("plain model code = %q, want unsupported", core.CodeOf(err))
 	}
 
 	f := &fakeChat{chunks: []*schema.Message{{Content: "x"}}}
 	withSeed := newAdapter(t, &seedChat{fakeChat: f})
-	h, err := withSeed.Start(t.Context(), req)
+	h, err := withSeed.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("start with seed: %v", err)
 	}
-	if _, err := withSeed.Result(t.Context(), h); err != nil {
+	if _, err := withSeed.Result(testCtx(t), h); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	if f.gotSeed == nil || *f.gotSeed != seed {
@@ -326,7 +343,7 @@ func TestStreamFailureEndsTheInvocation(t *testing.T) {
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	}
-	res, err := model.Invoke(t.Context(), a, req)
+	res, err := model.Invoke(testCtx(t), a, req)
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -355,7 +372,7 @@ func TestErrorMidStreamEndsTheInvocation(t *testing.T) {
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	}
-	res, err := model.Invoke(t.Context(), a, req)
+	res, err := model.Invoke(testCtx(t), a, req)
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -374,17 +391,17 @@ func TestCancelEndsTheInvocation(t *testing.T) {
 		return reader, nil
 	}}
 	a := newAdapter(t, f)
-	h, err := a.Start(t.Context(), model.Request{
+	h, err := a.Start(testCtx(t), model.Request{
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if err := a.Cancel(t.Context(), h); err != nil {
+	if err := a.Cancel(testCtx(t), h); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	res, err := a.Result(t.Context(), h)
+	res, err := a.Result(testCtx(t), h)
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -400,18 +417,18 @@ func TestStartIsIdempotent(t *testing.T) {
 		Model: "sim-chat", Op: model.CapChat, ClientRef: "ref-1",
 		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
 	}
-	first, err := a.Start(t.Context(), req)
+	first, err := a.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	second, err := a.Start(t.Context(), req)
+	second, err := a.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
 	if first != second {
 		t.Fatalf("handles differ: %+v and %+v", first, second)
 	}
-	if _, err := a.Result(t.Context(), first); err != nil {
+	if _, err := a.Result(testCtx(t), first); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	f.mu.Lock()
@@ -437,7 +454,7 @@ func TestNewValidatesItsConfig(t *testing.T) {
 
 func TestDescribe(t *testing.T) {
 	a := newAdapter(t, &fakeChat{})
-	ds, err := a.Describe(t.Context())
+	ds, err := a.Describe(testCtx(t))
 	if err != nil || len(ds) != 1 || ds[0].ID != "sim-chat" {
 		t.Fatalf("describe = (%+v, %v)", ds, err)
 	}

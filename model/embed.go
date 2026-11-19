@@ -63,6 +63,9 @@ func (e *Embedding) Describe(context.Context) ([]Descriptor, error) {
 // Start sends the embedding batch and returns at once. It is idempotent per
 // ClientRef: a repeated start returns the original handle.
 func (e *Embedding) Start(ctx context.Context, r Request) (Handle, error) {
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	if _, err := Select(e.descriptors, r.Model, r.Op); err != nil {
 		return Handle{}, err
 	}
@@ -76,7 +79,10 @@ func (e *Embedding) Start(ctx context.Context, r Request) (Handle, error) {
 	if len(r.Texts) == 0 {
 		return Handle{}, core.NewError(core.CodeInvalidArgument, "request has no input texts", nil)
 	}
-	run, existing := e.runs.Begin(ctx, r.ClientRef)
+	run, existing, err := e.runs.Begin(ctx, r.ClientRef)
+	if err != nil {
+		return Handle{}, err
+	}
 	if existing {
 		return run.Handle(), nil
 	}
