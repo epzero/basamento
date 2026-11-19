@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-05 @profile:embedded
+@wp:WP-L1-05 @profile:embedded
 Feature: Starting and stopping kit serve
   `kit serve` opens every port, says it is ready only when all of them are
   open, says which port it could not open, and stops on a termination signal

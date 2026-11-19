@@ -27,6 +27,7 @@ type World struct {
 	Blob        *blobWorld
 	Bus         *busWorld
 	Secrets     *secretsWorld
+	Config      *configWorld
 	Credentials *credentialsWorld
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
@@ -50,6 +51,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Telemetry:   newTelemetryWorld(),
 			Blob:        newBlobWorld(),
 			Secrets:     newSecretsWorld(),
+			Config:      newConfigWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
@@ -71,9 +73,15 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerCatalog(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
@@ -104,7 +112,16 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 	if err != nil {
 		return err
 	}
-	world(ctx).Core.clock.Advance(d)
+	w := world(ctx)
+	w.Core.clock.Advance(d)
+	// A component server times its shutdown drain from the same frozen clock;
+	// firing its timer here is what "the seconds pass" means.
+	if w.Config != nil && w.Config.after != nil {
+		select {
+		case w.Config.after <- w.Core.clock.Now():
+		default:
+		}
+	}
 	return nil
 }
 
