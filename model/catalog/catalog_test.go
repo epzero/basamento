@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -326,6 +327,49 @@ func TestDefaultTokenFormula(t *testing.T) {
 				t.Fatalf("charge = %d, want %d", charge.MilliPoints, tt.want)
 			}
 		})
+	}
+}
+
+func TestMissingInputRateRefusedAtUse(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"output": 10000}}}})
+	_, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 3_000_000, OutputLimit: 0})
+	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+		t.Fatalf("code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "input") {
+		t.Fatalf("error = %v, want input rate named", err)
+	}
+}
+
+func TestInputOnlyRatePricesWhenOutputIsZero(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"input": 1000}}}})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1_000_000, OutputLimit: 0})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	charge, err := c.Settle(q, model.Usage{InputTokens: 1_000_000, OutputTokens: 0})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 1000 {
+		t.Fatalf("charge = %d, want 1000", charge.MilliPoints)
+	}
+}
+
+func TestFormulaOnlyUnaffectedByMissingRates(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 10"})
+	got, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 7, OutputLimit: 0})
+	if err != nil {
+		t.Fatalf("Estimate: %v", err)
+	}
+	if got != 70 {
+		t.Fatalf("estimate = %d, want 70", got)
 	}
 }
 

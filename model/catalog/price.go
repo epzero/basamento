@@ -97,7 +97,7 @@ func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params 
 	var amount int64
 	var err error
 	if formula == "" {
-		amount, err = defaultTokenCost(rates, usage)
+		amount, err = defaultTokenCost(modelID, rates, usage)
 	} else {
 		vars, berr := bindings(modelID, at, params, usage, rates, tenant)
 		if berr != nil {
@@ -183,11 +183,31 @@ func ratesObject(rates Rates) map[string]any {
 	return out
 }
 
+func missingRate(modelID, kind string) error {
+	return core.NewError(core.CodeInvalidArgument,
+		fmt.Sprintf("model %q has no %s rate", modelID, kind), nil)
+}
+
 // defaultTokenCost is the default token formula (REQ-MODEL-074,
 // REQ-MODEL-075, REQ-MODEL-079 to REQ-MODEL-081). Rates are per million
 // tokens; the total is divided by one million once and rounded half away from
-// zero.
-func defaultTokenCost(rates Rates, usage model.Usage) (int64, error) {
+// zero. A positive usage count for a token kind needs a rate for that kind.
+func defaultTokenCost(modelID string, rates Rates, usage model.Usage) (int64, error) {
+	if usage.OutputTokens > 0 {
+		if _, ok := rates["output"]; !ok {
+			return 0, missingRate(modelID, "output")
+		}
+	}
+	_, hasCachedRate := rates["cached"]
+	_, hasInputRate := rates["input"]
+	if hasCachedRate {
+		uncached := usage.InputTokens - usage.CachedTokens
+		if uncached > 0 && !hasInputRate {
+			return 0, missingRate(modelID, "input")
+		}
+	} else if usage.InputTokens > 0 && !hasInputRate {
+		return 0, missingRate(modelID, "input")
+	}
 	inputRate := rates["input"]
 	outputRate := rates["output"]
 	total := new(big.Int)
@@ -199,7 +219,7 @@ func defaultTokenCost(rates Rates, usage model.Usage) (int64, error) {
 		total.Add(total, new(big.Int).Mul(big.NewInt(usage.InputTokens), big.NewInt(inputRate)))
 	}
 	total.Add(total, new(big.Int).Mul(big.NewInt(usage.OutputTokens), big.NewInt(outputRate)))
-	return divideRounded(total, million)
+	return divideRounded(modelID, total, million)
 }
 
 func amountFromCEL(modelID string, out any) (int64, error) {
@@ -266,6 +286,6 @@ func roundedRat(modelID string, r *big.Rat) (int64, error) {
 	return q.Int64(), nil
 }
 
-func divideRounded(num, den *big.Int) (int64, error) {
-	return roundedRat("", new(big.Rat).SetFrac(num, den))
+func divideRounded(modelID string, num, den *big.Int) (int64, error) {
+	return roundedRat(modelID, new(big.Rat).SetFrac(num, den))
 }
