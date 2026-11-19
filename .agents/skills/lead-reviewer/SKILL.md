@@ -36,24 +36,30 @@ stop and say so: do not guess an account.
 
 ## Every wake
 
-1. Read the tickets assigned to you, by priority, and
-   `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
-   also at the tickets you handed to the owner: take back one whose latest
-   comment is the owner's. A wake with nothing to act on ends at once.
-2. Read the scheduled **nightly** run (`docs/engineering/qa-gate.md`, "Who
-   reads the nightly"):
+1. Read the scheduled **nightly** run (`docs/engineering/qa-gate.md`, "Who
+   reads the nightly") — always, before anything else:
 
    ```bash
+   set -o pipefail
    gh run list --workflow nightly.yml --event schedule --limit 5 \
      --json conclusion,status,createdAt,url | go tool gate nightly
    ```
 
-   On **failed** or **stale**, open one ticket for the architect unless a
-   ticket with the same title already exists: `nightly failed: run <id>` or
-   `nightly stale: run <id>` (the id is in the command line), or `nightly
-   stale: no scheduled run` when the command says there is no completed run.
-   Hand-off: `design-needed`, state *Todo*, assign the architect; the comment
-   quotes the full command output. On **ok**, do nothing.
+   Exit **0** (ok): do nothing. Exit **1** (failed or stale): open one ticket
+   for the architect unless a ticket with the same title already exists
+   (`nightly failed: run <id>`, `nightly stale: run <id>`, or `nightly stale:
+   no scheduled run`). Hand-off: `design-needed`, state *Todo*, assign the
+   architect (`agent-workflow.md` §3); the comment quotes the one stdout line.
+   Any other exit (`gh` failed or unusable input; stderr has `nightly: ...`):
+   retry the pipeline once in the same wake; if it still fails, open one
+   architect ticket titled `nightly reader: cannot read the schedule` (dedupe
+   while an open ticket has that title; put stderr in the body) — never a
+   failed or stale ticket.
+2. Read the tickets assigned to you, by priority, and
+   `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
+   also at the tickets you handed to the owner: take back one whose latest
+   comment is the owner's. After the nightly read, a wake with nothing to act
+   on ends at once.
 3. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.

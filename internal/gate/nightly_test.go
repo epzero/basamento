@@ -112,7 +112,7 @@ func TestClassifyNightlySchedules(t *testing.T) {
 	}
 
 	failedConclusions := []string{
-		"failure", "cancelled", "timed_out", "skipped", "neutral",
+		"", "failure", "cancelled", "timed_out", "skipped", "neutral",
 		"action_required", "startup_failure",
 	}
 	for _, c := range failedConclusions {

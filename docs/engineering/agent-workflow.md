@@ -228,6 +228,11 @@ options. A decision carries its reasons. Every hand-off between maintainers:
 | `needs-human` | anyone → owner | A high-risk change with no open findings; a design; another direction; a spec acceptance; a question; a ticket that should not be handled | unchanged |
 | `owner-approved` | owner → reviewer | `approve` on a high-risk change or a design | *In Review* |
 
+The reviewer lead also uses `design-needed` (state *Todo*, assignee the
+architect) when handing the architect a failed or stale nightly for triage
+(`docs/engineering/qa-gate.md`, "Who reads the nightly"); the usual
+designer → architect row is unchanged.
+
 The owner answers in a comment (`approve`, `reject: <reason>`, `restart`,
 `accept`, or new direction) and hands the ticket on by assigning it. The
 owner need not change the label: when the latest comment is the owner's, it

@@ -40,33 +40,48 @@ The scheduled **nightly** workflow runs what must not stay silent:
 `ADR-0014`), the flake hunt, the slow lanes and the release-readiness
 summary.
 
-The reviewer lead reads the schedule on every wake:
+The reviewer lead reads the schedule on every wake (first step of
+`.agents/skills/lead-reviewer/SKILL.md`), with `set -o pipefail` so a failing
+`gh` is not hidden:
 
 ```bash
+set -o pipefail
 gh run list --workflow nightly.yml --event schedule --limit 5 \
   --json conclusion,status,createdAt,url | go tool gate nightly
 ```
 
 `go tool gate nightly` classifies the newest **completed** scheduled run
-(ignoring runs still queued or in progress):
+(ignoring runs still queued or in progress). **Stdout** is one summary line;
+unusable input prints `nightly: ...` on **stderr** and exits **2**.
 
-| State | Meaning | Exit |
-| --- | --- | --- |
-| **ok** | Newest completed run concluded `success` and started within the last **36 hours** | 0 |
-| **failed** | Newest completed run concluded anything other than `success` | 1 |
-| **stale** | No completed scheduled run, or the newest completed one is older than **36 hours** (a disabled or never-firing schedule) | 1 |
+| Exit | State | Meaning | Lead action |
+| --- | --- | --- | --- |
+| 0 | **ok** | Newest completed run concluded `success` and started within the last **36 hours** | None |
+| 1 | **failed** | Newest completed run concluded anything other than `success` | Ticket for the architect (below) |
+| 1 | **stale** | No completed scheduled run, or the newest completed one is older than **36 hours** | Ticket for the architect (below) |
+| 2 | — | Empty or invalid JSON, or `gh` failed before a classified outcome | Retry once; then ticket `nightly reader: cannot read the schedule` |
 
-Example line:
+Example stdout line:
 
 `nightly: failed: run 44516903074 https://github.com/epzero/basamento/actions/runs/44516903074 created 2026-11-19T11:40:22Z`
 
-When it reports **failed** or **stale**, the reviewer lead opens one ticket
-for the architect unless an open ticket with the same title already exists.
-Title: `nightly failed: run <id>` or `nightly stale: run <id>` using the run id
-from the command output; when the line is `nightly: stale: no completed
-scheduled run`, use `nightly stale: no scheduled run`. **Cost of this choice:**
-a failure that happens in a quiet period is seen at the next wake, not when the
-workflow finishes.
+On exit **1**, the reviewer lead opens one ticket for the architect unless an
+open ticket with the same title already exists: `nightly failed: run <id>`,
+`nightly stale: run <id>`, or `nightly stale: no scheduled run`. Hand-off:
+`design-needed`, state *Todo*, assign the architect (`agent-workflow.md` §3).
+The architect triages the failure and opens a developer ticket for the fix or
+answers it on the ticket. On any other exit, retry once in the same wake; if
+it still fails, one architect ticket titled `nightly reader: cannot read the
+schedule` (dedupe by title; stderr in the body).
+
+**Cost of this choice:** a failure that happens in a quiet period is seen at
+the next wake, not when the workflow finishes. Because only **completed** runs
+count, while a long run or re-run is in flight the reader reports on the
+previous completed run (it can say **ok** while a re-run of a failed workflow
+is still running, after the failure was ticketed on first sight). It says
+**stale** when the newest completed run is older than 36 hours even if a newer
+run is still unfinished; a run that stays unfinished for more than about 12
+hours after that creation time is worth the architect's look too.
 
 ## Conflict markers
 
