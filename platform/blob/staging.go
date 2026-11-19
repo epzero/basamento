@@ -14,6 +14,9 @@ import (
 
 const stagePrefix = "stage_"
 
+// maxUploadContentTypeLen keeps slot metadata within the read cap.
+const maxUploadContentTypeLen = 128
+
 var stagingKeyRE = regexp.MustCompile(`^stage_[A-Za-z0-9_-]{43}$`)
 
 // ValidateStagingKey reports whether k matches the staging key grammar.
@@ -51,7 +54,7 @@ type slotMeta struct {
 }
 
 func (m slotMeta) expired(now time.Time) bool {
-	return !now.Before(time.Unix(m.Expires, 0))
+	return !now.Before(time.Unix(0, m.Expires))
 }
 
 func validateUploadOptions(o platform.UploadOptions, maxTTL time.Duration) error {
@@ -68,7 +71,7 @@ func validateUploadOptions(o platform.UploadOptions, maxTTL time.Duration) error
 }
 
 func validUploadContentType(ct string) bool {
-	return validBoundContentType(ct)
+	return len(ct) <= maxUploadContentTypeLen && validBoundContentType(ct)
 }
 
 func validBoundContentType(ct string) bool {
