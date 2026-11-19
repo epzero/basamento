@@ -131,15 +131,18 @@ func checkNode(env *expr.Env, id string, node flow.Node) error {
 			return err
 		}
 	}
-	for _, spec := range nodeSpecExpressions(node) {
-		subject := fmt.Sprintf("node %q %s", id, spec.subject)
+	specs, err := nodeSpecExpressions(id, node)
+	if err != nil {
+		return err
+	}
+	for _, spec := range specs {
 		if spec.condition {
-			if err := checkCondition(env, subject, spec.value); err != nil {
+			if err := checkCondition(env, spec.subject, spec.value); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := checkMapping(env, subject, "", spec.value); err != nil {
+		if err := checkMapping(env, spec.subject, "", spec.value); err != nil {
 			return err
 		}
 	}
@@ -156,36 +159,50 @@ type specExpression struct {
 }
 
 // nodeSpecExpressions returns the spec expressions the compiler checks: a
-// gate's accept_if and a map's over. A set node's assignments have no field in
-// the IR yet (specs/flow-engine/design.md §2, open questions), so there is
-// nothing to check for it.
-func nodeSpecExpressions(node flow.Node) []specExpression {
+// gate's accept_if and a map's over (ir.SpecExpressionFields). A spec that is
+// not a JSON object, and a spec expression that is not a string, is rejected
+// instead of skipped: a spec the compiler cannot read must not pass as one
+// without expressions (REQ-FLOW-004, specs/flow-engine/design.md §1).
+func nodeSpecExpressions(id string, node flow.Node) ([]specExpression, error) {
 	if len(node.Spec) == 0 {
-		return nil
+		return nil, nil
 	}
 	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(node.Spec, &spec); err != nil {
-		return nil
+	if err := json.Unmarshal(node.Spec, &spec); err != nil || spec == nil {
+		return nil, specError(fmt.Sprintf("node %q spec", id), "is not a JSON object")
 	}
-	switch node.Kind {
-	case "gate":
-		return specString(spec, "gate accept_if", "accept_if", true)
-	case "map":
-		return specString(spec, "map over", "over", false)
+	var out []specExpression
+	for _, field := range ir.SpecExpressionFields(node.Kind) {
+		raw, ok := spec[field]
+		if !ok {
+			continue
+		}
+		// A JSON string only: null unmarshals into a string without an error
+		// and is still not one.
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, specError(fmt.Sprintf("node %q %s %s", id, node.Kind, field), "is not a string")
+		}
+		value, ok := decoded.(string)
+		if !ok {
+			return nil, specError(fmt.Sprintf("node %q %s %s", id, node.Kind, field), "is not a string")
+		}
+		if value == "" {
+			continue
+		}
+		out = append(out, specExpression{
+			subject:   fmt.Sprintf("node %q %s %s", id, node.Kind, field),
+			value:     value,
+			condition: field == "accept_if",
+		})
 	}
-	return nil
+	return out, nil
 }
 
-func specString(spec map[string]json.RawMessage, subject, field string, condition bool) []specExpression {
-	raw, ok := spec[field]
-	if !ok {
-		return nil
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil || value == "" {
-		return nil
-	}
-	return []specExpression{{subject: subject, value: value, condition: condition}}
+// specError rejects a node spec the compiler cannot read, naming the node and
+// the field at fault.
+func specError(subject, problem string) error {
+	return core.NewError(core.CodeInvalidArgument, subject+": "+problem, map[string]any{"subject": subject})
 }
 
 func checkMapping(env *expr.Env, subject, label, src string) error {

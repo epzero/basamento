@@ -119,6 +119,60 @@ func TestCompileRejectsMapOverThatDoesNotTypeCheck(t *testing.T) {
 	requireInvalid(t, errOf(t, f), `node "check" map over`, "nope")
 }
 
+// A spec is a JSON object (specs/flow-engine/design.md §1): one the compiler
+// cannot read is invalid_argument, not a node without expressions.
+func TestCompileRejectsASpecThatIsNotAJSONObject(t *testing.T) {
+	for _, spec := range []string{`true`, `null`, `[]`, `"gate"`, `1`} {
+		for _, kind := range []string{"gate", "task"} {
+			f := typedFlow()
+			node := f.Nodes["check"]
+			node.Kind = kind
+			node.Spec = json.RawMessage(spec)
+			f.Nodes["check"] = node
+			requireInvalid(t, errOf(t, f), `node "check" spec`, "not a JSON object")
+		}
+	}
+}
+
+func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
+	tests := []struct {
+		kind, spec, subject string
+	}{
+		{kind: "gate", spec: `{"accept_if":true}`, subject: `node "check" gate accept_if`},
+		{kind: "gate", spec: `{"accept_if":1}`, subject: `node "check" gate accept_if`},
+		{kind: "gate", spec: `{"accept_if":null}`, subject: `node "check" gate accept_if`},
+		{kind: "gate", spec: `{"accept_if":{"expr":"state.done"}}`, subject: `node "check" gate accept_if`},
+		{kind: "gate", spec: `{"accept_if":["state.done"]}`, subject: `node "check" gate accept_if`},
+		{kind: "map", spec: `{"over":["state.items"]}`, subject: `node "check" map over`},
+		{kind: "map", spec: `{"over":null}`, subject: `node "check" map over`},
+	}
+	for _, test := range tests {
+		f := typedFlow()
+		node := f.Nodes["check"]
+		node.Kind = test.kind
+		node.Spec = json.RawMessage(test.spec)
+		f.Nodes["check"] = node
+		requireInvalid(t, errOf(t, f), test.subject, "not a string")
+	}
+}
+
+// An empty string is no expression, not an unreadable one.
+func TestCompileAcceptsEmptySpecExpressions(t *testing.T) {
+	for _, test := range []struct{ kind, spec string }{
+		{kind: "gate", spec: `{"accept_if":""}`},
+		{kind: "map", spec: `{"over":""}`},
+	} {
+		f := typedFlow()
+		node := f.Nodes["check"]
+		node.Kind = test.kind
+		node.Spec = json.RawMessage(test.spec)
+		f.Nodes["check"] = node
+		if _, err := Compile(f); err != nil {
+			t.Fatalf("%s %s: %v", test.kind, test.spec, err)
+		}
+	}
+}
+
 func TestCompileAcceptsGateAcceptIfAndMapOver(t *testing.T) {
 	for _, spec := range []struct {
 		kind string
