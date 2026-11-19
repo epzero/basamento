@@ -33,6 +33,43 @@ nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
 No automatic reader for nightly **line** failures yet (tracked **EP0-95**);
 the **release-readiness** job uses `continue-on-error` and is informational only (P0 backlog is expected); **line** is the blocking nightly signal.
 
+## Conflict markers
+
+`gate hygiene` also fails a tracked text file that holds a merge conflict
+marker at the start of a line. A marker is an opening line of seven or more
+`<`, or a closing line of seven or more `>`, followed by a space and the label
+git writes (`HEAD`, a branch, or a revision and its subject); or a line of
+nothing but `=`, seven or more. A diff3 conflict's `|||||||` base line needs
+no rule of its own: the opening line above it fails the file anyway.
+
+Two line shapes pass, and neither can hide a conflict. A line of only `=`
+directly under a non-blank line in a Markdown file (`.md`, `.markdown`) is a
+setext heading underline, not a separator; the opening and closing lines of
+the conflict that holds it still fail the file. A marker inside a running line
+passes too, since only column one counts: a document may quote one in a
+sentence or an indented block.
+
+Every file `git ls-files` lists is read, in every module: Markdown, YAML,
+`.feature`, migrations and data files such as `go.sum` are covered, and an
+untracked file is covered once it is added. A file is skipped only for its
+content or its type, never for its extension or directory: a NUL byte in its
+first 8000 bytes makes it binary (git's own test); a tracked symbolic link is
+not read, since the files it points to are tracked on their own and following
+it could leave the tree. A line's trailing carriage return is ignored.
+
+The whole tracked tree is read, not just the diff, so a marker inherited from
+the base branch fails the next `make gate` even when the change does not touch
+the file; the check runs as part of `gate hygiene`, locally and in CI, so any
+hit blocks the merge.
+
+A file that must show a marker, such as a fixture testing this check, is named
+in the rule's glob allowlist under `internal/gate`, a reviewed change to the
+gate; there is no directive inside the file, no exempt extension and no exempt
+directory. No path is exempt today: the rule's own tests build their trees in
+`t.TempDir`, which is untracked. The check reads files only, with no clock and
+no network, and reports one `path:line` per hit in sorted order, so the same
+commit always gives the same list.
+
 ## Gate report
 
 CI uploads `.gate/` with the traceability JSON (`gate spec trace -json`) and

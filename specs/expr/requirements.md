@@ -1,6 +1,6 @@
 # Expressions: CEL and JSON mappings
 
-Status: **Planned** (WP-L2-01). Design: ADR-0003, [`design.md`](design.md),
+Status: **Implemented** (WP-L2-01, `expr`). Design: ADR-0003, [`design.md`](design.md),
 `docs/architecture/flow-engine.md`, `docs/architecture/model-layer.md` §7.
 
 Package `expr` gives every other layer one way to write conditions and
@@ -79,8 +79,9 @@ If a mapping cannot be parsed, then the mapping compiler shall reject it with co
 ### REQ-EXPR-020 — Mapping output limit
 If a mapping's output exceeds its output limit, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the output limit.
 
-### REQ-EXPR-021 — Map key order
+### REQ-EXPR-021 — Map key order, equality and lookup
 When an expression iterates over a map, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and within `double` numerically with any NaN after every other number.
+When an expression compares two maps with `==` or looks a key up with `[key]`, the expression evaluator shall compare keys by CEL numeric equality, not by that kind order, so that an `int`, `uint` or `double` key and a key of another of those kinds with the same value are the same key.
 
 ### REQ-EXPR-022 — Map keys of no order
 If a map in an expression holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key` when it iterates over that map, and shall not skip that key's entry.

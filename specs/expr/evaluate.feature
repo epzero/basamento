@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: Evaluating expressions deterministically
   A compiled expression is evaluated on JSON values bound to its variables.
   The same expression on the same values gives the same result, or the same
@@ -53,6 +53,22 @@ Feature: Evaluating expressions deterministically
     Given an expression environment declaring no variables
     When the expression "[{1.5: 1, 0.0 / 0.0: 2, -2.5: 3}.map(k, string(k)), {1.5: 1, 0.0 / 0.0: 2, -5.0 / 0.0: 3, 0.0: 4}.map(k, string(k))]" is evaluated 100 times
     Then every result is [["-2.5", "1.5", "NaN"], ["-Inf", "0", "1.5", "NaN"]]
+
+  @REQ-EXPR-021 @id:EXPR-021-05
+  Scenario Outline: Map equality and lookup compare numeric keys by value
+    Given an expression environment declaring no variables
+    When the expression "<expression>" is evaluated
+    Then the result is <result>
+
+    Examples:
+      | expression                               | result |
+      | {1: 'a', 2.0: 'b'} == {1u: 'a', 2: 'b'}  | true   |
+      | {1: 'a', 2.0: 'b'} == {1.0: 'a', 2: 'b'} | true   |
+      | {1: 'a', 2.0: 'b'}[1u]                   | "a"    |
+      | {1.0: 'a', 2: 'b'}[1]                    | "a"    |
+      | {1: 'a', 2.0: 'b'}[1.0]                  | "a"    |
+      | {1u: 'a', 2.0: 'b'}[2.0]                 | "b"    |
+      | {1: 'a', 'x': 0} == {'1': 'a', 'x': 0}   | false  |
 
   @REQ-EXPR-022 @id:EXPR-022-01
   Scenario Outline: A map with a key of no order fails when it is iterated, keeping every entry

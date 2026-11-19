@@ -102,6 +102,42 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    EXPR-003-05:
+        hash: sha256:2aa4ba1f5d6e367b504a7f9a28c12ad92fdbed907d847f0604185a90be131967
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
+    EXPR-003-06:
+        hash: sha256:8c784a2888d335c871e2f35c5a24ba4269435963433dcd01eb9acb07341ac47a
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
+    EXPR-003-07:
+        hash: sha256:cb0bef5c56cb8f6c1b8e1c60409026dcd917c9c35da3a4f8e524bc4a2854d40e
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
     EXPR-004-01:
         hash: sha256:96a64b6531a0c82447a5cb17daf5bae4dd77561a9f6f65ec5e2abbdc9856a821
         reqs:
@@ -496,6 +532,18 @@ scenarios:
         approved_at: "2026-11-19"
         note: 'Determinism (Constitution Art. 3): map iteration orders keys by kind and value, so comprehensions and the first error of an evaluation never depend on Go map order; same class as the accepted EXPR-006-01 and EXPR-016-01.'
         ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-05:
+        hash: sha256:597e3c230f42631796cd19380d445c3cca043c69689346bc83fbdd6259090c58
+        reqs:
+            - REQ-EXPR-021
+        tier: P1
+        author: claude-code:spec-author:b58551
+        reviewer: opencode:spec-reviewer:55941c
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: map key identity for == and [key] is CEL numeric equality across int, uint and double, symmetric in both directions, and a numeric key never equals a string key. Verified against cel-go v0.33.4: stock is asymmetric (int/uint lookups miss double entries) and operand-order-dependent, so this deliberately goes beyond its accessor; iteration order (EXPR-021-01..04) is unchanged.'
+        ref: https://github.com/epzero/basamento/pull/84
         human:
             status: pending
     EXPR-022-01:
