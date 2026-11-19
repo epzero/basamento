@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -26,6 +27,28 @@ import (
 
 	"github.com/epzero/basamento/core/coretest"
 )
+
+// waitFor spins until cond is true. It is a deadlock guard, not a timing
+// assertion: it reads no clock, and it fails only when cond never becomes true.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 1_000_000; i++ {
+		if cond() {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func signalReady(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
 
 // testCollector is a deterministic in-process OTLP/HTTP receiver.
 type testCollector struct {
@@ -193,6 +216,34 @@ func (c *testCollector) logCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.logs)
+}
+
+func (c *testCollector) hasSpan(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, span := range c.spans {
+		if span.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// recordTestSpan registers and keeps a span whose attributes the test built
+// directly, the way End does for a real span.
+func recordTestSpan(t *testing.T, setup *Setup, span SpanData) {
+	t.Helper()
+	if !setup.beginEndedSpan() {
+		t.Fatal("span refused before shutdown")
+	}
+	setup.acceptSpan(context.Background(), span)
+	setup.endRecording()
+}
+
+func queuedCounts(e *exporter) (spans, logs, metrics int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.spans), len(e.logs), len(e.metrics)
 }
 
 func newCloudTestSetup(t *testing.T, clock *coretest.FakeClock, collector *testCollector) *Setup {
@@ -386,11 +437,9 @@ func TestBackgroundExporterDrainsBacklogsLargerThanOneBatch(t *testing.T) {
 		setup.Logger().Info("queued")
 	}
 
-	select {
-	case <-collector.received:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the size-triggered exporter never reached the collector")
-	}
+	waitFor(t, "the size-triggered exporter to reach the collector", func() bool {
+		return signalReady(collector.received)
+	})
 	if err := setup.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -403,6 +452,8 @@ func TestBackgroundExporterDoesNotBlockRecording(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	collector := newTestCollector(t)
 	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
 	collector.mu.Lock()
 	collector.slow = block
 	collector.mu.Unlock()
@@ -415,13 +466,11 @@ func TestBackgroundExporterDoesNotBlockRecording(t *testing.T) {
 			setup.Logger().Info("queued")
 		}
 	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("recording waited for the background exporter")
-	}
+	waitFor(t, "recording to finish without waiting for the exporter", func() bool {
+		return signalReady(done)
+	})
 
-	close(block)
+	release()
 	if err := setup.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -434,17 +483,20 @@ func TestShutdownWaitsForAnInFlightFlush(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	collector := newTestCollector(t)
 	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
 	collector.mu.Lock()
 	collector.slow = block
 	collector.mu.Unlock()
 	setup := newCloudTestSetup(t, clock, collector)
 	setup.Logger().Info("queued")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	flushDone := make(chan error, 1)
 	go func() { flushDone <- setup.Flush(ctx) }()
-	<-collector.received
+	waitFor(t, "the flush to reach the collector", func() bool {
+		return signalReady(collector.received)
+	})
 
 	var shutdownReturned atomic.Bool
 	var shutdownConfirmed atomic.Int64
@@ -465,7 +517,7 @@ func TestShutdownWaitsForAnInFlightFlush(t *testing.T) {
 		t.Fatal("Shutdown returned while a Flush still held the batch")
 	}
 
-	close(block)
+	release()
 	if err := <-flushDone; err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
@@ -481,17 +533,20 @@ func TestConcurrentShutdownWaitsForDelivery(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	collector := newTestCollector(t)
 	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
 	collector.mu.Lock()
 	collector.slow = block
 	collector.mu.Unlock()
 	setup := newCloudTestSetup(t, clock, collector)
 	setup.Logger().Info("queued")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- setup.Shutdown(ctx) }()
-	<-collector.received
+	waitFor(t, "the first shutdown to reach the collector", func() bool {
+		return signalReady(collector.received)
+	})
 
 	var secondReturned atomic.Bool
 	var secondConfirmed atomic.Int64
@@ -509,7 +564,7 @@ func TestConcurrentShutdownWaitsForDelivery(t *testing.T) {
 		t.Fatal("the second Shutdown returned before delivery finished")
 	}
 
-	close(block)
+	release()
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first Shutdown: %v", err)
 	}
@@ -539,14 +594,20 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		slog.Any("errorField", errorCredential{Secret: "S3cretField"}),
 		slog.Any("wrapped", fmt.Errorf("auth: %w", errorCredential{Secret: "S3cretField"})),
 		slog.Any("joined", errors.Join(errors.New("plain"), errorCredential{Secret: "S3cretField"})),
+		slog.Any("pointerHolder", pointerHolder{inner: &innerCreds{Password: "S3cretField"}}),
+		slog.Any("embeddedHolder", embeddedErrorHolder{errorCredential{Secret: "S3cretField"}}),
+		slog.Any("plainWrapper", plainWrapper{cause: errorCredential{Secret: "S3cretField"}}),
 	)
 	// OTel attribute values are primitives, so the structured maps go through
 	// the same redactor at the record boundary and then the OTLP encoder.
 	structured := setup.redact.Map(map[string]any{
-		"stringerField": stringerCredential{Password: "S3cretField"},
-		"errorField":    errorCredential{Secret: "S3cretField"},
+		"stringerField":  stringerCredential{Password: "S3cretField"},
+		"errorField":     errorCredential{Secret: "S3cretField"},
+		"pointerHolder":  pointerHolder{inner: &innerCreds{Password: "S3cretField"}},
+		"embeddedHolder": embeddedErrorHolder{errorCredential{Secret: "S3cretField"}},
+		"plainWrapper":   plainWrapper{cause: errorCredential{Secret: "S3cretField"}},
 	})
-	setup.recordSpan(SpanData{
+	recordTestSpan(t, setup, SpanData{
 		TraceID:    "0102030405060708090a0b0c0d0e0f10",
 		SpanID:     "0102030405060708",
 		Name:       "redaction",
@@ -555,7 +616,7 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		Status:     StatusOK,
 		Attributes: structured,
 	})
-	setup.recordMetric(MetricPoint{
+	setup.appendMetric(MetricPoint{
 		Name:   "redaction",
 		Kind:   KindCounter,
 		Value:  1,
@@ -652,6 +713,168 @@ func metricAttributes(metric *metricsv1.Metric) [][]*commonv1.KeyValue {
 		}
 	}
 	return out
+}
+
+// TestShutdownDeliversASpanThatEndsDuringTheDrain covers the window where a
+// span started before Shutdown ends while the final drain is in progress. Its
+// recording finishes before Shutdown returns, so REQ-TELEM-022 delivers it.
+func TestShutdownDeliversASpanThatEndsDuringTheDrain(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
+	collector.mu.Lock()
+	collector.slow = block
+	collector.mu.Unlock()
+	setup := newCloudTestSetup(t, clock, collector)
+
+	_, span := setup.Tracer().Start(telemetryContext("acme", "run_01"), "in flight")
+	for i := 0; i < exportTrigger; i++ {
+		setup.Logger().Info("queued")
+	}
+	waitFor(t, "the background drain to reach the collector", func() bool {
+		return signalReady(collector.received)
+	})
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- setup.Shutdown(context.Background()) }()
+	waitFor(t, "Shutdown to close the setup", setup.isClosed)
+
+	// End lands after Shutdown started and while it is draining.
+	span.End()
+	release()
+
+	waitFor(t, "Shutdown to return", func() bool {
+		select {
+		case err := <-shutdownDone:
+			if err != nil {
+				t.Errorf("Shutdown: %v", err)
+			}
+			return true
+		default:
+			return false
+		}
+	})
+	if !collector.hasSpan("in flight") {
+		t.Fatal("the span that ended during the drain was not delivered")
+	}
+}
+
+// TestExportQueuesAreBounded proves the queue bound under a stalled collector:
+// each per-type queue stays at exportQueueCap and the drops are counted.
+func TestExportQueuesAreBounded(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
+	collector.mu.Lock()
+	collector.slow = block
+	collector.mu.Unlock()
+	setup := newCloudTestSetup(t, clock, collector)
+
+	// The background exporter can remove one batch before its stalled request
+	// blocks, so overfill past the cap by more than that.
+	const records = exportQueueCap + 2*exportBatchSize
+	for i := 0; i < records; i++ {
+		setup.Logger().Info("queued")
+	}
+	_, logs, _ := queuedCounts(setup.export)
+	if logs > exportQueueCap {
+		t.Fatalf("log queue holds %d records, want at most %d", logs, exportQueueCap)
+	}
+	if got := setup.DroppedExports(); got == 0 {
+		t.Fatal("a full queue dropped records without counting them")
+	}
+	release()
+	if err := setup.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+// TestSmallBacklogsExportAfterTheInterval covers a long-lived process whose
+// pending signals never reach exportTrigger: the first enqueue after the
+// oldest signal has waited exportInterval on the setup clock wakes the drain.
+func TestSmallBacklogsExportAfterTheInterval(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	setup := newCloudTestSetup(t, clock, collector)
+
+	setup.Logger().Info("first")
+	if got := collector.requestCount(); got != 0 {
+		t.Fatalf("the collector received %d requests below the trigger, want 0", got)
+	}
+	clock.Advance(exportInterval)
+	setup.Logger().Info("second")
+
+	waitFor(t, "the age-triggered export", func() bool {
+		return collector.logCount() == 2
+	})
+}
+
+// TestShutdownReturnsWhenItsContextIsAlreadyCancelled proves the context is
+// consulted even while the owned goroutine has not exited.
+func TestShutdownReturnsWhenItsContextIsAlreadyCancelled(t *testing.T) {
+	e := &exporter{
+		wake:     make(chan struct{}, 1),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		bgCancel: func() {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := e.halt(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("halt = %v, want context.Canceled", err)
+	}
+}
+
+// TestShutdownWithACancelledDeadlineDropsTheBacklog proves a stalled collector
+// cannot hold Shutdown past a cancelled context.
+func TestShutdownWithACancelledDeadlineDropsTheBacklog(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	block := make(chan struct{})
+	release := sync.OnceFunc(func() { close(block) })
+	defer release()
+	collector.mu.Lock()
+	collector.slow = block
+	collector.mu.Unlock()
+	setup := newCloudTestSetup(t, clock, collector)
+
+	for i := 0; i < 3*exportBatchSize; i++ {
+		setup.Logger().Info("queued")
+	}
+	waitFor(t, "the background drain to reach the collector", func() bool {
+		return signalReady(collector.received)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := setup.Shutdown(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Shutdown = %v, want context.Canceled", err)
+	}
+	release()
+}
+
+func TestAnyValueEncodesLargeUnsignedAndPreEpochTimes(t *testing.T) {
+	if got := anyValue(uint64(math.MaxInt64)).GetIntValue(); got != math.MaxInt64 {
+		t.Errorf("MaxInt64 as uint64 = %d, want %d", got, int64(math.MaxInt64))
+	}
+	if got := anyValue(uint64(math.MaxInt64) + 1); got.GetIntValue() != 0 || got.GetDoubleValue() <= 0 {
+		t.Errorf("uint64 above MaxInt64 = %v, want a positive double, not a wrapped int", got)
+	}
+	if got := anyValue(uint(math.MaxInt64)).GetIntValue(); got != math.MaxInt64 {
+		t.Errorf("MaxInt64 as uint = %d, want %d", got, int64(math.MaxInt64))
+	}
+	before := time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC)
+	if got := unixNano(before); got != 0 {
+		t.Errorf("pre-1970 time = %d, want 0", got)
+	}
+	after := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if got, want := unixNano(after), uint64(after.UnixNano()); got != want {
+		t.Errorf("post-1970 time = %d, want %d", got, want)
+	}
 }
 
 func TestMarshalRequestIsAnOTLPExportRequest(t *testing.T) {

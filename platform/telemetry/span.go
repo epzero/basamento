@@ -112,7 +112,18 @@ func (s *recordingSpan) End(...trace.SpanEndOption) {
 		return
 	}
 	s.ended = true
-	s.end = s.provider.setup.clock.Now()
+	setup := s.provider.setup
+	// Register before building the record: if Shutdown is already draining,
+	// it waits for this recording and includes it in the final drain
+	// (REQ-TELEM-022). Only a span that ends after Shutdown returned is
+	// refused.
+	if !setup.beginEndedSpan() {
+		s.mu.Unlock()
+		return
+	}
+	defer setup.endRecording()
+
+	s.end = setup.clock.Now()
 	span := SpanData{
 		TraceID:      s.traceID.String(),
 		SpanID:       s.spanID.String(),
@@ -123,29 +134,18 @@ func (s *recordingSpan) End(...trace.SpanEndOption) {
 		Status:       statusName(s.status),
 		RunID:        s.runID,
 		Tenant:       s.tenant,
-		Attributes:   s.provider.setup.redact.Map(s.attributes),
+		Attributes:   setup.redact.Map(s.attributes),
 	}
 	if s.parentSpanID == (trace.SpanID{}) {
 		span.ParentSpanID = ""
 	}
 	s.mu.Unlock()
 
-	setup := s.provider.setup
-	if !setup.recordSpan(span) {
-		return
-	}
-	if setup.cfg.Profile != ProfileEmbedded || setup.cfg.Spans == nil {
-		return
-	}
 	ctx := context.Background()
 	if s.tenant != "" {
 		ctx = core.WithTenant(ctx, core.TenantID(s.tenant))
 	}
-	if err := setup.cfg.Spans.Append(ctx, span); err != nil {
-		// The span was accepted; a store failure must not fail the work. The
-		// counter is how a caller notices missing spans.
-		setup.droppedSpan.Add(1)
-	}
+	setup.acceptSpan(ctx, span)
 }
 
 func (s *recordingSpan) AddEvent(string, ...trace.EventOption) {}

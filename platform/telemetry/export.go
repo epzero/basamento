@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -22,6 +24,8 @@ import (
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"github.com/epzero/basamento/core"
 )
 
 const (
@@ -29,8 +33,16 @@ const (
 	// drains a larger queue in several bounded batches.
 	exportBatchSize = 1024
 	// exportTrigger is the number of pending signals that wakes the background
-	// exporter. Delivery is size-triggered, never clock-triggered.
+	// exporter.
 	exportTrigger = 512
+	// exportQueueCap bounds each per-type queue. Past the cap the oldest
+	// pending signal of that type is dropped and counted, so a stalled
+	// collector cannot grow the process without limit (REQ-TELEM-016).
+	exportQueueCap = 4096
+	// exportInterval is how long the oldest pending signal may wait before the
+	// next enqueue wakes the exporter. It is read from the setup clock, never
+	// the wall clock, so a test advances the fake clock to trigger it.
+	exportInterval = time.Second
 )
 
 // exporter is a non-blocking OTLP/HTTP queue with an owned delivery goroutine.
@@ -40,6 +52,7 @@ const (
 type exporter struct {
 	endpoint    string
 	serviceName string
+	clock       core.Clock
 	client      *http.Client
 
 	// deliverMu serialises every delivery attempt, so Flush, Shutdown, an
@@ -47,40 +60,48 @@ type exporter struct {
 	// shutdown that returns therefore has no delivery still in flight.
 	deliverMu sync.Mutex
 
-	mu      sync.Mutex
-	spans   []SpanData
-	logs    []LogRecord
-	metrics []MetricPoint
+	mu           sync.Mutex
+	spans        []SpanData
+	logs         []LogRecord
+	metrics      []MetricPoint
+	pendingSince time.Time
 
+	dropped  atomic.Int64
 	wake     chan struct{}
 	stop     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
+	bgCancel context.CancelFunc
 }
 
-func newExporter(endpoint, serviceName string) *exporter {
+func newExporter(endpoint, serviceName string, clock core.Clock) *exporter {
 	e := &exporter{
 		endpoint:    strings.TrimRight(endpoint, "/"),
 		serviceName: serviceName,
+		clock:       clock,
 		client:      &http.Client{Timeout: 5 * time.Second},
 		wake:        make(chan struct{}, 1),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
-	go e.run()
+	bg, cancel := context.WithCancel(context.Background())
+	e.bgCancel = cancel
+	go e.run(bg)
 	return e
 }
 
-// run is the owned delivery goroutine. It drains when the queue reaches
-// exportTrigger and exits when Shutdown closes stop.
-func (e *exporter) run() {
+// run is the owned delivery goroutine. It drains when woken and stops between
+// batches once Shutdown closes stop; the batch it has already taken is still
+// delivered. A cancelled background context aborts a request that outlives the
+// caller's shutdown deadline.
+func (e *exporter) run(ctx context.Context) {
 	defer close(e.done)
 	for {
 		select {
 		case <-e.stop:
 			return
 		case <-e.wake:
-			_ = e.drain(context.Background())
+			_ = e.drainUntil(ctx, e.stop)
 		}
 	}
 }
@@ -88,26 +109,61 @@ func (e *exporter) run() {
 func (e *exporter) enqueueSpan(span SpanData) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.spans = append(e.spans, span)
+	var dropped bool
+	e.spans, dropped = appendBounded(e.spans, span, exportQueueCap)
+	if dropped {
+		e.dropped.Add(1)
+	}
 	e.notifyLocked()
 }
 
 func (e *exporter) enqueueLog(rec LogRecord) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.logs = append(e.logs, rec)
+	var dropped bool
+	e.logs, dropped = appendBounded(e.logs, rec, exportQueueCap)
+	if dropped {
+		e.dropped.Add(1)
+	}
 	e.notifyLocked()
 }
 
 func (e *exporter) enqueueMetric(point MetricPoint) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.metrics = append(e.metrics, point)
+	var dropped bool
+	e.metrics, dropped = appendBounded(e.metrics, point, exportQueueCap)
+	if dropped {
+		e.dropped.Add(1)
+	}
 	e.notifyLocked()
 }
 
+// appendBounded appends item, dropping the oldest when the queue is full. It
+// reports whether it dropped a signal.
+func appendBounded[T any](items []T, item T, limit int) ([]T, bool) {
+	if len(items) >= limit {
+		copy(items, items[1:])
+		items[len(items)-1] = item
+		return items, true
+	}
+	return append(items, item), false
+}
+
+// notifyLocked wakes the delivery goroutine at the size trigger, or when the
+// oldest pending signal has waited exportInterval on the setup clock. The age
+// check runs on enqueue, so it reads no wall clock and needs no timer: an idle
+// process exports its backlog with its next signal.
 func (e *exporter) notifyLocked() {
-	if len(e.spans)+len(e.logs)+len(e.metrics) < exportTrigger {
+	if len(e.spans)+len(e.logs)+len(e.metrics) == 0 {
+		e.pendingSince = time.Time{}
+		return
+	}
+	now := e.clock.Now()
+	if e.pendingSince.IsZero() {
+		e.pendingSince = now
+	}
+	if len(e.spans)+len(e.logs)+len(e.metrics) < exportTrigger && now.Sub(e.pendingSince) < exportInterval {
 		return
 	}
 	select {
@@ -127,22 +183,53 @@ func (e *exporter) attempt(ctx context.Context) error {
 	return err
 }
 
-// shutdown stops the owned goroutine, waits for any delivery it has in flight,
-// then drains the rest. It is safe to call more than once and from several
-// goroutines: every call waits for delivery to finish.
-func (e *exporter) shutdown(ctx context.Context) error {
+// halt stops the owned goroutine and waits for it to exit. A delivery it has in
+// flight is allowed to finish, so an accepted batch is not discarded; ctx
+// bounds the wait, and on expiry the background request is cancelled and the
+// owner returns ctx.Err() without being held past its deadline. It is safe to
+// call more than once and from several goroutines.
+func (e *exporter) halt(ctx context.Context) error {
 	e.stopOnce.Do(func() { close(e.stop) })
-	<-e.done
-	return e.drain(ctx)
+	select {
+	case <-e.done:
+		e.bgCancel()
+		return nil
+	case <-ctx.Done():
+		// Cancelling the background context aborts the request it has in
+		// flight; its drain then returns (it checks the context before every
+		// batch) and the goroutine exits on its own. Waiting for it here would
+		// hold the caller past the deadline it just exceeded.
+		e.bgCancel()
+		return ctx.Err()
+	}
 }
 
 // drain delivers every pending signal in bounded batches. A failed batch is
-// dropped; the remaining batches are still attempted (REQ-TELEM-017).
+// dropped; the remaining batches are still attempted (REQ-TELEM-017). The
+// context is checked before every batch and on every request, so a cancelled
+// deadline drops the rest instead of working through the whole backlog.
 func (e *exporter) drain(ctx context.Context) error {
+	return e.drainUntil(ctx, nil)
+}
+
+// drainUntil is drain with an optional stop channel: the owned goroutine uses
+// it to leave the remaining batches to Shutdown instead of draining the whole
+// backlog itself.
+func (e *exporter) drainUntil(ctx context.Context, stop <-chan struct{}) error {
 	e.deliverMu.Lock()
 	defer e.deliverMu.Unlock()
 	var errs []error
 	for {
+		if stop != nil {
+			select {
+			case <-stop:
+				return errors.Join(errs...)
+			default:
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
 		more, err := e.deliverBatchLocked(ctx)
 		if err != nil {
 			errs = append(errs, err)
@@ -151,6 +238,13 @@ func (e *exporter) drain(ctx context.Context) error {
 			return errors.Join(errs...)
 		}
 	}
+}
+
+// pending reports how many signals wait in the queues.
+func (e *exporter) pending() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.spans) + len(e.logs) + len(e.metrics)
 }
 
 // deliverBatchLocked takes at most exportBatchSize signals per type and makes
@@ -199,6 +293,9 @@ func (e *exporter) takeLocked(limit int) ([]SpanData, []LogRecord, []MetricPoint
 	spans, e.spans = takePrefix(e.spans, limit)
 	logs, e.logs = takePrefix(e.logs, limit)
 	metrics, e.metrics = takePrefix(e.metrics, limit)
+	if len(e.spans)+len(e.logs)+len(e.metrics) == 0 {
+		e.pendingSince = time.Time{}
+	}
 	return spans, logs, metrics
 }
 
@@ -400,11 +497,11 @@ func anyValue(value any) *commonv1.AnyValue {
 	case int64:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: typed}}
 	case uint:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
+		return uintValue(uint64(typed))
 	case uint32:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
 	case uint64:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
+		return uintValue(typed)
 	case float32:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: float64(typed)}}
 	case float64:
@@ -422,6 +519,16 @@ func anyValue(value any) *commonv1.AnyValue {
 	}
 }
 
+// uintValue encodes a uint64 exactly when it fits an OTLP int. A larger value
+// has no signed representation, so it is exported as a double instead of
+// wrapping to a negative int.
+func uintValue(value uint64) *commonv1.AnyValue {
+	if value <= math.MaxInt64 {
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(value)}}
+	}
+	return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: float64(value)}}
+}
+
 func decodeID(id string) []byte {
 	raw, err := hex.DecodeString(id)
 	if err != nil {
@@ -430,9 +537,16 @@ func decodeID(id string) []byte {
 	return raw
 }
 
+// unixNano encodes t as OTLP's unsigned nanoseconds since the epoch. A zero or
+// pre-1970 time has no unsigned representation, so it is clamped to 0 instead
+// of wrapping to a huge value.
 func unixNano(t time.Time) uint64 {
 	if t.IsZero() {
 		return 0
 	}
-	return uint64(t.UnixNano())
+	nanos := t.UnixNano()
+	if nanos < 0 {
+		return 0
+	}
+	return uint64(nanos)
 }

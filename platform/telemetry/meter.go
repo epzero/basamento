@@ -119,10 +119,11 @@ type instrument struct {
 func (i instrument) enabled() bool { return !i.setup.isClosed() }
 
 func (i instrument) record(ctx context.Context, value float64, isInt bool, labels map[string]any) {
-	if !i.enabled() {
+	if !i.setup.beginRecording() {
 		return
 	}
-	i.setup.recordMetric(MetricPoint{
+	defer i.setup.endRecording()
+	i.setup.appendMetric(MetricPoint{
 		Name:   i.name,
 		Kind:   i.kind,
 		Value:  value,

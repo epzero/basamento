@@ -15,9 +15,12 @@
 // not part of the platform/sql migration set. In the cloud profile spans, log
 // records and metric points are exported over OTLP to Config.CollectorURL
 // without ever making the work wait, and an undeliverable batch is dropped
-// without a retry (REQ-TELEM-015 through REQ-TELEM-019). Shutdown stops the
-// owned exporter, drains what was accepted and only then returns
-// (REQ-TELEM-022, REQ-TELEM-023).
+// without a retry (REQ-TELEM-015 through REQ-TELEM-019). The per-type export
+// queues are bounded: past the bound the oldest signal is dropped and counted
+// by DroppedExports, so a stalled collector cannot grow the process without
+// limit. Shutdown stops the owned exporter, drains what was accepted, delivers
+// a span that was started before it and ends while it runs, honours its
+// context and only then returns (REQ-TELEM-022, REQ-TELEM-023).
 //
 // A setup carries no mutable package-level state: pass one *Setup through
 // dependency injection.

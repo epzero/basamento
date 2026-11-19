@@ -151,14 +151,15 @@ func (r redactor) valueAt(key string, v any, depth int) any {
 		if nilValue(v) {
 			return nil
 		}
-		if !opaqueTextValue(v) {
-			return r.reflectValueAt(v, depth+1)
-		}
-		// A wrapper such as fmt.wrapError or errors.joinError has only
-		// unexported fields, so it looks opaque. Its text would render the
-		// wrapped error, which may be a struct with a sensitive field.
+		// A wrapper such as fmt.wrapError or errors.joinError renders its
+		// wrapped error through its text method, and that error may be a
+		// struct with a sensitive field. Redact the wrapper whole rather than
+		// keep a message prefix over a payload reflection cannot reach.
 		if wrappedNonOpaque(x, 0) {
 			return Redacted
+		}
+		if !opaqueTextValue(v) {
+			return r.reflectValueAt(v, depth+1)
 		}
 		return r.String(x.Error())
 	case fmt.Stringer:
@@ -222,9 +223,11 @@ func opaqueReflectValue(rv reflect.Value) bool {
 }
 
 // opaqueType reports whether every field of typ is unexported and neither
-// sensitive-named nor a struct that could carry such a field. It descends into
-// embedded fields and unexported value structs, but not unexported named
-// pointers: time.Time's *time.Location must stay opaque.
+// sensitive-named nor able to carry such a field. It descends through
+// pointers, embedded fields, interfaces, structs and their containers: a
+// pointer, interface or element type that could hold an error or fmt.Stringer
+// with an exported sensitive field disqualifies the text form. time.Time stays
+// opaque because time.Location has only unexported, non-sensitive fields.
 func opaqueType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
 	if depth > maxRedactDepth {
 		return false
@@ -244,13 +247,39 @@ func opaqueType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
 		if field.PkgPath == "" || sensitiveKey(field.Name) {
 			return false
 		}
-		if field.Anonymous || field.Type.Kind() == reflect.Struct {
-			if !opaqueType(field.Type, depth+1, seen) {
-				return false
-			}
+		if !opaqueFieldType(field.Type, depth+1, seen) {
+			return false
 		}
 	}
 	return true
+}
+
+// opaqueFieldType reports whether a field's type can only hold values that are
+// safe to render through the owner's text method. An interface can hold any
+// error or Stringer at runtime, a struct or pointer to struct can hold an
+// exported sensitive field, and a container can hold either, so all of them are
+// inspected rather than trusted.
+func opaqueFieldType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
+	if depth > maxRedactDepth {
+		return false
+	}
+	switch typ.Kind() {
+	case reflect.Interface:
+		return false
+	case reflect.Struct:
+		return opaqueType(typ, depth+1, seen)
+	case reflect.Pointer:
+		if typ.Elem().Kind() == reflect.Struct {
+			return opaqueType(typ, depth+1, seen)
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		return opaqueFieldType(typ.Elem(), depth+1, seen)
+	case reflect.Map:
+		return opaqueFieldType(typ.Key(), depth+1, seen) && opaqueFieldType(typ.Elem(), depth+1, seen)
+	default:
+		return true
+	}
 }
 
 // wrappedNonOpaque reports whether any error in the unwrap chain is a struct

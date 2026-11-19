@@ -3,6 +3,7 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -41,9 +42,10 @@ type Config struct {
 	CollectorURL string
 	// Clock is the only source of time for records, spans and metric points.
 	Clock core.Clock
-	// RetentionPeriod is how long an embedded span stays readable. Zero means
-	// DefaultRetentionPeriod; the span store applies it, and a negative value is
-	// refused when the store is built.
+	// RetentionPeriod is the embedded span store's effective purge window.
+	// Zero means DefaultRetentionPeriod, and a negative value is refused by
+	// New. New applies it to a SpanStore that implements RetentionApplier, so
+	// the configured period wins over the value the store was built with.
 	RetentionPeriod time.Duration
 	// Secrets supplies extra credential values to redact. Values added through
 	// SetCredential are always redacted too; a nil source simply adds none.
@@ -70,11 +72,15 @@ type Setup struct {
 	mp     *meterProvider
 	prop   propagation.TextMapPropagator
 
-	mu          sync.Mutex
-	closed      bool
-	logs        []LogRecord
-	metrics     []MetricPoint
-	spans       []SpanData
+	mu       sync.Mutex
+	closed   bool
+	drained  bool
+	inflight int
+	idle     chan struct{}
+	logs     []LogRecord
+	metrics  []MetricPoint
+	spans    []SpanData
+
 	droppedSpan atomic.Int64
 }
 
@@ -99,6 +105,16 @@ func New(cfg Config) (*Setup, error) {
 	if cfg.Profile == ProfileCloud && cfg.CollectorURL == "" {
 		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: cloud profile requires a collector URL", nil)
 	}
+	if cfg.Profile == ProfileEmbedded {
+		// The effective retention is the setup's, not the value the store was
+		// built with (REQ-TELEM-014). A store that does not implement
+		// RetentionApplier owns its own window.
+		if store, ok := cfg.Spans.(RetentionApplier); ok {
+			if err := store.SetRetention(cfg.RetentionPeriod); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	own := NewStaticSecrets()
 	sources := []SecretsSource{own}
@@ -118,7 +134,7 @@ func New(cfg Config) (*Setup, error) {
 	s.mp = &meterProvider{setup: s}
 	s.meter = s.mp.Meter(cfg.ServiceName)
 	if cfg.Profile == ProfileCloud {
-		s.export = newExporter(cfg.CollectorURL, cfg.ServiceName)
+		s.export = newExporter(cfg.CollectorURL, cfg.ServiceName, cfg.Clock)
 	}
 	return s, nil
 }
@@ -154,48 +170,96 @@ func (s *Setup) SetCredential(value string) {
 	s.secrets.Add(value)
 }
 
-// Logs returns a copy of the log records kept in this process.
+// Logs returns a deep copy of the log records kept in this process. The
+// returned Attrs share no map with the kept records.
 func (s *Setup) Logs() []LogRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]LogRecord, len(s.logs))
-	copy(out, s.logs)
+	for i, rec := range s.logs {
+		rec.Attrs = copyMap(rec.Attrs)
+		out[i] = rec
+	}
 	return out
 }
 
-// Metrics returns a copy of the metric points kept in this process.
+// Metrics returns a deep copy of the metric points kept in this process. The
+// returned Labels share no map with the kept points.
 func (s *Setup) Metrics() []MetricPoint {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]MetricPoint, len(s.metrics))
-	copy(out, s.metrics)
+	for i, point := range s.metrics {
+		point.Labels = copyMap(point.Labels)
+		out[i] = point
+	}
 	return out
 }
 
-// Spans returns a copy of the spans ended in this process, in end order.
+// Spans returns a deep copy of the spans ended in this process, in end order.
+// The returned Attributes share no map with the kept spans.
 func (s *Setup) Spans() []SpanData {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]SpanData, len(s.spans))
-	copy(out, s.spans)
+	for i, span := range s.spans {
+		span.Attributes = copyMap(span.Attributes)
+		out[i] = span
+	}
 	return out
 }
 
-// SpanByName returns the last kept span with name.
+// SpanByName returns a deep copy of the last kept span with name.
 func (s *Setup) SpanByName(name string) (SpanData, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := len(s.spans) - 1; i >= 0; i-- {
 		if s.spans[i].Name == name {
-			return s.spans[i], true
+			span := s.spans[i]
+			span.Attributes = copyMap(span.Attributes)
+			return span, true
 		}
 	}
 	return SpanData{}, false
 }
 
-// PurgeSpans deletes the embedded spans that ended more than the span store's
-// retention period ago and reports how many rows went (REQ-TELEM-014). The
-// store owns the retention and its default; the setup only supplies the time.
+// copyMap returns a copy of m that shares no nested map or slice with it.
+func copyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for key, value := range m {
+		out[key] = copyValue(value)
+	}
+	return out
+}
+
+// copyValue copies the maps, slices and byte slices the redactor produces. All
+// other values it keeps are immutable scalars or time.Time.
+func copyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return copyMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = copyValue(item)
+		}
+		return out
+	case []byte:
+		out := make([]byte, len(typed))
+		copy(out, typed)
+		return out
+	default:
+		return value
+	}
+}
+
+// PurgeSpans deletes the embedded spans that ended more than the effective
+// retention period ago and reports how many rows went (REQ-TELEM-014). New
+// applied Config.RetentionPeriod (or DefaultRetentionPeriod when it was zero)
+// to the store, so that is the window; the setup supplies the current time.
 func (s *Setup) PurgeSpans(ctx context.Context) (int64, error) {
 	if s.cfg.Profile != ProfileEmbedded || s.cfg.Spans == nil {
 		return 0, nil
@@ -223,19 +287,52 @@ func (s *Setup) Flush(ctx context.Context) error {
 	return s.export.flush(ctx)
 }
 
-// Shutdown drains the finished recordings, then makes every later record call a
-// no-op (REQ-TELEM-022, REQ-TELEM-023). It returns only after every signal
-// accepted before the call has been delivered or dropped, including a delivery
-// another goroutine already had in flight. It is idempotent.
+// Shutdown delivers every signal the work finished recording before it returns,
+// then makes every later recording a no-op (REQ-TELEM-022, REQ-TELEM-023). It
+// refuses new spans, log records and metric points as soon as it starts, waits
+// for the recordings already in progress, and repeats the drain until nothing
+// is in flight and no signal is pending. An ended span is therefore delivered
+// even when its End call lands during the drain, because the span was started
+// before the call. The caller's context bounds every wait and every request: on
+// expiry Shutdown stops waiting, refuses later recordings and returns ctx.Err()
+// (an undelivered backlog is dropped, as REQ-TELEM-017 allows). It is
+// idempotent and safe to call from several goroutines.
 func (s *Setup) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
 
-	if s.export == nil {
-		return nil
+	if s.export != nil {
+		if err := s.export.halt(ctx); err != nil {
+			s.finishRecording()
+			return err
+		}
 	}
-	return s.export.shutdown(ctx)
+	for {
+		if err := s.waitIdle(ctx); err != nil {
+			s.finishRecording()
+			return err
+		}
+		var drainErr error
+		if s.export != nil {
+			drainErr = s.export.drain(ctx)
+		}
+		s.mu.Lock()
+		quiet := s.inflight == 0 && (s.export == nil || s.export.pending() == 0)
+		if quiet {
+			s.drained = true
+		}
+		s.mu.Unlock()
+		if quiet {
+			return drainErr
+		}
+		if err := ctx.Err(); err != nil {
+			if s.export != nil {
+				return errors.Join(drainErr, err)
+			}
+			return err
+		}
+	}
 }
 
 // DroppedSpans reports how many ended spans the embedded span store rejected.
@@ -243,51 +340,133 @@ func (s *Setup) Shutdown(ctx context.Context) error {
 // notices that spans are missing.
 func (s *Setup) DroppedSpans() int64 { return s.droppedSpan.Load() }
 
+// DroppedExports reports how many signals the export queues dropped because a
+// slow or unreachable collector kept the per-type queue at its bound. The
+// oldest pending signal of that type is dropped, and recording never fails
+// (REQ-TELEM-016, REQ-TELEM-017).
+func (s *Setup) DroppedExports() int64 {
+	if s.export == nil {
+		return 0
+	}
+	return s.export.dropped.Load()
+}
+
 func (s *Setup) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
 }
 
-func (s *Setup) recordLog(rec LogRecord) {
+// beginRecording registers a log record or metric point that is being built.
+// Shutdown refuses new ones once it starts, then waits for the registered ones
+// before the final drain, so a recording that began before the call is never
+// lost.
+func (s *Setup) beginRecording() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return
+		return false
 	}
+	s.startRecordingLocked()
+	return true
+}
+
+// beginEndedSpan registers the recording of a span that was started before
+// Shutdown began. Unlike a new log record or metric point, an ended span is
+// still accepted while Shutdown drains: the work started it while telemetry
+// was live, and REQ-TELEM-022 delivers what finished recording before the call
+// returns. Only a span that ends after Shutdown has returned is refused.
+func (s *Setup) beginEndedSpan() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drained {
+		return false
+	}
+	s.startRecordingLocked()
+	return true
+}
+
+func (s *Setup) startRecordingLocked() {
+	if s.inflight == 0 {
+		s.idle = make(chan struct{})
+	}
+	s.inflight++
+}
+
+func (s *Setup) endRecording() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inflight--
+	if s.inflight == 0 && s.idle != nil {
+		close(s.idle)
+		s.idle = nil
+	}
+}
+
+// waitIdle returns once no recording is in flight. The channel is re-read every
+// round because a new recording can begin after a previous wait returned.
+func (s *Setup) waitIdle(ctx context.Context) error {
+	for {
+		s.mu.Lock()
+		idle := s.idle
+		s.mu.Unlock()
+		if idle == nil {
+			return nil
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// finishRecording sets the state that refuses a span that ends after Shutdown
+// has given up on its context.
+func (s *Setup) finishRecording() {
+	s.mu.Lock()
+	s.drained = true
+	s.mu.Unlock()
+}
+
+// appendLog keeps rec in process and enqueues it for export. The caller holds a
+// recording registration, so Shutdown cannot set drained until it returns.
+func (s *Setup) appendLog(rec LogRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.logs = appendCapped(s.logs, rec)
 	if s.export != nil {
-		// Enqueue under the same lock that Shutdown takes: once closed is set
-		// no record can land in a queue after the final drain.
 		s.export.enqueueLog(rec)
 	}
 }
 
-func (s *Setup) recordMetric(point MetricPoint) {
+func (s *Setup) appendMetric(point MetricPoint) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
 	s.metrics = appendCapped(s.metrics, point)
 	if s.export != nil {
 		s.export.enqueueMetric(point)
 	}
 }
 
-// recordSpan reports whether the span was accepted. A span rejected here must
-// not be written to the span store afterwards.
-func (s *Setup) recordSpan(span SpanData) bool {
+// acceptSpan keeps and enqueues one span the caller has already registered with
+// beginEndedSpan. The store append is inside the registration too, so Shutdown
+// does not return before an accepted span is stored.
+func (s *Setup) acceptSpan(ctx context.Context, span SpanData) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return false
-	}
 	s.spans = appendCapped(s.spans, span)
 	if s.export != nil {
 		s.export.enqueueSpan(span)
 	}
-	return true
+	s.mu.Unlock()
+	if s.cfg.Profile != ProfileEmbedded || s.cfg.Spans == nil {
+		return
+	}
+	if err := s.cfg.Spans.Append(ctx, span); err != nil {
+		// The span was accepted; a store failure must not fail the work. The
+		// counter is how a caller notices missing spans.
+		s.droppedSpan.Add(1)
+	}
 }
 
 // appendCapped keeps the newest maxKeptSignals entries without growing forever.

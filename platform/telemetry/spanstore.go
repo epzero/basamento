@@ -23,6 +23,16 @@ type SpanStore interface {
 	Purge(ctx context.Context, now time.Time) (int64, error)
 }
 
+// RetentionApplier is a SpanStore whose purge window a Setup can set. New
+// applies Config.RetentionPeriod to it, so the configured period is the one
+// used instead of the value the store was built with (REQ-TELEM-014).
+type RetentionApplier interface {
+	// SetRetention replaces the purge window. Zero restores
+	// DefaultRetentionPeriod; a negative period is refused with
+	// invalid_argument.
+	SetRetention(retention time.Duration) error
+}
+
 // spanSQLStore is the part of a *psql.Store the span store uses. It exists so
 // the dialect guard can be tested without a second database.
 type spanSQLStore interface {
@@ -84,6 +94,19 @@ func newSQLSpanStore(ctx context.Context, store spanSQLStore, retention time.Dur
 		return nil, spanStoreError("create span index", err)
 	}
 	return &SQLSpanStore{store: store, retention: retention}, nil
+}
+
+// SetRetention implements RetentionApplier. It must not run concurrently with
+// Purge; New applies the configured period before the setup is returned.
+func (s *SQLSpanStore) SetRetention(retention time.Duration) error {
+	if retention < 0 {
+		return core.NewError(core.CodeInvalidArgument, "telemetry: negative retention period", nil)
+	}
+	if retention == 0 {
+		retention = DefaultRetentionPeriod
+	}
+	s.retention = retention
+	return nil
 }
 
 // Append implements SpanStore. The tenant comes from ctx when present, so a

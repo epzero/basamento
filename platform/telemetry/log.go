@@ -57,9 +57,10 @@ func (h *logHandler) WithGroup(name string) slog.Handler {
 }
 
 func (h *logHandler) Handle(ctx context.Context, rec slog.Record) error {
-	if h.setup.isClosed() {
+	if !h.setup.beginRecording() {
 		return nil
 	}
+	defer h.setup.endRecording()
 	attrs := map[string]any{}
 	for _, entry := range h.base {
 		addLogAttr(attrs, entry.groups, entry.attr)
@@ -86,7 +87,7 @@ func (h *logHandler) Handle(ctx context.Context, rec slog.Record) error {
 		Message: h.setup.redact.String(rec.Message),
 		Attrs:   h.setup.redact.Map(attrs),
 	}
-	h.setup.recordLog(kept)
+	h.setup.appendLog(kept)
 	return nil
 }
 

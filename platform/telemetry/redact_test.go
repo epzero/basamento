@@ -48,6 +48,22 @@ type namedCreds struct{ inner innerCreds }
 
 func (n namedCreds) String() string { return "password=" + n.inner.Password }
 
+// pointerHolder hides a sensitive payload behind a named unexported pointer to
+// a struct and formats it in Error.
+type pointerHolder struct{ inner *innerCreds }
+
+func (p pointerHolder) Error() string { return "password=" + p.inner.Password }
+
+// embeddedErrorHolder hides a sensitive payload behind an unexported embedded
+// error interface, the idiomatic error wrapper.
+type embeddedErrorHolder struct{ error }
+
+// plainWrapper formats its cause but does not Unwrap, so the unwrap chain
+// cannot see the payload.
+type plainWrapper struct{ cause error }
+
+func (w plainWrapper) Error() string { return w.cause.Error() }
+
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
 	cases := []string{
@@ -233,6 +249,44 @@ func TestRedactorReadsUnexportedStructPayload(t *testing.T) {
 	inner, ok = named["inner"].(map[string]any)
 	if !ok || inner["Password"] != Redacted {
 		t.Errorf("named Password = %#v, want redacted", named)
+	}
+}
+
+func TestRedactorDoesNotTrustTextAroundHiddenPayloads(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Map(map[string]any{
+		"pointer":  pointerHolder{inner: &innerCreds{Password: "S3cretField"}},
+		"embedded": embeddedErrorHolder{errorCredential{Secret: "S3cretField"}},
+		"wrapper":  plainWrapper{cause: errorCredential{Secret: "S3cretField"}},
+	})
+	for key, value := range got {
+		if text, ok := value.(string); ok {
+			t.Errorf("%s kept the text form %q instead of reflecting the payload", key, text)
+		}
+	}
+	pointer, ok := got["pointer"].(map[string]any)
+	if !ok {
+		t.Fatalf("pointer holder = %T, want a canonicalised struct", got["pointer"])
+	}
+	inner, ok := pointer["inner"].(map[string]any)
+	if !ok || inner["Password"] != Redacted {
+		t.Errorf("pointer holder = %#v, want its Password redacted", pointer)
+	}
+	embedded, ok := got["embedded"].(map[string]any)
+	if !ok {
+		t.Fatalf("embedded holder = %T, want a canonicalised struct", got["embedded"])
+	}
+	dynamic, ok := embedded["error"].(map[string]any)
+	if !ok || dynamic["Secret"] != Redacted {
+		t.Errorf("embedded holder = %#v, want its Secret redacted", embedded)
+	}
+	wrapper, ok := got["wrapper"].(map[string]any)
+	if !ok {
+		t.Fatalf("wrapper = %T, want a canonicalised struct", got["wrapper"])
+	}
+	cause, ok := wrapper["cause"].(map[string]any)
+	if !ok || cause["Secret"] != Redacted {
+		t.Errorf("wrapper = %#v, want its cause's Secret redacted", wrapper)
 	}
 }
 
