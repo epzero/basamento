@@ -94,11 +94,14 @@ that the sample repository sets to violate the named constraint (`not-null` or
 Steps about a database failure trigger real dialect failures from `internal/bdd`
 with no test hooks in production code.
 
-A `busy` step opens a second connection to the same SQLite file, begins an
-immediate transaction on it to hold the write lock, and turns the store's busy
-timeout off (`PRAGMA busy_timeout=0`) so the store's next write fails at once
-with `SQLITE_BUSY` rather than waiting out the DSN's `busy_timeout`. Nothing
-waits on a timeout, so the scenario is deterministic and fast.
+A `busy` step opens a second connection to the same SQLite file and begins an
+immediate transaction on it to hold the write lock. It then runs
+`PRAGMA busy_timeout=0` through the store's own `Execer`: the SQLite store
+keeps exactly one connection (`SetMaxOpenConns(1)`), and the pragma applies to
+that connection, so the store's next write fails at once with `SQLITE_BUSY`
+instead of waiting out the DSN's `busy_timeout`. The step uses only the store's
+public port, and nothing waits on a timeout, so the scenario is deterministic
+and fast.
 
 `SQLITE_LOCKED` is not reachable through the store's connections. Its
 shared-cache form needs a shared-cache connection the store never opens, and
