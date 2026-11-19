@@ -1,11 +1,14 @@
 package gate
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -83,26 +86,49 @@ func dirPathSkipped(root, dir string) bool {
 	return relPathSkipped(filepath.ToSlash(rel))
 }
 
-// goModHasModule reports whether path's go.mod has a module directive with a path.
-func goModHasModule(path string) (bool, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	for _, raw := range strings.Split(string(b), "\n") {
-		line := strings.TrimSpace(raw)
-		if before, _, ok := strings.Cut(line, "//"); ok {
-			line = strings.TrimSpace(before)
-		}
-		if line == "" {
+func layeringGoEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env)+2)
+	var hasWork, hasFlags bool
+	for _, e := range env {
+		if strings.HasPrefix(e, "GOWORK=") {
+			out = append(out, "GOWORK=off")
+			hasWork = true
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "module" && fields[1] != "" {
-			return true, nil
+		if strings.HasPrefix(e, "GOFLAGS=") {
+			out = append(out, "GOFLAGS=-mod=readonly")
+			hasFlags = true
+			continue
 		}
+		out = append(out, e)
 	}
-	return false, nil
+	if !hasWork {
+		out = append(out, "GOWORK=off")
+	}
+	if !hasFlags {
+		out = append(out, "GOFLAGS=-mod=readonly")
+	}
+	return out
+}
+
+// nestedModuleLoads reports whether go accepts dir as a module root.
+func nestedModuleLoads(dir string) (bool, error) {
+	cmd := exec.Command("go", "list", "-m")
+	cmd.Dir = dir
+	cmd.Env = layeringGoEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return false, nil
+		}
+		return false, fmt.Errorf("go list -m: %w: %s", err, stderr.String())
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(stdout.String()), "\n")
+	return strings.TrimSpace(line) != "", nil
 }
 
 // layeringWalkExtra parses and checks .go files go list did not attribute to a package.
@@ -122,19 +148,23 @@ func layeringWalkExtra(root string, r LayeringRules, attributed map[string]bool,
 			if path != root {
 				modPath := filepath.Join(path, "go.mod")
 				if _, err := os.Stat(modPath); err == nil {
-					has, err := goModHasModule(modPath)
+					loads, err := nestedModuleLoads(path)
 					if err != nil {
 						return err
 					}
-					if has {
+					if loads {
 						return filepath.SkipDir
 					}
-					rel, err := filepath.Rel(root, modPath)
+					modRel, err := filepath.Rel(root, modPath)
 					if err != nil {
 						return err
 					}
-					add(fmt.Sprintf("%s: no module directive; a nested module needs one (or delete the file)",
-						filepath.ToSlash(rel)))
+					dirRel, err := filepath.Rel(root, path)
+					if err != nil {
+						return err
+					}
+					add(fmt.Sprintf("%s: go cannot load it as a module (run `go list -m` in %s for the reason); fix the file or delete it",
+						filepath.ToSlash(modRel), filepath.ToSlash(dirRel)))
 				}
 			}
 			return nil

@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -335,6 +336,11 @@ func TestLayeringSymlinkTempDir(t *testing.T) {
 	}
 }
 
+func goModCannotLoadMsg(modRel, dirRel string) string {
+	return fmt.Sprintf("%s: go cannot load it as a module (run `go list -m` in %s for the reason); fix the file or delete it",
+		modRel, dirRel)
+}
+
 func TestLayeringJunkGoModMasksForbiddenImport(t *testing.T) {
 	root := layeringModule(t, map[string]string{
 		"low/a/a.go":            "package a\n",
@@ -346,7 +352,7 @@ func TestLayeringJunkGoModMasksForbiddenImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsString(got, "low/evil/go.mod: no module directive; a nested module needs one (or delete the file)") {
+	if !containsString(got, goModCannotLoadMsg("low/evil/go.mod", "low/evil")) {
 		t.Fatalf("missing go.mod error in %v", got)
 	}
 	if !containsImportViolation(got, "low/evil/nest", "high/b") {
@@ -354,76 +360,100 @@ func TestLayeringJunkGoModMasksForbiddenImport(t *testing.T) {
 	}
 }
 
-func TestLayeringValidNestedModuleStillSkipped(t *testing.T) {
-	root := layeringModule(t, map[string]string{
-		"low/a/a.go":        "package a\n",
-		"high/b/b.go":       "package b\n",
-		"nested/go.mod":     "module nested.example\n\ngo 1.22.0\n",
-		"nested/pkg/pkg.go": "package pkg\n\nimport _ \"example.com/mod/high/b\"\n",
-	})
-	got, err := Layering(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("valid nested module must be skipped, got %v", got)
-	}
-}
-
 func TestLayeringGoModCommentsOnlyInvalid(t *testing.T) {
 	root := layeringModule(t, map[string]string{
-		"low/a/a.go":      "package a\n",
-		"low/fake/go.mod": "// just comments\n\n// nothing here\n",
-		"low/fake/x.go":   "package x\n",
+		"low/a/a.go":            "package a\n",
+		"high/b/b.go":           "package b\n",
+		"low/fake/go.mod":       "// just comments\n\n// nothing here\n",
+		"low/fake/nest/nest.go": "package nest\n\nimport _ \"example.com/mod/high/b\"\n",
 	})
 	got, err := Layering(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "low/fake/go.mod: no module directive; a nested module needs one (or delete the file)"
+	want := goModCannotLoadMsg("low/fake/go.mod", "low/fake")
 	if !containsString(got, want) {
 		t.Fatalf("got %v, want containing %q", got, want)
 	}
-}
-
-func TestLayeringGoModModuleAfterComment(t *testing.T) {
-	root := layeringModule(t, map[string]string{
-		"low/a/a.go":        "package a\n",
-		"high/b/b.go":       "package b\n",
-		"nested/go.mod":     "// comment line\nmodule nested.example\n\ngo 1.22.0\n",
-		"nested/bad/bad.go": "package bad\n\nimport _ \"example.com/mod/high/b\"\n",
-	})
-	got, err := Layering(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("module after comment is a nested module, want skip, got %v", got)
+	if !containsImportViolation(got, "low/fake/nest", "high/b") {
+		t.Fatalf("missing import violation in %v", got)
 	}
 }
 
-func TestGoModHasModuleDirective(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"ok/go.mod":       "// note\nmodule m\n",
-		"bad/go.mod":      "not a mod\n",
-		"comments/go.mod": "// only\n\n// lines\n",
-	})
+func TestLayeringInvalidNestedGoModShapes(t *testing.T) {
+	base := map[string]string{
+		"low/a/a.go":  "package a\n",
+		"high/b/b.go": "package b\n",
+	}
+	nestGo := "package nest\n\nimport _ \"example.com/mod/high/b\"\n"
 	cases := []struct {
-		file string
-		want bool
+		name string
+		dir  string
+		mod  string
 	}{
-		{"ok/go.mod", true},
-		{"bad/go.mod", false},
-		{"comments/go.mod", false},
+		{name: "junk_text", dir: "low/junk", mod: "not a real mod\n"},
+		{name: "comments_only", dir: "low/comm", mod: "// c\n\n// d\n"},
+		{name: "module_no_path", dir: "low/nopath", mod: "module\n\ngo 1.22.0\n"},
+		{name: "module_empty_parens", dir: "low/empty", mod: "module ()\n\ngo 1.22.0\n"},
+		{name: "module_semicolon", dir: "low/semi", mod: "module example.com/x;\n\ngo 1.22.0\n"},
+		{name: "module_unclosed_block", dir: "low/unclosed", mod: "module (\nexample.com/broken\n\ngo 1.22.0\n"},
 	}
-	for _, c := range cases {
-		got, err := goModHasModule(filepath.Join(root, c.file))
-		if err != nil {
-			t.Fatalf("%s: %v", c.file, err)
-		}
-		if got != c.want {
-			t.Fatalf("%s: got %v, want %v", c.file, got, c.want)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{}
+			for k, v := range base {
+				files[k] = v
+			}
+			files[tc.dir+"/go.mod"] = tc.mod
+			files[tc.dir+"/nest/nest.go"] = nestGo
+			got, err := Layering(layeringModule(t, files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := tc.dir
+			wantMod := goModCannotLoadMsg(dir+"/go.mod", dir)
+			if !containsString(got, wantMod) {
+				t.Fatalf("missing go.mod error in %v", got)
+			}
+			if !containsImportViolation(got, dir+"/nest", "high/b") {
+				t.Fatalf("missing import violation in %v", got)
+			}
+		})
+	}
+}
+
+func TestLayeringValidNestedGoModShapes(t *testing.T) {
+	base := map[string]string{
+		"low/a/a.go":  "package a\n",
+		"high/b/b.go": "package b\n",
+	}
+	evil := "package nest\n\nimport _ \"example.com/mod/high/b\"\n"
+	cases := []struct {
+		name string
+		dir  string
+		mod  string
+	}{
+		{name: "plain", dir: "nested", mod: "module nested.example\n\ngo 1.22.0\n"},
+		{name: "quoted", dir: "quoted", mod: "module \"example.com/q\"\n\ngo 1.22.0\n"},
+		{name: "block", dir: "block", mod: "module (\n\tnested.block\n)\n\ngo 1.22.0\n"},
+		{name: "comment_before", dir: "commented", mod: "// header\nmodule nested.comment\n\ngo 1.22.0\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{}
+			for k, v := range base {
+				files[k] = v
+			}
+			files[tc.dir+"/go.mod"] = tc.mod
+			files[tc.dir+"/nest/nest.go"] = evil
+			got, err := Layering(layeringModule(t, files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("valid nested module must be skipped, got %v", got)
+			}
+		})
 	}
 }
 
