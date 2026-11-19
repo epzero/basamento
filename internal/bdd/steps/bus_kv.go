@@ -364,7 +364,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		world(ctx).Core.clock.Advance(d)
+		advanceScenarioClock(ctx, d)
 		return nil
 	})
 }

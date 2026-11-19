@@ -205,6 +205,12 @@ func registerBusLimitsOutcomes(sc *godog.ScenarioContext) {
 }
 
 func matchPutOutcome(ctx context.Context, tail string) error {
+	// The credentials port reports a failed put with the same phrase; one
+	// handler reads whichever domain made the call.
+	if c := world(ctx).Credentials; c != nil && c.putErr != nil {
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(c.putErr, code)
+	}
 	w := world(ctx).Bus
 	if tail == `succeeds` {
 		return w.checkCode(w.lastErr, "")

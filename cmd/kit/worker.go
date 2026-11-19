@@ -25,7 +25,7 @@ import (
 // share the SQL store through worker.LocalTransport. The cloud profile's
 // generated gRPC client of basamento.worker.v1 is a later work package; the
 // contract and the client loop are the same.
-func runWorker(args []string) {
+func runWorker(args []string) error {
 	fs := flag.NewFlagSet("kit worker", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	poolToken := fs.String("pool-token", "", "pool token from the platform (required)")
@@ -36,11 +36,10 @@ func runWorker(args []string) {
 	labelsFlag := fs.String("labels", "", "comma-separated key=value labels, e.g. gpu=nvidia-a100,region=eu")
 	once := fs.Bool("once", false, "lease and run at most one invocation, then leave")
 	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
+		return err
 	}
 	if *poolToken == "" || *sqlURL == "" || *dataDir == "" {
-		fmt.Fprintln(os.Stderr, "kit worker: --pool-token, --sql-url and --data-dir are required")
-		os.Exit(2)
+		return fmt.Errorf("kit worker: --pool-token, --sql-url and --data-dir are required")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -48,30 +47,25 @@ func runWorker(args []string) {
 
 	descriptors, invokers, err := loadWorkerProviders(*modelsFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: %w", err)
 	}
 	if len(descriptors) == 0 {
-		fmt.Fprintln(os.Stderr, "kit worker: --models loaded no descriptors")
-		os.Exit(1)
+		return fmt.Errorf("kit worker: --models loaded no descriptors")
 	}
 
 	db, err := psql.Open(ctx, *sqlURL, migrations)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker: sql store:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: sql store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 	store, err := worker.Open(ctx, db, worker.Options{Clock: core.SystemClock{}})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker: worker store:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: worker store: %w", err)
 	}
 
 	journal, err := worker.OpenJournal(*dataDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: %w", err)
 	}
 	defer func() { _ = journal.Close() }()
 
@@ -84,15 +78,13 @@ func runWorker(args []string) {
 		Capacity:        *capacity,
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker: join:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: join: %w", err)
 	}
 	fmt.Printf("kit worker: %s joined pool %s with %d descriptors\n", joined.ID, joined.Pool, len(joined.Descriptors))
 
 	pending, err := client.Pending()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "kit worker: journal:", err)
-		os.Exit(1)
+		return fmt.Errorf("kit worker: journal: %w", err)
 	}
 	if len(pending) > 0 {
 		fmt.Printf("kit worker: resuming %d invocations from the journal\n", len(pending))
@@ -105,7 +97,7 @@ func runWorker(args []string) {
 		select {
 		case <-ctx.Done():
 			_ = client.Leave(context.Background())
-			return
+			return nil
 		case <-heartbeat.C:
 			if _, err := client.Heartbeat(ctx, *capacity); err != nil {
 				fmt.Fprintln(os.Stderr, "kit worker: heartbeat:", err)
@@ -118,7 +110,7 @@ func runWorker(args []string) {
 			fmt.Fprintln(os.Stderr, "kit worker: lease:", err)
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case <-time.After(time.Second):
 			}
 			continue
@@ -130,12 +122,12 @@ func runWorker(args []string) {
 		}
 		if *once {
 			_ = client.Leave(context.Background())
-			return
+			return nil
 		}
 		if len(leased) == 0 {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case <-time.After(time.Second):
 			}
 		}

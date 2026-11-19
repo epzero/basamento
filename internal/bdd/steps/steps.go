@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cucumber/godog"
 
@@ -94,6 +95,19 @@ func Initialize(sc *godog.ScenarioContext) {
 		world(ctx).Config.teardown()
 		return ctx, nil
 	})
+}
+
+// advanceScenarioClock moves the scenario's frozen clock and fires a
+// component server's shutdown timer, so "N seconds pass" means the same thing
+// to the config server and to the rest of the world.
+func advanceScenarioClock(ctx context.Context, d time.Duration) {
+	world(ctx).Core.clock.Advance(d)
+	if w := world(ctx).Config; w.after != nil {
+		select {
+		case w.after <- world(ctx).Core.clock.Now():
+		default:
+		}
+	}
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

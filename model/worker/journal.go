@@ -85,7 +85,7 @@ func (j *Journal) Entries() ([]JournalEntry, error) {
 		}
 		return nil, core.NewError(core.CodeInternal, "worker: cannot read journal", map[string]any{"cause": err.Error()})
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []JournalEntry
 	scn := bufio.NewScanner(f)
 	scn.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
