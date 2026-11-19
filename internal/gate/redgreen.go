@@ -86,10 +86,15 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	return activated, errs, nil
 }
 
-// buildBaseForRedGreen verifies the base worktree builds under GOTOOLCHAIN=auto so
-// a newer go directive on the base ref fails closed instead of vacuous red→green.
+// buildBaseForRedGreen compiles the base worktree's BDD test package under
+// GOTOOLCHAIN=auto without running it: go test -c builds the test binary but
+// writes it to os.DevNull, so internal/bdd compiles even though it holds only
+// _test.go files, which go build refuses, and no init or TestMain executes.
+// The per-scenario check that follows still runs TestFeatures. A base whose go
+// directive the toolchain cannot satisfy, or whose test file does not compile,
+// therefore fails closed instead of producing vacuous red→green.
 func buildBaseForRedGreen(wt string) error {
-	cmd := exec.Command("go", "build", "./internal/bdd/")
+	cmd := exec.Command("go", "test", "-c", "-o", os.DevNull, "./internal/bdd/")
 	cmd.Dir = wt
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
 	if out, err := cmd.CombinedOutput(); err != nil {
