@@ -11,6 +11,7 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/schema"
 	"github.com/epzero/basamento/flow"
+	"github.com/epzero/basamento/flow/ir"
 )
 
 // Start and Fail are the reserved endpoints of the IR's edge lists. Neither is
@@ -224,7 +225,7 @@ func (b *Builder) Build() (*flow.IR, error) {
 	if err != nil {
 		return nil, b.schemaError(err)
 	}
-	keys := schemaKeys(canonicalSchema)
+	stateKeys, everyObject := ir.StateProperties(canonicalSchema)
 
 	declaredReducers := make(map[string]bool, len(b.reducers))
 	for _, reducer := range b.reducers {
@@ -233,7 +234,7 @@ func (b *Builder) Build() (*flow.IR, error) {
 				"duplicate reducer for state key %q", reducer.key)
 		}
 		declaredReducers[reducer.key] = true
-		if !keys[reducer.key] {
+		if !everyObject && !stateKeys[reducer.key] {
 			return nil, b.errorf(map[string]any{"reducer": reducer.key},
 				"reducer for state key %q: key is not in the state schema", reducer.key)
 		}
@@ -257,7 +258,7 @@ func (b *Builder) Build() (*flow.IR, error) {
 			return nil, b.errorf(map[string]any{"node": node.name},
 				"node %q: input mapping is empty", node.name)
 		}
-		if node.out != "" && !keys[node.out] {
+		if node.out != "" && !everyObject && !stateKeys[node.out] {
 			return nil, b.errorf(map[string]any{"node": node.name, "key": node.out},
 				"node %q: output %q is not a state key", node.name, node.out)
 		}
@@ -367,20 +368,6 @@ func (b *Builder) schemaError(err error) *core.Error {
 	}
 	return core.NewError(core.CodeInvalidArgument,
 		fmt.Sprintf("flow %q: state schema: %s", b.name, message), details)
-}
-
-func schemaKeys(raw json.RawMessage) map[string]bool {
-	keys := map[string]bool{}
-	var doc struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return keys
-	}
-	for key := range doc.Properties {
-		keys[key] = true
-	}
-	return keys
 }
 
 func reducerMap(decls []reducerDecl) map[string]string {

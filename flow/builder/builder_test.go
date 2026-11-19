@@ -388,6 +388,115 @@ func TestStateSchemaAndReducersWritten(t *testing.T) {
 	}
 }
 
+func TestStateSchemaKeysMatchCompiler(t *testing.T) {
+	dataFlow := func(schema string, reducers map[string]string, nodes map[string]flow.Node, edges []flow.Edge) *flow.IR {
+		return &flow.IR{
+			Name: "parity", Version: 1,
+			State: flow.StateSpec{Schema: json.RawMessage(schema), Reducers: reducers},
+			Nodes: nodes, Edges: edges,
+		}
+	}
+	planOnly := func(b *Builder) *Builder {
+		return b.Node("plan", KindAgent, nil).Edge(Start, "plan", "").Edge("plan", Fail, "")
+	}
+
+	type case_ struct {
+		name   string
+		schema string
+		apply  func(*Builder)
+		data   *flow.IR
+		reject string
+	}
+	tests := []case_{
+		{
+			name:   "allOf reducer",
+			schema: `{"type":"object","properties":{"tests":{"type":"object"}},"allOf":[{"type":"object","properties":{"files":{"type":"array"}}}]}`,
+			apply: func(b *Builder) {
+				planOnly(b.Reducer("files", "append"))
+			},
+			data: dataFlow(
+				`{"type":"object","properties":{"tests":{"type":"object"}},"allOf":[{"type":"object","properties":{"files":{"type":"array"}}}]}`,
+				map[string]string{"files": "append"},
+				map[string]flow.Node{"plan": {Kind: "agent"}},
+				[]flow.Edge{{From: Start, To: "plan"}, {From: "plan", To: Fail}},
+			),
+		},
+		{
+			name:   "local ref reducer",
+			schema: `{"$defs":{"s":{"type":"object","properties":{"messages":{"type":"array"}}}},"$ref":"#/$defs/s"}`,
+			apply: func(b *Builder) {
+				planOnly(b.Reducer("messages", "append"))
+			},
+			data: dataFlow(
+				`{"$defs":{"s":{"type":"object","properties":{"messages":{"type":"array"}}}},"$ref":"#/$defs/s"}`,
+				map[string]string{"messages": "append"},
+				map[string]flow.Node{"plan": {Kind: "agent"}},
+				[]flow.Edge{{From: Start, To: "plan"}, {From: "plan", To: Fail}},
+			),
+		},
+		{
+			name:   "true schema reducer",
+			schema: `true`,
+			apply: func(b *Builder) {
+				planOnly(b.Reducer("anything", "replace"))
+			},
+			data: dataFlow(
+				`true`,
+				map[string]string{"anything": "replace"},
+				map[string]flow.Node{"plan": {Kind: "agent"}},
+				[]flow.Edge{{From: Start, To: "plan"}, {From: "plan", To: Fail}},
+			),
+		},
+		{
+			name:   "allOf node out",
+			schema: `{"type":"object","properties":{"tests":{"type":"object"}},"allOf":[{"type":"object","properties":{"files":{"type":"array"}}}]}`,
+			apply: func(b *Builder) {
+				b.Node("plan", KindAgent, nil, Out("files")).
+					Edge(Start, "plan", "").Edge("plan", Fail, "")
+			},
+			data: dataFlow(
+				`{"type":"object","properties":{"tests":{"type":"object"}},"allOf":[{"type":"object","properties":{"files":{"type":"array"}}}]}`,
+				nil,
+				map[string]flow.Node{"plan": {Kind: "agent", Out: "files"}},
+				[]flow.Edge{{From: Start, To: "plan"}, {From: "plan", To: Fail}},
+			),
+		},
+		{
+			name:   "absent key through ref",
+			schema: `{"$defs":{"s":{"type":"object","properties":{"messages":{"type":"array"}}}},"$ref":"#/$defs/s"}`,
+			apply: func(b *Builder) {
+				planOnly(b.Reducer("notes", "append"))
+			},
+			reject: `state key "notes"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			b := New("parity", 1).StateSchema(json.RawMessage(test.schema))
+			test.apply(b)
+			built, err := b.Build()
+			if test.reject != "" {
+				if err == nil {
+					t.Fatal("Build succeeded, want error")
+				}
+				if !strings.Contains(err.Error(), test.reject) {
+					t.Fatalf("error %q does not contain %q", err.Error(), test.reject)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if _, err := compile.Compile(built); err != nil {
+				t.Fatalf("compile builder IR: %v", err)
+			}
+			if _, err := compile.Compile(test.data); err != nil {
+				t.Fatalf("compile data IR: %v", err)
+			}
+		})
+	}
+}
+
 func TestReducerOnUnknownKeyRejected(t *testing.T) {
 	platform := mustFailure(t, New("codegen", 3).
 		StateSchema(json.RawMessage(`{"type":"object","properties":{"tests":{"type":"integer"}}}`)).
