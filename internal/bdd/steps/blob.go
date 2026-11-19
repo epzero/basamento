@@ -41,8 +41,10 @@ type blobWorld struct {
 	blobURL    string
 	httpResp   fetchResp
 	subdirRoot string
-	backend    string
-	openErr    error
+	backend      string
+	matrixID     string
+	scenarioName string
+	openErr      error
 	lastExists bool
 	hasExists  bool
 }
@@ -101,7 +103,8 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 		BaseURL:   "http://blob.test" + blob.HandlerRoute(),
 		SignKey:   w.signKey,
 	}
-	if w.backend == "s3" {
+	useS3Backend := w.backend == "s3"
+	if useS3Backend {
 		if w.s3 == nil {
 			w.s3 = s3sim.Start()
 		}
@@ -118,10 +121,20 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 		w.blob = nil
 		return err
 	}
+	if useS3Backend {
+		if err := w.assertOpenedS3Simulator(raw); err != nil {
+			_ = st.Close()
+			w.store = nil
+			w.blob = nil
+			w.openErr = err
+			return err
+		}
+	}
 	w.store = st
 	w.blob = st
 	w.locURL = raw
 	w.handler = h
+	w.emitS3OpenMarkerIfS3(raw)
 	if h != nil {
 		w.handlerSrv = httptest.NewServer(h)
 		altOpts := opts
@@ -136,10 +149,10 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 }
 
 func registerBlob(sc *godog.ScenarioContext) {
-	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		if world(ctx).Blob.backend == "s3" {
-			_, _ = fmt.Fprintln(os.Stderr, "blob-conformance backend=s3")
-		}
+	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
+		w := world(ctx).Blob
+		w.scenarioName = scn.Name
+		w.matrixID = matrixIDFromGodogScenario(scn)
 		return ctx, nil
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
@@ -723,21 +736,46 @@ func openBlobFromPhrase(ctx context.Context, phrase string) error {
 }
 
 func tryOpenPath(ctx context.Context, raw string) error {
-	opts := blob.Options{Clock: world(ctx).Core.clock, MaxURLTTL: world(ctx).Blob.maxTTL,
-		BaseURL: "http://blob.test" + blob.HandlerRoute(), SignKey: world(ctx).Blob.signKey}
+	w := world(ctx).Blob
+	opts := blob.Options{Clock: world(ctx).Core.clock, MaxURLTTL: w.maxTTL,
+		BaseURL: "http://blob.test" + blob.HandlerRoute(), SignKey: w.signKey}
 	st, h, err := blob.Open(ctx, raw, opts)
-	world(ctx).Blob.openErr = err
+	w.openErr = err
 	if err != nil {
 		return nil
 	}
-	world(ctx).Blob.store = st
-	world(ctx).Blob.blob = st
-	world(ctx).Blob.locURL = raw
-	world(ctx).Blob.handler = h
+	w.store = st
+	w.blob = st
+	w.locURL = raw
+	w.handler = h
+	w.emitS3OpenMarkerIfS3(raw)
 	if h != nil {
-		world(ctx).Blob.handlerSrv = httptest.NewServer(h)
+		w.handlerSrv = httptest.NewServer(h)
 	}
 	return nil
+}
+
+func (w *blobWorld) assertOpenedS3Simulator(raw string) error {
+	if w.s3 == nil {
+		return fmt.Errorf("s3 conformance backend configured but simulator is nil")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "s3" || !strings.HasPrefix(raw, w.s3.URL) {
+		return fmt.Errorf("s3 conformance backend configured but opened %q", raw)
+	}
+	return nil
+}
+
+func (w *blobWorld) emitS3OpenMarkerIfS3(raw string) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "s3" || w.matrixID == "" {
+		return
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "blob-conformance backend=s3 opened=s3 id=%s scenario=%q\n",
+		w.matrixID, w.scenarioName)
 }
 
 func alterProxiedBlobURL(ctx context.Context, raw, alteration, otherKey, otherTenant string) (string, error) {

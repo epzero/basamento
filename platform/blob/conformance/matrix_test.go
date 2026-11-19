@@ -2,27 +2,26 @@ package conformance_test
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
-	"strings"
 
-	gherkin "github.com/cucumber/gherkin/go/v42"
-	messages "github.com/cucumber/messages/go/v34"
+	"github.com/epzero/basamento/internal/bdd/blobmatrix"
 )
 
-// excludedScenarioTags mirrors defaultTags plus @profile:embedded in internal/bdd/bdd_test.go.
-var excludedScenarioTags = map[string]bool{
-	"@planned": true, "@live": true, "@eval": true, "@journey": true,
-	"@slow": true, "@quarantine": true, "@profile:embedded": true,
+// s3MatrixNoS3Marker lists matrix scenario ids that must not emit an S3 open marker.
+var s3MatrixNoS3Marker = map[string]string{
+	"BLOB-018-01":      "explicit file:// open in scheme outline",
+	"BLOB-019-01":      "unsupported URL; fails before Open",
+	"BLOB-019-01#01":   "unsupported URL; fails before Open",
+	"BLOB-019-01#02":   "unsupported URL; fails before Open",
+	"BLOB-019-01#03":   "unsupported URL; fails before Open",
+	"BLOB-020-01":      "explicit file URL of subdirectory",
 }
 
 var (
 	scenarioSummaryRE = regexp.MustCompile(`(\d+)\s+scenarios`)
 	passedSummaryRE   = regexp.MustCompile(`(\d+)\s+passed`)
-	backendMarkerRE   = regexp.MustCompile(`(?m)^blob-conformance backend=s3\s*$`)
+	s3OpenMarkerRE    = regexp.MustCompile(`(?m)^blob-conformance backend=s3 opened=s3 id=([^\s]+)`)
 )
 
 func parseGodogSummary(output string) (scenarios, passed int, err error) {
@@ -48,11 +47,18 @@ func parseGodogSummary(output string) (scenarios, passed int, err error) {
 	return scenarios, passed, nil
 }
 
-func countS3BackendMarkers(output string) int {
-	return len(backendMarkerRE.FindAllString(output, -1))
+func parseS3OpenMarkers(output string) map[string]int {
+	out := make(map[string]int)
+	for _, m := range s3OpenMarkerRE.FindAllStringSubmatch(output, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		out[m[1]]++
+	}
+	return out
 }
 
-func verifyS3MatrixOutput(output string, wantScenarios int) error {
+func verifyS3MatrixOutput(output string, wantScenarios int, matrixIDs []string) error {
 	got, passed, err := parseGodogSummary(output)
 	if err != nil {
 		return err
@@ -60,73 +66,32 @@ func verifyS3MatrixOutput(output string, wantScenarios int) error {
 	if got != passed || got != wantScenarios {
 		return fmt.Errorf("godog ran %d scenarios (%d passed), want exactly %d", got, passed, wantScenarios)
 	}
-	markers := countS3BackendMarkers(output)
-	if markers != wantScenarios {
-		return fmt.Errorf("s3 backend markers %d, want %d", markers, wantScenarios)
+	if len(matrixIDs) != wantScenarios {
+		return fmt.Errorf("matrix id list length %d != want %d", len(matrixIDs), wantScenarios)
+	}
+	markers := parseS3OpenMarkers(output)
+	marked := 0
+	allow := 0
+	for _, id := range matrixIDs {
+		n := markers[id]
+		if reason, skip := s3MatrixNoS3Marker[id]; skip {
+			allow++
+			if n > 0 {
+				return fmt.Errorf("scenario %s on allow-list (%s) but has %d s3 marker(s)", id, reason, n)
+			}
+			continue
+		}
+		if n < 1 {
+			return fmt.Errorf("scenario %s expected s3 open marker, got none", id)
+		}
+		marked++
+	}
+	if marked+allow != len(matrixIDs) {
+		return fmt.Errorf("marked %d + allow-list %d != selected %d", marked, allow, len(matrixIDs))
 	}
 	return nil
 }
 
-func expectedBlobMatrixScenarios(root string) (int, error) {
-	blobDir := filepath.Join(root, "specs", "blob")
-	entries, err := os.ReadDir(blobDir)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".feature") {
-			continue
-		}
-		rel := filepath.Join("specs", "blob", e.Name())
-		n, err := countFeaturePickles(filepath.Join(blobDir, e.Name()), rel)
-		if err != nil {
-			return 0, fmt.Errorf("%s: %w", e.Name(), err)
-		}
-		total += n
-	}
-	return total, nil
-}
-
-func countFeaturePickles(path, rel string) (int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = f.Close() }()
-	n := 0
-	doc, err := gherkin.ParseGherkinDocument(f, func() string { n++; return strconv.Itoa(n) })
-	if err != nil {
-		return 0, err
-	}
-	if doc.Feature == nil {
-		return 0, nil
-	}
-	count := 0
-	for _, p := range gherkin.Pickles(*doc, rel, func() string { n++; return strconv.Itoa(n) }) {
-		tags := pickleTagNames(p.Tags)
-		if excluded(tags) {
-			continue
-		}
-		count++
-	}
-	return count, nil
-}
-
-func excluded(tags []string) bool {
-	for _, t := range tags {
-		if excludedScenarioTags[t] {
-			return true
-		}
-	}
-	return false
-}
-
-func pickleTagNames(tags []*messages.PickleTag) []string {
-	out := make([]string, 0, len(tags))
-	for _, t := range tags {
-		out = append(out, t.Name)
-	}
-	sort.Strings(out)
-	return out
+func blobMatrixPickleIDs(root string) ([]string, error) {
+	return blobmatrix.PickleIDs(root)
 }
