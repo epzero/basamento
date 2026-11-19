@@ -579,11 +579,7 @@ func rebuildUploadURL(u *url.URL, tenant, stage string, signKey []byte) (string,
 	q := u.Query()
 	exp, _ := strconv.ParseInt(q.Get("exp"), 10, 64)
 	max, _ := strconv.ParseInt(q.Get("max"), 10, 64)
-	ctEnc := q.Get("ct")
-	ct, err := url.QueryUnescape(ctEnc)
-	if err != nil {
-		return "", err
-	}
+	ct := q.Get("ct")
 	sig := bddSignUpload(signKey, tenant, stage, exp, max, ct)
 	q.Set("sig", sig)
 	u.RawQuery = q.Encode()

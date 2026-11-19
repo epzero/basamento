@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -62,11 +61,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	ct, err := url.QueryUnescape(ctEnc)
-	if err != nil {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
+	ct := ctEnc
 	if !verifyUpload(h.Store.signKey, tenant, stageKey, sig, exp, max, ct, h.Store.clock.Now()) {
 		w.WriteHeader(http.StatusForbidden)
 		return
