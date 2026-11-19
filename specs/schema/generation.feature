@@ -181,7 +181,7 @@ Feature: Generating schemas from Go types
       | the zero value                                 |
       | name "a", tags "x" and "y", extra a=1, seed 9  |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-003 @id:SCHEMA-003-02
+  @REQ-SCHEMA-003 @id:SCHEMA-003-02
   Scenario Outline: A composite or pointer field is required only by its tag
     Given a Go struct type "Doc" with fields:
       | field | type      | json tag |
@@ -200,7 +200,7 @@ Feature: Generating schemas from Go types
       | []byte         | v,omitempty | accepts |
       | *int           | v,omitempty | accepts |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-038 @REQ-SCHEMA-008 @id:SCHEMA-038-02
+  @REQ-SCHEMA-038 @REQ-SCHEMA-008 @id:SCHEMA-038-02
   Scenario Outline: A byte slice with its own encoding is not a base64 string
     Given a Go type "Binary"
     And the type "Binary" appears as <position> in "Doc"
@@ -215,7 +215,7 @@ Feature: Generating schemas from Go types
       | an embedded field | null        |          |
       | the whole type    | null        |          |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-040 @REQ-SCHEMA-008 @id:SCHEMA-040-02
+  @REQ-SCHEMA-040 @REQ-SCHEMA-008 @id:SCHEMA-040-02
   Scenario Outline: A byte array with its own encoding is not an integer array
     Given a Go type "UUID"
     And the type "UUID" appears as <position> in "Doc"
@@ -231,7 +231,7 @@ Feature: Generating schemas from Go types
       | an embedded field | [1]        |          |
       | the whole type    | [1]        |          |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-041 @REQ-SCHEMA-008 @id:SCHEMA-041-01
+  @REQ-SCHEMA-041 @REQ-SCHEMA-008 @id:SCHEMA-041-01
   Scenario Outline: A value with its own text encoding is a string wherever it appears
     Given a Go type "TextStamp"
     And the type "TextStamp" appears as <position> in "Doc"
@@ -247,7 +247,7 @@ Feature: Generating schemas from Go types
       | an embedded field | {}        |          |
       | the whole type    | {}        |          |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-042 @REQ-SCHEMA-008 @id:SCHEMA-042-01
+  @REQ-SCHEMA-042 @REQ-SCHEMA-008 @id:SCHEMA-042-01
   Scenario Outline: A value with its own JSON encoding admits every value
     Given a Go type "JSONStamp"
     And the type "JSONStamp" appears as <position> in "Doc"
@@ -263,7 +263,7 @@ Feature: Generating schemas from Go types
       | an embedded field | [1, 2]        |
       | the whole type    | [1, 2]        |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-043 @REQ-SCHEMA-044 @REQ-SCHEMA-008 @id:SCHEMA-043-01
+  @REQ-SCHEMA-043 @REQ-SCHEMA-044 @REQ-SCHEMA-008 @id:SCHEMA-043-01
   Scenario Outline: A type handled in its own right keeps the schema of its encoding
     Given a Go type "<go type>"
     And the type "<go type>" appears as <position> in "Doc"
@@ -281,7 +281,7 @@ Feature: Generating schemas from Go types
       | Numbered  | an embedded field | "1"        |          |
       | Numbered  | the whole type    | "1"        |          |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-045 @REQ-SCHEMA-008 @id:SCHEMA-045-01
+  @REQ-SCHEMA-045 @REQ-SCHEMA-008 @id:SCHEMA-045-01
   Scenario: A value whose encoding only its pointer has admits both encodings
     Given a Go type "PointerStamp"
     And a Go struct type "Doc" with fields:
@@ -292,7 +292,7 @@ Feature: Generating schemas from Go types
     Then the schema generated from "Doc" accepts the encoded value
     And the schema accepts the instance {"v": [1]}
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-046 @id:SCHEMA-046-01
+  @REQ-SCHEMA-046 @id:SCHEMA-046-01
   Scenario Outline: A string-option number or boolean is a string
     Given a Go struct type "Inner" with fields:
       | field | type      | json tag |
@@ -317,7 +317,7 @@ Feature: Generating schemas from Go types
       | bool    | false   | the whole type    |
       | bool    | false   | an embedded field |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-047 @id:SCHEMA-047-01
+  @REQ-SCHEMA-047 @id:SCHEMA-047-01
   Scenario Outline: A string-option string holds the quoted string
     Given a Go struct type "Inner" with fields:
       | field | type   | json tag |
@@ -334,7 +334,7 @@ Feature: Generating schemas from Go types
       | the whole type    |
       | an embedded field |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-048 @id:SCHEMA-048-01
+  @REQ-SCHEMA-048 @id:SCHEMA-048-01
   Scenario Outline: A map whose key type is written as a string is an object
     Given a Go type "<map type>"
     And the type "<map type>" appears as <position> in "Doc"
@@ -351,7 +351,7 @@ Feature: Generating schemas from Go types
       | TextKeyed | an embedded field | {"v": {"S0": "x"}} | {"v": {"S0": 1}} | /v/S0    |
       | TextKeyed | the whole type    | {"S0": "x"}        | {"S0": 1}        | /S0      |
 
-  @planned @wp:WP-L2-02 @REQ-SCHEMA-049 @id:SCHEMA-049-01
+  @REQ-SCHEMA-049 @id:SCHEMA-049-01
   Scenario: A map key type with no JSON text is rejected with its name
     Given a Go type "FloatKeyed"
     And a Go struct type "Doc" with fields:
