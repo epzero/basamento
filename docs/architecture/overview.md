@@ -35,7 +35,7 @@ of `kit`. Status words: **Implemented**,
 | SQL | SQLite (`modernc.org/sqlite`) | Postgres (`pgx`) | goose migrations |
 | Blob | local directory | S3, GCS, Azure | `gocloud.dev/blob` |
 | Bus + KV | `nats-server` in-process with JetStream | NATS cluster | `nats-server`, `nats.go` |
-| Secrets (key wrapping) | local key | KMS or Vault Transit | `gocloud.dev/secrets` + Tink |
+| Secrets (key wrapping) | local key | KMS or Vault Transit (`hashivault://`; refused at open until ADR-0017's driver, after WP-L1-06) | `gocloud.dev/secrets` + Tink (+ our Transit keeper) |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
 | Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
 | Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |

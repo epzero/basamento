@@ -16,6 +16,10 @@ Every infrastructure concern is a port in `platform` with an embedded implementa
 
 Wiring uses plain constructors (`wireEmbedded`, `wireCloud`) and koanf configuration. Every port has a conformance suite that runs against both implementations.
 
+Vault Transit (`hashivault://`) is named here as a cloud key service; ADR-0017
+keeps it in the contract, refuses it at open until a driver of ours lands after
+WP-L1-06, and owns that driver in its own work package.
+
 **Credentials** are named secrets per tenant (vendor API keys, tokens).
 Flows, manifests and state carry only a reference, `cred://<name>`. A value is
 written or rotated through the API, resolved inside a step at the moment of
