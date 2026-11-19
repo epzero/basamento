@@ -45,6 +45,8 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCredentials(sc)
 	registerSchema(sc)
 	registerModel(sc)
+	registerMiddleware(sc)
+	registerMiddlewareCalls(sc)
 	registerShared(sc)
 }
 

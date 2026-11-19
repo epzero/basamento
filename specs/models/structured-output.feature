@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-02 @level:component
+@wp:WP-L3-02 @level:component
 Feature: Structured output climbs the ladder on one attempt budget
   A chat call that must answer with JSON walks four rungs, from the most
   reliable to the last resort, and stops when its attempt budget is spent.

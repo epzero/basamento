@@ -12,8 +12,9 @@
 // result, cancellation and lookup.
 //
 // Provider construction (vendor SDKs, eino-ext, OpenAI-compatible endpoints for
-// MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping is
-// WP-L3-02.
+// MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping lives in
+// model/structured and the call middleware (attempt budget, retries, timeouts,
+// metering, call log) in model/middleware.
 package model
 
 import (
