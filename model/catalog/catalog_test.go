@@ -550,6 +550,19 @@ func TestZeroAmountAccepted(t *testing.T) {
 	}
 }
 
+func TestFailingRateConditionFailsPricingNotFallback(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: "1/0 == 1", Rates: catalog.Rates{"input": 9000, "output": 0}},
+		{Rates: catalog.Rates{"input": 1000, "output": 0}},
+	}})
+	_, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1_000_000, OutputLimit: 0})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code=%s err=%v, want invalid_argument", core.CodeOf(err), err)
+	}
+}
+
 func TestFormulaAmountMustBeExactInteger(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -19,7 +19,11 @@ var million = big.NewInt(1_000_000)
 // chooseRule returns the first rule whose condition holds for the usage and
 // start time, or an unconditional rule. A formula-only entry has no rules and
 // returns a zero rule. No holding rule fails with core.CodeUnsupported
-// (REQ-MODEL-069, REQ-MODEL-070, REQ-MODEL-073).
+// (REQ-MODEL-069, REQ-MODEL-070, REQ-MODEL-073). When a rule's when condition
+// errors at runtime (division by zero, missing parameter, non-boolean result),
+// pricing fails with that error and later rules are not tried; the spec leaves
+// this undefined and the lead chose fail-closed on money paths so a bad rule
+// cannot silently fall through to a cheaper one.
 func (c *Catalog) chooseRule(entry Price, modelID string, params json.RawMessage, usage model.Usage, at time.Time, tenant core.TenantID) (Rule, error) {
 	if len(entry.Rules) == 0 {
 		return Rule{}, nil
