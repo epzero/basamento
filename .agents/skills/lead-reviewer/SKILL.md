@@ -48,10 +48,12 @@ stop and say so: do not guess an account.
      --json conclusion,status,createdAt,url | go tool gate nightly
    ```
 
-   On **failed** or **stale**, open one ticket for the architect unless an
-   open ticket already names that Actions run id in its title. Hand-off:
-   `design-needed`, state *Todo*, assign the architect; the comment quotes
-   the command output and the run URL. On **ok**, do nothing.
+   On **failed** or **stale**, open one ticket for the architect unless a
+   ticket with the same title already exists: `nightly failed: run <id>` or
+   `nightly stale: run <id>` (the id is in the command line), or `nightly
+   stale: no scheduled run` when the command says there is no completed run.
+   Hand-off: `design-needed`, state *Todo*, assign the architect; the comment
+   quotes the full command output. On **ok**, do nothing.
 3. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.

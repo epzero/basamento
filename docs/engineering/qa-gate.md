@@ -56,10 +56,16 @@ gh run list --workflow nightly.yml --event schedule --limit 5 \
 | **failed** | Newest completed run concluded anything other than `success` | 1 |
 | **stale** | No completed scheduled run, or the newest completed one is older than **36 hours** (a disabled or never-firing schedule) | 1 |
 
+Example line:
+
+`nightly: failed: run 44516903074 https://github.com/epzero/basamento/actions/runs/44516903074 created 2026-11-19T11:40:22Z`
+
 When it reports **failed** or **stale**, the reviewer lead opens one ticket
-for the architect unless an open ticket already names that run in its title
-(dedupe by the Actions run id from the URL). **Cost of this choice:** a
-failure that happens in a quiet period is seen at the next wake, not when the
+for the architect unless an open ticket with the same title already exists.
+Title: `nightly failed: run <id>` or `nightly stale: run <id>` using the run id
+from the command output; when the line is `nightly: stale: no completed
+scheduled run`, use `nightly stale: no scheduled run`. **Cost of this choice:**
+a failure that happens in a quiet period is seen at the next wake, not when the
 workflow finishes.
 
 ## Conflict markers

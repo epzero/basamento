@@ -15,15 +15,18 @@ const NightlyStaleAfter = 36 * time.Hour
 
 // NightlyRun is one row from `gh run list --json conclusion,status,createdAt,url`.
 type NightlyRun struct {
-	Conclusion string `json:"conclusion"`
-	Status     string `json:"status"`
-	CreatedAt  string `json:"createdAt"`
-	URL        string `json:"url"`
+	Conclusion string    `json:"conclusion"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"createdAt"`
+	URL        string    `json:"url"`
 }
 
-// NightlyStatus is the schedule health: ok, failed, or stale.
+// NightlyStatus is the schedule health.
 type NightlyStatus string
 
+// NightlyOK: newest completed scheduled run succeeded within the stale window.
+// NightlyFailed: newest completed run did not conclude success.
+// NightlyStale: no completed scheduled run, or the newest completed run is too old.
 const (
 	NightlyOK     NightlyStatus = "ok"
 	NightlyFailed NightlyStatus = "failed"
@@ -38,24 +41,26 @@ type NightlyOutcome struct {
 	Run    *NightlyRun
 }
 
+const nightlyGHJSONHint = "pipe output of gh run list --json conclusion,status,createdAt,url"
+
 // ParseNightlyRuns decodes the JSON array gh prints on standard output.
 // The slice order is gh's: newest run first. An empty array decodes to a
 // non-nil empty slice.
 func ParseNightlyRuns(data []byte) ([]NightlyRun, error) {
 	trim := bytes.TrimSpace(data)
 	if len(trim) == 0 {
-		return nil, fmt.Errorf("nightly: empty input")
+		return nil, fmt.Errorf("nightly: empty input; %s", nightlyGHJSONHint)
 	}
 	if trim[0] != '[' {
-		return nil, fmt.Errorf("nightly: input is not a JSON array")
+		return nil, fmt.Errorf("nightly: input is not a JSON array; %s", nightlyGHJSONHint)
 	}
 	var runs []NightlyRun
 	if err := json.Unmarshal(trim, &runs); err != nil {
-		return nil, fmt.Errorf("nightly: input is not JSON: %w", err)
+		return nil, fmt.Errorf("nightly: input is not JSON: %w; %s", err, nightlyGHJSONHint)
 	}
 	for i, r := range runs {
-		if strings.TrimSpace(r.CreatedAt) == "" {
-			return nil, fmt.Errorf("nightly: run %d missing createdAt", i)
+		if r.CreatedAt.IsZero() {
+			return nil, fmt.Errorf("nightly: run %d missing createdAt; %s", i, nightlyGHJSONHint)
 		}
 	}
 	return runs, nil
@@ -81,15 +86,7 @@ func ClassifyNightlySchedules(runs []NightlyRun, now time.Time) NightlyOutcome {
 			Detail: "no completed scheduled run",
 		}
 	}
-	created, err := time.Parse(time.RFC3339, latest.CreatedAt)
-	if err != nil {
-		return NightlyOutcome{
-			Status: NightlyStale,
-			Detail: fmt.Sprintf("newest completed run has unreadable createdAt %q", latest.CreatedAt),
-			Run:    latest,
-		}
-	}
-	age := now.Sub(created)
+	age := now.Sub(latest.CreatedAt)
 	if age > NightlyStaleAfter {
 		return NightlyOutcome{
 			Status: NightlyStale,
@@ -112,7 +109,11 @@ func ClassifyNightlySchedules(runs []NightlyRun, now time.Time) NightlyOutcome {
 }
 
 func nightlyRunDetail(r *NightlyRun) string {
-	return fmt.Sprintf("%s at %s", r.URL, r.CreatedAt)
+	id := NightlyRunID(r.URL)
+	if id == "" {
+		id = "unknown"
+	}
+	return fmt.Sprintf("run %s %s created %s", id, r.URL, r.CreatedAt.UTC().Format(time.RFC3339))
 }
 
 // NightlyRunID returns the numeric Actions run id from a run URL, for ticket
@@ -152,7 +153,8 @@ func FormatNightlyLine(o NightlyOutcome) string {
 	return fmt.Sprintf("nightly: %s: %s", o.Status, o.Detail)
 }
 
-// ExitCode maps the outcome to the nightly subcommand exit status.
+// ExitCode returns the process exit status for a classified outcome: 0 for ok,
+// 1 for failed or stale. The nightly command exits 2 on unusable input.
 func (o NightlyOutcome) ExitCode() int {
 	switch o.Status {
 	case NightlyOK:
