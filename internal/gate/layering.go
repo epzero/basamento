@@ -29,11 +29,55 @@ type LayeringRules struct {
 }
 
 type goPkg struct {
-	ImportPath string
-	Imports    []string
+	ImportPath     string
+	Dir            string
+	GoFiles        []string
+	CgoFiles       []string
+	TestGoFiles    []string
+	XTestGoFiles   []string
+	IgnoredGoFiles []string
+	Imports        []string
+	TestImports    []string
+	XTestImports   []string
 }
 
-// Layering checks `go list` imports against layering.yaml.
+type importKind int
+
+const (
+	kindProduction importKind = iota
+	kindTest
+	kindExcluded
+)
+
+// importCheck describes which import list or file is being checked.
+type importCheck struct {
+	kind         importKind
+	fileName     string
+	useTestRules bool
+	unlayered    bool
+	parseErr     error
+}
+
+func (c importCheck) suffix() string {
+	switch c.kind {
+	case kindTest:
+		return ", in a test"
+	case kindExcluded:
+		return ", in an excluded file " + c.fileName
+	default:
+		return ""
+	}
+}
+
+func (c importCheck) testRules() bool {
+	if c.kind == kindTest || c.useTestRules {
+		return true
+	}
+	return false
+}
+
+// Layering checks production and test imports from go list and from every other
+// module .go file (build-excluded sources included) against layering.yaml.
 func Layering(root string) ([]string, error) {
 	b, err := os.ReadFile(filepath.Join(root, "layering.yaml"))
 	if err != nil {
@@ -43,6 +87,69 @@ func Layering(root string) ([]string, error) {
 	if err := yaml.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("layering.yaml: %w", err)
 	}
+	pkgs, err := goListPackages(root)
+	if err != nil {
+		return nil, err
+	}
+	attributed, err := attributedGoFiles(pkgs)
+	if err != nil {
+		return nil, err
+	}
+	var errs []string
+	add := func(msg string) {
+		if msg != "" {
+			errs = append(errs, msg)
+		}
+	}
+	checkOne := func(rel, layer string, imports []string, ctx importCheck) {
+		if ctx.unlayered {
+			add(fmt.Sprintf("%s: package not assigned to a layer in layering.yaml", rel))
+			return
+		}
+		if ctx.parseErr != nil {
+			add(fmt.Sprintf("%s: %v", rel, ctx.parseErr))
+			return
+		}
+		for _, imp := range imports {
+			add(checkImport(r, rel, layer, imp, ctx))
+		}
+	}
+	layerKeys := keys(r.Layers)
+	for _, p := range pkgs {
+		if p.Dir != "" && dirPathSkipped(root, p.Dir) {
+			continue
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, r.Module), "/")
+		layer := matchLayer(rel, layerKeys)
+		if layer == "" {
+			add(fmt.Sprintf("%s: package not assigned to a layer in layering.yaml", rel))
+			continue
+		}
+		for _, imp := range p.Imports {
+			add(checkImport(r, rel, layer, imp, importCheck{kind: kindProduction}))
+		}
+		for _, imp := range p.TestImports {
+			add(checkImport(r, rel, layer, imp, importCheck{kind: kindTest}))
+		}
+		for _, imp := range p.XTestImports {
+			add(checkImport(r, rel, layer, imp, importCheck{kind: kindTest}))
+		}
+	}
+	if err := layeringWalkExtra(root, r, attributed, checkOne); err != nil {
+		return nil, err
+	}
+	sort.Strings(errs)
+	// De-duplicate while keeping order stable after sort.
+	out := errs[:0]
+	for i, e := range errs {
+		if i == 0 || e != errs[i-1] {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func goListPackages(root string) ([]goPkg, error) {
 	cmd := exec.Command("go", "list", "-json", "./...")
 	cmd.Dir = root
 	var out, stderr bytes.Buffer
@@ -50,7 +157,7 @@ func Layering(root string) ([]string, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
 	}
-	var errs []string
+	var pkgs []goPkg
 	dec := json.NewDecoder(&out)
 	for {
 		var p goPkg
@@ -59,35 +166,46 @@ func Layering(root string) ([]string, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, r.Module), "/")
-		layer := matchLayer(rel, keys(r.Layers))
-		if layer == "" {
-			errs = append(errs, fmt.Sprintf("%s: package not assigned to a layer in layering.yaml", rel))
-			continue
+		pkgs = append(pkgs, p)
+	}
+	return pkgs, nil
+}
+
+// checkImport returns a violation message for one import, or "" if allowed.
+func checkImport(r LayeringRules, rel, layer, imp string, ctx importCheck) string {
+	if strings.HasPrefix(imp, r.Module+"/") {
+		dep := strings.TrimPrefix(imp, r.Module+"/")
+		testOnly := matchLayer(dep, r.TestOnly) != ""
+		if testOnly && !ctx.testRules() && matchLayer(rel, r.TestOnlyOK) == "" {
+			sfx := ctx.suffix()
+			if sfx == "" {
+				return fmt.Sprintf("%s imports test-only package %s", rel, dep)
+			}
+			return fmt.Sprintf("%s (layer %s%s) imports test-only package %s", rel, layer, sfx, dep)
 		}
-		for _, imp := range p.Imports {
-			if strings.HasPrefix(imp, r.Module+"/") {
-				dep := strings.TrimPrefix(imp, r.Module+"/")
-				if matchLayer(dep, r.TestOnly) != "" && matchLayer(rel, r.TestOnlyOK) == "" {
-					errs = append(errs, fmt.Sprintf("%s imports test-only package %s", rel, dep))
-					continue
-				}
-				depLayer := matchLayer(dep, keys(r.Layers))
-				if depLayer == layer || matchLayer(dep, r.Layers[layer]) != "" {
-					continue
-				}
-				errs = append(errs, fmt.Sprintf("%s (layer %s) may not import %s (layer %s)", rel, layer, dep, depLayer))
-				continue
+		if testOnly && ctx.testRules() {
+			return ""
+		}
+		depLayer := matchLayer(dep, keys(r.Layers))
+		if depLayer == layer || matchLayer(dep, r.Layers[layer]) != "" {
+			return ""
+		}
+		sfx := ctx.suffix()
+		if sfx == "" {
+			return fmt.Sprintf("%s (layer %s) may not import %s (layer %s)", rel, layer, dep, depLayer)
+		}
+		return fmt.Sprintf("%s (layer %s%s) may not import %s (layer %s)", rel, layer, sfx, dep, depLayer)
+	}
+	for _, deny := range r.DenyExternal[layer] {
+		if strings.HasPrefix(imp, deny) {
+			sfx := ctx.suffix()
+			if sfx == "" {
+				return fmt.Sprintf("%s (layer %s) may not import %s", rel, layer, imp)
 			}
-			for _, deny := range r.DenyExternal[layer] {
-				if strings.HasPrefix(imp, deny) {
-					errs = append(errs, fmt.Sprintf("%s (layer %s) may not import %s", rel, layer, imp))
-				}
-			}
+			return fmt.Sprintf("%s (layer %s%s) may not import %s", rel, layer, sfx, imp)
 		}
 	}
-	sort.Strings(errs)
-	return errs, nil
+	return ""
 }
 
 func keys(m map[string][]string) []string {
