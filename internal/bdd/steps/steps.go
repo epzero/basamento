@@ -17,10 +17,11 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core   *coreWorld
-	SQL    *sqlWorld
-	Prompt *promptWorld
-	Blob   *blobWorld
+	Core    *coreWorld
+	SQL     *sqlWorld
+	Prompt  *promptWorld
+	Blob    *blobWorld
+	Secrets *secretsWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -29,16 +30,19 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			SQL:    newSQLWorld(),
-			Prompt: newPromptWorld(),
-			Blob:   newBlobWorld(),
+			Core:    newCoreWorld(),
+			SQL:     newSQLWorld(),
+			Prompt:  newPromptWorld(),
+			Blob:    newBlobWorld(),
+			Secrets: newSecretsWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerSecrets(sc)
+	registerOpeningSteps(sc)
 	registerSharedSteps(sc)
 }
 
@@ -62,6 +66,12 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	}
 	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
 		return assertBlobCallCode(ctx, code)
+	}
+	if w.Secrets != nil && w.Secrets.lastErr != nil {
+		if string(core.CodeOf(w.Secrets.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Secrets.lastErr), code)
+		}
+		return nil
 	}
 	return fmt.Errorf("call succeeded, want %s", code)
 }

@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-04 @level:component
+@wp:WP-L1-04 @level:component
 Feature: Payload encryption
   The payload codec encrypts every payload a runtime records in history (step
   inputs and results, signals, gate payloads), so history holds no plaintext
