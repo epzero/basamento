@@ -146,58 +146,61 @@ func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, e
 
 // Apply records one event against the current superstep. It returns no
 // commands until every node of the superstep has reported; then it merges the
-// updates, routes and starts the next superstep.
+// updates, routes and starts the next superstep. The snapshot argument is never
+// modified; on error the caller's snapshot is unchanged and the returned
+// snapshot is zero.
 func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.Command, error) {
-	if s.Visit == nil {
-		s.Visit = map[string]int{}
+	work := copySnapshot(s)
+	if work.Visit == nil {
+		work.Visit = map[string]int{}
 	}
 	switch ev.Type {
 	case "node_failed":
-		return s, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
+		return work, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
 	case "cancelled":
-		return s, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
+		return work, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
 	case "node_completed", "gate_resolved", "timer_fired":
 	default:
-		return s, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
+		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
 	}
 	index := -1
-	for i := range s.Steps {
-		step := &s.Steps[i]
+	for i := range work.Steps {
+		step := &work.Steps[i]
 		if step.Node == ev.Node && step.Attempt == ev.Attempt && !step.Done {
 			index = i
 			break
 		}
 	}
 	if index < 0 {
-		return s, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
+		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
 	}
-	step := &s.Steps[index]
+	step := &work.Steps[index]
 	step.Done = true
 	switch ev.Type {
 	case "node_completed", "gate_resolved":
 		step.Update = append(json.RawMessage(nil), ev.Payload...)
 	}
-	for i := range s.Steps {
-		if !s.Steps[i].Done {
-			return s, nil, nil
+	for i := range work.Steps {
+		if !work.Steps[i].Done {
+			return work, nil, nil
 		}
 	}
-	next, failing, err := m.barrier(&s)
+	next, failing, err := m.barrier(&work)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
 	if failing != nil {
-		return s, []flow.Command{*failing}, nil
+		return work, []flow.Command{*failing}, nil
 	}
 	if len(next) == 0 {
-		return s, []flow.Command{{Type: "complete"}}, nil
+		return work, []flow.Command{{Type: "complete"}}, nil
 	}
-	s.Seq++
-	commands, err := m.advance(&s, next)
+	work.Seq++
+	commands, err := m.advance(&work, next)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
-	return s, commands, nil
+	return work, commands, nil
 }
 
 // advance expands a set of ready nodes and runs pure supersteps until it has

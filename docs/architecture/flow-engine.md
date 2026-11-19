@@ -91,7 +91,8 @@ node's input must be, per kind, is the machine's (WP-L4-02) and the host's
 validates the IR and compiles its expressions, then `Start` and `Apply` run it.
 
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
-  snapshot and commands. No I/O and no clock.
+  snapshot and commands. The snapshot passed to `Apply` is never modified; on
+  error the host keeps it. No I/O and no clock.
 - **Supersteps**: every ready node runs. Updates merge through reducers **in
   node-id order** at the barrier, so the result does not depend on completion
   order (REQ-FLOW-002). A map node's attempts merge in attempt order after the

@@ -101,7 +101,8 @@ type Step struct {
 // Implementations must be deterministic: the same definition, input and event
 // sequence always yield the same snapshots and commands, independent of the
 // order in which parallel nodes complete (updates merge in canonical node-id
-// order at superstep barriers).
+// order at superstep barriers). The snapshot passed to Apply is never modified;
+// on error the host keeps that snapshot unchanged.
 type Machine interface {
 	Start(input json.RawMessage) (Snapshot, []Command, error)
 	Apply(s Snapshot, ev Event) (Snapshot, []Command, error)
