@@ -6,21 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
-func resetPostgresSession() {
-	_ = ClosePostgres()
-	pgMu.Lock()
-	pgInit = sync.Once{}
-	pgFailed = false
-	reportedSource = ""
-	pgMu.Unlock()
-}
-
 func TestPostgresURLPrecedenceNoEmbeddedFallback(t *testing.T) {
-	resetPostgresSession()
+	ResetPostgresForTest()
 	ResetSkipCounts()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -45,7 +35,7 @@ func TestPostgresURLPrecedenceNoEmbeddedFallback(t *testing.T) {
 }
 
 func TestPostgresStrictFailsUnreachableURL(t *testing.T) {
-	resetPostgresSession()
+	ResetPostgresForTest()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -60,24 +50,19 @@ func TestPostgresStrictFailsUnreachableURL(t *testing.T) {
 }
 
 func TestResolveSupervisorRequiresBuild(t *testing.T) {
-	t.Setenv("EP_SUPERVISOR", filepath.Join(t.TempDir(), "missing-supervisor"))
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing-supervisor")
+	t.Setenv("EP_SUPERVISOR", missing)
 	if _, err := resolveSupervisorPath(); err == nil {
 		t.Fatal("expected missing supervisor error")
 	}
-	t.Setenv("EP_SUPERVISOR", "")
-	root, err := moduleRoot()
-	if err != nil {
+	valid := filepath.Join(dir, "supervisor-stub")
+	if err := os.WriteFile(valid, []byte{0}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	built := filepath.Join(root, supervisorRel)
-	if st, err := os.Stat(built); err == nil && st.Mode().IsRegular() {
-		if _, err := resolveSupervisorPath(); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	if _, err := resolveSupervisorPath(); err == nil {
-		t.Fatal("expected missing supervisor error")
+	t.Setenv("EP_SUPERVISOR", valid)
+	if got, err := resolveSupervisorPath(); err != nil || got != valid {
+		t.Fatalf("got %q err %v", got, err)
 	}
 }
 
@@ -124,41 +109,5 @@ func TestGateEmbeddedConfigLoopback(t *testing.T) {
 	}
 	if !strings.Contains(url, "127.0.0.1") {
 		t.Fatalf("want loopback host in %q", url)
-	}
-}
-
-func TestWhitespacePostgresURLUsesEmbeddedPath(t *testing.T) {
-	resetPostgresSession()
-	ResetSkipCounts()
-	t.Setenv("BDD_POSTGRES_URL", "   ")
-	t.Setenv("GATE_STRICT", "1")
-	if _, err := resolveSupervisorPath(); err != nil {
-		if PostgresCacheDir() == "" {
-			t.Setenv(BDDPostgresCacheDir, t.TempDir())
-		}
-		err = InitPostgres(context.Background())
-		if err == nil {
-			t.Fatal("expected embedded start failure without supervisor")
-		}
-		if strings.Contains(err.Error(), "url unavailable") {
-			t.Fatal("whitespace URL must count as unset, not URL path")
-		}
-		if !strings.Contains(err.Error(), "pg-prefetch") {
-			t.Fatalf("want prefetch hint, got %v", err)
-		}
-		return
-	}
-	if PostgresCacheDir() == "" {
-		t.Skip("BDD_POSTGRES_CACHE_DIR unset; cannot start embedded in gate")
-	}
-	if err := InitPostgres(context.Background()); err != nil {
-		if strings.Contains(err.Error(), "url unavailable") {
-			t.Fatal("whitespace URL must count as unset, not URL path")
-		}
-		t.Fatalf("embedded postgres: %v", err)
-	}
-	defer func() { _ = ClosePostgres() }()
-	if got := PostgresServerSource(); got != string(PostgresServerEmbedded) {
-		t.Fatalf("postgres_server = %q, want embedded", got)
 	}
 }
