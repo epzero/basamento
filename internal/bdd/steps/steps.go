@@ -30,6 +30,7 @@ type World struct {
 	Machine  *machineWorld
 	Host     *hostWorld
 	Temporal *temporalWorld
+	Local    *localWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -51,6 +52,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Machine:  newMachineWorld(),
 			Host:     newHostWorld(),
 			Temporal: newTemporalWorld(),
+			Local:    newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -67,6 +69,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
+	registerLocal(sc)
 	registerTemporal(sc)
 	registerEmbedded(sc)
 	registerSharedSteps(sc)

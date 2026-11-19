@@ -1,9 +1,9 @@
 # Runtimes
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
-**Implemented** (`flow/host`, WP-L4-04); `runtime/temporal` **Implemented**
-(WP-L5-02); the embedded server **Implemented** (WP-L5-03); `runtime/local`
-**Planned** (WP-L5-01). Decisions: ADR-0002, ADR-0011.
+**Implemented** (`flow/host`, WP-L4-04); `runtime/local` **Implemented**
+(WP-L5-01); `runtime/temporal` **Implemented** (WP-L5-02); the embedded
+server **Implemented** (WP-L5-03). Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
 
