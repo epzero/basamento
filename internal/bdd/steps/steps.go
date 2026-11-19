@@ -18,6 +18,7 @@ type World struct {
 	Prompt *promptWorld
 	Expr   *exprWorld
 	Schema *schemaWorld
+	Flow   *flowWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -30,10 +31,12 @@ func Initialize(sc *godog.ScenarioContext) {
 			Prompt: newPromptWorld(),
 			Expr:   &exprWorld{bindings: map[string]any{}},
 			Schema: newSchemaWorld(),
+			Flow:   newFlowWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerPrompt(sc)
 	registerExpr(sc)
 	registerSchema(sc)
+	registerFlowCompile(sc)
 }
