@@ -2,11 +2,13 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -61,6 +63,36 @@ func TestOpenRejectsMaxPayload79(t *testing.T) {
 	_, err = connectAndOpen(ctx, nc, Options{MaxMessageSize: 1}, nil)
 	if err == nil || string(core.CodeOf(err)) != string(core.CodeInvalidArgument) {
 		t.Fatalf("got %v", err)
+	}
+	nc2, err := nats.Connect("", nats.InProcessServer(srv), nats.Timeout(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc2.Close()
+	js, err := jetstream.New(nc2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoBusJetStreamAssets(t, ctx, js)
+}
+
+func assertNoBusJetStreamAssets(t *testing.T, ctx context.Context, js jetstream.JetStream) {
+	t.Helper()
+	_, err := js.Stream(ctx, streamName)
+	if err == nil {
+		t.Fatal("KIT_BUS stream exists after rejected open")
+	}
+	if !errors.Is(err, jetstream.ErrStreamNotFound) {
+		t.Fatalf("stream: %v", err)
+	}
+	for _, bucket := range []string{dataBucket, metaBucket} {
+		_, err := js.KeyValue(ctx, bucket)
+		if err == nil {
+			t.Fatalf("bucket %s exists after rejected open", bucket)
+		}
+		if !errors.Is(err, jetstream.ErrBucketNotFound) {
+			t.Fatalf("bucket %s: %v", bucket, err)
+		}
 	}
 }
 
