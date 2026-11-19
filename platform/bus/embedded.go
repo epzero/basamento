@@ -50,7 +50,7 @@ func OpenEmbedded(ctx context.Context, dataDir string, opts Options) (*Store, er
 	if err := ensureStoreDir(storeDir); err != nil {
 		return nil, err
 	}
-	maxPayload := int32(opts.MaxMessageSize + 512)
+	maxPayload := int32(MinClusterMaxPayloadKV(opts.MaxMessageSize))
 	srv, err := startEmbeddedServer(storeDir, maxPayload)
 	if err != nil {
 		return nil, unavailable()
@@ -67,5 +67,6 @@ func OpenEmbedded(ctx context.Context, dataDir string, opts Options) (*Store, er
 		shutdownEmbedded(srv)
 		return nil, err
 	}
+	st.inprocess = srv
 	return st, nil
 }

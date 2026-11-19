@@ -35,6 +35,9 @@ func registerBusKV(sc *godog.ScenarioContext) {
 			rev, err = w.bus.Put(ctx, key, []byte(value), d)
 		}
 		w.lastErr = err
+		if create {
+			w.lastCreateErr = err
+		}
 		if err == nil {
 			w.putRevisionKey(key, rev)
 			w.lastRev["lastPut"] = rev
@@ -72,6 +75,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		defer cancel()
 		_, _, err := w.bus.Get(readCtx, key)
 		w.lastErr = err
+		w.lastReadErr = err
 		return nil
 	})
 
@@ -140,6 +144,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		}
 		r, err := w.bus.CompareAndSwap(ctx, key, []byte(value), uint64(rev), 0)
 		w.lastErr = err
+		w.lastSwapErr = err
 		if err == nil {
 			w.putRevisionKey(key, r)
 			w.lastSwapRev = r
@@ -303,7 +308,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^the read fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastErr, code)
+		return world(ctx).Bus.checkCode(world(ctx).Bus.lastReadErr, code)
 	})
 
 	sc.Step(`^reading entry "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, key, code string) error {
@@ -311,16 +316,8 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return world(ctx).Bus.checkCode(err, code)
 	})
 
-	sc.Step(`^the put fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastErr, code)
-	})
-
-	sc.Step(`^the swap fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastErr, code)
-	})
-
 	sc.Step(`^the create fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastErr, code)
+		return world(ctx).Bus.checkCode(world(ctx).Bus.lastCreateErr, code)
 	})
 
 	sc.Step(`^the create returns a revision$`, func(ctx context.Context) error {

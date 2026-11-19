@@ -78,7 +78,8 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^message "([^"]*)" is published on subject "([^"]*)"$`, func(ctx context.Context, name, subject string) error {
-		return world(ctx).Bus.publish(ctx, subject, name, nil)
+		_ = world(ctx).Bus.publish(ctx, subject, name, nil)
+		return nil
 	})
 
 	sc.Step(`^a message of (\d+) bytes is published on subject "([^"]*)"$`, func(ctx context.Context, size int, subject string) error {
@@ -86,7 +87,8 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 		for i := range data {
 			data[i] = 'x'
 		}
-		return world(ctx).Bus.publish(ctx, subject, fmt.Sprintf("blob%d", size), data)
+		_ = world(ctx).Bus.publish(ctx, subject, fmt.Sprintf("blob%d", size), data)
+		return nil
 	})
 
 	sc.Step(`^these messages are published in this order:$`, func(ctx context.Context, t *godog.Table) error {
@@ -313,6 +315,21 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 		default:
 		}
 		return nil
+	})
+
+	sc.Step(`^a subscriber to "([^"]*)" from the start receives "([^"]*)" and nothing else$`, func(ctx context.Context, subject, one string) error {
+		w := world(ctx).Bus
+		if err := w.ensureOpen(ctx); err != nil {
+			return err
+		}
+		subCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		ch, err := w.bus.Subscribe(subCtx, subject, 0)
+		if err != nil {
+			return err
+		}
+		sub := &subState{subject: subject, ch: ch}
+		return recvWithSentinel(ctx, w.bus, sub, []string{one})
 	})
 
 	sc.Step(`^a subscriber from the start of "([^"]*)" receives "([^"]*)" and nothing else$`, func(ctx context.Context, subject, one string) error {

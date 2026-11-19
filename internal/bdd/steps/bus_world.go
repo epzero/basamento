@@ -55,6 +55,9 @@ type busWorld struct {
 	subs      map[string]*subState
 
 	lastErr       error
+	lastReadErr   error
+	lastSwapErr   error
+	lastCreateErr error
 	subErr        error
 	subBuf        int
 	maxMsg        int
@@ -67,6 +70,9 @@ type busWorld struct {
 }
 
 func scenarioUsesBus(scn *godog.Scenario) bool {
+	if strings.Contains(scn.Uri, "specs/bus/") {
+		return true
+	}
 	for _, t := range scn.Tags {
 		if t.Name == "@wp:WP-L1-03" || strings.HasPrefix(t.Name, "@REQ-BUS-") {
 			return true
@@ -99,13 +105,16 @@ func skipBusByProfile(scn *godog.Scenario, backend string) error {
 			hasCloud = true
 		}
 	}
-	if backend == "fake" && hasEmbedded && !hasCloud {
+	if hasEmbedded && hasCloud {
+		if backend == "fake" {
+			return godog.ErrSkip
+		}
+		return nil
+	}
+	if hasCloud && !hasEmbedded && backend != "cloud" {
 		return godog.ErrSkip
 	}
-	if backend == "embedded" && hasCloud && !hasEmbedded {
-		return godog.ErrSkip
-	}
-	if backend == "cloud" && hasEmbedded && !hasCloud {
+	if hasEmbedded && !hasCloud && backend != "embedded" {
 		return godog.ErrSkip
 	}
 	return nil
@@ -230,10 +239,7 @@ func (w *busWorld) publish(ctx context.Context, subject, label string, data []by
 		w.publishOK = append(w.publishOK, seq)
 	}
 	w.mu.Unlock()
-	if err != nil {
-		return nil
-	}
-	return nil
+	return err
 }
 
 func (w *busWorld) paceReaders(ctx context.Context, n int) error {

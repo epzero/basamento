@@ -17,9 +17,10 @@
 // [Options.Replicas] used only when this open creates JetStream assets.
 //
 // Publish payloads are capped at [Options.MaxMessageSize]. KV values are capped at
-// [MaxKVValueBytes] (the message limit minus the eight-byte deadline header in
-// each encoded record). The cluster max_payload must be at least
-// MaxMessageSize plus that header or open fails with invalid_argument.
+// [MaxKVValueBytes] (the message limit minus the eight-byte deadline header and
+// JetStream KV wire slack). The cluster max_payload must be at least
+// [MinClusterMaxPayload] (the configured MaxMessageSize) or open fails with
+// invalid_argument before provisioning JetStream assets.
 //
 // Subscriptions replay retained messages up to the last stream sequence at
 // Subscribe time with back-pressure; later live messages use the non-blocking
