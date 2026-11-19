@@ -111,6 +111,11 @@ func (e *Embedding) execute(run *Run, texts []string) {
 		run.Fail(MapError(err))
 		return
 	}
+	if len(vectors) != len(texts) {
+		run.Fail(core.NewError(core.CodeVendor,
+			fmt.Sprintf("embedding count mismatch: got %d vectors for %d texts", len(vectors), len(texts)), nil))
+		return
+	}
 	out := make([][]float32, len(vectors))
 	for i, v := range vectors {
 		out[i] = vector32(v)

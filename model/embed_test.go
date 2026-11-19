@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -166,6 +167,61 @@ func TestNewEmbeddingValidatesItsConfig(t *testing.T) {
 	}
 	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}}); core.CodeOf(err) != core.CodeUnsupported {
 		t.Fatalf("missing descriptor code = %q", core.CodeOf(err))
+	}
+}
+
+func TestEmbeddingRejectsVectorCountMismatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		texts []string
+		vecs  [][]float64
+	}{
+		{name: "fewer vectors", texts: []string{"a", "b"}, vecs: [][]float64{{1}}},
+		{name: "more vectors", texts: []string{"a"}, vecs: [][]float64{{1}, {2}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeEmbedder{vecs: tc.vecs}
+			adapter, _ := NewEmbedding(embedConfig(f))
+			res, err := Invoke(t.Context(), adapter, Request{
+				Model: "sim-embed", Op: CapEmbed, Texts: tc.texts, ClientRef: "ref-mismatch",
+			})
+			if err != nil {
+				t.Fatalf("invoke: %v", err)
+			}
+			if res.State != StateFailed {
+				t.Fatalf("state = %q, want failed", res.State)
+			}
+			var failure Failure
+			if err := json.Unmarshal(res.Error, &failure); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if failure.Code != core.CodeVendor {
+				t.Fatalf("code = %q, want vendor_error", failure.Code)
+			}
+			want := fmt.Sprintf("embedding count mismatch: got %d vectors for %d texts", len(tc.vecs), len(tc.texts))
+			if failure.Message != want {
+				t.Fatalf("message = %q, want %q", failure.Message, want)
+			}
+		})
+	}
+}
+
+func TestEmbeddingAcceptsExactVectorCount(t *testing.T) {
+	f := &fakeEmbedder{vecs: [][]float64{{0.1}, {0.2}, {0.3}}}
+	adapter, _ := NewEmbedding(embedConfig(f))
+	res, err := Invoke(t.Context(), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x", "y", "z"}, ClientRef: "ref-ok",
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if res.State != StateSucceeded {
+		t.Fatalf("state = %q, want succeeded", res.State)
+	}
+	want := [][]float32{{0.1}, {0.2}, {0.3}}
+	if !reflect.DeepEqual(res.Vectors, want) {
+		t.Fatalf("vectors = %v, want %v", res.Vectors, want)
 	}
 }
 
