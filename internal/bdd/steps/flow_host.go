@@ -621,33 +621,6 @@ func (w *hostWorld) registerHandledKind(kind string) {
 
 // --- step definitions ------------------------------------------------------
 
-// advanceScenarioClock drives the one scenario clock. It also advances the
-// recording fake of the flow host, which keeps its own clock, when that host is
-// the one under test.
-func advanceScenarioClock(ctx context.Context, count int, unit, _ string) error {
-	d := time.Duration(count)
-	switch strings.TrimSuffix(unit, "s") {
-	case "millisecond":
-		d *= time.Millisecond
-	case "second":
-		d *= time.Second
-	case "minute":
-		d *= time.Minute
-	case "hour":
-		d *= time.Hour
-	case "day":
-		d *= 24 * time.Hour
-	}
-	world(ctx).Core.clock.Advance(d)
-	w := world(ctx).Host
-	if w == nil || w.dc == nil {
-		return nil
-	}
-	w.dc.advance(d)
-	w.signal()
-	return w.settle()
-}
-
 func registerFlowHost(sc *godog.ScenarioContext) {
 	sc.Step(`^a recording fake durable context$`, func(ctx context.Context) error {
 		w := world(ctx).Host
@@ -1139,8 +1112,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-
-	sc.Step(`^(\d+) (millisecond|milliseconds|second|seconds|minute|minutes|hour|hours|day|days) pass(?:es)?(?: without the gate "([^"]*)" being resolved)?$`, advanceScenarioClock)
 
 	// FLOW-036: pure nodes.
 	sc.Step(`^a flow routing node "([^"]*)" of kind "set" to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)" when "([^"]*)", otherwise to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)"$`,

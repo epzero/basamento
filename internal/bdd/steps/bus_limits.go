@@ -180,7 +180,6 @@ func registerBusLimitsOutcomes(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcome)
 	sc.Step(`^the swap (succeeds|fails with code "[^"]+")$`, matchSwapOutcome)
 	sc.Step(`^reading entry "([^"]*)" returns (\d+) bytes$`, func(ctx context.Context, key string, n int) error {
 		got, _, err := world(ctx).Bus.bus.Get(ctx, key)

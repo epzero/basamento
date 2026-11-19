@@ -1,6 +1,6 @@
 # Streaming: runs outlive connections
 
-Status: **Partly implemented** (WP-L6-01; WP-L6-02 and WP-L7-03 are planned). Decisions: ADR-0005,
+Status: **Partly implemented** (WP-L6-01, WP-L6-02; WP-L6-03, WP-L6-04 and WP-L7-03 are planned). Decisions: ADR-0005,
 ADR-0007. Specs: `specs/streaming`.
 
 ## 1. Two layers
@@ -32,6 +32,15 @@ Wire shapes: `contracts/basamento/stream/v1/stream.proto`, Go mirror in
    however long the message takes.
 4. It then streams live deltas from `dseq + 1`. Ordering by `dseq` means no
    gap and no duplicate (REQ-STRM-003).
+
+The Go implementation is `stream.Broker` (WP-L6-02). `Attach` replays through
+`stream/eventlog` under the run's lock, so a durable event cannot slip between
+the replay and the live stream; it then sends one `Snapshot` per message still
+in flight and follows the deltas. Deltas are numbered per message, kept for the
+message's lifetime, published on `run.<run_id>.deltas` and fanned out to the
+attachments of the server that owns them. `EnforceDetachPolicies` is the clock-
+driven loop that applies `on_detach`; `Heartbeat` is how a producer learns of a
+cancellation, which records the in-flight messages as interrupted.
 
 ## 4. Producers
 

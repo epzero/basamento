@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -34,6 +35,7 @@ type World struct {
 	Local       *localWorld
 	Bus         *busWorld
 	Eventlog    *eventlogWorld
+	Stream      *streamWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -75,6 +77,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowHost(sc)
 	registerLocal(sc)
 	registerEventlog(sc)
+	registerStreamLive(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
 }
@@ -113,6 +116,7 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 // the Secrets port both report an open failure with the same phrase; one
 // handler reads whichever domain opened in the scenario.
 func registerShared(sc *godog.ScenarioContext) {
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, assertPutOutcome)
 	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)
 		var err error
@@ -130,4 +134,22 @@ func registerShared(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+}
+
+// assertPutOutcome reads the phrase the credentials and the bus scenarios share.
+// The credentials store is the one under test only when a credentials scenario
+// opened it; otherwise the bus KV store is.
+func assertPutOutcome(ctx context.Context, tail string) error {
+	w := world(ctx)
+	if w.Credentials != nil {
+		if tail == "succeeds" {
+			if w.Credentials.putErr != nil {
+				return fmt.Errorf("put failed: %w", w.Credentials.putErr)
+			}
+			return nil
+		}
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(w.Credentials.putErr, code)
+	}
+	return matchPutOutcome(ctx, tail)
 }
