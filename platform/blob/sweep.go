@@ -58,11 +58,50 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 	for _, tenant := range tenants {
 		prefix := tenant + "/stage/"
 		err := s.bucket.ListKeysCallback(ctx, prefix, func(k string) error {
-			if !strings.HasSuffix(k, ".slot") {
+			tid := core.TenantID(tenant)
+			if strings.HasSuffix(k, ".slot") {
+				stageKey := strings.TrimSuffix(strings.TrimPrefix(k, prefix), ".slot")
+				if !ValidateStagingKey(stageKey) {
+					return nil
+				}
+				id := tenant + "/" + stageKey
+				if seen[id] {
+					return nil
+				}
+				seen[id] = true
+				meta, ok, rerr := s.readSlot(ctx, tid, stageKey)
+				if rerr != nil {
+					joined = append(joined, rerr)
+					return nil
+				}
+				if !ok || !meta.expired(now) {
+					return nil
+				}
+				if err := s.sweepSlot(ctx, tid, stageKey); err != nil {
+					joined = append(joined, err)
+				}
 				return nil
 			}
-			stageKey := strings.TrimSuffix(strings.TrimPrefix(k, prefix), ".slot")
+			var stageKey string
+			switch {
+			case strings.HasSuffix(k, ".committed"):
+				stageKey = strings.TrimSuffix(strings.TrimPrefix(k, prefix), ".committed")
+			default:
+				stageKey = strings.TrimPrefix(k, prefix)
+			}
 			if !ValidateStagingKey(stageKey) {
+				return nil
+			}
+			mp, merr := slotMetaPath(tid, stageKey)
+			if merr != nil {
+				return nil
+			}
+			metaOK, err := s.bucket.Exists(ctx, mp)
+			if err != nil {
+				joined = append(joined, mapError(err))
+				return nil
+			}
+			if metaOK {
 				return nil
 			}
 			id := tenant + "/" + stageKey
@@ -70,17 +109,8 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 				return nil
 			}
 			seen[id] = true
-			meta, ok, rerr := s.readSlot(ctx, core.TenantID(tenant), stageKey)
-			if rerr != nil {
-				joined = append(joined, rerr)
-				return nil
-			}
-			if !ok || !meta.expired(now) {
-				return nil
-			}
-			if err := s.sweepSlot(ctx, core.TenantID(tenant), stageKey); err != nil {
+			if err := s.sweepSlot(ctx, tid, stageKey); err != nil {
 				joined = append(joined, err)
-				return nil
 			}
 			return nil
 		})
@@ -92,6 +122,44 @@ func (s *Store) sweepAllTenants(ctx context.Context, now time.Time) error {
 }
 
 func (s *Store) sweepSlot(ctx context.Context, tid core.TenantID, stageKey string) error {
+	now := s.clock.Now()
+	unlock, ok := s.stageLocks.tryLock(stageLockKey(tid, stageKey))
+	if !ok {
+		return nil
+	}
+	defer unlock()
+	meta, slotOK, err := s.readSlot(ctx, tid, stageKey)
+	if err != nil {
+		return err
+	}
+	if slotOK && !meta.expired(now) {
+		return nil
+	}
+	if !slotOK {
+		stagePath, err := stageObjectPath(tid, stageKey)
+		if err != nil {
+			return err
+		}
+		cp, err := commitRecordPath(tid, stageKey)
+		if err != nil {
+			return err
+		}
+		stageExists, err := s.bucket.Exists(ctx, stagePath)
+		if err != nil {
+			return mapError(err)
+		}
+		commitExists, err := s.bucket.Exists(ctx, cp)
+		if err != nil {
+			return mapError(err)
+		}
+		if !stageExists && !commitExists {
+			return nil
+		}
+	}
+	return s.deleteSlotContents(ctx, tid, stageKey)
+}
+
+func (s *Store) deleteSlotContents(ctx context.Context, tid core.TenantID, stageKey string) error {
 	stagePath, err := stageObjectPath(tid, stageKey)
 	if err != nil {
 		return err
@@ -110,7 +178,7 @@ func (s *Store) sweepSlot(ctx context.Context, tid core.TenantID, stageKey strin
 	if err != nil {
 		return err
 	}
-	if err := s.bucket.Delete(ctx, mp); err != nil {
+	if err := s.bucket.Delete(ctx, mp); err != nil && !isNotFoundBucketErr(err) {
 		return mapError(err)
 	}
 	return nil
