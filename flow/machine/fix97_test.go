@@ -199,6 +199,205 @@ func TestWithMaxFanoutLowersLimit(t *testing.T) {
 func TestWithMaxFanoutRejectsZero(t *testing.T) {
 	_, err := New(triageFlow(), WithMaxFanout(0))
 	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("error %v, want invalid_argument", err)
+	}
+}
+
+func TestCostGuardFailsOnThirdVisit(t *testing.T) {
+	def := &flow.IR{
+		Name:    "cost-loop",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"work":  {Kind: "task", Guard: &flow.Guard{CostMpts: 100}},
+			"check": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "work"},
+			{From: "work", To: "check"},
+			{From: "check", To: "work"},
+		},
+	}
+	m := requireMachine(t, def)
+	snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workRuns := 0
+	for len(commands) != 1 || commands[0].Type != "fail" {
+		switch commands[0].Node {
+		case "work":
+			workRuns++
+			snapshot, commands, err = m.Apply(snapshot, flow.Event{
+				Type:     "node_completed",
+				Node:     "work",
+				CostMpts: 40,
+			})
+		case "check":
+			snapshot, commands, err = m.Apply(snapshot, flow.Event{Type: "node_completed", Node: "check"})
+		default:
+			t.Fatalf("unexpected commands %+v", commands)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := commandCode(t, commands[0]); code != string(core.CodeBudgetExceeded) {
+		t.Fatalf("code %q, want budget_exceeded", code)
+	}
+	if workRuns != 3 {
+		t.Fatalf("completed work %d times, want 3 before budget_exceeded", workRuns)
+	}
+}
+
+func TestCostMptsValidationLeavesSnapshotUnchanged(t *testing.T) {
+	m := requireMachine(t, triageFlow())
+	held, _, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(held)
+	for _, ev := range []flow.Event{
+		{Type: "node_completed", Node: "verify", CostMpts: -1},
+		{Type: "gate_resolved", Node: "verify", CostMpts: 1},
+	} {
+		_, _, err := m.Apply(held, ev)
+		if core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("event %+v: error %v, want invalid_argument", ev, err)
+		}
+		after, _ := json.Marshal(held)
+		if string(before) != string(after) {
+			t.Fatalf("snapshot changed after %+v", ev)
+		}
+	}
+	held.Cost = math.MaxInt64
+	beforeOverflow, _ := json.Marshal(held)
+	_, _, err = m.Apply(held, flow.Event{Type: "node_completed", Node: "verify", CostMpts: 1})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("overflow error %v, want invalid_argument", err)
+	}
+	afterOverflow, _ := json.Marshal(held)
+	if string(beforeOverflow) != string(afterOverflow) {
+		t.Fatal("snapshot changed after overflow")
+	}
+}
+
+func TestRunCostVisibleInEdgeCondition(t *testing.T) {
+	def := &flow.IR{
+		Name:    "cost-route",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"work": {Kind: "task"},
+			"done": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "work"},
+			{From: "work", To: "done", When: "run.cost >= 50"},
+		},
+	}
+	m := requireMachine(t, def)
+	snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commands[0].Node != "work" {
+		t.Fatal(commands)
+	}
+	snapshot, commands, err = m.Apply(snapshot, flow.Event{
+		Type:     "node_completed",
+		Node:     "work",
+		CostMpts: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0].Node != "done" {
+		t.Fatalf("commands %+v, want done when run.cost >= 50", commands)
+	}
+	if snapshot.Cost != 50 {
+		t.Fatalf("cost %d, want 50", snapshot.Cost)
+	}
+}
+
+func TestCostOrderIndependentInParallel(t *testing.T) {
+	def := &flow.IR{
+		Name:    "cost-parallel",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"fan": {Kind: "parallel"},
+			"a":   {Kind: "task"},
+			"b":   {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "fan"},
+			{From: "fan", To: "a"},
+			{From: "fan", To: "b"},
+		},
+	}
+	m := requireMachine(t, def)
+	run := func(order []string, costs []int64) int64 {
+		snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, node := range order {
+			snapshot, commands, err = m.Apply(snapshot, flow.Event{
+				Type:     "node_completed",
+				Node:     node,
+				CostMpts: costs[i],
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(commands) != 1 || commands[0].Type != "complete" {
+			t.Fatalf("commands %+v, want complete", commands)
+		}
+		return snapshot.Cost
+	}
+	c1 := run([]string{"a", "b"}, []int64{30, 70})
+	c2 := run([]string{"b", "a"}, []int64{70, 30})
+	if c1 != 100 || c2 != 100 {
+		t.Fatalf("costs %d and %d, want 100", c1, c2)
+	}
+}
+
+func TestPropertyCostIndependentOfCompletionOrder(t *testing.T) {
+	def := fanoutFlow(2)
+	def.Nodes["a"] = flow.Node{Kind: "task", Out: "log"}
+	def.Nodes["b"] = flow.Node{Kind: "task", Out: "log"}
+	m := requireMachine(t, def)
+	var first int64
+	orders := [][]string{{"a", "b"}, {"b", "a"}}
+	costs := map[string]int64{"a": 11, "b": 22}
+	for i, order := range orders {
+		snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range order {
+			payload, _ := json.Marshal(name)
+			snapshot, commands, err = m.Apply(snapshot, flow.Event{
+				Type:     "node_completed",
+				Node:     name,
+				Payload:  payload,
+				CostMpts: costs[name],
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if i == 0 {
+			first = snapshot.Cost
+		} else if snapshot.Cost != first {
+			t.Fatalf("order %v cost %d, want %d", order, snapshot.Cost, first)
+		}
+		_ = commands
+	}
+}
+
 func mapFanoutFlow(n int) *flow.IR {
 	items := make([]int, n)
 	for i := range items {

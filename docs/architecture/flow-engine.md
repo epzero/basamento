@@ -112,7 +112,9 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
 - **Guards**: a `while` that does not hold skips the node and ends its branch;
   a visit or cost bound that is reached fails the run with `budget_exceeded`.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
-  (`cost_mpts`). Reserving and settling is the model node's work
+  (`cost_mpts`). The host puts each node's settled milli-points on
+  `Event.cost_mpts` for `node_completed` and `node_failed`; `Apply` adds them
+  to `Snapshot.Cost`. Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.
 - **Large values** are blob references in state.
 

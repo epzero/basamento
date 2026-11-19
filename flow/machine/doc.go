@@ -43,5 +43,6 @@
 // Before a node runs its guard is checked. A guard While condition that does
 // not hold skips the node and ends its branch. A visit or cost bound that is
 // reached fails the run with code budget_exceeded (specs/glossary.md, "Repair
-// guard").
+// guard"). Snapshot cost accumulates from CostMpts on node_completed and
+// node_failed events.
 package machine

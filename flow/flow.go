@@ -59,6 +59,10 @@ type Event struct {
 	Node    string          `json:"node,omitempty"`
 	Attempt int             `json:"attempt,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// CostMpts is milli-points the completed node settled, set by the host from
+	// the model node's settlement (model-layer.md §4); only node_completed and
+	// node_failed may carry it.
+	CostMpts int64 `json:"cost_mpts,omitempty"`
 }
 
 // Command is returned by the Machine for the runtime to execute. Attempt is

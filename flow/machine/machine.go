@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/epzero/basamento/core"
@@ -19,11 +20,11 @@ type Machine struct {
 	def       *flow.IR
 	maxFanout int
 	edges     map[string][]compiledEdge
-	guards   map[string]*expr.Program
-	inputs   map[string]*valueExpr
-	sets     map[string]*valueExpr
-	mapOver  map[string]*valueExpr
-	mapNodes map[string]string
+	guards    map[string]*expr.Program
+	inputs    map[string]*valueExpr
+	sets      map[string]*valueExpr
+	mapOver   map[string]*valueExpr
+	mapNodes  map[string]string
 }
 
 type compiledEdge struct {
@@ -63,10 +64,10 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 		def:       def,
 		maxFanout: DefaultMaxFanout,
 		edges:     make(map[string][]compiledEdge, len(def.Nodes)),
-		guards:   make(map[string]*expr.Program),
-		inputs:   make(map[string]*valueExpr),
-		sets:     make(map[string]*valueExpr),
-		mapOver:  make(map[string]*valueExpr),
+		guards:    make(map[string]*expr.Program),
+		inputs:    make(map[string]*valueExpr),
+		sets:      make(map[string]*valueExpr),
+		mapOver:   make(map[string]*valueExpr),
 		mapNodes:  make(map[string]string),
 	}
 	for _, opt := range opts {
@@ -163,6 +164,9 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 	}
 	switch ev.Type {
 	case "node_failed":
+		if err := applyEventCost(&work, ev); err != nil {
+			return flow.Snapshot{}, nil, err
+		}
 		return work, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
 	case "cancelled":
 		return work, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
@@ -180,6 +184,9 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 	}
 	if index < 0 {
 		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
+	}
+	if err := applyEventCost(&work, ev); err != nil {
+		return flow.Snapshot{}, nil, err
 	}
 	step := &work.Steps[index]
 	step.Done = true
@@ -208,6 +215,25 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 		return flow.Snapshot{}, nil, err
 	}
 	return work, commands, nil
+}
+
+func applyEventCost(s *flow.Snapshot, ev flow.Event) error {
+	if ev.CostMpts == 0 {
+		return nil
+	}
+	switch ev.Type {
+	case "node_completed", "node_failed":
+	default:
+		return invalid(fmt.Sprintf("flow: event type %q cannot carry cost_mpts", ev.Type), map[string]any{"type": ev.Type})
+	}
+	if ev.CostMpts < 0 {
+		return invalid("flow: cost_mpts must not be negative", nil)
+	}
+	if ev.CostMpts > math.MaxInt64-s.Cost {
+		return invalid("flow: cost_mpts overflow", nil)
+	}
+	s.Cost += ev.CostMpts
+	return nil
 }
 
 // advance expands a set of ready nodes and runs pure supersteps until it has
