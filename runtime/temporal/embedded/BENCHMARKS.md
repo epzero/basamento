@@ -61,7 +61,7 @@ go build -o bench-cli ./bench
 6. **Pin `go.temporal.io/api` and `go.temporal.io/sdk` to the versions the
    server release was built with** (from the matching `temporalio/cli` release).
    Newer API modules do not compile against a given server release.
-7. **Go ≥ 1.26.10** is required by server v1.32.
+7. **Go ≥ 1.26.11** is required by server v1.32.
 8. **The server's dependencies are heavy.** That is acceptable in the `kit`
    binary but must stay out of library packages, so this is its own Go module
    (ADR-0002).

@@ -1,7 +1,10 @@
 # Model layer
 
-Status: contract in `model/model.go`; implementation **Planned** (WP-L3-*).
-Decision: ADR-0006. Specs: `specs/models`.
+Status: the invocation contract and adapters in `model` and `model/chat`
+(WP-L3-01), the catalog and price table in `model/catalog` (WP-L3-06) and the
+model node in `model/node` (WP-L3-03) are implemented; structured output and
+middleware (WP-L3-02), provider construction and routing (WP-L3-04) are
+**Planned**. Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
 
@@ -34,6 +37,14 @@ video. It outlives the client connection, streams, can be cancelled, retried
 and recorded. A single contract gives every model the same path for budget,
 cancellation, reattach and replay. Small calls such as embeddings use the
 blocking `Invoke` in process.
+
+`model.Registry` holds what every adapter owes regardless of protocol:
+idempotent starts per client ref, the ordered event log with replay from a
+cursor, the result, cancellation and lookup. The chat adapter (`model/chat`)
+and the embedding adapter (`model.NewEmbedding`) drive eino models;
+`Request.Messages` and `Request.Tools` are JSON of `eino/schema` values, so the
+contract itself stays free of the dependency. Provider construction is
+WP-L3-04's, including the OpenAI-compatible mode MiniMax and GLM use.
 
 ## 2. Descriptors
 
@@ -75,7 +86,9 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    heartbeating step, or through a gate resolved by a webhook.
 5. **Ingest** output files into content-addressed blob storage with provenance
    (REQ-MODEL-008).
-6. **Settle**: charge the actual cost or release the reservation.
+6. **Settle**: charge the actual cost or release the reservation. The cost is
+   the provider's, or else the price formula on the actual usage; a run
+   without a budget is unmetered and reserves nothing.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.
@@ -162,4 +175,7 @@ gets a formula of its own in its descriptor.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run
-time, so the same commit prices the same call the same way.
+time, so the same commit prices the same call the same way. `model/catalog`
+loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
+and tenant layers above it, and keeps the entry and start time of a call in a
+quote until settlement.

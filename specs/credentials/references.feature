@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: Credential references and tenancy
   A caller holds a `cred://<name>` reference, never a value. A reference is
   resolved only for the tenant that stored it: another tenant's credential is

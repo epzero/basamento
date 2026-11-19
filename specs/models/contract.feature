@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-01 @level:component
+@wp:WP-L3-01 @level:component
 Feature: One invocation contract
   Chat, image, video and audio models are called the same way, whether their
   vendor streams one response, is polled, calls back or runs as a command.

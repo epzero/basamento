@@ -1,6 +1,6 @@
 # Blob: content-addressed blob storage
 
-Status: **Planned** (WP-L1-02, WP-L1-08). Design: ADR-0004, ADR-0013, [`design.md`](design.md).
+Status: **Implemented (WP-L1-02); uploads planned (WP-L1-08)**. Design: ADR-0004, ADR-0013, [`design.md`](design.md).
 
 The blob store keeps immutable content (assets, large run payloads, browser
 recordings) under its content key, separately for each tenant. The embedded

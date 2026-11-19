@@ -200,17 +200,6 @@ func registerSQL(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		err := world(ctx).SQL.openErr
-		if err == nil {
-			return fmt.Errorf("opening succeeded, want %s", code)
-		}
-		if string(core.CodeOf(err)) != code {
-			return fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
-		}
-		return nil
-	})
-
 	sc.Step(`^the error is marked retryable$`, func(ctx context.Context) error {
 		err := sqlCallError(ctx)
 		if err == nil {

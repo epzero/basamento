@@ -2,6 +2,7 @@ package bdd
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/cucumber/godog"
@@ -10,10 +11,65 @@ import (
 	"github.com/epzero/basamento/internal/bdd/steps"
 )
 
-// defaultTags excludes scenarios that are not part of the deterministic gate.
+// defaultTags excludes scenarios that are not part of the deterministic gate run.
+// @planned: approved but not implemented yet; @live/@eval/@journey/@slow: nightly lanes;
+// @quarantine: temporarily excluded with an issue and an expiry date (linted).
 const defaultTags = "~@planned && ~@live && ~@eval && ~@journey && ~@slow && ~@quarantine"
 
-// bddGateProfiles returns SQL dialect profiles to run in the component gate.
+// scenarioTags builds godog's tag filter: comma-separated OR of AND chains (&&).
+func scenarioTags() string {
+	tags := defaultTags
+	if extra := os.Getenv("BDD_TAGS"); extra != "" {
+		tags = extra
+	}
+	and := os.Getenv("BDD_TAGS_AND")
+	if and == "" {
+		return tags
+	}
+	tagParts := splitTagCSV(tags)
+	andParts := splitTagCSV(and)
+	if len(tagParts) == 1 && len(andParts) == 1 {
+		return tags + " && " + and
+	}
+	var clauses []string
+	for _, t := range tagParts {
+		for _, a := range andParts {
+			clauses = append(clauses, t+" && "+a)
+		}
+	}
+	return strings.Join(clauses, ",")
+}
+
+func splitTagCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func scenarioPaths() []string {
+	if p := os.Getenv("BDD_PATHS"); p != "" {
+		parts := strings.Split(p, ",")
+		out := make([]string, 0, len(parts))
+		for _, s := range parts {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, "../../"+strings.TrimPrefix(s, "/"))
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return []string{"../../specs"}
+}
+
+// bddGateProfiles returns dialect profiles to run in the component gate.
 func bddGateProfiles(postgresConfigured bool) []string {
 	out := []string{"embedded"}
 	if postgresConfigured {
@@ -49,14 +105,14 @@ func gatePasses(postgresConfigured bool) []bddPass {
 			name:       "default",
 			busBackend: "fake",
 			sqlProfile: "embedded",
-			paths:      []string{"../../specs"},
+			paths:      scenarioPaths(),
 		})
 		if postgresConfigured && (oneBus == "" || oneBus == "fake") {
 			out = append(out, bddPass{
 				name:       "sql-cloud",
 				busBackend: "fake",
 				sqlProfile: "cloud",
-				paths:      []string{"../../specs"},
+				paths:      scenarioPaths(),
 			})
 		}
 	}
@@ -77,10 +133,7 @@ func gatePasses(postgresConfigured bool) []bddPass {
 // TestFeatures runs scenarios in strict mode. BDD_TAGS narrows the run (gate redgreen).
 // BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
-	tags := defaultTags
-	if extra := os.Getenv("BDD_TAGS"); extra != "" {
-		tags = extra
-	}
+	tags := scenarioTags()
 	postgres := sqltest.PostgresConfigured()
 	for _, pass := range gatePasses(postgres) {
 		pass := pass

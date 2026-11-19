@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: Credential audit
   Every resolution of a well-formed reference for a tenant, successful or not,
   records one `platform.AuditEvent` through the `platform.Audit` port naming who

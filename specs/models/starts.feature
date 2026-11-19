@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-03 @runtime:any @level:component
+@wp:WP-L3-03 @runtime:any @level:component
 Feature: Starting paid invocations safely
   Video and image vendors charge per start. A retry must never cause a second
   charge, and an unknown outcome is resolved before anything is sent again.
