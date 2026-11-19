@@ -1,6 +1,7 @@
 # Flow engine
 
-Status: contracts in `flow/flow.go`; implementation **Planned** (WP-L4-*).
+Status: IR and compiler in `flow/ir` and `flow/compile` (WP-L4-01); contracts
+in `flow/flow.go`; machine, builder and host **Planned** (WP-L4-02 … 04).
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -9,6 +10,11 @@ A flow is canonical JSON with `name`, `version`, a state schema with per-key
 reducers, nodes and edges. Its sha256 is its identity, and runs pin it. Authors
 write YAML, use the Go builder, or have an LLM generate the IR; all three
 compile to the same IR.
+
+`flow/ir` decodes that JSON or YAML, rejects unknown fields and duplicate
+keys, produces the RFC 8785 canonical bytes and the content hash, and enforces
+the structural rules below. `flow/compile` type-checks expressions and
+returns the validated canonical form of the same IR.
 
 ```yaml
 flow: codegen.feature
@@ -38,11 +44,17 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 ## 2. Compiler
 
-- Validates the schema, references and node specs.
+- Validates the state schema, reducer keys and reducer forms, node names and
+  kinds, and edge references.
 - Type-checks every CEL expression against the state schema.
 - Requires at least one guarded node on every cycle, which bounds it.
 - Rejects unknown node kinds.
-- Error messages name the node or edge and the expression (REQ-FLOW-003/004).
+- Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
+  those names; a node named `START` or `FAIL`, an edge into `START`, an edge
+  out of `FAIL`, or a flow without exactly one edge from `START` is rejected.
+- Rejects nodes unreachable from `START`.
+- Error messages name the node or edge and the expression (REQ-FLOW-003/004),
+  and all rejections use code `invalid_argument`.
 
 ## 3. Machine
 

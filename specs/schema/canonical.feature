@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-02 @level:component
+@wp:WP-L2-02 @level:component
 Feature: Canonical JSON
   A flow is identified by the hash of its canonical JSON, and recorded runs
   are compared byte by byte. Two texts with the same value must therefore give
