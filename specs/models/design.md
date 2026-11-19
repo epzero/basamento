@@ -430,7 +430,7 @@ Decisions the implementer must follow in `model` (`model/registry.go`). The
 requirements are REQ-MODEL-004, REQ-MODEL-005 and REQ-MODEL-088
 (`requirements.md`, section "Retention"); where this note is silent, the
 requirements win. The scenarios are MODEL-088-01 to MODEL-088-05 in
-`contract.feature`.
+`contract.feature` and MODEL-005-03 in `starts.feature`.
 
 ## R1. What is retained, and why it is bounded
 
@@ -470,7 +470,9 @@ traffic cannot evict another adapter's invocations.
 - **Ended bound.** The registry counts the ended invocations it holds. A sweep
   that finds more than `MaxEnded` evicts from the oldest ended invocation
   first; ended invocations are queued in end-time order, so "oldest ended" is
-  the queue's head.
+  the queue's head. Two invocations that end at the same instant keep the order
+  in which they ended, so an equal-end-time tie never makes an eviction
+  arbitrary.
 - **A running invocation is never evicted**, whatever the clock reads and
   however many ended invocations arrive. It enters the ended queue when it
   ends, at its end time. Running invocations hold memory too, but only as many
@@ -486,8 +488,8 @@ means thousands of live timers at the ended bound, and eviction would then
 depend on scheduler timing rather than on the clock the gate controls. The
 sweep runs inline instead:
 
-- `Begin`, `Lookup`, `Events` and `Result` sweep the registry before they
-  resolve the client ref. `Cancel` does not sweep (see the open questions).
+- `Begin`, `Lookup`, `Events`, `Result` and `Cancel` sweep the registry before
+  they resolve the client ref or its handle.
 - The sweep pops the head of the ended queue while the head's end time plus
   `Retention` is at or before the clock's reading, then pops the head while
   the queue holds more than `MaxEnded` entries. Both loops are the same queue
@@ -496,10 +498,9 @@ sweep runs inline instead:
   sweep runs is appended to the queue and seen by the next sweep. When an
   invocation ends it reports its end time, read on the registry's clock, to the
   registry; the sweep only reads the queue.
-- A registry on which no sweeping method is called evicts nothing, which
-  loses no observable behaviour: the next `Begin`, `Lookup`, `Events` or
-  `Result` sweeps first, and every read of a retained invocation goes through
-  one of them.
+- A registry on which no method is called evicts nothing, which loses no
+  observable behaviour: every method of the contract sweeps first, so no caller
+  can observe an invocation past its window.
 - Determinism: eviction depends only on end times and clock readings, both
   from `core.Clock`, which the gate supplies as `coretest.FakeClock`. A
   scenario advances the fake clock and then calls a sweeping method; no sleep,
@@ -529,8 +530,9 @@ existed", so eviction cannot be used to probe which calls ran.
 The window bounds what the registry remembers; the model node's ordering is
 what makes a retry safe:
 
-1. It derives the client ref from (run, node, attempt), as REQ-MODEL-054 and
-   `docs/architecture/model-layer.md` §4 state.
+1. It derives the call's client ref from the run, the node path, the visit and
+   the input (`docs/architecture/model-layer.md` §4), and the attempt's ref from
+   that call ref and the attempt number (REQ-MODEL-054).
 2. It calls `Begin` (through `Start`) inside one activity attempt, and does not
    split starting from waiting for the result across attempts.
 3. It records the result durably before that activity attempt acknowledges its
@@ -540,9 +542,11 @@ So a late retry of the activity replays the recorded result and never reaches
 `Begin`, whether or not the invocation is still retained. Only an attempt that
 crashed between `Begin` and the durable record can find nothing to replay; its
 retry follows the crash at once, far inside the window, and resolves the
-ambiguous start by lookup (REQ-MODEL-005). The registry cannot enforce this
-ordering and does not pretend to: it forgets on schedule, and the model node's
-durable record is what outlives it.
+ambiguous start by lookup (REQ-MODEL-005) — which finds the invocation when the
+start landed, and opens the gate when it finds nothing, because a forgotten ref
+can no longer prove the start never landed (MODEL-005-03). The registry cannot
+enforce this ordering and does not pretend to: it forgets on schedule, and the
+model node's durable record is what outlives it.
 
 ## R6. Configuration
 
@@ -557,23 +561,16 @@ durable record is what outlives it.
   that means unbounded.
 - Options are validated once, at construction. The constructor returns
   `(*Registry, error)`: a missing clock and an invalid bound are both
-  `core.CodeInvalidArgument` errors naming the offending option. The current
-  one-value `NewRegistry` cannot report either, so its callers move to the
-  checked form in the same change.
+  `core.CodeInvalidArgument` errors naming the offending option. `model` has no
+  registry yet, so it lands with this checked form from the start rather than
+  changing an existing one-valued `NewRegistry`.
 
-## Open questions
+## Settled in review
 
-1. **The constructor's error return (R6).** Two of its refusals (no clock,
-   negative bound) need a channel; this section proposes `(*Registry, error)`
-   and updates the adapters and their simulators. Confirm that over a
-   panicking constructor.
-2. **`Cancel` does not sweep (R3).** The sweep sits in `Begin`, `Lookup`,
-   `Events` and `Result`. A cancel on an invocation past its window but not
-   yet swept still cancels it, while a lookup just before it would find
-   nothing. Sweeping in `Cancel` too would make the two agree; the choice here
-   is not to, because cancel is a state change, not a read. Confirm.
-3. **Defaults and the one-requirement shape.** 1 hour and 10,000 are author
-   choices for the reviewer to weigh. REQ-MODEL-088 states the bounds and
-   their observable consequence as one requirement (the consequence is what
-   eviction means); split it in two if the one-behavior rule in R1 of the
-   review rubric reads it differently.
+1. **The constructor's error return (R6).** The checked `(*Registry, error)` is
+   confirmed over a panicking constructor: a missing clock and an invalid bound
+   are `core.CodeInvalidArgument` errors naming the offending option, and the
+   adapters and their simulators call the checked form.
+2. **Defaults and the one-requirement shape.** 1 hour and 10,000 are confirmed,
+   and REQ-MODEL-088 keeps the bounds and their observable consequence in one
+   requirement.

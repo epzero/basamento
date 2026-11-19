@@ -72,7 +72,7 @@ Feature: One invocation contract
   @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-04
   Scenario: The ended bound evicts the oldest ended invocation
     Given the clock is frozen at "2026-10-01T09:00:00Z"
-    And a registry that keeps at most 2 ended invocations
+    And a registry with a retention window of 1 hour and an ended bound of 2
     And a caller starts an invocation with client ref "ref-1" that ends as succeeded
     And 1 minute passes
     And a caller starts an invocation with client ref "ref-2" that ends as succeeded
