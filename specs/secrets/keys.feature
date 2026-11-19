@@ -174,7 +174,7 @@ Feature: Data keys and master keys
     And encoded payload "p1" is decoded for tenant "acme"
     Then decoding fails with code "internal" and message "keyset of the tenant cannot be unwrapped"
 
-  @security @REQ-SECRET-023 @id:SECRET-023-02
+@planned @security @REQ-SECRET-023 @id:SECRET-023-02
   Scenario: A keyset record in another tenant's slot decrypts neither tenant's payloads
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And payload "g1" with encoding "json/plain" and data "sk-live-77b0e1" encoded for tenant "globex"
@@ -186,7 +186,7 @@ Feature: Data keys and master keys
     When encoded payload "g1" is decoded for tenant "acme"
     Then decoding fails with code "internal" and message "keyset of the tenant cannot be unwrapped"
 
-  @cost @REQ-SECRET-024 @id:SECRET-024-01
+@planned @cost @REQ-SECRET-024 @id:SECRET-024-01
   Scenario: A tampered payload on a cold codec unwraps the keyset once
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And the payload codec restarts with the same keyset store and master key "mk-1"
@@ -195,7 +195,7 @@ Feature: Data keys and master keys
     Then decoding fails with code "invalid_argument" and message "payload cannot be decrypted"
     And the simulated key service received 1 unwrap request since the restart
 
-  @cost @REQ-SECRET-024 @id:SECRET-024-02
+@planned @cost @REQ-SECRET-024 @id:SECRET-024-02
   Scenario: A tampered payload on a warm codec unwraps no keyset
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And the payload codec restarts with the same keyset store and master key "mk-1"
@@ -205,7 +205,7 @@ Feature: Data keys and master keys
     Then decoding fails with code "invalid_argument" and message "payload cannot be decrypted"
     And the payload codec sent 0 unwrap request to the simulated key service for that decode
 
-  @cost @REQ-SECRET-024 @id:SECRET-024-03
+@planned @cost @REQ-SECRET-024 @id:SECRET-024-03
   Scenario: A tampered payload and then 100 valid ones unwrap the keyset once in total
     Given payload "p1" with encoding "json/plain" and data "sk-live-4f9a2c" encoded for tenant "acme"
     And the payload codec restarts with the same keyset store and master key "mk-1"
