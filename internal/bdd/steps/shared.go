@@ -1,3 +1,5 @@
+// Step texts that more than one capability's scenarios use are registered once
+// in this file; EP0-100 will grow a registry to replace ad hoc routing.
 package steps
 
 import (
@@ -5,9 +7,30 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 )
+
+type timeSink interface {
+	timePassed(context.Context, time.Duration) error
+}
+
+func registerSharedPassStep(sc *godog.ScenarioContext) {
+	sc.Step(`^([^"]+) pass$`, stepElapsedPasses)
+}
+
+func stepElapsedPasses(ctx context.Context, elapsed string) error {
+	d, err := parseElapsed(elapsed)
+	if err != nil {
+		return err
+	}
+	world(ctx).Core.clock.Advance(d)
+	if sink, ok := any(world(ctx).Host).(timeSink); ok {
+		return sink.timePassed(ctx, d)
+	}
+	return nil
+}
 
 // runOutcome is what a domain world reports about the run a scenario started,
 // for the sentences that flow machine and flow host scenarios share.
@@ -28,7 +51,7 @@ func pickRunOutcome(ctx context.Context) (runOutcome, error) {
 		}
 	}
 	if w.Host != nil {
-		if ro, ok := w.Host.(runOutcome); ok && ro.started() {
+		if ro, ok := any(w.Host).(runOutcome); ok && ro.started() {
 			return ro, nil
 		}
 	}

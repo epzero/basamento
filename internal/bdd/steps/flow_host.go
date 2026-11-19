@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -278,6 +279,15 @@ func (w *hostWorld) waitDone() error {
 	case <-time.After(5 * time.Second):
 		return fmt.Errorf("run did not finish")
 	}
+}
+
+func (w *hostWorld) timePassed(_ context.Context, duration time.Duration) error {
+	if w.dc == nil || w.done == nil {
+		return nil
+	}
+	w.dc.advance(duration)
+	w.signal()
+	return w.settle()
 }
 
 // --- recording fake DurableContext ----------------------------------------
@@ -617,6 +627,24 @@ func setSpec(key string, value any) string {
 
 func (w *hostWorld) registerHandledKind(kind string) {
 	w.ensureHandler(kind)
+}
+
+// replayFlowStep is the FLOW-037-01 declaration; flow_builder's catch-all routes
+// matching text here so godog sees one step definition (EP0-100 replaces this).
+var replayFlowStep = regexp.MustCompile(`^a flow with node "([^"]*)" of kind "tool" with node spec (\{.*\}), then node "([^"]*)" of kind "wait" for "([^"]*)", then node "([^"]*)" of kind "agent" whose handler calls step "([^"]*)"$`)
+
+func declareReplayFlow(ctx context.Context, first, firstSpec, second, duration, third, step string) error {
+	w := world(ctx).Host
+	w.newFlow("replay", 1)
+	w.addNode(first, "tool", firstSpec, "", "")
+	w.addNode(second, "wait", fmt.Sprintf(`{"duration":%q}`, duration), "", "")
+	w.addNode(third, "agent", "", "", "")
+	w.addEdge(ir.Start, first, "")
+	w.addEdge(first, second, "")
+	w.addEdge(second, third, "")
+	w.registerHandledKind("agent")
+	w.behavior(third).step = step
+	return nil
 }
 
 // --- step definitions ------------------------------------------------------
@@ -1113,7 +1141,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?: without the gate "([^"]*)" being resolved)?$`,
+	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass without the gate "([^"]*)" being resolved$`,
 		func(ctx context.Context, count int, unit, gate string) error {
 			w := world(ctx).Host
 			var duration time.Duration
@@ -1125,6 +1153,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			case "hour":
 				duration = time.Duration(count) * time.Hour
 			}
+			_ = gate
 			w.dc.advance(duration)
 			w.signal()
 			return w.settle()
@@ -1162,21 +1191,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	// FLOW-037: replay.
-	sc.Step(`^a flow with node "([^"]*)" of kind "tool" with node spec (\{.*\}), then node "([^"]*)" of kind "wait" for "([^"]*)", then node "([^"]*)" of kind "agent" whose handler calls step "([^"]*)"$`,
-		func(ctx context.Context, first, firstSpec, second, duration, third, step string) error {
-			w := world(ctx).Host
-			w.newFlow("replay", 1)
-			w.addNode(first, "tool", firstSpec, "", "")
-			w.addNode(second, "wait", fmt.Sprintf(`{"duration":%q}`, duration), "", "")
-			w.addNode(third, "agent", "", "", "")
-			w.addEdge(ir.Start, first, "")
-			w.addEdge(first, second, "")
-			w.addEdge(second, third, "")
-			w.registerHandledKind("agent")
-			w.behavior(third).step = step
-			return nil
-		})
+	// FLOW-037: replay — declareReplayFlow is called from flow_builder's catch-all.
 
 	sc.Step(`^a first run recorded tool "([^"]*)" failing with code "([^"]*)" (\d+) times then returning (\{.*\}), the (\S+) timer of "([^"]*)" firing, and step "([^"]*)" returning (\{.*\})$`,
 		func(ctx context.Context, tool, code string, attempts int, toolResult, duration, timerNode, step, stepResult string) error {
