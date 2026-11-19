@@ -60,8 +60,9 @@ CREATE TABLE credentials (
 );
 ```
 
-`BYTEA` is the portable spelling of the binary column: SQLite keeps the
-affinity as `BLOB`, and the SQL store binds `[]byte` to either.
+`BYTEA` is the portable spelling of the binary column. SQLite gives a
+`BYTEA` column `NUMERIC` affinity, but BLOB values are stored and returned
+unchanged; the SQL store binds `[]byte` to either dialect.
 
 The store keeps no decrypted value and no ciphertext after a call returns.
 Each resolution reads the row again, so a replacement is seen at once
