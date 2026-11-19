@@ -27,6 +27,7 @@ type World struct {
 	Schema      *schemaWorld
 	Model       *modelWorld
 	Catalog     *catalogWorld
+	Node        *nodeWorld
 	Flow        *flowWorld
 	Machine     *machineWorld
 	Host        *hostWorld
@@ -47,6 +48,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Schema:  newSchemaWorld(),
 			Model:   newModelWorld(),
 			Catalog: newCatalogWorld(),
+			Node:    newNodeWorld(),
 			Flow:    newFlowWorld(),
 			Machine: newMachineWorld(),
 			Host:    newHostWorld(),
@@ -63,6 +65,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSchema(sc)
 	registerModel(sc)
 	registerCatalog(sc)
+	registerNode(sc)
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)

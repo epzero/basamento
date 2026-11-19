@@ -1321,6 +1321,11 @@ func registerLocal(sc *godog.ScenarioContext) {
 		return exec.wait("the run to wait on its timer", func() bool { return exec.waiting })
 	})
 	sc.Step(`^the run is cancelled$`, func(ctx context.Context) error {
+		// The model node scenarios cancel their own one-node run; the runtime
+		// scenarios cancel the local world's current run.
+		if n := world(ctx).Node; n.active() {
+			return n.cancelRun()
+		}
 		w := localStepWorld(ctx)
 		return w.runtime(ctx).Cancel(w.ctx(string(w.current.TenantID)), w.current, "")
 	})
