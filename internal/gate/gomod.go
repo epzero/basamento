@@ -107,8 +107,7 @@ func PatchOnlyGoModBump(base, head []byte) bool {
 	return headParsed.ver.Patch > baseParsed.ver.Patch
 }
 
-// CheckSameGoModLine returns errors when tracked go.mod files disagree on the
-// go directive or any line does not parse (ADR-0014).
+// trackedGoModFiles are the tracked go.mod paths, unquoted.
 func trackedGoModFiles(root string) ([]string, error) {
 	paths, err := gitPathsUnquoted(root, "ls-files", "-z")
 	if err != nil {
@@ -146,8 +145,8 @@ func ModuleRoots(root string) ([]string, error) {
 	return roots, nil
 }
 
-// VulnScopeErrors reports tracked go.mod trees missing from moduleRoots.
-func VulnScopeErrors(root string, moduleRoots []string) ([]string, error) {
+// vulnScopeErrors reports tracked go.mod trees missing from moduleRoots.
+func vulnScopeErrors(root string, moduleRoots []string) ([]string, error) {
 	mods, err := trackedGoModFiles(root)
 	if err != nil {
 		return nil, err
@@ -169,6 +168,8 @@ func VulnScopeErrors(root string, moduleRoots []string) ([]string, error) {
 	return errs, nil
 }
 
+// CheckSameGoModLine returns errors when tracked go.mod files disagree on the
+// go directive or any line does not parse (ADR-0014).
 func CheckSameGoModLine(root string) ([]string, error) {
 	mods, err := trackedGoModFiles(root)
 	if err != nil {
