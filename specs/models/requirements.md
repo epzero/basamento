@@ -278,3 +278,18 @@ The default token formula shall count every reasoning token of the call exactly 
 
 ### REQ-MODEL-082 — Usage with more cached than input tokens fails pricing
 If a call's usage reports more cached tokens than input tokens, then the price table shall fail pricing the call with code `invalid_argument`.
+
+### REQ-MODEL-083 — A rate condition that errors fails pricing
+If a rate rule's `when` condition fails to evaluate or yields a value that is not a boolean, then the price table shall fail pricing the call with code `invalid_argument` and shall not try a later rate rule.
+
+### REQ-MODEL-084 — Rates are never negative
+When any layer of the price table, or the shipped snapshot as it loads, sets a rate below zero, the price table shall refuse it with code `invalid_argument`, naming the model id and the rate key.
+
+### REQ-MODEL-085 — Usage counts are never negative
+If a call's usage reports a negative input, output, cached or reasoning token count, then the price table shall fail pricing the call with code `invalid_argument` before it evaluates any formula, naming the model id and the offending count.
+
+### REQ-MODEL-086 — A priced amount is never negative
+If a price formula returns an amount below zero, then the price table shall fail pricing the call with code `invalid_argument`; an amount of zero shall be a valid price.
+
+### REQ-MODEL-087 — A model's own formula returns whole milli-points
+If a model's own formula returns a floating-point amount that is not an exact integer of magnitude at most 2^53, then the price table shall fail pricing the call with code `invalid_argument`, naming the model id.

@@ -1,7 +1,8 @@
 # Flow engine
 
-Status: IR and compiler in `flow/ir` and `flow/compile` (WP-L4-01); contracts
-in `flow/flow.go`; machine, builder and host **Planned** (WP-L4-02 … 04).
+Status: IR, compiler and Go builder in `flow/ir`, `flow/compile` and
+`flow/builder` (WP-L4-01, WP-L4-03); contracts
+in `flow/flow.go`; machine and host **Planned** (WP-L4-02, WP-L4-04).
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -15,7 +16,9 @@ compile to the same IR.
 a stream carrying more than one document, produces the RFC 8785 canonical bytes
 and the content hash, and enforces the structural rules below. `flow/compile`
 type-checks expressions, enforces the definition limits and returns the
-validated canonical form of the same IR.
+validated canonical form of the same IR. `flow/builder` writes the same IR from
+typed Go declarations; it checks only what those declarations can tell it and
+leaves kinds, spec shapes, expressions and cycles to the compiler.
 
 ```yaml
 name: codegen.feature
