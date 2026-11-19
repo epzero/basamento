@@ -1113,21 +1113,22 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?: without the gate "([^"]*)" being resolved)?$`,
-		func(ctx context.Context, count int, unit, gate string) error {
-			w := world(ctx).Host
-			var duration time.Duration
-			switch strings.TrimSuffix(unit, "s") {
-			case "second":
-				duration = time.Duration(count) * time.Second
-			case "minute":
-				duration = time.Duration(count) * time.Minute
-			case "hour":
-				duration = time.Duration(count) * time.Hour
+	sc.Step(`^(.+) pass(?: without the gate "([^"]*)" being resolved)?$`,
+		func(ctx context.Context, elapsed, gate string) error {
+			duration, err := parseElapsed(elapsed)
+			if err != nil {
+				return err
 			}
-			w.dc.advance(duration)
-			w.signal()
-			return w.settle()
+			w := world(ctx)
+			if w.Core != nil && w.Core.clock != nil {
+				w.Core.clock.Advance(duration)
+			}
+			if w.Host != nil && w.Host.dc != nil {
+				w.Host.dc.advance(duration)
+				w.Host.signal()
+				return w.Host.settle()
+			}
+			return nil
 		})
 
 	// FLOW-036: pure nodes.
