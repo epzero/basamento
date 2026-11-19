@@ -19,6 +19,7 @@ type worldKey struct{}
 type World struct {
 	Core   *coreWorld
 	Schema *schemaWorld
+	Expr   *exprWorld
 	SQL    *sqlWorld
 	Prompt *promptWorld
 	Blob   *blobWorld
@@ -32,6 +33,7 @@ func Initialize(sc *godog.ScenarioContext) {
 		return context.WithValue(ctx, worldKey{}, &World{
 			Core:   newCoreWorld(),
 			Schema: newSchemaWorld(),
+			Expr:   &exprWorld{bindings: map[string]any{}},
 			SQL:    newSQLWorld(),
 			Prompt: newPromptWorld(),
 			Blob:   newBlobWorld(),
@@ -39,6 +41,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	})
 	registerCore(sc)
 	registerSchema(sc)
+	registerExpr(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)

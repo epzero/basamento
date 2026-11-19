@@ -1,6 +1,6 @@
 # Expressions: CEL and JSON mappings
 
-Status: **Planned** (WP-L2-01). Design: ADR-0003, [`design.md`](design.md),
+Status: **Implemented** (WP-L2-01, `expr`). Design: ADR-0003, [`design.md`](design.md),
 `docs/architecture/flow-engine.md`, `docs/architecture/model-layer.md` §7.
 
 Package `expr` gives every other layer one way to write conditions and

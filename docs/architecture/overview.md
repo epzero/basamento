@@ -178,5 +178,5 @@ We reuse rather than reinvent. Notable choices:
   and cannot be stepped from outside.
 - **Google ADK Go** and Temporal's ADK integration: a reference for workflow
   agents. Our agent loop stays runtime-neutral (ADR-0002).
-- **cel-go** (`github.com/cel-expr/cel-go`), **gojq**, **godog**, **MCP Go SDK**,
+- **cel-go** (`cel.dev/cel-go`), **gojq**, **godog**, **MCP Go SDK**,
   **connect-go**, **gocloud.dev**, **nats-server**.
