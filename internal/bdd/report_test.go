@@ -35,3 +35,22 @@ func TestWriteBDDReportSecretFree(t *testing.T) {
 		t.Fatal("missing outcome")
 	}
 }
+
+func TestWriteBDDReportMarksFailure(t *testing.T) {
+	sqltest.ResetSkipCounts()
+	root := t.TempDir()
+	if err := writeBDDReportAt(root, true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".gate", "bdd.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep map[string]any
+	if err := json.Unmarshal(b, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep["outcome"] != "fail" {
+		t.Fatalf("outcome %v", rep["outcome"])
+	}
+}

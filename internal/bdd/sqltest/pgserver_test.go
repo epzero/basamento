@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -100,5 +101,45 @@ func TestModuleRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(root + "/go.mod"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGateDownloadProviderOfflineUnderStrict(t *testing.T) {
+	t.Setenv("GATE_STRICT", "1")
+	p := gateDownloadProvider()
+	if !p.Offline {
+		t.Fatal("strict gate must prefetch bundles offline")
+	}
+	t.Setenv("GATE_STRICT", "")
+	if gateDownloadProvider().Offline {
+		t.Fatal("non-strict may download on first start")
+	}
+}
+
+func TestGateEmbeddedConfigLoopback(t *testing.T) {
+	cfg := gateEmbeddedConfig(filepath.Join(t.TempDir(), "supervisor-stub"))
+	url := cfg.GetConnectionURL()
+	if strings.Contains(url, ":5432/") {
+		t.Fatalf("must not bind default 5432, got %q", url)
+	}
+	if !strings.Contains(url, "127.0.0.1") {
+		t.Fatalf("want loopback host in %q", url)
+	}
+}
+
+func TestWhitespacePostgresURLUsesEmbeddedPath(t *testing.T) {
+	resetPostgresSession()
+	ResetSkipCounts()
+	t.Setenv("BDD_POSTGRES_URL", "   ")
+	t.Setenv("GATE_STRICT", "1")
+	err := InitPostgres(context.Background())
+	if err == nil {
+		t.Fatal("expected embedded start failure without supervisor")
+	}
+	if strings.Contains(err.Error(), "url unavailable") {
+		t.Fatal("whitespace URL must count as unset, not URL path")
+	}
+	if !strings.Contains(err.Error(), "pg-prefetch") {
+		t.Fatalf("want prefetch hint, got %v", err)
 	}
 }

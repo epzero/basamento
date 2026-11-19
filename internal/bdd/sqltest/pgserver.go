@@ -122,23 +122,33 @@ func probeAdminURL(ctx context.Context, admin string) error {
 	return conn.PingContext(ctx)
 }
 
-func startEmbedded(ctx context.Context) (string, *embeddedpostgres.EmbeddedPostgres, error) {
-	supervisor, err := resolveSupervisorPath()
-	if err != nil {
-		return "", nil, err
-	}
+func gateDownloadProvider() embeddedpostgres.DownloadProvider {
 	cache := PostgresCacheDir()
-	provider := embeddedpostgres.DownloadProvider{CacheDir: cache, Offline: GateStrict()}
+	return embeddedpostgres.DownloadProvider{CacheDir: cache, Offline: GateStrict()}
+}
+
+// gateEmbeddedConfig builds loopback embedded settings for the gate (ADR-0015).
+func gateEmbeddedConfig(supervisor string) embeddedpostgres.Config {
+	cache := PostgresCacheDir()
 	cfg := embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.V16).
 		Port(0).
 		Password(processPostgresPassword()).
 		Storage(embeddedpostgres.Storage{CacheDir: cache}).
-		Provider(provider).
+		Provider(gateDownloadProvider()).
 		Supervisor(supervisor)
 	if os.Geteuid() == 0 {
 		cfg = cfg.RunAs(embeddedpostgres.User{UID: 1000, GID: 1000})
 	}
+	return cfg
+}
+
+func startEmbedded(ctx context.Context) (string, *embeddedpostgres.EmbeddedPostgres, error) {
+	supervisor, err := resolveSupervisorPath()
+	if err != nil {
+		return "", nil, err
+	}
+	cfg := gateEmbeddedConfig(supervisor)
 	emb := embeddedpostgres.NewDatabase(cfg)
 	if err := emb.StartContext(ctx); err != nil {
 		return "", nil, err
