@@ -29,7 +29,7 @@ Capabilities:
 | [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
 | [`runtime`](runtime/requirements.md) | Planned (WP-L5-*). |
 | [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
-| [`models`](models/requirements.md) | Planned (WP-L3-*). |
+| [`models`](models/requirements.md) | Partly implemented (WP-L3-01, WP-L3-03, WP-L3-06); planned (WP-L3-02, WP-L3-04, workers). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`secrets`](secrets/requirements.md) | Implemented (WP-L1-04). |
