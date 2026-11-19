@@ -106,9 +106,9 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
   array and starts the node named by `spec.node` once per element, carrying the
   element as input and the one-based index as the attempt, up to
-  `DefaultMaxFanout` (10 000; the host may lower it via `WithMaxFanout`).
-  Every other kind
-  becomes a `run_node`, `await_gate` or `start_timer` command for the host.
+  `DefaultMaxFanout` (10 000; the host may lower it via `WithMaxFanout`). Every
+  other kind becomes a `run_node`, `await_gate` or `start_timer` command for the
+  host.
 - **Guards**: a `while` that does not hold skips the node and ends its branch;
   a visit or cost bound that is reached fails the run with `budget_exceeded`.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards

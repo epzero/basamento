@@ -129,7 +129,8 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 
 // Start begins a run with input and returns the first superstep's commands.
 // The run's state is input, with the definition's defaults for keys input does
-// not set. A run whose entry edge reaches FAIL completes at once.
+// not set. A run whose entry edge reaches FAIL completes at once. On error the
+// returned snapshot is zero.
 func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, error) {
 	state, err := m.initialState(input)
 	if err != nil {
@@ -147,7 +148,7 @@ func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, e
 	}
 	commands, err := m.advance(&s, targets)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
 	return s, commands, nil
 }
@@ -163,16 +164,19 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 		work.Visit = map[string]int{}
 	}
 	switch ev.Type {
+	case "node_failed", "cancelled", "node_completed", "gate_resolved", "timer_fired":
+	default:
+		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
+	}
+	if err := validateCostMpts(work.Cost, ev); err != nil {
+		return flow.Snapshot{}, nil, err
+	}
+	switch ev.Type {
 	case "node_failed":
-		if err := applyEventCost(&work, ev); err != nil {
-			return flow.Snapshot{}, nil, err
-		}
+		accrueCostMpts(&work, ev)
 		return work, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
 	case "cancelled":
 		return work, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
-	case "node_completed", "gate_resolved", "timer_fired":
-	default:
-		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
 	}
 	index := -1
 	for i := range work.Steps {
@@ -185,8 +189,8 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 	if index < 0 {
 		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
 	}
-	if err := applyEventCost(&work, ev); err != nil {
-		return flow.Snapshot{}, nil, err
+	if ev.Type == "node_completed" {
+		accrueCostMpts(&work, ev)
 	}
 	step := &work.Steps[index]
 	step.Done = true
@@ -217,7 +221,7 @@ func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.C
 	return work, commands, nil
 }
 
-func applyEventCost(s *flow.Snapshot, ev flow.Event) error {
+func validateCostMpts(current int64, ev flow.Event) error {
 	if ev.CostMpts == 0 {
 		return nil
 	}
@@ -229,11 +233,17 @@ func applyEventCost(s *flow.Snapshot, ev flow.Event) error {
 	if ev.CostMpts < 0 {
 		return invalid("flow: cost_mpts must not be negative", nil)
 	}
-	if ev.CostMpts > math.MaxInt64-s.Cost {
+	if ev.CostMpts > math.MaxInt64-current {
 		return invalid("flow: cost_mpts overflow", nil)
 	}
-	s.Cost += ev.CostMpts
 	return nil
+}
+
+func accrueCostMpts(s *flow.Snapshot, ev flow.Event) {
+	if ev.CostMpts == 0 {
+		return
+	}
+	s.Cost += ev.CostMpts
 }
 
 // advance expands a set of ready nodes and runs pure supersteps until it has

@@ -353,12 +353,15 @@ func TestCompletionOrderDoesNotChangeTheSnapshot(t *testing.T) {
 }
 
 // TestPropertyCompletionOrderIndependence checks random fan-outs and random
-// completion orders: the merged state is always the canonical node-id order.
+// completion orders: the merged state is always the canonical node-id order and
+// total cost_mpts is independent of completion order.
 func TestPropertyCompletionOrderIndependence(t *testing.T) {
 	for n := 2; n <= 6; n++ {
 		want := make([]string, n)
+		var wantCost int64
 		for i := range want {
 			want[i] = nodeName(i)
+			wantCost += int64((i + 1) * 10)
 		}
 		rng := rand.New(rand.NewSource(int64(n)))
 		for round := 0; round < 50; round++ {
@@ -376,6 +379,9 @@ func TestPropertyCompletionOrderIndependence(t *testing.T) {
 			}
 			if strings.Join(state.Log, ",") != strings.Join(want, ",") {
 				t.Fatalf("n=%d order %v: log %v, want %v", n, names, state.Log, want)
+			}
+			if snapshot.Cost != wantCost {
+				t.Fatalf("n=%d order %v: cost %d, want %d", n, names, snapshot.Cost, wantCost)
 			}
 		}
 	}
@@ -518,10 +524,12 @@ func runFanout(t *testing.T, n int, order []string) flow.Snapshot {
 	}
 	for _, name := range order {
 		payload, _ := json.Marshal(name)
+		cost := int64(name[0]-'a'+1) * 10
 		snapshot, commands, err = m.Apply(snapshot, flow.Event{
-			Type:    "node_completed",
-			Node:    name,
-			Payload: payload,
+			Type:     "node_completed",
+			Node:     name,
+			Payload:  payload,
+			CostMpts: cost,
 		})
 		if err != nil {
 			t.Fatal(err)
