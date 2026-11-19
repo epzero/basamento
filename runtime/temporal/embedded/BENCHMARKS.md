@@ -4,7 +4,7 @@ Measurements of the in-process Temporal server used by the embedded profile
 (single-user daily use), and the reasons behind its settings. Re-run them after
 any change to the server version or the settings.
 
-Environment: Linux x86-64, 4 vCPU, Go 1.26.11, `go.temporal.io/server` v1.32.2,
+Environment: Linux x86-64, 4 vCPU, Go 1.26.10 (measured), `go.temporal.io/server` v1.32.2,
 `go.temporal.io/sdk` v1.47.0, `go.temporal.io/api` v1.63.5, `modernc.org/sqlite`
 v1.51.0, built with `CGO_ENABLED=0`.
 
