@@ -17,6 +17,8 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+const minSignKeyLen = 32
+
 // Open selects an implementation from the location URL (REQ-BLOB-018).
 //
 // For file:// locations, temporary write files are created next to the final
@@ -24,8 +26,6 @@ import (
 // other than the system temp directory. A process killed mid-write can leave
 // stranded "<object>.<hex>.tmp" files with partial data; an operator may
 // remove them when no write is in flight.
-const minSignKeyLen = 32
-
 func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, error) {
 	if len(opts.SignKey) > 0 && len(opts.SignKey) < minSignKeyLen {
 		return nil, nil, core.NewError(core.CodeInvalidArgument, "blob SignKey must be at least 32 bytes", nil)
