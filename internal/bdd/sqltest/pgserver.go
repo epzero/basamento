@@ -28,7 +28,6 @@ var (
 	pgMu           sync.Mutex
 	pgAdmin        string
 	pgReady        bool
-	pgFailed       bool
 	pgEmb          *embeddedpostgres.EmbeddedPostgres
 	reportedSource string
 )
@@ -47,7 +46,6 @@ func ResetPostgresForTest() {
 	_ = ClosePostgres()
 	pgMu.Lock()
 	pgInit = sync.Once{}
-	pgFailed = false
 	reportedSource = ""
 	pgMu.Unlock()
 }
@@ -84,7 +82,6 @@ func initPostgres(ctx context.Context) error {
 	if PostgresResolveSource() == PostgresServerURL {
 		envURL := strings.TrimSpace(os.Getenv("BDD_POSTGRES_URL"))
 		if err := probeAdminURL(ctx, envURL); err != nil {
-			pgFailed = true
 			if GateStrict() {
 				return err
 			}
@@ -99,7 +96,6 @@ func initPostgres(ctx context.Context) error {
 	}
 	admin, emb, err := startEmbedded(ctx)
 	if err != nil {
-		pgFailed = true
 		if GateStrict() {
 			return newEmbeddedInitError(err)
 		}
