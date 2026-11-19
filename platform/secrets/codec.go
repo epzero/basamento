@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -34,14 +33,21 @@ type Codec struct {
 }
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
-// are previous keys still able to unwrap stored keysets. Duplicate MasterKeyID
-// values are refused with invalid_argument.
+// are previous keys still able to unwrap stored keysets. A nil store, an empty
+// keys slice, a nil KeyService, or duplicate MasterKeyID values are refused with
+// invalid_argument.
 func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, error) {
+	if store == nil {
+		return nil, errInvalidArgument("keyset store is required")
+	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("master key is required")
+		return nil, errInvalidArgument("master key is required")
 	}
 	seen := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
+		if k == nil {
+			return nil, errInvalidArgument("master key is required")
+		}
 		id := k.MasterKeyID()
 		if _, dup := seen[id]; dup {
 			return nil, errInvalidArgument("duplicate master key id in codec configuration")

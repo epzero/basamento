@@ -103,8 +103,7 @@ func (s *simKeyService) MasterKeyID() string { return s.name }
 
 func (s *simKeyService) Close() error { return nil }
 
-func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byte) ([]byte, error) {
-	_ = ctx
+func (s *simKeyService) Wrap(_ context.Context, tenant string, plaintext []byte) ([]byte, error) {
 	if err := s.reg.checkAvailable(true, tenant); err != nil {
 		return nil, err
 	}
@@ -112,8 +111,7 @@ func (s *simKeyService) Wrap(ctx context.Context, tenant string, plaintext []byt
 	return s.encrypt(tenant, plaintext)
 }
 
-func (s *simKeyService) Unwrap(ctx context.Context, tenant string, ciphertext []byte) ([]byte, error) {
-	_ = ctx
+func (s *simKeyService) Unwrap(_ context.Context, tenant string, ciphertext []byte) ([]byte, error) {
 	if err := s.reg.checkAvailable(false, tenant); err != nil {
 		return nil, err
 	}
