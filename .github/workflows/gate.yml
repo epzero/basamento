@@ -19,6 +19,7 @@ jobs:
     env:
       GATE_STRICT: "1"
       GOTOOLCHAIN: local
+      BDD_POSTGRES_CACHE_DIR: ${{ runner.temp }}/embedded-postgres-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +28,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Postgres bundle cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/embedded-postgres-cache
+          key: embedded-postgres-v2.0.1-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            embedded-postgres-v2.0.1-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install gate tools
         run: |
@@ -45,6 +54,9 @@ jobs:
           else
             echo "ref=" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Prefetch Postgres bundles
+        run: make pg-prefetch
 
       - name: make gate
         run: make gate BASE="${{ steps.base.outputs.ref }}"
