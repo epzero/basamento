@@ -24,8 +24,8 @@ context, as `Record` does not trust the event over the context, and it fails
 closed without a tenant.
 
 Enforcing the context against the field also fails closed when the context has
-no tenant; an empty context id counts as no tenant, not a tenant that matches
-an empty field. On the local runtime every call without a context tenant is
+no tenant; an empty or otherwise invalid context id counts as no tenant
+(REQ-CORE-005, REQ-CORE-006), not a tenant that matches an empty field. On the local runtime every call without a context tenant is
 rejected with `invalid_argument` (`REQ-RT-044`). On the temporal runtime,
 `Describe`, `Cancel`, `Resolve` and `List` are rejected the same way
 (`REQ-RT-045`), and `Start` is covered by `REQ-RT-040`.
@@ -188,7 +188,8 @@ The workflow and the activity worker share one context-aware data converter
 that composes the encryption codec of WP-L1-04 and the blob claim-check codec
 over WP-L1-02. The tenant of the run or activity is read from the context
 through `core.TenantFrom(ctx)` set by `core.WithTenant(ctx, id)`, as
-`specs/secrets/design.md` §1 requires; an empty id counts as no tenant.
+`specs/secrets/design.md` §1 requires; an empty or otherwise invalid id
+counts as no tenant (REQ-CORE-005, REQ-CORE-006).
 The codec composes them in this order:
 
 1. **On encode** (`REQ-RT-028`, `REQ-RT-031`): the payload is first encrypted
