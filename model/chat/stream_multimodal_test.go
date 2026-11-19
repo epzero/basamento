@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -56,14 +57,8 @@ func TestStreamMultimodalPayloadLimitEndsInvocation(t *testing.T) {
 			},
 		},
 		{
-			name: "legacy multi content image url",
-			chunk: &schema.Message{
-				Role: schema.Assistant,
-				MultiContent: []schema.ChatMessagePart{{
-					Type:     schema.ChatMessagePartTypeImageURL,
-					ImageURL: &schema.ChatMessageImageURL{URL: url},
-				}},
-			},
+			name:  "legacy multi content image url",
+			chunk: legacyMultiContentImageChunk(t, url),
 		},
 	}
 	for _, tc := range cases {
@@ -114,4 +109,14 @@ func TestSmallMultimodalStreamSucceeds(t *testing.T) {
 	if res.State != model.StateSucceeded {
 		t.Fatalf("state = %q, want succeeded", res.State)
 	}
+}
+
+func legacyMultiContentImageChunk(t *testing.T, imageURL string) *schema.Message {
+	t.Helper()
+	raw := fmt.Sprintf(`{"role":"assistant","multi_content":[{"type":"image_url","image_url":{"url":%q}}]}`, imageURL)
+	var msg schema.Message
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatalf("decode legacy chunk: %v", err)
+	}
+	return &msg
 }

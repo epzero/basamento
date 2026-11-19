@@ -49,30 +49,27 @@ func foreachAssistantOutputString(m *schema.Message, fn func(string)) {
 	}
 	// MultiContent is deprecated in eino but ConcatMessages still merges it.
 	for i := range m.MultiContent {
-		partMultiContentString(&m.MultiContent[i], fn)
+		p := m.MultiContent[i]
+		fn(p.Text)
+		if p.ImageURL != nil {
+			fn(p.ImageURL.URL)
+			fn(p.ImageURL.URI)
+		}
+		if p.AudioURL != nil {
+			fn(p.AudioURL.URL)
+			fn(p.AudioURL.URI)
+		}
+		if p.VideoURL != nil {
+			fn(p.VideoURL.URL)
+			fn(p.VideoURL.URI)
+		}
+		if p.FileURL != nil {
+			fn(p.FileURL.URL)
+			fn(p.FileURL.URI)
+		}
 	}
 	for i := range m.AssistantGenMultiContent {
 		partAssistantOutputString(&m.AssistantGenMultiContent[i], fn)
-	}
-}
-
-func partMultiContentString(p *schema.ChatMessagePart, fn func(string)) {
-	fn(p.Text)
-	if p.ImageURL != nil {
-		fn(p.ImageURL.URL)
-		fn(p.ImageURL.URI)
-	}
-	if p.AudioURL != nil {
-		fn(p.AudioURL.URL)
-		fn(p.AudioURL.URI)
-	}
-	if p.VideoURL != nil {
-		fn(p.VideoURL.URL)
-		fn(p.VideoURL.URI)
-	}
-	if p.FileURL != nil {
-		fn(p.FileURL.URL)
-		fn(p.FileURL.URI)
 	}
 }
 
