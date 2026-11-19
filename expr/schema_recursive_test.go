@@ -2,6 +2,8 @@ package expr
 
 import (
 	"encoding/json"
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -335,6 +337,65 @@ func nestedObjectSchema(depth int) string {
 	for i := 0; i < depth; i++ {
 		b.WriteString(`}}`)
 	}
+	return b.String()
+}
+
+// TestRefAliasChainRegistersLinearly pins that the nested-object pass follows a
+// $ref alias chain on one shared visiting set, so it allocates memory linear in
+// the number of hops. A set cloned per hop stayed live until the chain unwound,
+// which made a map whose additionalProperties is a $ref into a cycle of N
+// one-line aliases cost Θ(N²) memory and time. The budget is far above what a
+// linear pass needs at this size and far below the hundreds of MB a quadratic
+// one allocated.
+func TestRefAliasChainRegistersLinearly(t *testing.T) {
+	const (
+		aliases   = 4000
+		memBudget = 48 << 20
+	)
+	schema := json.RawMessage(aliasCycleMapSchema(aliases))
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	env, err := NewEnv([]Var{{Name: "x", Schema: schema}})
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatalf("NewEnv: %v", err)
+	}
+	if d := int64(after.TotalAlloc) - int64(before.TotalAlloc); d > memBudget {
+		t.Fatalf("NewEnv allocated %d bytes for a %d-alias chain, want <= %d", d, aliases, memBudget)
+	}
+	// The chain closes on itself, so the map's value type is dyn.
+	p, err := env.Compile(`x['k']`, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := p.ResultType(); got != "dyn" {
+		t.Fatalf("result type %q, want dyn", got)
+	}
+	got, err := p.Eval(map[string]any{"x": map[string]any{"k": int64(3)}})
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if got != int64(3) {
+		t.Fatalf("got %v want 3", got)
+	}
+}
+
+// aliasCycleMapSchema builds a map schema whose additionalProperties is a $ref
+// into a cycle of n one-line $defs aliases: the chain the nested-object pass
+// follows hop by hop.
+func aliasCycleMapSchema(n int) string {
+	var b strings.Builder
+	b.WriteString(`{"type": "object", "additionalProperties": {"$ref": "#/$defs/a0"}, "$defs": {`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, `"a%d": {"$ref": "#/$defs/a%d"}`, i, (i+1)%n)
+	}
+	b.WriteString(`}}`)
 	return b.String()
 }
 

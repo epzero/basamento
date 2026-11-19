@@ -166,14 +166,6 @@ func (e *Env) buildObjectType(doc map[string]any, path string, st *schemaType, a
 	return obj, nil
 }
 
-func cloneVisiting(visiting map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(visiting)+1)
-	for name := range visiting {
-		out[name] = true
-	}
-	return out
-}
-
 // registerNestedObjects registers the object types nested in a schema value:
 // the fields of an object, the element type of a list's items and the value
 // type of a map's additionalProperties, at any depth. An object type keeps the
@@ -182,23 +174,18 @@ func cloneVisiting(visiting map[string]bool) map[string]bool {
 // types and reads one of its fields.
 func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) error {
 	if ref, ok := doc["$ref"].(string); ok {
-		// Follow the chain one hop at a time, as mapSchemaVisit does: a
-		// definition that refers back to itself stops at dyn there instead of
-		// being rejected (design.md §2).
-		if !strings.HasPrefix(ref, "#/$defs/") {
-			return fmt.Errorf("external reference %q", ref)
-		}
+		// One hop at a time on the shared set, deleting each name on return as
+		// mapSchemaVisit does: N aliases cost N hops, and a definition that
+		// refers back to itself stops here (design.md §2). parseSchema has
+		// validated every reference reachable from here (schema.go), so it is
+		// local and names an existing definition.
 		name := strings.TrimPrefix(ref, "#/$defs/")
 		if visiting[name] {
 			return nil
 		}
-		def, ok := st.defs[name]
-		if !ok {
-			return fmt.Errorf("missing definition for reference %q", ref)
-		}
-		next := cloneVisiting(visiting)
-		next[name] = true
-		return e.registerNestedObjects(def, path, st, adapter, next)
+		visiting[name] = true
+		defer delete(visiting, name)
+		return e.registerNestedObjects(st.defs[name], path, st, adapter, visiting)
 	}
 	switch typ, _ := doc["type"].(string); typ {
 	case "object":
@@ -226,22 +213,15 @@ func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaT
 // sits at: a $ref keeps the path of the place it is written and each array hop
 // adds "[]", as mapSchemaVisit names them.
 func objectSchemaForBuild(pm map[string]any, st *schemaType, path string) (map[string]any, string, string, error) {
-	seen := map[string]bool{}
 	doc, defName := pm, ""
 	for {
 		if ref, ok := doc["$ref"].(string); ok {
-			resolved, names, cycle, err := defRefChain(ref, st.defs)
+			// The chain is acyclic: a chain that closed on itself types as dyn
+			// in mapSchemaVisit, so the schema never resolves to an object and
+			// this function is not called for it (design.md §2).
+			resolved, names, _, err := defRefChain(ref, st.defs)
 			if err != nil {
 				return nil, "", "", err
-			}
-			if cycle != "" {
-				return nil, "", "", fmt.Errorf("cyclic reference %q", "#/$defs/"+cycle)
-			}
-			for _, name := range names {
-				if seen[name] {
-					return nil, "", "", fmt.Errorf("cyclic reference %q", ref)
-				}
-				seen[name] = true
 			}
 			doc, defName = resolved, names[len(names)-1]
 			continue
