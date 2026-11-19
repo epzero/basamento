@@ -71,20 +71,42 @@ func TestUnwrapBudgetColdTamperedAtMostOne(t *testing.T) {
 	t.Parallel()
 	ks := &budgetKey{id: "mk"}
 	store := &memKeysetStore{data: map[string]StoredKeyset{}}
-	c, err := NewCodec(store, []KeyService{ks})
+	creator, err := NewCodec(store, []KeyService{ks})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := core.WithTenant(context.Background(), "acme")
-	enc, err := c.Encode(ctx, plainPayload("hi"))
+	enc, err := creator.Encode(ctx, plainPayload("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold, err := NewCodec(store, []KeyService{ks})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ks.unwraps.Store(0)
-	enc.Data[0] ^= 1
-	_, _ = c.Decode(ctx, enc)
-	if ks.unwraps.Load() > 1 {
-		t.Fatalf("unwraps %d want <=1", ks.unwraps.Load())
+	bad := enc
+	bad.Data = append([]byte(nil), enc.Data...)
+	if len(bad.Data) > 0 {
+		bad.Data[0] ^= 1
+	}
+	_, _ = cold.Decode(ctx, bad)
+	if ks.unwraps.Load() != 1 {
+		t.Fatalf("first cold tampered decode unwraps=%d want 1", ks.unwraps.Load())
+	}
+	for i := 0; i < 2; i++ {
+		bad2 := enc
+		bad2.Data = append([]byte(nil), enc.Data...)
+		if len(bad2.Data) > 0 {
+			bad2.Data[0] ^= byte(i + 2)
+		}
+		_, _ = cold.Decode(ctx, bad2)
+	}
+	if _, err := cold.Decode(ctx, enc); err != nil {
+		t.Fatal(err)
+	}
+	if ks.unwraps.Load() != 1 {
+		t.Fatalf("total cold unwraps=%d want 1", ks.unwraps.Load())
 	}
 }
 
