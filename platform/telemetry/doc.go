@@ -18,7 +18,11 @@
 // without a retry (REQ-TELEM-015 through REQ-TELEM-019). The per-type export
 // queues are bounded: past the bound the oldest signal is dropped and counted
 // by DroppedExports, so a stalled collector cannot grow the process without
-// limit. Shutdown stops the owned exporter, drains what was accepted, delivers
+// limit. Below the size trigger, pending signals are exported on the first
+// enqueue after they have waited one second on Config.Clock, or at Flush or
+// Shutdown: a process that records a burst and then goes silent exports that
+// burst with its next signal, or when it shuts down. Shutdown stops the owned
+// exporter, drains what was accepted, delivers
 // a span that was started before it and ends while it runs, honours its
 // context and only then returns (REQ-TELEM-022, REQ-TELEM-023).
 //

@@ -217,7 +217,10 @@ func opaqueReflectValue(rv reflect.Value) bool {
 		rv = rv.Elem()
 	}
 	if !rv.IsValid() || rv.Kind() != reflect.Struct {
-		return true
+		// A map, slice or named scalar behind a String or Error method must
+		// be canonicalised, not rendered: its text can carry the same payload
+		// a plain value of that kind would have redacted.
+		return false
 	}
 	return opaqueType(rv.Type(), 0, map[reflect.Type]bool{})
 }
@@ -236,7 +239,9 @@ func opaqueType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
 		typ = typ.Elem()
 	}
 	if typ.Kind() != reflect.Struct {
-		return true
+		// Only a struct can have a text method whose output is worth trusting;
+		// every other kind is canonically encoded through reflectValue.
+		return false
 	}
 	if seen[typ] {
 		return true
@@ -269,10 +274,9 @@ func opaqueFieldType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bo
 	case reflect.Struct:
 		return opaqueType(typ, depth+1, seen)
 	case reflect.Pointer:
-		if typ.Elem().Kind() == reflect.Struct {
-			return opaqueType(typ, depth+1, seen)
-		}
-		return true
+		// opaqueType's dereference loop walks any pointer chain, so a field
+		// such as **innerCreds is inspected too.
+		return opaqueType(typ, depth+1, seen)
 	case reflect.Slice, reflect.Array:
 		return opaqueFieldType(typ.Elem(), depth+1, seen)
 	case reflect.Map:

@@ -155,10 +155,8 @@ func appendBounded[T any](items []T, item T, limit int) ([]T, bool) {
 // check runs on enqueue, so it reads no wall clock and needs no timer: an idle
 // process exports its backlog with its next signal.
 func (e *exporter) notifyLocked() {
-	if len(e.spans)+len(e.logs)+len(e.metrics) == 0 {
-		e.pendingSince = time.Time{}
-		return
-	}
+	// The caller has just appended, so the queue is never empty here;
+	// takeLocked resets pendingSince when a drain empties it.
 	now := e.clock.Now()
 	if e.pendingSince.IsZero() {
 		e.pendingSince = now

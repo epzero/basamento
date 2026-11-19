@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,22 @@ type embeddedErrorHolder struct{ error }
 type plainWrapper struct{ cause error }
 
 func (w plainWrapper) Error() string { return w.cause.Error() }
+
+// mapStringer is a Stringer backed by a map: its text must not be trusted when
+// the same map would have its sensitive key redacted.
+type mapStringer map[string]string
+
+func (m mapStringer) String() string { return "password=" + m["password"] }
+
+// sliceError is an error backed by a slice of structs with a sensitive field.
+type sliceError []errorCredential
+
+func (e sliceError) Error() string { return "secret=" + e[0].Secret }
+
+// doublePointerHolder hides the payload behind a named unexported ** pointer.
+type doublePointerHolder struct{ inner **innerCreds }
+
+func (h doublePointerHolder) Error() string { return "password=" + (*h.inner).Password }
 
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
@@ -290,6 +307,70 @@ func TestRedactorDoesNotTrustTextAroundHiddenPayloads(t *testing.T) {
 	}
 }
 
+func TestRedactorCanonicalisesContainerBackedText(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	inner := &innerCreds{Password: "S3cretField"}
+	got := r.Map(map[string]any{
+		"mapStringer":   mapStringer{"password": "S3cretField", "note": "kept"},
+		"sliceError":    sliceError{errorCredential{Secret: "S3cretField"}},
+		"doublePointer": doublePointerHolder{inner: &inner},
+	})
+	for key, value := range got {
+		if text, ok := value.(string); ok {
+			t.Errorf("%s kept the text form %q instead of canonicalising", key, text)
+		}
+	}
+
+	mapped, ok := got["mapStringer"].(map[string]any)
+	if !ok {
+		t.Fatalf("map-backed Stringer = %T, want a canonicalised map", got["mapStringer"])
+	}
+	if mapped["password"] != Redacted {
+		t.Errorf("map password = %v, want redacted", mapped["password"])
+	}
+	if mapped["note"] != "kept" {
+		t.Errorf("map note = %v, want kept", mapped["note"])
+	}
+
+	sliced, ok := got["sliceError"].([]any)
+	if !ok || len(sliced) != 1 {
+		t.Fatalf("slice-backed error = %#v, want one canonicalised item", got["sliceError"])
+	}
+	item, ok := sliced[0].(map[string]any)
+	if !ok || item["Secret"] != Redacted {
+		t.Errorf("slice item = %#v, want its Secret redacted", sliced[0])
+	}
+
+	double, ok := got["doublePointer"].(map[string]any)
+	if !ok {
+		t.Fatalf("double-pointer holder = %T, want a canonicalised struct", got["doublePointer"])
+	}
+	if !containsRedactedSecret(double) {
+		t.Errorf("double-pointer holder = %#v, want its Password redacted", double)
+	}
+}
+
+func containsRedactedSecret(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if sensitiveKey(key) && item == Redacted {
+				return true
+			}
+			if containsRedactedSecret(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if containsRedactedSecret(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestRedactorKeepsOpaqueStringersAsText(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
@@ -308,6 +389,46 @@ func TestRedactorCanonicalisesDelegateValues(t *testing.T) {
 	if got != "boom" {
 		t.Errorf("error = %v, want its message", got)
 	}
+}
+
+func TestLogHandlerRedactsContainerBackedText(t *testing.T) {
+	setup := newEmbeddedTestSetup(t, coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)))
+	inner := &innerCreds{Password: "S3cretField"}
+	setup.Logger().Info("container backed",
+		slog.Any("mapStringer", mapStringer{"password": "S3cretField", "note": "kept"}),
+		slog.Any("sliceError", sliceError{errorCredential{Secret: "S3cretField"}}),
+		slog.Any("doublePointer", doublePointerHolder{inner: &inner}),
+	)
+	rec := setup.Logs()[0]
+	if containsText(rec.Attrs, "S3cretField") {
+		t.Fatalf("kept log attributes still carry the hidden payload: %#v", rec.Attrs)
+	}
+	if mapped, ok := rec.Attrs["mapStringer"].(map[string]any); !ok || mapped["password"] != Redacted {
+		t.Errorf("map-backed Stringer = %#v, want a canonicalised map", rec.Attrs["mapStringer"])
+	}
+	if sliced, ok := rec.Attrs["sliceError"].([]any); !ok || len(sliced) != 1 {
+		t.Errorf("slice-backed error = %#v, want one canonicalised item", rec.Attrs["sliceError"])
+	}
+}
+
+func containsText(value any, text string) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == text || strings.Contains(typed, text)
+	case map[string]any:
+		for key, item := range typed {
+			if strings.Contains(key, text) || containsText(item, text) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if containsText(item, text) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestLogHandlerUsesClockAndCorrelation(t *testing.T) {

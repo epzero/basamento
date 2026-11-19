@@ -327,6 +327,10 @@ func (s *Setup) Shutdown(ctx context.Context) error {
 			return drainErr
 		}
 		if err := ctx.Err(); err != nil {
+			// The deadline expired with work still pending: refuse later
+			// recordings before returning, so a span that ends afterwards is
+			// not accepted into an exporter whose goroutine has stopped.
+			s.finishRecording()
 			if s.export != nil {
 				return errors.Join(drainErr, err)
 			}

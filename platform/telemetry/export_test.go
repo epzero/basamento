@@ -586,6 +586,7 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		Name     string
 		Password string
 	}
+	deep := &innerCreds{Password: "S3cretField"}
 	setup.Logger().Info("structured",
 		slog.Any("error", errors.New("failed with sk-live-7f3a9c1b")),
 		slog.Any("credentials", credentials{Name: "ana", Password: "hunter2"}),
@@ -597,6 +598,9 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		slog.Any("pointerHolder", pointerHolder{inner: &innerCreds{Password: "S3cretField"}}),
 		slog.Any("embeddedHolder", embeddedErrorHolder{errorCredential{Secret: "S3cretField"}}),
 		slog.Any("plainWrapper", plainWrapper{cause: errorCredential{Secret: "S3cretField"}}),
+		slog.Any("mapStringer", mapStringer{"password": "S3cretField", "note": "kept"}),
+		slog.Any("sliceError", sliceError{errorCredential{Secret: "S3cretField"}}),
+		slog.Any("doublePointer", doublePointerHolder{inner: &deep}),
 	)
 	// OTel attribute values are primitives, so the structured maps go through
 	// the same redactor at the record boundary and then the OTLP encoder.
@@ -606,6 +610,9 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		"pointerHolder":  pointerHolder{inner: &innerCreds{Password: "S3cretField"}},
 		"embeddedHolder": embeddedErrorHolder{errorCredential{Secret: "S3cretField"}},
 		"plainWrapper":   plainWrapper{cause: errorCredential{Secret: "S3cretField"}},
+		"mapStringer":    mapStringer{"password": "S3cretField", "note": "kept"},
+		"sliceError":     sliceError{errorCredential{Secret: "S3cretField"}},
+		"doublePointer":  doublePointerHolder{inner: &deep},
 	})
 	recordTestSpan(t, setup, SpanData{
 		TraceID:    "0102030405060708090a0b0c0d0e0f10",
@@ -855,6 +862,49 @@ func TestShutdownWithACancelledDeadlineDropsTheBacklog(t *testing.T) {
 		t.Fatalf("Shutdown = %v, want context.Canceled", err)
 	}
 	release()
+}
+
+// expiredContext reports an expired deadline through Err only, leaving Done
+// open. That makes Shutdown's halt take the already-stopped path and its loop
+// reach the final expired-deadline return deterministically, without a select
+// race between a closed done channel and a closed context.
+type expiredContext struct{ context.Context }
+
+func (expiredContext) Done() <-chan struct{} { return nil }
+func (expiredContext) Err() error            { return context.DeadlineExceeded }
+
+// TestShutdownRefusesASpanThatEndsAfterAnExpiredDeadline covers the return
+// that gives up on its context: it must drain nothing further but still mark
+// the setup shut down, so a span ending afterwards is not accepted into an
+// exporter whose goroutine has stopped.
+func TestShutdownRefusesASpanThatEndsAfterAnExpiredDeadline(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	setup := newCloudTestSetup(t, clock, collector)
+
+	// Stop the owned goroutine first so halt returns without a select race and
+	// the queued signals are still pending when the loop sees the deadline.
+	if err := setup.export.halt(context.Background()); err != nil {
+		t.Fatalf("stopping the exporter: %v", err)
+	}
+	_, span := setup.Tracer().Start(telemetryContext("acme", "run_01"), "after expiry")
+	for i := 0; i < 3; i++ {
+		setup.Logger().Info("queued")
+	}
+
+	err := setup.Shutdown(expiredContext{Context: context.Background()})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown = %v, want context.DeadlineExceeded", err)
+	}
+
+	span.End()
+	if got := len(setup.Spans()); got != 0 {
+		t.Fatalf("kept %d spans after the expired deadline, want 0", got)
+	}
+	spans, _, _ := queuedCounts(setup.export)
+	if spans != 0 {
+		t.Fatalf("the export queue accepted %d spans after the expired deadline, want 0", spans)
+	}
 }
 
 func TestAnyValueEncodesLargeUnsignedAndPreEpochTimes(t *testing.T) {
