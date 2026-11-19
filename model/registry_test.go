@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -156,6 +157,101 @@ func TestLookupFindsTheInvocation(t *testing.T) {
 	}
 	if h == nil || *h != run.Handle() {
 		t.Fatalf("lookup = %+v, want %+v", h, run.Handle())
+	}
+}
+
+func TestEventsReplayFromCursor(t *testing.T) {
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	for i := 0; i < 5; i++ {
+		run.Publish(Event{Kind: EventText, Text: fmt.Sprintf("%d", i)})
+	}
+	run.Succeed(Result{})
+
+	from0 := drain(t, mustEvents(t, reg, run.Handle(), 0))
+	if len(from0) != 5 {
+		t.Fatalf("from 0: got %d events, want 5", len(from0))
+	}
+	from2 := drain(t, mustEvents(t, reg, run.Handle(), 2))
+	if len(from2) != 3 || from2[0].Seq != 3 {
+		t.Fatalf("from 2: %+v, want 3 events starting at seq 3", from2)
+	}
+	from4 := drain(t, mustEvents(t, reg, run.Handle(), 4))
+	if len(from4) != 1 || from4[0].Text != "4" {
+		t.Fatalf("from last seq: %+v", from4)
+	}
+}
+
+func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	run.Publish(Event{Kind: EventText, Text: "a"})
+	run.Publish(Event{Kind: EventText, Text: "b"})
+	run.Succeed(Result{})
+	got := drain(t, mustEvents(t, reg, run.Handle(), -5))
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+}
+
+func TestEventsCursorBeyondEndWaitsForLaterEvents(t *testing.T) {
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	run.Publish(Event{Kind: EventText, Text: "first"})
+
+	ch := mustEvents(t, reg, run.Handle(), 1)
+	done := make(chan []Event, 1)
+	go func() {
+		done <- drain(t, ch)
+	}()
+
+	run.Publish(Event{Kind: EventText, Text: "second"})
+	run.Succeed(Result{})
+
+	select {
+	case got := <-done:
+		if len(got) != 1 || got[0].Text != "second" {
+			t.Fatalf("events = %+v, want second after cursor caught up", got)
+		}
+	case <-t.Context().Done():
+		t.Fatal("timed out waiting for events after large cursor")
+	}
+}
+
+func TestEventsLongStreamLateAndEarlyFollowers(t *testing.T) {
+	const n = 5000
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	early := mustEvents(t, reg, run.Handle(), 0)
+	var lateCh <-chan Event
+	const lateStart = 2500
+	for i := 0; i < n; i++ {
+		run.Publish(Event{Kind: EventProgress, Progress: float64(i) / float64(n)})
+		if i == lateStart-1 {
+			lateCh = mustEvents(t, reg, run.Handle(), lateStart)
+		}
+	}
+	run.Succeed(Result{})
+
+	earlyBatch := drain(t, early)
+	if len(earlyBatch) != n {
+		t.Fatalf("early follower got %d events, want %d", len(earlyBatch), n)
+	}
+	for i, e := range earlyBatch {
+		if e.Seq != int64(i+1) {
+			t.Fatalf("early event %d seq %d, want %d", i, e.Seq, i+1)
+		}
+	}
+
+	lateBatch := drain(t, lateCh)
+	wantLate := n - lateStart
+	if len(lateBatch) != wantLate {
+		t.Fatalf("late follower got %d events, want %d", len(lateBatch), wantLate)
+	}
+	for i, e := range lateBatch {
+		if e.Seq != int64(i+lateStart+1) {
+			t.Fatalf("late event %d seq %d, want %d", i, e.Seq, i+lateStart+1)
+		}
 	}
 }
 

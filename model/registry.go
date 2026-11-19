@@ -148,6 +148,8 @@ func (r *Run) Done() <-chan struct{} { return r.done }
 
 // Publish appends one event and assigns its sequence number. It returns false
 // when the invocation has already ended, in which case the event is dropped.
+// Publish is the only writer of r.events; each appended event gets Seq == len
+// before append, and after append events[i].Seq == i+1 for every slot.
 func (r *Run) Publish(e Event) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -228,10 +230,13 @@ func (r *Run) eventsAfter(ctx context.Context, after int64) <-chan Event {
 		for {
 			r.mu.Lock()
 			var batch []Event
-			for _, e := range r.events {
-				if e.Seq > next {
-					batch = append(batch, e)
-				}
+			start := int(next) + 1
+			if start < 0 {
+				start = 0
+			}
+			// Invariant: events[i].Seq == i+1 (Publish is the only writer).
+			if start < len(r.events) {
+				batch = append([]Event(nil), r.events[start:]...)
 			}
 			ended, changed := r.ended, r.changed
 			r.mu.Unlock()
