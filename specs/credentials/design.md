@@ -104,8 +104,8 @@ store itself writes the plaintext nowhere.
 ## 5. Tenancy
 
 The tenant comes from the context through `core.TenantFrom(ctx)`:
-`core.TenantID`, set with `core.WithTenant`, and an empty id counts as no
-tenant. Every layer reads the tenant through that helper. The credential store
+`core.TenantID`, set with `core.WithTenant`, and an empty or otherwise invalid
+id counts as no tenant (REQ-CORE-005, REQ-CORE-006). Every layer reads the tenant through that helper. The credential store
 requires it at the start of every public
 method, so no backend, Secrets call or audit event happens without one
 (REQ-CRED-005). The helper lands first, in its own `feat(core)` contract pull

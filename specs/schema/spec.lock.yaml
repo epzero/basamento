@@ -397,3 +397,39 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/4
+    SCHEMA-038-01:
+        hash: sha256:7f070c3aff1085b21fe849fa9a12c0a4b15420d733ecf06e839438dfcec5c43f
+        reqs:
+            - REQ-SCHEMA-038
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: opencode:spec-reviewer:0f230d
+        approved_at: "2026-11-18"
+        note: 'New behavior: schemas for byte slices, raw JSON and fixed byte arrays; no previously approved text changes.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending
+    SCHEMA-039-01:
+        hash: sha256:8354cdb0fa79d55c4fb0b8bfcc9c480cf4b9ea09cda214d4d4586bf06e168edc
+        reqs:
+            - REQ-SCHEMA-039
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: opencode:spec-reviewer:0f230d
+        approved_at: "2026-11-18"
+        note: 'New behavior: schemas for byte slices, raw JSON and fixed byte arrays; no previously approved text changes.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending
+    SCHEMA-040-01:
+        hash: sha256:38262b22ae1f6ad62eb19810f6186856009110699fa6865054cf38b98bf3e965
+        reqs:
+            - REQ-SCHEMA-040
+        tier: P2
+        author: claude-code:spec-author:5120f5
+        reviewer: opencode:spec-reviewer:0f230d
+        approved_at: "2026-11-18"
+        note: 'New behavior: schemas for byte slices, raw JSON and fixed byte arrays; no previously approved text changes.'
+        ref: https://github.com/epzero/basamento/pull/50
+        human:
+            status: pending

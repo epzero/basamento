@@ -1,6 +1,6 @@
 # SQL: store, migrations and tenant-scoped repositories
 
-Status: **Planned** (WP-L1-01). Design: ADR-0001, ADR-0004,
+Status: **Implemented** (WP-L1-01, platform/sql). Design: ADR-0001, ADR-0004,
 [`design.md`](design.md).
 
 The SQL store is the SQL port of `platform`: SQLite (`modernc.org/sqlite`) in
@@ -23,6 +23,15 @@ If the database a SQL store URL names cannot be reached, then the SQL store shal
 
 ### REQ-SQL-004 — No passwords in errors
 If opening a SQL store fails, then the SQL store shall return an error whose message and details do not contain the password of the URL.
+
+### REQ-SQL-019 — SQLite database file named by URL
+When a SQL store is opened with a `sqlite` URL naming a file path, the SQL store shall open the database file at that path, resolving a relative path against the working directory.
+
+### REQ-SQL-020 — Unsupported SQLite URL query and fragment
+If the URL of a SQL store is a `sqlite` URL with a query or a fragment, then the SQL store shall fail to open with code `invalid_argument` without creating any file.
+
+### REQ-SQL-021 — In-memory SQLite stays in memory
+When a SQL store is opened with a `sqlite` URL whose database is `:memory:`, the SQL store shall keep the database in memory without opening or creating any file.
 
 ## Migrations
 
@@ -63,6 +72,12 @@ If a write would break a uniqueness rule of the schema, then the SQL store shall
 ### REQ-SQL-015 — References enforced
 If a write would leave a record referring to a record that does not exist, then the SQL store shall reject the write with code `conflict` on both dialects.
 
+### REQ-SQL-022 — Not-null and check violations rejected
+If a write would break a not-null or check rule of the schema, then the SQL store shall reject the write with code `invalid_argument` and leave the stored records unchanged.
+
+### REQ-SQL-023 — Failures of the database
+If a call fails because the database is busy, in a deadlock or serialization failure, out of resources, or unreachable, then the SQL store shall fail the call with code `unavailable`, marked retryable.
+
 ## Values that behave the same on both dialects
 
 ### REQ-SQL-016 — Timestamps in UTC to the microsecond
@@ -73,3 +88,11 @@ When a repository lists records ordered by a text value, the SQL store shall ord
 
 ### REQ-SQL-018 — NUL characters rejected
 If a text value to be stored contains a NUL character, then the SQL store shall reject the write with code `invalid_argument` on both dialects.
+
+## Secrets in URLs
+
+### REQ-SQL-024 — No credentials in errors of the store
+If an error of the SQL store carries the URL of the store, then the SQL store shall replace in it the password of the URL's user information and the values of its credential query parameters (`password`, `sslpassword`, `passfile`, `sslcert`, `sslkey`, `sslrootcert`) with `***`.
+
+### REQ-SQL-025 — Driver text withheld for URLs with a secret
+If the URL of a SQL store carried a password or a credential query parameter, then the SQL store shall not forward driver error text in the errors of the store.
