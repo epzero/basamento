@@ -86,12 +86,24 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 	return e, nil
 }
 
+// objectFromSchema registers the object type a variable's schema declares. The
+// schema document is normalized first: parseSchema names the element type of a
+// root array, but st.schema still holds the array, so building from it would
+// register an empty object type (design.md §2). objectSchemaForBuild follows
+// that array's items, or a $ref chain, to the document with the properties.
 func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
-	visiting := map[string]bool{}
-	if st.rootDef != "" {
-		visiting[st.rootDef] = true
+	doc, defName, err := objectSchemaForBuild(st.schema, st)
+	if err != nil {
+		return nil, exprErr(fmt.Sprintf("schema %q: %s", st.typeName, err.Error()), map[string]any{"variable": st.typeName})
 	}
-	return e.buildObjectType(st.schema, st.typeName, st, adapter, visiting)
+	visiting := map[string]bool{}
+	if defName == "" {
+		defName = st.rootDef
+	}
+	if defName != "" {
+		visiting[defName] = true
+	}
+	return e.buildObjectType(doc, st.typeName, st, adapter, visiting)
 }
 
 // buildObjectType registers the object type for doc. visiting holds the $defs

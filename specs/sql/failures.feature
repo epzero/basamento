@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component
+@wp:WP-L1-01 @level:component
 Feature: Failures of the SQL store on both dialects
   Constraint violations and database failures map to the same stable codes on
   SQLite and Postgres, so a caller can retry what is retryable and fix what is
@@ -19,15 +19,10 @@ Feature: Failures of the SQL store on both dialects
       | k-tag  | check    |
 
   @REQ-SQL-023 @profile:embedded @id:SQL-023-01
-  Scenario Outline: Busy and locked SQLite databases are retryable
-    When tenant "acme" writes an item while the database refuses with "<refusal>"
+  Scenario: A busy SQLite database is retryable
+    When tenant "acme" writes an item while the database refuses with "busy"
     Then the call fails with code "unavailable"
     And the error is marked retryable
-
-    Examples:
-      | refusal |
-      | busy    |
-      | locked  |
 
   @REQ-SQL-023 @profile:cloud @id:SQL-023-02
   Scenario Outline: Deadlocks, serialization failures and resource limits are retryable

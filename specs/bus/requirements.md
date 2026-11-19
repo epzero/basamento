@@ -87,3 +87,30 @@ When a caller deletes a key that has no entry, the KV store shall succeed and le
 
 ### REQ-BUS-025 — Swapping an expired entry
 If a caller swaps a KV entry at the revision of an entry that has expired, then the KV store shall fail the swap with code `conflict`.
+
+## Failures every implementation reports the same way
+
+### REQ-BUS-026 — A corrupt KV record
+If a KeyValue entry stored under a key cannot be decoded as a KV entry, then every read, swap or create of that key shall fail with code `internal`, and the error shall carry neither the key, the value nor any text from the server, so a caller never reads it as `not_found` or `unavailable`.
+
+### REQ-BUS-027 — A cancelled call
+If the context of a call is cancelled while the server can be reached, then the bus or KV store shall fail the call with code `cancelled` without storing a message or changing an entry.
+
+### REQ-BUS-028 — A call past its deadline
+If the context of a call has passed its deadline while the server can be reached, then the bus or KV store shall fail the call with code `timeout` without storing a message or changing an entry.
+
+## Implementations and their assets
+
+### REQ-BUS-029 — Credentials only in clear over loopback
+If the connection URL of the cloud implementation has scheme `nats` and carries credentials (a user name, a password or a token), then the cloud implementation shall connect only when the host is a loopback address (`127.0.0.0/8`, `::1` or `localhost`), and otherwise shall refuse the open with code `invalid_argument` and an error that holds nothing of the URL, before connecting anywhere; a `nats` URL without credentials is accepted on any host.
+
+### REQ-BUS-030 — Streams and buckets the bus can use
+If a JetStream stream or KV bucket the bus uses opens and is a mirror, has sources, or otherwise differs from the configuration the bus requires, then the bus shall refuse the open with code `invalid_argument` and detail `asset` naming that stream or bucket, and shall not change it. If a KV bucket the bus uses exists but does not load as a key-value store, then the bus shall fail the open with code `unavailable` and change nothing.
+
+### REQ-BUS-031 — Embedded data directory is private
+Where the profile is `embedded`, when the bus opens on a data directory whose store directory exists with a mode wider than `0700`, the bus shall narrow it to `0700` before starting the server, and if it cannot, shall fail the open with code `internal` and an error that holds no path and no text from the server.
+
+## KV store value bound
+
+### REQ-BUS-032 — KV value size limit
+If a KV value is larger than the maximum message size minus the eight bytes of a KV record's deadline header, then the KV store shall refuse the `Put` or `CompareAndSwap` with code `invalid_argument` and store nothing.
