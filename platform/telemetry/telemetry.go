@@ -150,9 +150,9 @@ func (s *Setup) Extract(ctx context.Context, carrier propagation.TextMapCarrier)
 	return s.prop.Extract(ctx, carrier)
 }
 
-// SetCredential registers a credential value to redact from every signal.
-func (s *Setup) SetCredential(name, value string) {
-	_ = name // the name never reaches a signal; only the value is matched
+// SetCredential registers a credential value to redact from every signal. The
+// value is matched; a name never reaches a signal and is not needed.
+func (s *Setup) SetCredential(value string) {
 	s.secrets.Add(value)
 }
 

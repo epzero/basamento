@@ -251,7 +251,7 @@ func registerTelemetry(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^the telemetry setup holds a credential "([^"]*)" with the value "([^"]*)"$`, func(ctx context.Context, name, value string) error {
-		world(ctx).Telemetry.setup.SetCredential(name, value)
+		world(ctx).Telemetry.setup.SetCredential(value)
 		return nil
 	})
 

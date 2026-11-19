@@ -2,7 +2,10 @@ package telemetry
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -270,7 +273,7 @@ func TestRedactionHappensBeforeExport(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	collector := newTestCollector(t)
 	setup := newCloudTestSetup(t, clock, collector)
-	setup.SetCredential("openai", "sk-live-7f3a9c1b")
+	setup.SetCredential("sk-live-7f3a9c1b")
 
 	setup.Logger().Info("carrying sk-live-7f3a9c1b")
 	if err := setup.Shutdown(t.Context()); err != nil {
@@ -284,6 +287,39 @@ func TestRedactionHappensBeforeExport(t *testing.T) {
 	for _, body := range collector.bodies {
 		if bytes.Contains(body, []byte("sk-live-7f3a9c1b")) {
 			t.Fatal("an exported OTLP batch contains the credential value")
+		}
+	}
+}
+
+func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	collector := newTestCollector(t)
+	setup := newCloudTestSetup(t, clock, collector)
+	setup.SetCredential("sk-live-7f3a9c1b")
+
+	type credentials struct {
+		Name     string
+		Password string
+	}
+	setup.Logger().Info("structured",
+		slog.Any("error", errors.New("failed with sk-live-7f3a9c1b")),
+		slog.Any("credentials", credentials{Name: "ana", Password: "hunter2"}),
+		slog.Any("raw", []byte("sk-live-7f3a9c1b")),
+	)
+	if err := setup.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	if len(collector.bodies) == 0 {
+		t.Fatal("collector received no OTLP batch")
+	}
+	for _, body := range collector.bodies {
+		for _, secret := range []string{"sk-live-7f3a9c1b", "hunter2"} {
+			if bytes.Contains(body, []byte(secret)) {
+				t.Fatalf("an exported OTLP batch contains %q", secret)
+			}
 		}
 	}
 }

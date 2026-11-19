@@ -264,6 +264,9 @@ func keyValues(attrs map[string]any) []*commonv1.KeyValue {
 	return out
 }
 
+// anyValue encodes a value the redactor returned. Every shape it does not know
+// is redacted instead of formatted: an exporter must never turn an arbitrary Go
+// value into text that skipped redaction (REQ-TELEM-006, REQ-TELEM-007).
 func anyValue(value any) *commonv1.AnyValue {
 	switch typed := value.(type) {
 	case nil:
@@ -274,10 +277,18 @@ func anyValue(value any) *commonv1.AnyValue {
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_BoolValue{BoolValue: typed}}
 	case int:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
+	case int32:
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
 	case int64:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: typed}}
+	case uint:
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
+	case uint32:
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
 	case uint64:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_IntValue{IntValue: int64(typed)}}
+	case float32:
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: float64(typed)}}
 	case float64:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_DoubleValue{DoubleValue: typed}}
 	case []any:
@@ -289,7 +300,7 @@ func anyValue(value any) *commonv1.AnyValue {
 	case map[string]any:
 		return &commonv1.AnyValue{Value: &commonv1.AnyValue_KvlistValue{KvlistValue: &commonv1.KeyValueList{Values: keyValues(typed)}}}
 	default:
-		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: fmt.Sprint(typed)}}
+		return &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: Redacted}}
 	}
 }
 

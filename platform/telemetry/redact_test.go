@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -9,6 +11,19 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
 )
+
+type credentialStruct struct {
+	Name     string
+	Password string
+	Nested   struct {
+		Token string
+		Note  string
+	}
+}
+
+type secretStringer struct{ secret string }
+
+func (s secretStringer) String() string { return "token=" + s.secret }
 
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
@@ -69,10 +84,71 @@ func TestRedactorSensitiveKeysAtAnyDepth(t *testing.T) {
 	}
 }
 
+func TestRedactorCanonicalisesNonStringValues(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets("hunter2")}}
+	got := r.Map(map[string]any{
+		"error":    errors.New("hunter2"),
+		"stringer": secretStringer{secret: "hunter2"},
+		"bytes":    []byte("hunter2"),
+		"creds": credentialStruct{
+			Name:     "ana",
+			Password: "hunter2",
+			Nested: struct {
+				Token string
+				Note  string
+			}{Token: "hunter2", Note: "kept"},
+		},
+	})
+
+	if got["error"] != Redacted {
+		t.Errorf("error = %v, want redacted", got["error"])
+	}
+	if got["stringer"] != Redacted {
+		t.Errorf("Stringer = %v, want redacted", got["stringer"])
+	}
+	if got["bytes"] != Redacted {
+		t.Errorf("[]byte = %v, want redacted", got["bytes"])
+	}
+	creds, ok := got["creds"].(map[string]any)
+	if !ok {
+		t.Fatalf("struct was not canonicalised: %T", got["creds"])
+	}
+	if creds["Password"] != Redacted {
+		t.Errorf("Password = %v, want redacted", creds["Password"])
+	}
+	if creds["Name"] != "ana" {
+		t.Errorf("Name = %v, want ana", creds["Name"])
+	}
+	nested, ok := creds["Nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested struct was not canonicalised: %T", creds["Nested"])
+	}
+	if nested["Token"] != Redacted || nested["Note"] != "kept" {
+		t.Errorf("nested = %v, want Token redacted and Note kept", nested)
+	}
+	for key, value := range got {
+		if text, ok := value.(string); ok && text == "hunter2" {
+			t.Errorf("%s still carries the credential", key)
+		}
+	}
+}
+
+func TestRedactorCanonicalisesDelegateValues(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Value("blob", []byte("plain bytes"))
+	if got != "plain bytes" {
+		t.Errorf("[]byte without a credential = %v, want the string form", got)
+	}
+	got = r.Value("metric", fmt.Errorf("boom"))
+	if got != "boom" {
+		t.Errorf("error = %v, want its message", got)
+	}
+}
+
 func TestLogHandlerUsesClockAndCorrelation(t *testing.T) {
 	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	setup := newEmbeddedTestSetup(t, clock)
-	setup.SetCredential("openai", "sk-live-7f3a9c1b")
+	setup.SetCredential("sk-live-7f3a9c1b")
 
 	ctx := telemetryContext("acme", "run_01")
 	ctx, span := setup.Tracer().Start(ctx, "step a")

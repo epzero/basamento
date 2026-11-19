@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -10,11 +11,17 @@ import (
 // field's value (REQ-TELEM-006).
 const Redacted = "[REDACTED]"
 
-var sensitiveKeys = map[string]bool{
-	"password":      true,
-	"secret":        true,
-	"token":         true,
-	"authorization": true,
+// maxRedactDepth bounds reflection over nested values. A value deeper than this
+// is redacted entire rather than descending further, which also breaks cycles.
+const maxRedactDepth = 64
+
+func sensitiveKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "password", "secret", "token", "authorization":
+		return true
+	default:
+		return false
+	}
 }
 
 // SecretsSource supplies credential values whose occurrences are removed from
@@ -103,24 +110,33 @@ func (r redactor) String(s string) string {
 // {"user": {"password": …}} group are covered. A segment that merely contains
 // a sensitive word, such as "token_count", is not sensitive (TELEM-006-04).
 func (r redactor) Key(key string) bool {
-	if sensitiveKeys[strings.ToLower(key)] {
+	if sensitiveKey(key) {
 		return true
 	}
 	if !strings.Contains(key, ".") {
 		return false
 	}
 	for _, part := range strings.Split(key, ".") {
-		if sensitiveKeys[strings.ToLower(part)] {
+		if sensitiveKey(part) {
 			return true
 		}
 	}
 	return false
 }
 
-// Value redacts v under key, descending into maps, slices and pointers so a
-// sensitive field is found at any depth.
+// Value redacts v under key, descending into maps, slices, pointers and structs
+// so a sensitive field is found at any depth. Every value it returns is one the
+// exporter can encode: no struct, error, fmt.Stringer or []byte survives
+// unchanged (REQ-TELEM-006, REQ-TELEM-007).
 func (r redactor) Value(key string, v any) any {
+	return r.valueAt(key, v, 0)
+}
+
+func (r redactor) valueAt(key string, v any, depth int) any {
 	if r.Key(key) {
+		return Redacted
+	}
+	if depth > maxRedactDepth {
 		return Redacted
 	}
 	switch x := v.(type) {
@@ -129,63 +145,90 @@ func (r redactor) Value(key string, v any) any {
 	case string:
 		return r.String(x)
 	case []byte:
-		return x
+		return r.String(string(x))
+	case error:
+		return r.String(x.Error())
+	case fmt.Stringer:
+		return r.String(x.String())
 	case map[string]any:
-		return r.Map(x)
+		return r.mapAt(x, depth+1)
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = r.Value(key, item)
+			out[i] = r.valueAt("", item, depth+1)
 		}
 		return out
 	}
-	return r.reflectValue(key, v)
+	return r.reflectValueAt(v, depth+1)
 }
 
-// Map redacts every value of m, including nested maps and slices.
+// Map redacts every value of m, including nested maps, slices and structs.
 func (r redactor) Map(m map[string]any) map[string]any {
+	return r.mapAt(m, 0)
+}
+
+func (r redactor) mapAt(m map[string]any, depth int) map[string]any {
 	if m == nil {
 		return nil
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[k] = r.Value(k, v)
+		out[k] = r.valueAt(k, v, depth+1)
 	}
 	return out
 }
 
-func (r redactor) reflectValue(key string, v any) any {
+func (r redactor) reflectValueAt(v any, depth int) any {
 	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return nil
+	}
 	switch rv.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if rv.IsNil() {
-			return v
+			return nil
 		}
-		return r.Value(key, rv.Elem().Interface())
+		return r.valueAt("", rv.Elem().Interface(), depth+1)
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return rv.Interface()
 	case reflect.Map:
 		if rv.Type().Key().Kind() != reflect.String {
-			return v
+			return Redacted
 		}
 		out := make(map[string]any, rv.Len())
 		iter := rv.MapRange()
 		for iter.Next() {
 			k := iter.Key().String()
-			out[k] = r.Value(k, iter.Value().Interface())
+			out[k] = r.valueAt(k, iter.Value().Interface(), depth+1)
 		}
 		return out
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return r.String(string(rv.Bytes()))
+		}
+		fallthrough
+	case reflect.Array:
 		out := make([]any, rv.Len())
 		for i := 0; i < rv.Len(); i++ {
-			out[i] = r.Value(key, rv.Index(i).Interface())
+			out[i] = r.valueAt("", rv.Index(i).Interface(), depth+1)
+		}
+		return out
+	case reflect.Struct:
+		out := make(map[string]any, rv.NumField())
+		typ := rv.Type()
+		for i := 0; i < rv.NumField(); i++ {
+			field := typ.Field(i)
+			if field.PkgPath != "" {
+				// Unexported: never hand the raw value to an exporter.
+				continue
+			}
+			out[field.Name] = r.valueAt(field.Name, rv.Field(i).Interface(), depth+1)
 		}
 		return out
 	default:
-		return v
+		return Redacted
 	}
-}
-
-// AttrValue is unused by the package today; it exists so callers that already
-// have a converted attribute value redact it the same way as a label.
-func (r redactor) AttrValue(key string, v any) any {
-	return r.Value(key, v)
 }
