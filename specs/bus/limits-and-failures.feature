@@ -111,6 +111,7 @@ Feature: Limits, invalid arguments, an unreachable server, corrupt records and c
     Examples:
       | url                                           | result                                                                  |
       | nats://kit-s3cret@10.0.0.1:4222               | fails with code "invalid_argument" without "kit-s3cret" or "10.0.0.1"   |
+      | nats://kit:pw@10.0.0.1:4222                   | fails with code "invalid_argument" without "pw" or "10.0.0.1"           |
       | nats://kit-s3cret@nats.example.test:4222      | fails with code "invalid_argument" without "kit-s3cret" or "example.test" |
       | nats://127.0.0.1:1                            | fails with code "unavailable"                                           |
       | nats://[::1]:1                                | fails with code "unavailable"                                           |
@@ -118,16 +119,26 @@ Feature: Limits, invalid arguments, an unreachable server, corrupt records and c
       | nats://10.0.0.1:1                             | fails with code "unavailable"                                           |
 
   @REQ-BUS-032 @id:BUS-032-01
-  Scenario Outline: A KV value at the bound is stored, one byte over is refused
+  Scenario Outline: A KV value at the bound is put, one byte over is refused
     Given the maximum message size is 1024 bytes
-    And entry "cursor.r1" is put with value "seed"
-    When entry "cursor.r1" is <call> a value of <size> bytes
-    Then the <call> <result>
+    When entry "cursor.r1" is put with a value of <size> bytes
+    Then the put <result>
     And reading entry "cursor.r1" <stored>
 
     Examples:
-      | call | size | result                             | stored                                   |
-      | put  | 1016 | succeeds                           | returns 1016 bytes                       |
-      | put  | 1017 | fails with code "invalid_argument" | returns the 4 bytes it was put with last |
-      | swap | 1016 | succeeds                           | returns 1016 bytes                       |
-      | swap | 1017 | fails with code "invalid_argument" | returns the 4 bytes of "seed"            |
+      | size | result                             | stored                      |
+      | 1016 | succeeds                           | returns 1016 bytes          |
+      | 1017 | fails with code "invalid_argument" | fails with code "not_found" |
+
+  @REQ-BUS-032 @id:BUS-032-02
+  Scenario Outline: A KV value at the bound is swapped, one byte over is refused
+    Given the maximum message size is 1024 bytes
+    And entry "cursor.r1" is put with value "seed"
+    When entry "cursor.r1" is swapped at revision 1 to a value of <size> bytes
+    Then the swap <result>
+    And reading entry "cursor.r1" <stored>
+
+    Examples:
+      | size | result                             | stored                        |
+      | 1016 | succeeds                           | returns 1016 bytes            |
+      | 1017 | fails with code "invalid_argument" | returns the 4 bytes of "seed" |

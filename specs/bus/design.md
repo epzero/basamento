@@ -15,12 +15,14 @@ Selecting an implementation by URL (`nats-embedded://…` or `nats://…`) is
 wiring, specified with `kit serve` (WP-L1-05), not here.
 
 - **Cloud open, `OpenCloud(ctx, url, opts)`.** The URL has scheme `nats` or
-  `tls`; anything else is refused. Credentials in the URL (a user name, a
-  password or a token) travel in clear over `nats://`, so there they are
-  accepted only for a loopback host: `localhost`, an address in `127.0.0.0/8`
-  or `::1`. Any other host needs `tls://` (REQ-BUS-029). The check runs on the
-  parsed URL before the client connects, so a refused URL reaches no network
-  and its scenario needs no remote server. A `nats://` URL without
+  `tls`; anything else is refused. The bus configuration accepts only `nats`
+  (REQ-CONFIG-012, REQ-CONFIG-014), so through the product credentials reach a
+  remote host only once the configuration spec allows `tls`. Credentials in a
+  `nats://` URL (a user name, a password or a token) travel in clear, so they
+  are accepted only for a loopback host: `localhost`, an address in
+  `127.0.0.0/8` or `::1`; any other host is refused (REQ-BUS-029). The check
+  runs on the parsed URL before the client connects, so a refused URL reaches
+  no network and its scenario needs no remote server. A `nats://` URL without
   credentials is accepted on any host: a refusal would not protect a secret
   and an operator may have a private network. A refused URL fails with
   `invalid_argument` and one fixed message, `plaintext credential requires
@@ -84,9 +86,10 @@ implementation (`docs/engineering/agent-workflow.md` §4), noting the touch to
   messages it has to deliver, and it never ends the subscription (REQ-BUS-003).
   A later message is live: it takes a free place in the buffer without
   delaying the publisher, and when the buffer is full it ends the
-  subscription after the buffered messages (REQ-BUS-010). No live message
-  enters the channel after the subscription's context is cancelled
-  (REQ-BUS-009).
+  subscription after the buffered messages (REQ-BUS-010). Delivery checks the
+  subscription's context before it takes the channel lock, so a live message
+  being delivered at the moment the context is cancelled may still arrive;
+  no live message enters the channel after it closes (REQ-BUS-009).
 
 ## 4. TTLs follow the injected clock
 
@@ -116,11 +119,11 @@ system clock in production):
   most the maximum message size minus the eight-byte deadline header that
   every KV record starts with: 1 MiB − 8 = 1,048,568 bytes by default. `Put`
   and `CompareAndSwap` refuse a larger value with `invalid_argument` on every
-  backend, before writing (REQ-BUS-032). The connection's `max_payload` must
-  allow at least the maximum message size plus the header; when it does not,
-  the open fails with `invalid_argument` instead of accepting values the
-  transport cannot carry. The client's `max_payload` is a second bound, as in
-  the message row: a smaller one lowers it.
+  backend, before writing (REQ-BUS-032). The largest KV record is therefore
+  the maximum message size, header included, so the connection's `max_payload`
+  must allow at least the maximum message size; when it does not, the open
+  fails with `invalid_argument` instead of accepting values the transport
+  cannot carry.
 - **Subject**: one or more dot-separated tokens of letters, digits, `-` and `_`;
   no empty token, no wildcard (`*`, `>`), no whitespace.
 - **Key**: ASCII letters and digits and `-`, `_`, `/`, `=`, `.`; 1 to 512
@@ -128,8 +131,8 @@ system clock in production):
   no `a..b`; no wildcard, no whitespace. A key is checked by one function,
   `ValidKey` of `platform/bus`, which the fake applies too; a refused key fails with
   `invalid_argument` before any storage call (REQ-BUS-012). The grammar is
-  narrower than the NATS KV key grammar: letters with a case, accents and
-  other scripts are refused, so a key is written with ASCII only.
+  narrower than the NATS KV key grammar: only ASCII letters are accepted,
+  so accents and other scripts are refused.
 - The same validation applies to `Subscribe`, `Purge`, `LastSeq` and every KV
   call. Large payloads travel by reference (constitution 7), never on the bus.
 
@@ -190,9 +193,9 @@ system clock in production):
   helper installs the foreign record through a test-only hook
   (`bustest.Fake.WriteForeignRecord`); the fake fails a read, swap or create of
   that key with `internal` (REQ-BUS-026). A fresh bucket per scenario puts the
-  record the helper writes at revision 1, which the swap step uses. The value
-  is shorter than the eight-byte deadline header of a record, so the store
-  cannot decode it.
+  record the helper writes, and the seed put of BUS-032-02, at revision 1.
+  The foreign value is shorter than the eight-byte deadline header of a
+  record, so the store cannot decode it.
 - The cancellation and deadline scenarios (BUS-027-01 and BUS-028-01) pass a
   context that is already cancelled, or one whose deadline is the Unix epoch
   and therefore always past, to the driver; neither reads the wall clock nor
@@ -216,6 +219,11 @@ system clock in production):
   `nats-server` of the cloud row before the open, with a second client:
   `KIT_BUS` is created with a mirror, a source or `Retention: WorkQueuePolicy`
   (the faults that make it incompatible without a mismatch in message
-  size), `KIT_KV` by creating the bucket and then changing its backing
-  stream the same way. The step checks the configuration again after the
-  refused open, so the scenario also shows that a refusal changes nothing.
+  size), and `KIT_KV` by creating the bucket and then adding a source to its
+  backing stream. The server refuses to turn an existing KV backing stream
+  into a mirror or a work-queue stream (API errors 10055 and 10052), and a
+  `KIT_KV` backing stream created directly as a mirror or a work-queue stream
+  is not a key-value store the client can load, so that open fails with
+  `unavailable`, without detail `asset`. The step checks the configuration
+  again after the refused open, so the scenario also shows that a refusal
+  changes nothing.

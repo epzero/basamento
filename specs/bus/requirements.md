@@ -102,10 +102,10 @@ If the context of a call has passed its deadline while the server can be reached
 ## Implementations and their assets
 
 ### REQ-BUS-029 — Credentials only in clear over loopback
-If the connection URL of the cloud implementation has scheme `nats` and carries credentials (a user name, a password or a token), then the cloud implementation shall connect only when the host is a loopback address (`127.0.0.0/8`, `::1` or `localhost`), and otherwise shall refuse the open with code `invalid_argument`, an error that holds nothing of the URL, before connecting anywhere; with scheme `tls` credentials are accepted on any host, and a `nats` URL without credentials is accepted on any host.
+If the connection URL of the cloud implementation has scheme `nats` and carries credentials (a user name, a password or a token), then the cloud implementation shall connect only when the host is a loopback address (`127.0.0.0/8`, `::1` or `localhost`), and otherwise shall refuse the open with code `invalid_argument` and an error that holds nothing of the URL, before connecting anywhere; a `nats` URL without credentials is accepted on any host.
 
 ### REQ-BUS-030 — Streams and buckets the bus can use
-If a JetStream stream or bucket the bus uses is a mirror, has sources, or otherwise differs from the configuration the bus requires, then the bus shall refuse the open with code `invalid_argument` and detail `asset` naming that stream or bucket, and shall not change it.
+If a JetStream stream or KV bucket the bus uses opens and is a mirror, has sources, or otherwise differs from the configuration the bus requires, then the bus shall refuse the open with code `invalid_argument` and detail `asset` naming that stream or bucket, and shall not change it. If a KV bucket the bus uses does not open as a key-value store, then the bus shall fail the open with code `unavailable` and change nothing.
 
 ### REQ-BUS-031 — Embedded data directory is private
 Where the profile is `embedded`, when the bus opens on a data directory whose store directory exists with a mode wider than `0700`, the bus shall narrow it to `0700` before starting the server, and if it cannot, shall fail the open with code `internal` and an error that holds no path and no text from the server.
