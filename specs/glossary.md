@@ -53,6 +53,7 @@ the same change that first uses it.
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
 | **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..` (REQ-CRED-006, REQ-CRED-007). |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical invocation (including retries of an unacknowledged start). |
+| **Invocation registry** | The in-process store of one provider's invocations: it answers a client ref with the invocation, its event log from a cursor and its result. It keeps an ended invocation for its **retention window** after its end and holds at most its **ended bound** of ended invocations, evicting the oldest ended first and never a running one; an evicted client ref behaves as one it never held. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |
 | **Price table** | The rate rules of each model (rates per token, image or second, with the condition under which they apply), shipped with the binary and overridden per deployment and tenant. |

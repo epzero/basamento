@@ -19,10 +19,10 @@ When a caller invokes a model without following its events, the model layer shal
 While an invocation produces partial output, the model layer shall publish it as events in order, and the result shall contain the complete output.
 
 ### REQ-MODEL-004 — Stable client ref
-The model node shall start every attempt of one logical invocation with the same client ref.
+The model node shall start every attempt of one logical invocation with the same client ref while the provider's registry retains the invocation.
 
 ### REQ-MODEL-005 — Ambiguous starts are never repeated blindly
-If the outcome of a start is unknown, then the model node shall look the invocation up by client ref before starting it again, and if the provider cannot answer, shall open a gate instead of starting it again.
+If the outcome of a start is unknown, then the model node shall, while the provider's registry retains the invocation, look it up by client ref before starting it again, and if the provider cannot answer, shall open a gate instead of starting it again.
 
 ### REQ-MODEL-006 — Reserve, then settle
 Before starting a paid invocation, the system shall reserve the cost estimated by the model's price formula; when the invocation ends, the system shall charge the actual cost or release the reservation.
@@ -41,6 +41,21 @@ If an invocation's parameters do not satisfy the model's parameter schema, then 
 
 ### REQ-MODEL-011 — Machine-local models
 While the profile is `cloud`, the model router shall not select a model whose locality is `machine_local`.
+
+## Retention
+
+A registry is the in-process memory of one provider's invocations: it answers
+a client ref with the invocation, its event log from a cursor and its result.
+It cannot grow without bound, so it forgets ended invocations within limits its
+constructor sets, and nothing else.
+
+The window bounds only what the registry remembers. The model node derives the
+client ref from (run, node, attempt), calls `Begin` inside one activity
+attempt, and records the result durably before that attempt acknowledges, so a
+late retry replays the recorded result and never reaches `Begin`.
+
+### REQ-MODEL-088 — Ended invocations are forgotten within a window and a bound
+When an invocation ends, the registry shall keep it until its retention window after its end has passed and, while it holds more ended invocations than its ended bound, shall evict ended invocations from the oldest first; it shall never evict a running invocation, and shall answer for an evicted client ref exactly as for one it never held: lookup finds no invocation, events, result and cancel answer `not_found`, and a start begins a new invocation.
 
 ## Workers
 
