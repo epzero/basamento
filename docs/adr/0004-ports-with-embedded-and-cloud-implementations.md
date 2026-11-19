@@ -19,7 +19,7 @@ Wiring uses plain constructors (`wireEmbedded`, `wireCloud`) and koanf configura
 Vault Transit (`hashivault://`) is named here as a cloud key service; ADR-0017
 keeps it in the contract, refuses it at open until a driver of ours lands in its
 own work package (Vault token from a file, not from the credential store), and
-sets the schedule.
+defers the schedule to the owner.
 
 **Credentials** are named secrets per tenant (vendor API keys, tokens).
 Flows, manifests and state carry only a reference, `cred://<name>`. A value is
