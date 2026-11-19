@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -99,9 +100,57 @@ func rank(tier string) int {
 	return len(riskTiers)
 }
 
+// checkRefNotOption rejects a ref git would read as an option before it
+// reaches any git command. name says which flag it came from, so the error
+// names what to fix.
+func checkRefNotOption(name, ref string) error {
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("%s %q begins with '-': pass a branch, tag or commit, not a git option", name, ref)
+	}
+	return nil
+}
+
+// checkBaseRef rejects a value git would read as an option and requires the
+// ref to name exactly one commit. Branches, tags, remote-tracking refs such as
+// origin/main and commit SHAs all pass: the gate compares against a commit,
+// not against a branch name, so a session branch's shape is not required.
+func checkBaseRef(root, base string) error {
+	if base == "" {
+		return errors.New("no base ref: pass a branch, tag or commit such as origin/main")
+	}
+	if err := checkRefNotOption("base ref", base); err != nil {
+		return err
+	}
+	out, err := git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", base+"^{commit}")
+	// A revision-set negation such as ^main also exits 0, printing ^<sha>.
+	// Only one full object name is a commit; anything else would make `git
+	// show` and `git diff` read an empty range.
+	if err != nil || !isObjectID(out) {
+		return fmt.Errorf("base ref %q does not name a commit in this clone: fetch it (`git fetch origin`) or pass a branch, tag or commit SHA", base)
+	}
+	return nil
+}
+
+// isObjectID reports whether s is one full object name: rev-parse prints one
+// line of hex for a commit, and ^<sha> for a revision-set negation.
+func isObjectID(s string) bool {
+	if len(s) != 40 && len(s) != 64 { // SHA-1 or SHA-256
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // PlanReview reads review.yaml and the REVIEW.md files from the base ref, so a
 // change cannot lower the bar it is reviewed against.
 func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
+	if err := checkBaseRef(root, base); err != nil {
+		return ReviewPlan{}, err
+	}
 	raw, err := git(root, "show", base+":review.yaml")
 	if err != nil {
 		b, ferr := os.ReadFile(filepath.Join(root, "review.yaml")) // first introduction
@@ -145,6 +194,14 @@ func PlanReview(root, base string, changed []string) (ReviewPlan, error) {
 // the working tree, so uncommitted edits count. Comparing from the merge base
 // keeps commits that landed on base in the meantime out of the change.
 func ChangedFiles(root, base, head string) ([]string, error) {
+	if err := checkBaseRef(root, base); err != nil {
+		return nil, err
+	}
+	if head != "" {
+		if err := checkRefNotOption("head", head); err != nil {
+			return nil, err
+		}
+	}
 	tip := head
 	if tip == "" {
 		tip = "HEAD"

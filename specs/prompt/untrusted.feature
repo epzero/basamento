@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-05 @security @level:component
+@wp:WP-L3-05 @security @level:component
 Feature: Untrusted input is wrapped and cannot break out
   Values that come from users, documents, tools or earlier turns are wrapped
   in untrusted-content delimiters, so a model can tell them from

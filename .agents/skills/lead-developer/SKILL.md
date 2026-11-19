@@ -70,19 +70,21 @@ hand-off with `needs-human`, one question, with options.
 ## Self-review, before the pull request
 
 1. `go tool gate review plan -base origin/main -head <branch>` gives the
-   tier, which sets the finders of `code-review.md` §2 to §4, at the tiers
-   of `agent-workflow.md` §2.3. Each finding gets at most one verifier in
-   the self-review (`code-review.md` §1). Spawn them as code reviewer
-   sessions.
-2. Surviving important findings go to the implementer as
-   `code-changes-requested` (`go tool gate agent status … -issue <id>`).
-3. A later round is one code reviewer session at standard effort, not a
-   fan-out of finders (`code-review.md` §6, `agent-workflow.md` §2.3). Give
-   it, as separate lists: the commit the new diff starts from, the findings
-   still open (to check) and the findings settled (not to repeat).
-4. After three rounds, stop spawning. Read what is still open yourself and
-   settle each finding: have it fixed, or drop it with a reason that goes in
-   the pull request description.
+   tier, which sets the self-review finders and verifier rule of
+   `code-review.md` §1 to §4, at the effort tiers of `agent-workflow.md` §2.3.
+   Spawn them as code reviewer sessions.
+2. If round 1 raised no surviving important findings, the self-review is
+   settled. Otherwise send them to the implementer as `code-changes-requested`
+   (`go tool gate agent status … -issue <id>`).
+3. Round 2 is one code reviewer session at standard effort (`code-review.md`
+   §6, `agent-workflow.md` §2.3). Give it, as separate lists: the commit the
+   new diff starts from, the findings still open (to check) and the findings
+   settled (not to repeat). Verify the important findings it raises as in
+   round 1 (`code-review.md` §4) before you send them to the implementer or
+   settle them.
+4. After two rounds, stop spawning code reviewers. Read what is still open
+   yourself and settle each finding: have it fixed, or drop it with a reason
+   that goes in the pull request description.
 
 You never set the risk label: that is the reviewer's.
 

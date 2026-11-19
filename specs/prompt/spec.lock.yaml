@@ -416,6 +416,54 @@ scenarios:
             by: human:epzero
             at: "2026-11-17"
             note: https://github.com/epzero/basamento/pull/1
+    PROMPT-021-03:
+        hash: sha256:0593b62d8003a57f9386d323711ab465b55c1122997bee00e4a17f5a28dbce3a
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'Security: trusted values can forge a delimiter pair; both delimiters must report as unpaired so a forged wrapper cannot pass as prompt structure.'
+        ref: https://github.com/epzero/basamento/pull/52
+        human:
+            status: pending
+    PROMPT-021-04:
+        hash: sha256:a0952332f1e5f6af7c87bf9da118320dd04cce91c766270736f7cc56145382ee
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'Security: a delimiter pair in a template''s fixed text must be refused at lint; fixed text must not smuggle an untrusted wrapper.'
+        ref: https://github.com/epzero/basamento/pull/52
+        human:
+            status: pending
+    PROMPT-021-05:
+        hash: sha256:facbc7e32f7f366fb2ae7cbd2d08c529bc132a6b97cd11f731725f766a36c4a5
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'Security boundary: the assembler''s own recorded pairs must lint clean, so the rule catches forgeries without refusing legitimate wrapping.'
+        ref: https://github.com/epzero/basamento/pull/52
+        human:
+            status: pending
+    PROMPT-021-06:
+        hash: sha256:0b5c810d553fce1916b2be974748be4cadf5bda93e98296d2eba4909b419159b
+        reqs:
+            - REQ-PROMPT-021
+        tier: P0
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'Security: a recorded pair whose closing delimiter was removed must report the remaining delimiter, or a tampered prompt drops a wrapper boundary undetected.'
+        ref: https://github.com/epzero/basamento/pull/52
+        human:
+            status: pending
     PROMPT-022-01:
         hash: sha256:14b912469ec828c5b8820136af641c7300a3e828b308197f73125d69aca119c2
         reqs:
@@ -449,7 +497,10 @@ scenarios:
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
     PROMPT-024-02:
         hash: sha256:82284fa1b309526837bb0c547999c56fb0d9abb883cc998d1acaca7bfb2fa78f
         reqs:
@@ -461,7 +512,10 @@ scenarios:
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
     PROMPT-024-03:
         hash: sha256:779afc3cca9463823f692c4b5a1c23578de1fb00b937fccb058e68718faf173f
         reqs:
@@ -472,5 +526,33 @@ scenarios:
         approved_at: "2026-11-18"
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
+        human:
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
+    PROMPT-025-01:
+        hash: sha256:30e1d6bcf99540a23fdff9c077aebfd22951139458e7ee063a1e0dc8e6e7affb
+        reqs:
+            - REQ-PROMPT-025
+        tier: P2
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'New scenarios: prompt lint and registration name the structure rule a template breaks; no approved scenario text changed.'
+        ref: https://github.com/epzero/basamento/pull/52
+        human:
+            status: pending
+    PROMPT-025-02:
+        hash: sha256:ba66b30bfd2fe1eb4d4e3921af2df0119e50e7080acb1886b03998a60e8204a6
+        reqs:
+            - REQ-PROMPT-020
+            - REQ-PROMPT-025
+        tier: P2
+        author: claude-code:spec-author:ep0057
+        reviewer: opencode:spec-reviewer:e7172c
+        approved_at: "2026-11-18"
+        note: 'New scenarios: prompt lint and registration name the structure rule a template breaks; no approved scenario text changed.'
+        ref: https://github.com/epzero/basamento/pull/52
         human:
             status: pending

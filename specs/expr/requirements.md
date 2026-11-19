@@ -75,3 +75,13 @@ When a mapping passes through an integer of its input unchanged, the mapping eva
 
 ### REQ-EXPR-019 — Mapping syntax errors
 If a mapping cannot be parsed, then the mapping compiler shall reject it with code `invalid_argument`, naming the mapping and the position of the error.
+
+### REQ-EXPR-020 — Mapping output limit
+If a mapping's output exceeds its output limit, then the mapping evaluator shall stop and fail with code `invalid_argument`, naming the output limit.
+
+### REQ-EXPR-021 — Map key order
+When an expression iterates over a map, the expression evaluator shall order its keys by kind, `bool` < `int` < `uint` < `double` < `string`, ascending within each kind, and within `double` numerically with any NaN after every other number.
+
+### REQ-EXPR-022 — Map keys of no order
+If a map in an expression holds a key that is not a `bool`, `int`, `uint`, `double` or `string`, then the expression evaluator shall fail with code `invalid_argument` and the cause `unordered key` when it iterates over that map, and shall not skip that key's entry.
+
