@@ -93,14 +93,6 @@ check every change against this page. Tools enforce what they can
     and restricted licenses such as GPL and AGPL;
   - be pure Go (the binary is built with `CGO_ENABLED=0`).
 - Pin exact versions. Heavy dependencies (servers, SDKs with large trees) live
-<<<<<<< HEAD
-  in their own module, as `runtime/temporal/embedded` does.
-- A port vendor library (cloud SDKs, SQL drivers, NATS, gocloud, Temporal, Tink
-  and the like) must not be imported from `internal/config`; add its import-path
-  prefix to that layer's `deny_external` in the same change (ADR-0016). The
-  module port packages (`platform`, `runtime`, and subpackages) stay out via the
-  layer allow-list, not `deny_external`.
-=======
   in their own module, as `runtime/temporal/embedded` does (454 modules on
   `go list -m all`). Platform port libraries stay in the root module: SDKs such
   as `gocloud.dev` and Tink, and embedded servers whose trees stay small.
@@ -108,7 +100,11 @@ check every change against this page. Tools enforce what they can
   modules on this root module versus 24 on `main` without bus); `platform/bus`,
   the BDD harness and kit use it in one code path (profiles table in
   `docs/architecture/overview.md` section 2).
->>>>>>> 845073e (docs(bus): record nats-server root-module exception (WP-L1-03 EP0-20))
+- A port vendor library (cloud SDKs, SQL drivers, NATS, gocloud, Temporal, Tink
+  and the like) must not be imported from `internal/config`; add its import-path
+  prefix to that layer's `deny_external` in the same change (ADR-0016). The
+  module port packages (`platform`, `runtime`, and subpackages) stay out via the
+  layer allow-list, not `deny_external`.
 
 ## 5. Documentation
 
