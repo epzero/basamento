@@ -571,6 +571,62 @@ func snapshotsEqual(a, b flow.Snapshot) bool {
 	return string(left) == string(right)
 }
 
+func TestNodeInputWithoutInUsesRunInput(t *testing.T) {
+	def := &flow.IR{
+		Name:    "input-default",
+		Version: 1,
+		State: flow.StateSpec{
+			Schema: json.RawMessage(`{"type":"object"}`),
+		},
+		Nodes: map[string]flow.Node{
+			"work": {Kind: "task"},
+		},
+		Edges: []flow.Edge{{From: ir.Start, To: "work"}},
+	}
+	for _, tc := range []struct {
+		name  string
+		start string
+		want  string
+	}{
+		{name: "run_input", start: `{"tests":4}`, want: `{"tests":4}`},
+		{name: "empty_run", start: `{}`, want: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := requireMachine(t, def)
+			_, commands, err := m.Start(json.RawMessage(tc.start))
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCommands(t, commands)
+			if string(commands[0].Input) != tc.want {
+				t.Fatalf("input %s, want %s", commands[0].Input, tc.want)
+			}
+		})
+	}
+	t.Run("in_mapping", func(t *testing.T) {
+		mapped := &flow.IR{
+			Name:    "input-mapped",
+			Version: 1,
+			State: flow.StateSpec{
+				Schema: json.RawMessage(`{"type":"object","properties":{"draft":{"type":"object"}}}`),
+			},
+			Nodes: map[string]flow.Node{
+				"work": {Kind: "task", In: "state.draft"},
+			},
+			Edges: []flow.Edge{{From: ir.Start, To: "work"}},
+		}
+		m := requireMachine(t, mapped)
+		_, commands, err := m.Start(json.RawMessage(`{"draft":{"picked":true},"tests":4}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireCommands(t, commands)
+		if string(commands[0].Input) != `{"picked":true}` {
+			t.Fatalf("input %s, want mapped draft", commands[0].Input)
+		}
+	})
+}
+
 func permutations(items []string) [][]string {
 	var out [][]string
 	var walk func(int)

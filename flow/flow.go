@@ -37,7 +37,7 @@ type Node struct {
 	// could not tell two nodes of the same kind apart (ADR-0011).
 	Name  string          `json:"-"`
 	Kind  string          `json:"kind"`          // set|task|model|agent|tool|map|parallel|subflow|gate|wait
-	In    string          `json:"in,omitempty"`  // CEL or jq mapping from state to node input
+	In    string          `json:"in,omitempty"`  // CEL or jq mapping from state to node input; empty means the run's input
 	Out   string          `json:"out,omitempty"` // state key receiving the node's update
 	Spec  json.RawMessage `json:"spec,omitempty"`
 	Guard *Guard          `json:"guard,omitempty"`

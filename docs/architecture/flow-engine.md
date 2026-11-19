@@ -108,7 +108,8 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   existing node whose kind is one the host runs (not `set`, `map` or `parallel`),
   must not carry a guard, and must not be shared by two map nodes.
 - **Node kinds**: `set` nodes and routing are evaluated in the machine with no
-  command (REQ-FLOW-036). A `parallel` node starts every node named by its
+  command (REQ-FLOW-036). A node with no `in` mapping receives the run's input
+  as its command input. A `parallel` node starts every node named by its
   outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
   array and starts the node named by `spec.node` once per element, carrying the
   element as input and the one-based index as the attempt, up to
