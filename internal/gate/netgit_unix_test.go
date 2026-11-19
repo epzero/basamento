@@ -1,4 +1,4 @@
-//go:build unix && !aix
+//go:build unix && !solaris && !aix
 
 package gate
 
@@ -60,7 +60,9 @@ func TestOriginHasBranchKeepsTheLSRemoteExitCode(t *testing.T) {
 // it. It leaves git's process group so the kill at the deadline misses it, and
 // then holds the stdout and stderr pipes inherited from git, the way
 // git-remote-https or ssh would, until the test releases it through
-// GATE_TEST_PIPE_RELEASE.
+// GATE_TEST_PIPE_RELEASE. The test keeps an O_RDWR descriptor on each fifo so
+// when the test process exits the kernel closes those ends and this process's
+// blocking read on release returns EOF instead of leaking forever.
 func TestGitPipeHolderProcess(t *testing.T) {
 	if os.Getenv("GATE_TEST_PIPE_HOLDER") != "1" {
 		return
@@ -76,41 +78,38 @@ func TestGitPipeHolderProcess(t *testing.T) {
 	if pidPath := os.Getenv("GATE_TEST_PIPE_PID"); pidPath != "" {
 		_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
 	}
-	if readyPath := os.Getenv("GATE_TEST_PIPE_READY"); readyPath != "" {
-		ready, err := os.OpenFile(readyPath, os.O_WRONLY, 0)
-		if err != nil {
-			os.Exit(1)
-		}
-		if _, err := ready.Write([]byte{1}); err != nil {
-			_ = ready.Close()
-			os.Exit(1)
-		}
-		_ = ready.Close()
-	}
-	if os.Getenv("GATE_TEST_PIPE_EXIT_AFTER_READY") == "1" {
-		os.Exit(0)
-	}
+	readyPath := os.Getenv("GATE_TEST_PIPE_READY")
+	donePath := os.Getenv("GATE_TEST_PIPE_DONE")
 	releasePath := os.Getenv("GATE_TEST_PIPE_RELEASE")
-	if releasePath == "" {
+	if readyPath == "" || donePath == "" || releasePath == "" {
 		os.Exit(1)
 	}
-	release, err := os.Open(releasePath)
-	if err != nil {
-		os.Exit(1)
-	}
-	if _, err := release.Read(make([]byte, 1)); err != nil && err != io.EOF {
-		_ = release.Close()
-		os.Exit(1)
-	}
-	_ = release.Close()
-	if donePath := os.Getenv("GATE_TEST_PIPE_DONE"); donePath != "" {
-		done, err := os.OpenFile(donePath, os.O_WRONLY, 0)
-		if err == nil {
+	signalDone := func(code int) {
+		if done, err := os.OpenFile(donePath, os.O_RDWR, 0); err == nil {
 			_, _ = done.Write([]byte{0})
 			_ = done.Close()
 		}
+		os.Exit(code)
 	}
-	os.Exit(0)
+	ready, err := os.OpenFile(readyPath, os.O_RDWR, 0)
+	if err != nil {
+		signalDone(1)
+	}
+	if _, err := ready.Write([]byte{1}); err != nil {
+		_ = ready.Close()
+		signalDone(1)
+	}
+	_ = ready.Close()
+	release, err := os.OpenFile(releasePath, os.O_RDONLY, 0)
+	if err != nil {
+		signalDone(1)
+	}
+	if _, err := release.Read(make([]byte, 1)); err != nil && !errors.Is(err, io.EOF) {
+		_ = release.Close()
+		signalDone(1)
+	}
+	_ = release.Close()
+	signalDone(0)
 }
 
 // TestRemoteGitCancelBoundsCallDespitePipeHolder proves a cancel (or deadline)
@@ -119,6 +118,7 @@ func TestGitPipeHolderProcess(t *testing.T) {
 // blocks on the release fifo, so helper start time does not affect pass/fail.
 func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 	bin := t.TempDir()
+	repoDir := t.TempDir()
 	mark := filepath.Join(t.TempDir(), "holder")
 	holderPID := mark + ".pid"
 	started := mark + ".script"
@@ -134,6 +134,26 @@ func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	readyFD, err := os.OpenFile(readyFIFO, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("opening holder-ready fifo: %v", err)
+	}
+	releaseFD, err := os.OpenFile(releaseFIFO, os.O_RDWR, 0)
+	if err != nil {
+		_ = readyFD.Close()
+		t.Fatalf("opening holder-release fifo: %v", err)
+	}
+	doneFD, err := os.OpenFile(doneFIFO, os.O_RDWR, 0)
+	if err != nil {
+		_ = readyFD.Close()
+		_ = releaseFD.Close()
+		t.Fatalf("opening holder-done fifo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = readyFD.Close()
+		_ = releaseFD.Close()
+		_ = doneFD.Close()
+	})
 
 	script := fmt.Sprintf("#!/bin/sh\necho started > %q\n%q -test.run='^TestGitPipeHolderProcess$' &\nwait\n",
 		started, os.Args[0])
@@ -149,35 +169,30 @@ func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 	t.Setenv("GATE_TEST_PIPE_RELEASE", releaseFIFO)
 	t.Setenv("GATE_TEST_PIPE_DONE", doneFIFO)
 
+	var releaseErr error
 	var releaseOnce sync.Once
-	releaseHolder := func() {
+	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			w, err := os.OpenFile(releaseFIFO, os.O_WRONLY, 0)
-			if err != nil {
-				return
+			if _, err := releaseFD.Write([]byte{0}); err != nil {
+				releaseErr = fmt.Errorf("releasing the pipe holder: %w", err)
 			}
-			_, _ = w.Write([]byte{0})
-			_ = w.Close()
 		})
+		return releaseErr
 	}
 	var waitOnce sync.Once
+	var waitErr error
 	waitHolderExited := func(fatal bool) {
 		t.Helper()
 		waitOnce.Do(func() {
-			r, err := os.Open(doneFIFO)
-			if err != nil {
+			// The holder defers a done-byte write on every path it controls; if it
+			// is killed from outside, this read blocks until go test's own timeout,
+			// which is the accepted failure mode for that case.
+			if _, err := doneFD.Read(make([]byte, 1)); err != nil && !errors.Is(err, io.EOF) {
+				waitErr = fmt.Errorf("reading holder-done fifo: %w", err)
 				if fatal {
-					t.Fatalf("waiting for the pipe holder to exit: %v", err)
+					t.Fatal(waitErr)
 				}
-				t.Errorf("waiting for the pipe holder to exit: %v", err)
-				return
-			}
-			defer func() { _ = r.Close() }()
-			if _, err := io.ReadAll(r); err != nil {
-				if fatal {
-					t.Fatalf("reading holder-done fifo: %v", err)
-				}
-				t.Errorf("reading holder-done fifo: %v", err)
+				t.Error(waitErr)
 			}
 		})
 	}
@@ -197,7 +212,9 @@ func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 		if err != nil || proc.Signal(syscall.Signal(0)) != nil {
 			return
 		}
-		releaseHolder()
+		if err := releaseHolder(); err != nil {
+			t.Error(err)
+		}
 		waitHolderExited(false)
 	})
 
@@ -210,19 +227,26 @@ func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 	go func() {
 		// A long child timeout ensures the only bound is the cancel the test
 		// fires after the helper has signalled readiness.
-		_, remoteErr = gitRemoteWithin(parent, t.TempDir(), time.Hour, waitDelay, "fetch", "origin")
+		_, remoteErr = gitRemoteWithin(parent, repoDir, time.Hour, waitDelay, "fetch", "origin")
 		close(done)
 	}()
 
-	// Blocking read: no polling, no timer. If the helper never starts (broken
-	// test binary path, etc.) this blocks until go test's own timeout.
-	ready, err := os.Open(readyFIFO)
-	if err != nil {
-		t.Fatalf("opening holder-ready fifo: %v", err)
-	}
-	defer func() { _ = ready.Close() }()
-	if _, err := ready.Read(make([]byte, 1)); err != nil && err != io.EOF {
-		t.Fatalf("reading holder-ready fifo: %v", err)
+	readyCh := make(chan error, 1)
+	go func() {
+		_, err := readyFD.Read(make([]byte, 1))
+		readyCh <- err
+	}()
+
+	select {
+	case err := <-readyCh:
+		if err != nil && !errors.Is(err, io.EOF) {
+			t.Fatalf("reading holder-ready fifo: %v", err)
+		}
+	case <-done:
+		if remoteErr != nil {
+			t.Fatalf("gitRemoteWithin failed before the holder was ready: %v", remoteErr)
+		}
+		t.Fatal("gitRemoteWithin finished before the holder signalled readiness")
 	}
 
 	cancel()
@@ -247,7 +271,9 @@ func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 		t.Fatalf("the pipe holder must still be running while gitRemoteWithin returned (pid %d)", pid)
 	}
 
-	releaseHolder()
+	if err := releaseHolder(); err != nil {
+		t.Fatal(err)
+	}
 	waitHolderExited(true)
 }
 
@@ -262,7 +288,9 @@ func TestRemoteGitDeadlineErrorBeforeExec(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	_, err := gitRemoteWithin(context.Background(), t.TempDir(), time.Nanosecond, time.Millisecond, "fetch", "origin")
+	past, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancel()
+	_, err := gitRemoteWithin(past, t.TempDir(), time.Hour, time.Millisecond, "fetch", "origin")
 	if err == nil || !strings.Contains(err.Error(), "timed out after") {
 		t.Fatalf("want the deadline error before exec starts: %v", err)
 	}
