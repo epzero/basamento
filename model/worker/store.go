@@ -205,7 +205,7 @@ func (s *Store) ListPools(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var id string
@@ -339,16 +339,6 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	}, nil
 }
 
-// poolRef names a pool in an audit event. A refused join with an unknown token
-// has no pool to name, so the id is reported as unknown rather than echoing
-// the token.
-func poolRef(_ string, poolID string) string {
-	if poolID == "" {
-		return "[unknown]"
-	}
-	return poolID
-}
-
 // poolIDByToken names the pool a token belongs to, revoked or not, without
 // ever returning the token itself.
 func (s *Store) poolIDByToken(ctx context.Context, token string) string {
@@ -378,7 +368,7 @@ func (s *Store) checkConflict(ctx context.Context, poolID string, descriptors []
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	want := map[string]string{}
 	for _, d := range descriptors {
 		want[d.ID] = d.canonical()
@@ -513,16 +503,16 @@ func (s *Store) ListWorkers(ctx context.Context, poolID string) ([]Worker, error
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	out := make([]Worker, 0, len(ids))
 	for _, id := range ids {
 		w, err := s.Worker(ctx, id)
@@ -553,7 +543,7 @@ func (s *Store) Leased(ctx context.Context, workerID string) ([]Invocation, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Invocation
 	for rows.Next() {
 		inv, err := scanInvocation(rows)
@@ -643,7 +633,7 @@ func (s *Store) Descriptors(ctx context.Context, poolID string) ([]Descriptor, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Descriptor
 	for rows.Next() {
 		var model, raw string

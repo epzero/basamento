@@ -384,22 +384,6 @@ func (w *workerWorld) nextRef(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, w.seq)
 }
 
-func (w *workerWorld) workerState(ctx context.Context, name string) (worker.State, error) {
-	jw, ok := w.workers[name]
-	if !ok {
-		return "", fmt.Errorf("worker %q has not joined", name)
-	}
-	st, err := w.open(ctx)
-	if err != nil {
-		return "", err
-	}
-	got, err := st.Worker(ctx, jw.worker.ID)
-	if err != nil {
-		return "", err
-	}
-	return got.State, nil
-}
-
 func workerHeartbeat(ctx context.Context, name string, minutes int) error {
 	w := world(ctx).Worker
 	if minutes > 0 {
@@ -467,9 +451,7 @@ func registerWorker(sc *godog.ScenarioContext) {
 	sc.Step(`^tenant "([^"]*)" has pool "([^"]*)" serving model "([^"]*)"$`, func(ctx context.Context, tenant, poolID, modelID string) error {
 		return workerDeclare(ctx, tenant, poolID, modelID, -1)
 	})
-	sc.Step(`^tenant "([^"]*)" has pool "([^"]*)" serving model "([^"]*)" priced at (\d+) milli-points, with no present worker$`, func(ctx context.Context, tenant, poolID, modelID string, price int64) error {
-		return workerDeclare(ctx, tenant, poolID, modelID, price)
-	})
+	sc.Step(`^tenant "([^"]*)" has pool "([^"]*)" serving model "([^"]*)" priced at (\d+) milli-points, with no present worker$`, workerDeclare)
 	sc.Step(`^pool "([^"]*)" serves model "([^"]*)" and has no present worker$`, func(ctx context.Context, poolID, modelID string) error {
 		return workerDeclare(ctx, "", poolID, modelID, -1)
 	})
@@ -534,9 +516,7 @@ func registerWorker(sc *godog.ScenarioContext) {
 	sc.Step(`^tenant "([^"]*)" has spill-over (on|off)$`, func(ctx context.Context, tenant, onOff string) error {
 		return workerSpillSetting(ctx, tenant, onOff, 0)
 	})
-	sc.Step(`^tenant "([^"]*)" has spill-over (on|off) after (\d+) minutes$`, func(ctx context.Context, tenant, onOff string, minutes int) error {
-		return workerSpillSetting(ctx, tenant, onOff, minutes)
-	})
+	sc.Step(`^tenant "([^"]*)" has spill-over (on|off) after (\d+) minutes$`, workerSpillSetting)
 	sc.Step(`^tenant "([^"]*)" has pool "([^"]*)" serving model "([^"]*)" with no present worker$`, func(ctx context.Context, tenant, poolID, modelID string) error {
 		return workerDeclare(ctx, tenant, poolID, modelID, -1)
 	})
@@ -820,9 +800,7 @@ func registerWorker(sc *godog.ScenarioContext) {
 	sc.Step(`^worker "([^"]*)" sends a heartbeat$`, func(ctx context.Context, name string) error {
 		return workerHeartbeat(ctx, name, 0)
 	})
-	sc.Step(`^worker "([^"]*)" sends a heartbeat (\d+) minutes? later$`, func(ctx context.Context, name string, minutes int) error {
-		return workerHeartbeat(ctx, name, minutes)
-	})
+	sc.Step(`^worker "([^"]*)" sends a heartbeat (\d+) minutes? later$`, workerHeartbeat)
 
 	sc.Step(`^leases last (\d+) minutes?$`, func(ctx context.Context, minutes int) error {
 		w := world(ctx).Worker

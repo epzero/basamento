@@ -125,7 +125,7 @@ func scanInvocation(row rowScanner) (Invocation, error) {
 	inv.Code = core.Code(code)
 	inv.Request = json.RawMessage(request)
 	inv.Result = json.RawMessage(result)
-	if inv.Request == nil || len(inv.Request) == 0 {
+	if len(inv.Request) == 0 {
 		inv.Request = json.RawMessage("{}")
 	}
 	return inv, nil
@@ -229,7 +229,7 @@ func (s *Store) waitingCandidates(ctx context.Context, exec *psql.Execer, poolID
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Invocation
 	for rows.Next() {
 		inv, err := scanInvocation(rows)
@@ -268,7 +268,7 @@ func leasedByTenant(ctx context.Context, exec *psql.Execer, poolID string) (map[
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[core.TenantID]int{}
 	for rows.Next() {
 		var tenant string
@@ -591,7 +591,7 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	answer := HeartbeatAnswer{Drain: w.State == StateDraining, LeaseExpires: expires, State: w.State}
 	for rows.Next() {
 		var ref string
@@ -677,16 +677,16 @@ func (s *Store) sweep(ctx context.Context) error {
 		for rows.Next() {
 			inv, err := scanInvocation(rows)
 			if err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 			all = append(all, inv)
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
-		rows.Close()
+		_ = rows.Close()
 		touched := map[string]bool{}
 		for _, inv := range all {
 			switch {
@@ -754,12 +754,12 @@ func (s *Store) sweep(ctx context.Context) error {
 			for rows.Next() {
 				var id string
 				if err := rows.Scan(&id); err != nil {
-					rows.Close()
+					_ = rows.Close()
 					return err
 				}
 				ids = append(ids, id)
 			}
-			rows.Close()
+			_ = rows.Close()
 			for _, id := range ids {
 				if err := setUnitsInUse(ctx, tx, id); err != nil {
 					return err
@@ -837,7 +837,7 @@ func (s *Store) EventsAfter(ctx context.Context, clientRef string, after int64) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
 		var e Event
@@ -876,7 +876,7 @@ func (s *Store) Metrics(ctx context.Context, poolID string) (QueueMetrics, error
 	for rows.Next() {
 		inv, err := scanInvocation(rows)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return m, err
 		}
 		switch inv.State {
@@ -898,10 +898,10 @@ func (s *Store) Metrics(ctx context.Context, poolID string) (QueueMetrics, error
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return m, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	workers, err := s.ListWorkers(ctx, poolID)
 	if err != nil {
 		return m, err

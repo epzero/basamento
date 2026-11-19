@@ -21,7 +21,10 @@ func main() {
 	case "serve":
 		runServe(os.Args[2:])
 	case "worker":
-		runWorker(os.Args[2:])
+		if err := runWorker(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "config":
 		if len(os.Args) < 3 || os.Args[2] != "validate" {
 			usage()

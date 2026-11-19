@@ -100,14 +100,6 @@ type Descriptor struct {
 	RestartSafe bool `json:"restart_safe,omitempty"`
 }
 
-// units is the declared cost, at least 1.
-func (d Descriptor) units() int {
-	if d.Units <= 0 {
-		return 1
-	}
-	return d.Units
-}
-
 // canonical returns a stable representation for descriptor comparison. A pool
 // refuses a worker that declares a different descriptor for a model another
 // present worker serves (REQ-MODEL-028).
@@ -272,11 +264,5 @@ type QueueMetrics struct {
 func errLeaseLost(clientRef string) error {
 	return core.NewError(CodeLeaseLost,
 		fmt.Sprintf("invocation %q is no longer leased", clientRef),
-		map[string]any{"client_ref": clientRef})
-}
-
-func errWorkerLost(clientRef string) error {
-	return core.NewError(CodeWorkerLost,
-		fmt.Sprintf("invocation %q was lost with its worker", clientRef),
 		map[string]any{"client_ref": clientRef})
 }
