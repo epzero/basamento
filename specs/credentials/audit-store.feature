@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: Credential audit store
   The SQL implementation of `platform.Audit` appends every audit event to one
   table. A stored event is never updated or deleted; a tenant-scoped read
