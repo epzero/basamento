@@ -197,3 +197,7 @@ tool (
 	github.com/epzero/basamento/tools/gate
 	github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
 )
+
+require github.com/epzero/basamento/presets/codegen v0.0.0
+
+replace github.com/epzero/basamento/presets/codegen => ./presets/codegen

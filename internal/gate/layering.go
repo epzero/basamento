@@ -26,6 +26,11 @@ type LayeringRules struct {
 	TestOnlyOK []string `yaml:"test_only_allowed_from"`
 	// DenyExternal maps a layer to import path prefixes it must not use.
 	DenyExternal map[string][]string `yaml:"deny_external"`
+	// known is the set of package paths in this module, filled by Layering
+	// from go list. A module-path import that is not in it belongs to a
+	// nested module (for example presets/codegen), which is external to this
+	// graph like any other dependency.
+	known map[string]bool
 }
 
 type goPkg struct {
@@ -92,6 +97,11 @@ func Layering(root string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	known := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		known[p.ImportPath] = true
+	}
+	r.known = known
 	attributed, err := attributedGoFiles(pkgs)
 	if err != nil {
 		return nil, err
@@ -174,7 +184,7 @@ func goListPackages(root string) ([]goPkg, error) {
 
 // checkImport returns a violation message for one import, or "" if allowed.
 func checkImport(r LayeringRules, rel, layer, imp string, ctx importCheck) string {
-	if strings.HasPrefix(imp, r.Module+"/") {
+	if strings.HasPrefix(imp, r.Module+"/") && (r.known == nil || r.known[imp]) {
 		dep := strings.TrimPrefix(imp, r.Module+"/")
 		testOnly := matchLayer(dep, r.TestOnly) != ""
 		if testOnly && !ctx.testRules() && matchLayer(rel, r.TestOnlyOK) == "" {

@@ -1,4 +1,4 @@
-@planned @wp:WP-L10-01 @runtime:any @level:component
+@wp:WP-L10-01 @runtime:any @level:component
 Feature: Codegen iteration
   "codegen.iterate" applies a change request to an existing repository over
   the same loop as "codegen.bootstrap", and lands its commit on a new branch.

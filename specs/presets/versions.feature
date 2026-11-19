@@ -1,4 +1,4 @@
-@planned @wp:WP-L10-01 @runtime:any @level:component
+@wp:WP-L10-01 @runtime:any @level:component
 Feature: Preset versions
   A new version of the codegen preset is accepted only when it compiles, its
   `@eval` suite does not regress and a person resolves its review gate. The
