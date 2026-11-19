@@ -145,6 +145,34 @@ func TestRepairKeepsCommasInsideStrings(t *testing.T) {
 	}
 }
 
+func TestRepairFixesTypographicQuotes(t *testing.T) {
+	spec := mustSpec(t, RungJSONMode)
+	got, ok := spec.Repair(replyWith(t, "{\u201canswer\u201d: 7}"))
+	if !ok || string(got) != `{"answer":7}` {
+		t.Fatalf("Repair = %s, %v", got, ok)
+	}
+}
+
+func TestRepairEscapesAnInvalidEscape(t *testing.T) {
+	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := spec.Repair(replyWith(t, `{"answer": "a\db"}`))
+	if !ok {
+		t.Fatal("Repair did not accept an invalid escape")
+	}
+	var value struct {
+		Answer string `json:"answer"`
+	}
+	if err := json.Unmarshal(got, &value); err != nil {
+		t.Fatalf("Repair = %s: %v", got, err)
+	}
+	if value.Answer != `a\db` {
+		t.Fatalf("Repair changed the value to %q", value.Answer)
+	}
+}
+
 func TestClientRef(t *testing.T) {
 	if got := ClientRef("call-1", 1); got != "call-1" {
 		t.Fatalf("attempt 1 ref = %q, want call-1", got)
