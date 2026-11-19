@@ -1,9 +1,11 @@
 # Package graph, enforced by `go tool gate layering`. Canonical; the table in
-# docs/architecture/overview.md §3 is derived from it. A layer may always import
-# itself and its own sub-packages. A sub-package listed here is a layer of its
-# own (the longest match wins): flow and model stay free of package runtime,
-# while flow/host and model/node hold the flow code that needs it (ADR-0011).
-# Change this file only with an ADR.
+# docs/architecture/overview.md §3 is derived from it. The gate checks production
+# imports, in-package and external test imports, and imports in build-excluded
+# files (`IgnoredGoFiles`) on one `go list -json ./...` pass (ADR-0018). A layer
+# may always import itself and its own sub-packages. A sub-package listed here
+# is a layer of its own (the longest match wins): flow and model stay free of
+# package runtime, while flow/host and model/node hold the flow code that needs
+# it (ADR-0011). Change this file only with an ADR.
 module: github.com/epzero/basamento
 
 layers:
@@ -29,9 +31,9 @@ layers:
   internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
   internal/config:    [core]
 
-# Fakes: importable only from _test.go files (not checked by `go list` Imports)
-# and from the BDD harness.
-test_only: [core/coretest]
+# Fakes and BDD harness helpers: importable only from _test.go files of any
+# layer and from packages in test_only_allowed_from (ADR-0018).
+test_only: [core/coretest, internal/bdd/s3sim, internal/bdd/blobmatrix, internal/bdd/modroot]
 test_only_allowed_from: [internal/bdd]
 
 # Durable-execution vendors stay behind runtime implementations; flow code and

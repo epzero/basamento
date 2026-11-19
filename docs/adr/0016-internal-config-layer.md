@@ -1,6 +1,8 @@
 # ADR-0016 — The `internal/config` layer
 
-**Status:** accepted · **Date:** 2026-11-18
+**Status:** accepted · **Date:** 2026-11-18 · **Amended 2026-11-19:** ADR-0018
+supersedes the **Gate vs review** sentences that `_test.go` is out of scope and
+that files for other platforms are reviewed by hand only.
 
 ## Context
 

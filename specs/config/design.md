@@ -61,11 +61,10 @@ tell it apart, and a new `internal/<pkg>` row or grant needs an ADR
 `cloud.google.com/`, `github.com/Azure/` (ADR-0002, ADR-0004). The gate has
 no way to know which modules are port vendors, so whoever adds a port library
 to the config package extends that list in the same change and a reviewer
-checks it; an import the list does not name passes. Imports are read from
-`go list` in the gate's build context (Linux on CI), so a file built only on
-another platform is outside the check and is reviewed by hand; `_test.go`
-imports are not read at all, as `test_only` already relies on. The standard
-library and small parsers are allowed.
+checks it; an import the list does not name passes. `gate layering` reads
+production and test imports and build-excluded files in the gate's build context
+(Linux on CI), with `test_only` as the cross-layer test exemption (`ADR-0018`).
+The standard library and small parsers are allowed.
 
 Keep `internal/config` free of every port implementation and of
 `go.temporal.io/`: the allow-list admits `core` only and `deny_external`
