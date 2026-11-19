@@ -115,6 +115,9 @@ func (c *Catalog) SetTenantPrice(tenant core.TenantID, modelID string, p Price) 
 		c.tenants[tenant] = m
 	}
 	if err := setPrice(m, modelID, p); err != nil {
+		if len(m) == 0 {
+			delete(c.tenants, tenant)
+		}
 		return err
 	}
 	if len(m) == 0 {

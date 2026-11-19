@@ -2,25 +2,28 @@ package catalog
 
 import (
 	"testing"
+	"time"
 
 	"github.com/epzero/basamento/core"
-	"gopkg.in/yaml.v3"
+	"github.com/epzero/basamento/core/coretest"
 )
 
 func TestSnapshotLoaderRejectsNegativeRate(t *testing.T) {
-	var prices map[string]Price
 	raw := []byte(`sim-chat:
   rules:
     - rates:
         input: -1
         output: 0
 `)
-	if err := yaml.Unmarshal(raw, &prices); err != nil {
-		t.Fatalf("yaml: %v", err)
+	_, err := parseSnapshot(raw)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("parseSnapshot: code=%s err=%v, want invalid_argument", core.CodeOf(err), err)
 	}
-	for modelID, p := range prices {
-		if err := validatePrice(modelID, p); core.CodeOf(err) != core.CodeInvalidArgument {
-			t.Fatalf("validatePrice: code=%s err=%v", core.CodeOf(err), err)
-		}
+}
+
+func TestEmbeddedSnapshotLoadsViaNew(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	if _, err := New(clock); err != nil {
+		t.Fatalf("New: %v", err)
 	}
 }

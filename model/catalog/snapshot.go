@@ -16,8 +16,12 @@ import (
 var snapshotYAML []byte
 
 func loadSnapshot() (map[string]Price, error) {
+	return parseSnapshot(snapshotYAML)
+}
+
+func parseSnapshot(data []byte) (map[string]Price, error) {
 	var prices map[string]Price
-	if err := yaml.Unmarshal(snapshotYAML, &prices); err != nil {
+	if err := yaml.Unmarshal(data, &prices); err != nil {
 		return nil, internalError("price snapshot is invalid", fmt.Errorf("yaml: %w", err))
 	}
 	if prices == nil {
