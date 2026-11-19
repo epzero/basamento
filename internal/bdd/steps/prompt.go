@@ -382,7 +382,10 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the resolution fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return expectCode(world(ctx).Prompt.lastErr, code)
+		if world(ctx).Prompt.lastErr != nil {
+			return expectCode(world(ctx).Prompt.lastErr, code)
+		}
+		return localLastError(world(ctx).Local, code)
 	})
 	sc.Step(`^the registration fails with code "([^"]*)" naming variable "([^"]*)"$`, func(ctx context.Context, code, name string) error {
 		if err := expectCode(world(ctx).Prompt.lastErr, code); err != nil {

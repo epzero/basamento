@@ -34,6 +34,7 @@ type World struct {
 	Model       *modelWorld
 	Machine     *machineWorld
 	Host        *hostWorld
+	Local       *localWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -56,6 +57,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Model:       newModelWorld(),
 			Machine:     newMachineWorld(),
 			Host:        newHostWorld(),
+			Local:       newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -78,6 +80,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCredentials(sc)
 	registerCatalog(sc)
 	registerModel(sc)
+	registerLocal(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
