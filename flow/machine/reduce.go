@@ -3,6 +3,7 @@ package machine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -208,6 +209,12 @@ func addNumbers(a, b any) (any, error) {
 		add, err := strconv.ParseInt(right, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("sum: %s", err.Error())
+		}
+		if add > 0 && sum > math.MaxInt64-add {
+			return nil, fmt.Errorf("overflow")
+		}
+		if add < 0 && sum < math.MinInt64-add {
+			return nil, fmt.Errorf("overflow")
 		}
 		return json.Number(strconv.FormatInt(sum+add, 10)), nil
 	}

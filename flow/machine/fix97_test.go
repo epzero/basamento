@@ -2,6 +2,9 @@ package machine
 
 import (
 	"encoding/json"
+	"math"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -110,3 +113,37 @@ func TestBarrierErrorLeavesInputSnapshotUnchanged(t *testing.T) {
 		t.Fatalf("retry after error: %v", err)
 	}
 }
+
+func TestSumOverflowRejectsPositiveAndNegative(t *testing.T) {
+	m := reducerMachine(t, map[string]string{"n": "sum"})
+	for _, tc := range []struct {
+		name  string
+		start string
+		add   string
+	}{
+		{"max plus one", "9223372036854775807", "1"},
+		{"min minus one", "-9223372036854775808", "-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := map[string]any{"n": json.Number(tc.start)}
+			err := m.reduceKey(state, "n", json.Number(tc.add))
+			if core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("error %v, want invalid_argument", err)
+			}
+			if !strings.Contains(err.Error(), "overflow") {
+				t.Fatalf("error %q, want overflow in message", err)
+			}
+			if !strings.Contains(err.Error(), `"n"`) {
+				t.Fatalf("error %q, want key name", err)
+			}
+		})
+	}
+}
+
+func TestSumAtMaxInt64StillWorks(t *testing.T) {
+	m := reducerMachine(t, map[string]string{"n": "sum"})
+	state := map[string]any{"n": json.Number("9223372036854775806")}
+	if err := m.reduceKey(state, "n", json.Number("1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := state["n"].(json.Number).String(); got != "9223372036854775807" {
