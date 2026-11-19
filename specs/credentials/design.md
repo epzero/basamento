@@ -324,6 +324,6 @@ it, in the `internal/bdd` package:
 
 Unit tests in `platform/credentials` use fakes defined in their own `_test.go`
 files. No test double enters production code, and no new test-only package is
-added: `core/coretest` remains the only entry in `layering.yaml`'s
-`test_only`, importable from `_test.go` files and from `internal/bdd`. The
+added: packages listed in `layering.yaml` `test_only` are importable from
+`_test.go` files and from `internal/bdd`. The
 gate uses no wall clock, no unseeded randomness and no live vendor call.

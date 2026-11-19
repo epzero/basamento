@@ -1,8 +1,8 @@
 # ADR-0016 — The `internal/config` layer
 
 **Status:** accepted · **Date:** 2026-11-18 · **Amended 2026-11-19:** ADR-0018
-supersedes the **Gate vs review** sentences that `_test.go` is out of scope and
-that files for other platforms are reviewed by hand only.
+supersedes the **Gate vs review** scope rules below; enforcement lands with the
+ADR-0018 implementation change.
 
 ## Context
 
@@ -48,8 +48,10 @@ Path-segment prefix grants only:
 | `internal/bdd` | `internal/config` | Same, including `internal/bdd/steps`. |
 
 **Gate vs review:** `go list` imports in the gate build context (Linux on CI);
-files for other platforms are reviewed by hand. `_test.go` is out of scope (as
-`test_only`). The allow-list blocks `platform` and `runtime`; `deny_external`
+files for other platforms are reviewed by hand (superseded by ADR-0018,
+2026-11-19). `_test.go` is out of scope (as `test_only`) (superseded by
+ADR-0018, 2026-11-19). The allow-list blocks `platform` and `runtime`;
+`deny_external`
 blocks the prefixes above. The gate does not classify port vendors — add a new
 vendor prefix in the change that brings the library; an unlisted import can pass
 and is a review finding. By policy, untrusted code does not live under `internal/`

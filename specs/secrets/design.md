@@ -220,8 +220,8 @@ requests per codec and in total, and can delete a master key. The seeded random
 helper the scenarios use for deterministic payloads and keys lives beside it in
 `internal/bdd`; no production code path accepts a seeded random source. Unit
 tests in `platform/secrets` use fakes defined in their own `_test.go` files.
-`core/coretest` remains the only package listed as test-only in
-`layering.yaml` and belongs to another work package, so this WP adds none.
+Packages listed in `layering.yaml` `test_only` belong to other work packages;
+this WP adds none.
 No check exercises the live keepers yet; the gate uses `localsecrets` and the
 simulator.
 

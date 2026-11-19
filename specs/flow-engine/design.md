@@ -90,8 +90,8 @@ exists in the state schema's properties.
   by WP-L4-01.
 - The BDD steps for `builder.feature` go into
   `internal/bdd/steps/flow_builder.go`. `flow/builder` may import `core/schema`
-  directly; test-only packages (`core/coretest`) remain restricted to
-  `_test.go` files and `internal/bdd` (`layering.yaml`).
+  directly; packages listed in `layering.yaml` `test_only` remain restricted to
+  `_test.go` files and `internal/bdd`.
 
 ## 2. Compiler and machine
 
