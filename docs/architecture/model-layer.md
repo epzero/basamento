@@ -1,6 +1,7 @@
 # Model layer
 
-Status: contract in `model/model.go`; implementation **Planned** (WP-L3-*).
+Status: contract and adapters implemented in `model` and `model/chat`
+(WP-L3-01); provider construction and routing **Planned** (WP-L3-04).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -34,6 +35,14 @@ video. It outlives the client connection, streams, can be cancelled, retried
 and recorded. A single contract gives every model the same path for budget,
 cancellation, reattach and replay. Small calls such as embeddings use the
 blocking `Invoke` in process.
+
+`model.Registry` holds what every adapter owes regardless of protocol:
+idempotent starts per client ref, the ordered event log with replay from a
+cursor, the result, cancellation and lookup. The chat adapter (`model/chat`)
+and the embedding adapter (`model.NewEmbedding`) drive eino models;
+`Request.Messages` and `Request.Tools` are JSON of `eino/schema` values, so the
+contract itself stays free of the dependency. Provider construction is
+WP-L3-04's, including the OpenAI-compatible mode MiniMax and GLM use.
 
 ## 2. Descriptors
 
