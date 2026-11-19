@@ -1,0 +1,16 @@
+// Package schema generates JSON Schema from Go types, compiles and validates
+// instances, and produces RFC 8785 canonical JSON for content-addressing.
+//
+// Generation maps []byte and named types over []byte to nullable strings with
+// contentEncoding "base64". json.RawMessage accepts any JSON value including null.
+// Fixed-length [N]byte arrays remain JSON arrays of integers.
+//
+// Struct schemas follow encoding/json object keys for promoted fields, nested
+// tagged embeds and exported anonymous non-struct fields; a struct that embeds
+// json.RawMessage (value or pointer) admits any JSON value at that schema node;
+// unsupported embeds such as channels fail at generation.
+//
+// Untrusted JSON is bounded: nesting depth at most 10000; number literals at
+// most 1000 mantissa digits and exponent magnitude at most 8192; canonicalization
+// still enforces exact IEEE-754 doubles.
+package schema

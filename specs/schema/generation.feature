@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-02 @level:component
+@wp:WP-L2-02 @level:component
 Feature: Generating schemas from Go types
   Model parameters, structured outputs and gate payloads are often declared as
   Go types. The schema generated from a type is what flows store and hash, so
@@ -180,3 +180,212 @@ Feature: Generating schemas from Go types
       | value                                          |
       | the zero value                                 |
       | name "a", tags "x" and "y", extra a=1, seed 9  |
+
+  @REQ-SCHEMA-003 @id:SCHEMA-003-02
+  Scenario Outline: A composite or pointer field is required only by its tag
+    Given a Go struct type "Doc" with fields:
+      | field | type      | json tag |
+      | V     | <go type> | <tag>    |
+    When a schema is generated from "Doc"
+    Then the schema <verdict> the instance {}
+
+    Examples:
+      | go type        | tag         | verdict |
+      | []string       | v           | rejects |
+      | map[string]int | v           | rejects |
+      | []byte         | v           | rejects |
+      | *int           | v           | rejects |
+      | []string       | v,omitempty | accepts |
+      | map[string]int | v,omitempty | accepts |
+      | []byte         | v,omitempty | accepts |
+      | *int           | v,omitempty | accepts |
+
+  @REQ-SCHEMA-038 @REQ-SCHEMA-008 @id:SCHEMA-038-02
+  Scenario Outline: A byte slice with its own encoding is not a base64 string
+    Given a Go type "Binary"
+    And the type "Binary" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
+
+    Examples:
+      | position          | wrong       | location |
+      | a field named "v" | {"v": null} | /v       |
+      | an embedded field | null        |          |
+      | the whole type    | null        |          |
+
+  @REQ-SCHEMA-040 @REQ-SCHEMA-008 @id:SCHEMA-040-02
+  Scenario Outline: A byte array with its own encoding is not an integer array
+    Given a Go type "UUID"
+    And the type "UUID" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
+
+    Examples:
+      | position          | wrong      | location |
+      | a field named "v" | {"v": [1]} | /v       |
+      | an embedded field | [1]        |          |
+      | the whole type    | [1]        |          |
+
+  @REQ-SCHEMA-041 @REQ-SCHEMA-008 @id:SCHEMA-041-01
+  Scenario Outline: A value with its own text encoding is a string wherever it appears
+    Given a Go type "TextStamp"
+    And the type "TextStamp" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
+
+    Examples:
+      | position          | wrong     | location |
+      | a field named "v" | {"v": {}} | /v       |
+      | an embedded field | {}        |          |
+      | the whole type    | {}        |          |
+
+  @REQ-SCHEMA-042 @REQ-SCHEMA-008 @id:SCHEMA-042-01
+  Scenario Outline: A value with its own JSON encoding admits every value
+    Given a Go type "JSONStamp"
+    And the type "JSONStamp" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema accepts the instance <other>
+
+    Examples:
+      | position          | other         |
+      | a field named "v" | {"v": [1, 2]} |
+      | an embedded field | [1, 2]        |
+      | the whole type    | [1, 2]        |
+
+  @REQ-SCHEMA-043 @REQ-SCHEMA-044 @REQ-SCHEMA-008 @id:SCHEMA-043-01
+  Scenario Outline: A type handled in its own right keeps the schema of its encoding
+    Given a Go type "<go type>"
+    And the type "<go type>" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
+
+    Examples:
+      | go type   | position          | wrong      | location |
+      | TimeStamp | a field named "v" | {"v": 1}   | /v       |
+      | TimeStamp | the whole type    | 1          |          |
+      | Numbered  | a field named "v" | {"v": "1"} | /v       |
+      | Numbered  | an embedded field | "1"        |          |
+      | Numbered  | the whole type    | "1"        |          |
+
+  @REQ-SCHEMA-045 @REQ-SCHEMA-008 @id:SCHEMA-045-01
+  Scenario: A value whose encoding only its pointer has admits both encodings
+    Given a Go type "PointerStamp"
+    And a Go struct type "Doc" with fields:
+      | field | type         | json tag |
+      | V     | PointerStamp | v        |
+    And a value of "Doc" that is the zero value
+    When the address of the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema accepts the instance {"v": [1]}
+
+  @REQ-SCHEMA-046 @id:SCHEMA-046-01
+  Scenario Outline: A string-option number or boolean is a string
+    Given a Go struct type "Inner" with fields:
+      | field | type      | json tag |
+      | V     | <go type> | v,string |
+    And the type "Inner" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance {"v": <literal>} with a violation at "/v" of keyword "type"
+
+    Examples:
+      | go type  | literal | position          |
+      | int      | 0       | the whole type    |
+      | int      | 0       | an embedded field |
+      | int64    | 0       | the whole type    |
+      | int64    | 0       | an embedded field |
+      | uint     | 0       | the whole type    |
+      | uint     | 0       | an embedded field |
+      | float64  | 0       | the whole type    |
+      | float64  | 0       | an embedded field |
+      | Numbered | 0       | the whole type    |
+      | bool     | false   | the whole type    |
+      | bool     | false   | an embedded field |
+      | *int     | 0       | the whole type    |
+      | *int     | 0       | an embedded field |
+
+  @REQ-SCHEMA-046 @id:SCHEMA-046-02
+  Scenario: A string-option named pointer to an integer keeps the ordinary pointer schema
+    Given a Go type "IntPtr"
+    And a Go struct type "Doc" with fields:
+      | field | type   | json tag |
+      | V     | IntPtr | v,string |
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance {"v": "3"} with a violation at "/v" of keyword "type"
+    And the schema accepts the instance {"v": 3}
+
+  @REQ-SCHEMA-047 @id:SCHEMA-047-01
+  Scenario Outline: A string-option string holds the quoted string
+    Given a Go struct type "Inner" with fields:
+      | field | type     | json tag |
+      | V     | <go type> | v,string |
+    And the type "Inner" appears as <position> in "Doc"
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance {"v": "plain"} with a violation at "/v" of keyword "pattern"
+
+    Examples:
+      | go type | position          |
+      | string  | the whole type    |
+      | string  | an embedded field |
+      | *string | the whole type    |
+      | *string | an embedded field |
+
+  @REQ-SCHEMA-047 @id:SCHEMA-047-02
+  Scenario: A string-option named pointer to a string keeps the ordinary pointer schema
+    Given a Go type "StrPtr"
+    And a Go struct type "Doc" with fields:
+      | field | type   | json tag |
+      | V     | StrPtr | v,string |
+    And a value of "Doc" that is the zero value
+    When a schema is generated from "Doc"
+    And the value is encoded with encoding/json
+    Then the schema generated from "Doc" accepts the encoded value
+    And the schema accepts the instance {"v": "a"}
+
+  @REQ-SCHEMA-048 @id:SCHEMA-048-01
+  Scenario Outline: A map whose key type is written as a string is an object
+    Given a Go type "<map type>"
+    And the type "<map type>" appears as <position> in "Doc"
+    When a schema is generated from "Doc"
+    Then the schema accepts the instance <accepted>
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
+
+    Examples:
+      | map type  | position          | accepted           | wrong            | location |
+      | IntKeyed  | a field named "v" | {"v": {"7": "x"}}  | {"v": {"7": 1}}  | /v/7     |
+      | IntKeyed  | an embedded field | {"v": {"7": "x"}}  | {"v": {"7": 1}}  | /v/7     |
+      | IntKeyed  | the whole type    | {"7": "x"}         | {"7": 1}         | /7       |
+      | TextKeyed | a field named "v" | {"v": {"S0": "x"}} | {"v": {"S0": 1}} | /v/S0    |
+      | TextKeyed | an embedded field | {"v": {"S0": "x"}} | {"v": {"S0": 1}} | /v/S0    |
+      | TextKeyed | the whole type    | {"S0": "x"}        | {"S0": 1}        | /S0      |
+
+  @REQ-SCHEMA-049 @id:SCHEMA-049-01
+  Scenario: A map key type with no JSON text is rejected with its name
+    Given a Go type "FloatKeyed"
+    And a Go struct type "Doc" with fields:
+      | field | type       | json tag |
+      | M     | FloatKeyed | m        |
+    When a schema is generated from "Doc"
+    Then the generation fails with code "invalid_argument" naming the field path "M" and the key type "float64"

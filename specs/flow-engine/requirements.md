@@ -8,8 +8,8 @@ When a node completes, the flow machine shall follow the first outgoing edge who
 ### REQ-FLOW-002 — Completion order does not matter
 When parallel nodes complete, in whatever order, the flow machine shall merge their updates in node-id order, so that the final state does not depend on completion order.
 
-### REQ-FLOW-003 — Guarded cycles
-The flow compiler shall reject a flow that has a cycle with no guarded node.
+### REQ-FLOW-003 — Bounded cycles
+The flow compiler shall reject a flow that has a cycle on which no node has a guard carrying a positive `max_visits` or `cost_mpts`, naming a node on the cycle and the missing bound. A `while` condition alone does not bound a cycle.
 
 ### REQ-FLOW-004 — Type-checked expressions
 The flow compiler shall reject a flow whose expressions do not type-check against the state schema, naming the node or edge and the expression.
@@ -19,6 +19,18 @@ When a flow definition changes, runs that already started shall continue with th
 
 ### REQ-FLOW-006 — Gate payload validation
 If a gate payload does not satisfy the gate's schema or acceptance condition, then the system shall reject it with code `invalid_argument` and keep the gate open.
+
+## Compiler limits (WP-L4-01)
+
+The maxima in REQ-FLOW-045 and REQ-FLOW-046 are fixed properties of the
+compiler, with their values and reasons in `design.md` §2.2 and §2.3. They are
+requirements, not tuning knobs: changing a value is a spec change.
+
+### REQ-FLOW-045 — Guard budgets within their maxima
+If a node's guard gives `max_visits` or `cost_mpts` a negative value, or a value above its maximum in `design.md` §2.2, then the flow compiler shall reject the flow with code `invalid_argument`, naming the node, the field and the maximum.
+
+### REQ-FLOW-046 — Definition size limits
+If a flow definition's node count, edge count, size of any one expression or canonical JSON size exceeds its maximum in `design.md` §2.3, then the flow compiler shall reject the definition with code `invalid_argument`, naming the limit and its maximum.
 
 ## Go builder (WP-L4-03)
 
