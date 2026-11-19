@@ -2,6 +2,9 @@ package expr
 
 import (
 	"encoding/json"
+	"fmt"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -199,6 +202,201 @@ func TestRootNestedArrayOfInlineObjectFields(t *testing.T) {
 	if res != int64(7) {
 		t.Fatalf("got %v want 7", res)
 	}
+}
+
+// TestCyclicPureRefAliasIsDyn pins that a $ref chain whose definitions only
+// point at other $refs and loop back on itself declares no type: every
+// definition refers back to itself, so the type at that point is dyn
+// (design.md §2) and NewEnv builds instead of rejecting the schema. The chain
+// is reached at the schema root, as an object field and as a map value, the
+// three places NewEnv follows a $ref while registering nested objects.
+func TestCyclicPureRefAliasIsDyn(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema string
+		src    string
+		bind   map[string]any
+		want   any
+	}{
+		{
+			name:   "alias chain a to b to a at the root",
+			schema: `{"$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}`,
+			src:    `x`,
+			bind:   map[string]any{"x": int64(3)},
+			want:   int64(3),
+		},
+		{
+			name:   "self alias at the root",
+			schema: `{"$defs": {"a": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}`,
+			src:    `x`,
+			bind:   map[string]any{"x": "v"},
+			want:   "v",
+		},
+		{
+			name:   "alias chain as an object field",
+			schema: `{"type": "object", "properties": {"p": {"$ref": "#/$defs/a"}}, "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}}`,
+			src:    `x.p.v`,
+			bind:   map[string]any{"x": map[string]any{"p": map[string]any{"v": int64(5)}}},
+			want:   int64(5),
+		},
+		{
+			name:   "alias chain as a map value",
+			schema: `{"type": "object", "additionalProperties": {"$ref": "#/$defs/a"}, "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}}`,
+			src:    `x['k'].v`,
+			bind:   map[string]any{"x": map[string]any{"k": map[string]any{"v": int64(7)}}},
+			want:   int64(7),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := NewEnv([]Var{{Name: "x", Schema: json.RawMessage(tc.schema)}})
+			if err != nil {
+				t.Fatalf("NewEnv: %v", err)
+			}
+			p, err := env.Compile(tc.src, nil)
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+			got, err := p.Eval(tc.bind)
+			if err != nil {
+				t.Fatalf("eval: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCyclicPureRefAliasRootTypeIsDyn pins the type of the two root cases: the
+// variable whose schema is a cyclic $ref chain is dyn, as a definition that
+// refers back to itself is (design.md §2).
+func TestCyclicPureRefAliasRootTypeIsDyn(t *testing.T) {
+	schemas := []string{
+		`{"$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}`,
+		`{"$defs": {"a": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}`,
+	}
+	for _, schema := range schemas {
+		env, err := NewEnv([]Var{{Name: "x", Schema: json.RawMessage(schema)}})
+		if err != nil {
+			t.Fatalf("%s: NewEnv: %v", schema, err)
+		}
+		p, err := env.Compile(`x`, nil)
+		if err != nil {
+			t.Fatalf("%s: compile: %v", schema, err)
+		}
+		if got := p.ResultType(); got != "dyn" {
+			t.Fatalf("%s: result type %q, want dyn", schema, got)
+		}
+	}
+}
+
+// TestDeeplyNestedObjectSchemaBuildsOnce pins that NewEnv builds a nested object
+// schema in time linear in its size. It used to grow exponentially with the
+// nesting level twice over: registerNestedObjects descended into every property
+// itself and then again through buildObjectType, and buildObjectType named a
+// nested type after its parent's type name instead of its schema path, so every
+// level re-escaped the level above and doubled the name. No clock is asserted:
+// an exponential build of 40 levels never finishes, a linear one is instant.
+func TestDeeplyNestedObjectSchemaBuildsOnce(t *testing.T) {
+	const depth = 40
+	env, err := NewEnv([]Var{{Name: "x", Schema: json.RawMessage(nestedObjectSchema(depth))}})
+	if err != nil {
+		t.Fatalf("NewEnv: %v", err)
+	}
+	src := "x" + strings.Repeat(".child", depth) + ".v"
+	p, err := env.Compile(src, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := p.ResultType(); got != "int" {
+		t.Fatalf("result type %q, want int", got)
+	}
+	var bind any = map[string]any{"v": int64(9)}
+	for i := 0; i < depth; i++ {
+		bind = map[string]any{"v": int64(i), "child": bind}
+	}
+	got, err := p.Eval(map[string]any{"x": bind})
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if got != int64(9) {
+		t.Fatalf("got %v want 9", got)
+	}
+}
+
+// nestedObjectSchema builds an object schema nested depth levels deep: each
+// level declares an int property and a child object, the innermost only the
+// int property.
+func nestedObjectSchema(depth int) string {
+	var b strings.Builder
+	for i := 0; i < depth; i++ {
+		b.WriteString(`{"type": "object", "properties": {"v": {"type": "integer"}, "child": `)
+	}
+	b.WriteString(`{"type": "object", "properties": {"v": {"type": "integer"}}}`)
+	for i := 0; i < depth; i++ {
+		b.WriteString(`}}`)
+	}
+	return b.String()
+}
+
+// TestRefAliasChainRegistersLinearly pins that the nested-object pass follows a
+// $ref alias chain on one shared visiting set, so it allocates memory linear in
+// the number of hops. A set cloned per hop stayed live until the chain unwound,
+// which made a map whose additionalProperties is a $ref into a cycle of N
+// one-line aliases cost Θ(N²) memory and time. The budget is far above what a
+// linear pass needs at this size and far below the hundreds of MB a quadratic
+// one allocated.
+func TestRefAliasChainRegistersLinearly(t *testing.T) {
+	const (
+		aliases   = 4000
+		memBudget = 48 << 20
+	)
+	schema := json.RawMessage(aliasCycleMapSchema(aliases))
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	env, err := NewEnv([]Var{{Name: "x", Schema: schema}})
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatalf("NewEnv: %v", err)
+	}
+	if d := int64(after.TotalAlloc) - int64(before.TotalAlloc); d > memBudget {
+		t.Fatalf("NewEnv allocated %d bytes for a %d-alias chain, want <= %d", d, aliases, memBudget)
+	}
+	// The chain closes on itself, so the map's value type is dyn.
+	p, err := env.Compile(`x['k']`, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := p.ResultType(); got != "dyn" {
+		t.Fatalf("result type %q, want dyn", got)
+	}
+	got, err := p.Eval(map[string]any{"x": map[string]any{"k": int64(3)}})
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if got != int64(3) {
+		t.Fatalf("got %v want 3", got)
+	}
+}
+
+// aliasCycleMapSchema builds a map schema whose additionalProperties is a $ref
+// into a cycle of n one-line $defs aliases: the chain the nested-object pass
+// follows hop by hop.
+func aliasCycleMapSchema(n int) string {
+	var b strings.Builder
+	b.WriteString(`{"type": "object", "additionalProperties": {"$ref": "#/$defs/a0"}, "$defs": {`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, `"a%d": {"$ref": "#/$defs/a%d"}`, i, (i+1)%n)
+	}
+	b.WriteString(`}}`)
+	return b.String()
 }
 
 // TestRootArrayOfObjectRefFields pins that a root $ref to an array of objects

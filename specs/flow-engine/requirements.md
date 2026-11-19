@@ -1,6 +1,6 @@
 # Flow engine: flows as data
 
-Status: **Planned** (WP-L4-01, WP-L4-02). Design: ADR-0003, `docs/architecture/flow-engine.md`.
+Status: **In progress** (IR and compiler implemented, WP-L4-01; machine, builder and host planned, WP-L4-02, WP-L4-03, WP-L4-04). Design: ADR-0003, `docs/architecture/flow-engine.md`.
 
 ### REQ-FLOW-001 — Conditional edges
 When a node completes, the flow machine shall follow the first outgoing edge whose condition holds, in declaration order, and otherwise the edge without a condition.

@@ -1,6 +1,7 @@
 # Flow engine
 
-Status: contracts in `flow/flow.go`; implementation **Planned** (WP-L4-*).
+Status: IR and compiler in `flow/ir` and `flow/compile` (WP-L4-01); contracts
+in `flow/flow.go`; machine, builder and host **Planned** (WP-L4-02 … 04).
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -10,18 +11,32 @@ reducers, nodes and edges. Its sha256 is its identity, and runs pin it. Authors
 write YAML, use the Go builder, or have an LLM generate the IR; all three
 compile to the same IR.
 
+`flow/ir` decodes that JSON or YAML, rejects unknown fields, duplicate keys and
+a stream carrying more than one document, produces the RFC 8785 canonical bytes
+and the content hash, and enforces the structural rules below. `flow/compile`
+type-checks expressions, enforces the definition limits and returns the
+validated canonical form of the same IR.
+
 ```yaml
-flow: codegen.feature
+name: codegen.feature
 version: 3
 state:
-  schema: { $ref: codegen-state.json }
+  schema:
+    type: object
+    properties:
+      messages: { type: array, items: { type: object } }
+      files:    { type: array, items: { type: object } }
+      attempts: { type: integer }
+      plan:     { type: object, properties: { modules: { type: array, items: { type: object } } } }
+      tests:    { type: object, properties: { failed: { type: integer } } }
+    required: [messages, files, attempts, plan, tests]
   reducers: { messages: append, files: merge_by(path), attempts: sum }
 nodes:
   plan:   { kind: agent, spec: { agent: planner }, out: plan }
   impl:   { kind: map, spec: { over: "state.plan.modules", node: impl_module, max_parallel: 4 } }
   verify: { kind: tool, spec: { tool: run_tests } }
   repair: { kind: agent, spec: { agent: fixer }, guard: { max_visits: 3, cost_mpts: 5000 } }
-  review: { kind: gate, spec: { schema: review.json, accept_if: "input.approved || size(input.notes) > 0", timeout: 72h } }
+  review: { kind: gate, spec: { schema: "review.json", accept_if: "input.approved || size(input.notes) > 0", timeout: "72h" } }
 edges:
   - { from: START,  to: plan }
   - { from: plan,   to: impl }
@@ -38,11 +53,34 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 ## 2. Compiler
 
-- Validates the schema, references and node specs.
-- Type-checks every CEL expression against the state schema.
-- Requires on every cycle a node whose guard carries an explicit budget (`max_visits` or `cost_mpts`): a `while` condition alone does not bound the cycle (REQ-FLOW-003).
+- Validates the state schema and its reducer keys and forms, the node names
+  and kinds, the edge references and the node specs.
+- Type-checks every CEL expression against the state schema: edge `when`
+  conditions, node `in` mappings, guard `while` conditions, and the `accept_if`
+  of a `gate` and the `over` of a `map` in their node specs.
+- Enforces the compiler's limits, in the order `specs/flow-engine/design.md`
+  §2.2 and §2.3 state: at most 4,096 nodes and 16,384 edges, a guard budget
+  inside its range (`max_visits` ≤ 1,000,000, `cost_mpts` ≤ 1,000,000,000,
+  neither negative), each expression at most 16,384 bytes, and a canonical
+  definition at most 1 MiB (REQ-FLOW-045, REQ-FLOW-046).
+- Requires at least one guarded node on every cycle. A guard's `max_visits` or
+  `cost_mpts` is the budget that bounds a cycle (REQ-FLOW-003); a `while`
+  condition only chooses when the cycle leaves.
 - Rejects unknown node kinds.
-- Error messages name the node or edge and what is wrong: the expression that does not type-check (REQ-FLOW-004), or the node on the cycle and the missing guard bound (REQ-FLOW-003).
+- Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
+  those names; a node named `START` or `FAIL`, an edge into `START`, an edge
+  out of `FAIL`, or a flow without exactly one edge from `START` is rejected.
+- Rejects nodes unreachable from `START`.
+- Error messages name the node or edge and what is wrong: the expression that
+  does not type-check (REQ-FLOW-004), or the node on the cycle and the
+  missing guard (REQ-FLOW-003), and all rejections use code
+  `invalid_argument`.
+
+A jq `in` or `over` mapping is parsed, measured and checked for reserved names,
+but it cannot be type-checked against the state schema: a jq mapping has no
+`state` binding, so only CEL is checked against the schema. Checking what a
+node's input must be, per kind, is the machine's (WP-L4-02) and the host's
+(WP-L4-04) work.
 
 ## 3. Machine
 
