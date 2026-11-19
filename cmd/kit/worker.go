@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/providers"
 	"github.com/epzero/basamento/model/worker"
+	"github.com/epzero/basamento/model/worker/scale"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -26,15 +28,21 @@ import (
 // generated gRPC client of basamento.worker.v1 is a later work package; the
 // contract and the client loop are the same.
 func runWorker(args []string) error {
+	if len(args) > 0 && args[0] == "describe" {
+		return runWorkerDescribe(args[1:])
+	}
 	fs := flag.NewFlagSet("kit worker", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	poolToken := fs.String("pool-token", "", "pool token from the platform (required)")
+	poolToken := fs.String("pool-token", "", "pool token or single-use join token from the platform (required)")
 	sqlURL := fs.String("sql-url", "", "SQL store URL of the embedded platform (required)")
 	dataDir := fs.String("data-dir", "", "writable directory for the worker journal (required)")
 	capacity := fs.Int("capacity", 1, "capacity in units")
 	modelsFlag := fs.String("models", "", "comma-separated provider manifest files")
 	labelsFlag := fs.String("labels", "", "comma-separated key=value labels, e.g. gpu=nvidia-a100,region=eu")
 	once := fs.Bool("once", false, "lease and run at most one invocation, then leave")
+	idleExit := fs.Duration("idle-exit", 0, "leave after this long without a lease (0 disables it)")
+	maxLifetime := fs.Duration("max-lifetime", 0, "drain and leave after this long in total (0 disables it)")
+	maxInvocations := fs.Int("max-invocations", 0, "leave after this many invocations (0 disables it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -58,7 +66,14 @@ func runWorker(args []string) error {
 		return fmt.Errorf("kit worker: sql store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	store, err := worker.Open(ctx, db, worker.Options{Clock: core.SystemClock{}})
+	clock := core.SystemClock{}
+	tokens, err := scale.OpenTokens(ctx, db, scale.Options{Clock: clock})
+	if err != nil {
+		return fmt.Errorf("kit worker: template store: %w", err)
+	}
+	store, err := worker.Open(ctx, db, worker.Options{
+		Clock: clock, LaunchTokens: tokens, Templates: tokens,
+	})
 	if err != nil {
 		return fmt.Errorf("kit worker: worker store: %w", err)
 	}
@@ -93,7 +108,16 @@ func runWorker(args []string) error {
 	runner := &worker.Runner{Client: client, Providers: invokers}
 	heartbeat := time.NewTicker(30 * time.Second)
 	defer heartbeat.Stop()
+	policy := scale.ExitPolicy{IdleExit: *idleExit, MaxLifetime: *maxLifetime, MaxInvocations: *maxInvocations}
+	started := clock.Now()
+	lastWork := started
+	ran := 0
 	for {
+		if policy.Leave(clock.Now(), started, lastWork, ran) {
+			fmt.Println("kit worker: leaving by its exit policy")
+			_ = client.Leave(context.Background())
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			_ = client.Leave(context.Background())
@@ -119,6 +143,10 @@ func runWorker(args []string) error {
 			if err := runner.Run(ctx, inv); err != nil {
 				fmt.Fprintf(os.Stderr, "kit worker: invocation %s: %v\n", inv.ClientRef, err)
 			}
+			ran++
+		}
+		if len(leased) > 0 {
+			lastWork = clock.Now()
 		}
 		if *once {
 			_ = client.Leave(context.Background())
@@ -132,6 +160,36 @@ func runWorker(args []string) error {
 			}
 		}
 	}
+}
+
+// runWorkerDescribe prints what one worker serves, in the form a worker
+// template stores it: descriptors, labels and capacity. An image exports this
+// once, so a launched worker can be compared with its template at join
+// (ADR-0012 §12).
+func runWorkerDescribe(args []string) error {
+	fs := flag.NewFlagSet("kit worker describe", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	modelsFlag := fs.String("models", "", "comma-separated provider manifest files")
+	labelsFlag := fs.String("labels", "", "comma-separated key=value labels")
+	capacity := fs.Int("capacity", 1, "capacity in units")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	descriptors, _, err := loadWorkerProviders(*modelsFlag)
+	if err != nil {
+		return fmt.Errorf("kit worker describe: %w", err)
+	}
+	if len(descriptors) == 0 {
+		return fmt.Errorf("kit worker describe: --models loaded no descriptors")
+	}
+	out := struct {
+		Descriptors []worker.Descriptor `json:"descriptors"`
+		Labels      map[string]string   `json:"labels,omitempty"`
+		Capacity    int                 `json:"capacity"`
+	}{Descriptors: descriptors, Labels: parseLabels(*labelsFlag), Capacity: *capacity}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func loadWorkerProviders(list string) ([]worker.Descriptor, map[string]model.Invoker, error) {

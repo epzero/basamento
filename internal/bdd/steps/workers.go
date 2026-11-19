@@ -16,7 +16,9 @@ import (
 	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/worker"
+	"github.com/epzero/basamento/model/worker/scale"
 	"github.com/epzero/basamento/platform"
+	"github.com/epzero/basamento/platform/launcher"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -56,6 +58,26 @@ type workerWorld struct {
 	seq     int
 
 	audit *auditSink
+
+	// Worker templates and their scaler (WP-L3-08).
+	db             *psql.Store
+	templateTokens *scale.TokenStore
+	scaler         *scale.Scaler
+	launcher       *launcher.Sim
+	templates      map[string]scale.Template
+	deploymentCap  int
+	tokenSeq       int
+	launched       map[string]*launchedWorker
+}
+
+// launchedWorker is a worker a template started, with its own exit policy.
+type launchedWorker struct {
+	worker      worker.Worker
+	credential  string
+	started     time.Time
+	lastWork    time.Time
+	policy      scale.ExitPolicy
+	invocations int
 }
 
 type joinedWorker struct {
@@ -92,11 +114,13 @@ func (a *auditSink) Record(_ context.Context, e platform.AuditEvent) error {
 
 func newWorkerWorld() *workerWorld {
 	return &workerWorld{
-		pools:   map[string]worker.PoolSpec{},
-		workers: map[string]*joinedWorker{},
-		revoked: map[string]string{},
-		tokens:  map[string]string{},
-		audit:   &auditSink{},
+		pools:     map[string]worker.PoolSpec{},
+		workers:   map[string]*joinedWorker{},
+		revoked:   map[string]string{},
+		tokens:    map[string]string{},
+		audit:     &auditSink{},
+		templates: map[string]scale.Template{},
+		launched:  map[string]*launchedWorker{},
 	}
 }
 
@@ -109,28 +133,78 @@ func (w *workerWorld) open(ctx context.Context) (*worker.Store, error) {
 		return nil, err
 	}
 	w.dir = dir
-	store, err := psql.Open(ctx, "sqlite:///"+dir+"/worker.db", fstest.MapFS{"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\nSELECT 1;\n")}})
+	db, err := psql.Open(ctx, "sqlite:///"+dir+"/worker.db", fstest.MapFS{"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\nSELECT 1;\n")}})
 	if err != nil {
 		return nil, err
 	}
-	ws, err := worker.Open(ctx, store, worker.Options{
-		Clock: world(ctx).Core.clock,
-		IDs:   &coretest.SeqIds{},
-		Audit: w.audit,
+	w.db = db
+	if w.launcher == nil {
+		w.launcher = launcher.NewSim()
+	}
+	tokens, err := scale.OpenTokens(ctx, db, scale.Options{
+		Clock:    world(ctx).Core.clock,
+		IDs:      &coretest.SeqIds{},
+		Audit:    w.audit,
+		NewToken: w.nextToken,
+	})
+	if err != nil {
+		return nil, err
+	}
+	w.templateTokens = tokens
+	ws, err := worker.Open(ctx, db, worker.Options{
+		Clock:        world(ctx).Core.clock,
+		IDs:          &coretest.SeqIds{},
+		Audit:        w.audit,
+		LaunchTokens: tokens,
+		Templates:    tokens,
 	})
 	if err != nil {
 		return nil, err
 	}
 	w.store = ws
+	w.rebuildScaler(ctx)
 	return ws, nil
 }
 
+// tokenStore returns the template store opened with the worker store.
+func (w *workerWorld) tokenStore(ctx context.Context) (*scale.TokenStore, error) {
+	if _, err := w.open(ctx); err != nil {
+		return nil, err
+	}
+	return w.templateTokens, nil
+}
+
+func (w *workerWorld) nextToken() string {
+	w.tokenSeq++
+	return fmt.Sprintf("t%d", w.tokenSeq)
+}
+
+func (w *workerWorld) rebuildScaler(ctx context.Context) {
+	if w.store == nil || w.templateTokens == nil || w.launcher == nil {
+		return
+	}
+	scaler, err := scale.NewScaler(w.store, w.templateTokens, scale.ScalerOptions{
+		Clock:         world(ctx).Core.clock,
+		Audit:         w.audit,
+		Launchers:     map[string]platform.Launcher{"simulated": w.launcher},
+		DeploymentCap: w.deploymentCap,
+	})
+	if err == nil {
+		w.scaler = scaler
+	}
+}
+
 func (w *workerWorld) teardown() {
+	if w.db != nil {
+		_ = w.db.Close()
+		w.db = nil
+	}
 	if w.dir != "" {
 		_ = os.RemoveAll(w.dir)
 		w.dir = ""
 	}
 	w.store = nil
+	w.templateTokens = nil
 }
 
 func (w *workerWorld) ensurePool(ctx context.Context, id string) (worker.PoolSpec, error) {

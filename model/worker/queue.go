@@ -86,7 +86,7 @@ func (s *Store) Invocation(ctx context.Context, clientRef string) (Invocation, e
 
 const selectInvocation = `SELECT client_ref, pool_id, tenant, model, class, units, state, worker_id, attempt,
 	started, in_doubt, queued_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms,
-	max_runtime_ms, cancel_requested, reserved_mpts, charged_mpts, code, request, result, provider_handle,
+	max_runtime_ms, cancel_requested, reserved_mpts, charged_mpts, code, message, request, result, provider_handle,
 	spilled, trace_parent FROM worker_invocations`
 
 type rowScanner interface {
@@ -96,7 +96,7 @@ type rowScanner interface {
 func scanInvocation(row rowScanner) (Invocation, error) {
 	var (
 		inv                                   Invocation
-		tenant, class, state, code            string
+		tenant, class, state, code, message   string
 		started, inDoubt, cancel              int
 		queued, lease, doubt, timeout, maxRun int64
 		request, result                       string
@@ -104,7 +104,7 @@ func scanInvocation(row rowScanner) (Invocation, error) {
 	)
 	err := row.Scan(&inv.ClientRef, &inv.Pool, &tenant, &inv.Model, &class, &inv.Units, &state, &inv.WorkerID,
 		&inv.Attempt, &started, &inDoubt, &queued, &lease, &doubt, &timeout, &maxRun, &cancel,
-		&inv.ReservedMpts, &inv.ChargedMpts, &code, &request, &result, &inv.ProviderHandle, &spilled, &inv.TraceParent)
+		&inv.ReservedMpts, &inv.ChargedMpts, &code, &message, &request, &result, &inv.ProviderHandle, &spilled, &inv.TraceParent)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return Invocation{}, core.NewError(core.CodeNotFound, "invocation does not exist", nil)
 	}
@@ -123,6 +123,7 @@ func scanInvocation(row rowScanner) (Invocation, error) {
 	inv.QueueTimeout = time.Duration(timeout) * time.Millisecond
 	inv.MaxRuntime = time.Duration(maxRun) * time.Millisecond
 	inv.Code = core.Code(code)
+	inv.Message = message
 	inv.Request = json.RawMessage(request)
 	inv.Result = json.RawMessage(result)
 	if len(inv.Request) == 0 {
@@ -692,21 +693,27 @@ func (s *Store) sweep(ctx context.Context) error {
 			switch {
 			case inv.State == stateWaiting:
 				if inv.QueueTimeout > 0 && !now.Before(inv.QueuedAt.Add(inv.QueueTimeout)) {
-					if err := failRow(ctx, tx, inv.ClientRef, core.CodeUnavailable, 0); err != nil {
+					msg := ""
+					if err := tx.QueryRow(ctx,
+						`SELECT launch_error FROM worker_pools WHERE pool_id = ?`, inv.Pool).Scan(&msg); err != nil &&
+						core.CodeOf(err) != core.CodeNotFound {
+						return err
+					}
+					if err := failRow(ctx, tx, inv.ClientRef, core.CodeUnavailable, 0, msg); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				}
 			case inv.InDoubt:
 				if !inv.InDoubtUntil.IsZero() && !now.Before(inv.InDoubtUntil) {
-					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts, ""); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				}
 			case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
 				if inv.Attempt >= 3 {
-					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts, ""); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -770,11 +777,11 @@ func (s *Store) sweep(ctx context.Context) error {
 	})
 }
 
-func failRow(ctx context.Context, tx *psql.Execer, clientRef string, code core.Code, charged int64) error {
+func failRow(ctx context.Context, tx *psql.Execer, clientRef string, code core.Code, charged int64, message string) error {
 	_, err := tx.Exec(ctx,
-		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
+		`UPDATE worker_invocations SET state = ?, code = ?, message = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, cancel_requested = 0 WHERE client_ref = ?`,
-		stateFailed, string(code), charged, clientRef)
+		stateFailed, string(code), message, charged, clientRef)
 	return err
 }
 

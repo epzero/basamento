@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,16 +24,24 @@ type Options struct {
 	Clock core.Clock
 	Audit platform.Audit
 	IDs   core.Ids
+	// LaunchTokens verifies the single-use join tokens a launcher hands to
+	// workers (ADR-0012 §12). Nil leaves only pool tokens.
+	LaunchTokens LaunchTokens
+	// Templates lets the catalog answer on_demand for a pool's worker
+	// templates (REQ-MODEL-034). Nil leaves template models invisible.
+	Templates TemplateCatalog
 }
 
 // Store is the platform side of the worker layer: pools, workers and the SQL
 // queue. It is safe for concurrent use; one store may serve several platform
 // replicas over the same database.
 type Store struct {
-	db    *psql.Store
-	clock core.Clock
-	audit platform.Audit
-	ids   core.Ids
+	db        *psql.Store
+	clock     core.Clock
+	audit     platform.Audit
+	ids       core.Ids
+	tokens    LaunchTokens
+	templates TemplateCatalog
 }
 
 // schema is created on first use. The queue is a table and the bus only wakes
@@ -47,6 +56,8 @@ var schema = []string{
 		ageing_ms INTEGER NOT NULL,
 		lease_ms INTEGER NOT NULL,
 		grace_ms INTEGER NOT NULL,
+		queue_timeout_ms INTEGER NOT NULL DEFAULT 0,
+		launch_error TEXT NOT NULL DEFAULT '',
 		created_unix_ms INTEGER NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS worker_pool_models (
@@ -74,6 +85,7 @@ var schema = []string{
 		units_used INTEGER NOT NULL DEFAULT 0,
 		present INTEGER NOT NULL DEFAULT 1,
 		removed INTEGER NOT NULL DEFAULT 0,
+		template_id TEXT NOT NULL DEFAULT '',
 		credential_hash TEXT NOT NULL,
 		joined_unix_ms INTEGER NOT NULL,
 		heartbeat_ms INTEGER NOT NULL
@@ -99,6 +111,7 @@ var schema = []string{
 		reserved_mpts INTEGER NOT NULL DEFAULT 0,
 		charged_mpts INTEGER NOT NULL DEFAULT 0,
 		code TEXT NOT NULL DEFAULT '',
+		message TEXT NOT NULL DEFAULT '',
 		request TEXT NOT NULL DEFAULT '',
 		result TEXT NOT NULL DEFAULT '',
 		provider_handle TEXT NOT NULL DEFAULT '',
@@ -125,7 +138,8 @@ func Open(ctx context.Context, db *psql.Store, opts Options) (*Store, error) {
 	if opts.IDs == nil {
 		opts.IDs = core.NewULIDs(opts.Clock, nil)
 	}
-	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs}
+	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs,
+		tokens: opts.LaunchTokens, templates: opts.Templates}
 	for _, q := range schema {
 		if _, err := db.Execer().Exec(ctx, q); err != nil {
 			return nil, err
@@ -153,10 +167,10 @@ func (s *Store) CreatePool(ctx context.Context, spec PoolSpec) (Pool, error) {
 		return Pool{}, err
 	}
 	_, err = s.db.Execer().Exec(ctx,
-		`INSERT INTO worker_pools (pool_id, tenant, token_hash, token_revoked, ageing_ms, lease_ms, grace_ms, created_unix_ms)
-		 VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
+		`INSERT INTO worker_pools (pool_id, tenant, token_hash, token_revoked, ageing_ms, lease_ms, grace_ms, queue_timeout_ms, created_unix_ms)
+		 VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 		spec.ID, string(spec.Tenant), hashToken(token), spec.Ageing.Milliseconds(),
-		spec.Lease.Milliseconds(), spec.Grace.Milliseconds(), unixms(s.now()))
+		spec.Lease.Milliseconds(), spec.Grace.Milliseconds(), spec.QueueTimeout.Milliseconds(), unixms(s.now()))
 	if err != nil {
 		return Pool{}, err
 	}
@@ -182,10 +196,10 @@ func (s *Store) EnsurePool(ctx context.Context, spec PoolSpec) (Pool, bool, erro
 func (s *Store) Pool(ctx context.Context, id string) (PoolSpec, error) {
 	var p PoolSpec
 	var tenant string
-	var ageing, lease, grace int64
+	var ageing, lease, grace, queueTimeout int64
 	err := s.db.Execer().QueryRow(ctx,
-		`SELECT pool_id, tenant, ageing_ms, lease_ms, grace_ms FROM worker_pools WHERE pool_id = ?`, id).
-		Scan(&p.ID, &tenant, &ageing, &lease, &grace)
+		`SELECT pool_id, tenant, ageing_ms, lease_ms, grace_ms, queue_timeout_ms FROM worker_pools WHERE pool_id = ?`, id).
+		Scan(&p.ID, &tenant, &ageing, &lease, &grace, &queueTimeout)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return PoolSpec{}, core.NewError(core.CodeNotFound, fmt.Sprintf("pool %q does not exist", id), map[string]any{"pool": id})
 	}
@@ -196,6 +210,7 @@ func (s *Store) Pool(ctx context.Context, id string) (PoolSpec, error) {
 	p.Ageing = time.Duration(ageing) * time.Millisecond
 	p.Lease = time.Duration(lease) * time.Millisecond
 	p.Grace = time.Duration(grace) * time.Millisecond
+	p.QueueTimeout = time.Duration(queueTimeout) * time.Millisecond
 	return p, nil
 }
 
@@ -234,11 +249,11 @@ func (s *Store) RevokeToken(ctx context.Context, poolID string) error {
 func (s *Store) poolByToken(ctx context.Context, token string) (PoolSpec, error) {
 	var p PoolSpec
 	var tenant string
-	var ageing, lease, grace int64
+	var ageing, lease, grace, queueTimeout int64
 	err := s.db.Execer().QueryRow(ctx,
-		`SELECT pool_id, tenant, ageing_ms, lease_ms, grace_ms FROM worker_pools
+		`SELECT pool_id, tenant, ageing_ms, lease_ms, grace_ms, queue_timeout_ms FROM worker_pools
 		 WHERE token_hash = ? AND token_revoked = 0`, hashToken(token)).
-		Scan(&p.ID, &tenant, &ageing, &lease, &grace)
+		Scan(&p.ID, &tenant, &ageing, &lease, &grace, &queueTimeout)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return PoolSpec{}, core.NewError(core.CodeUnauthenticated, "pool token is unknown or revoked", nil)
 	}
@@ -249,18 +264,41 @@ func (s *Store) poolByToken(ctx context.Context, token string) (PoolSpec, error)
 	p.Ageing = time.Duration(ageing) * time.Millisecond
 	p.Lease = time.Duration(lease) * time.Millisecond
 	p.Grace = time.Duration(grace) * time.Millisecond
+	p.QueueTimeout = time.Duration(queueTimeout) * time.Millisecond
 	return p, nil
 }
 
-// Join exchanges a pool token for a worker id and a short-lived credential.
-// A descriptor that differs from the one a present worker of the pool serves
-// is refused with conflict (REQ-MODEL-028); an unknown or revoked token is
-// refused with unauthenticated and audited (REQ-MODEL-029).
+// Join exchanges a pool token or a single-use launch join token for a worker
+// id and a short-lived credential. A descriptor that differs from the one a
+// present worker of the pool serves is refused with conflict (REQ-MODEL-028);
+// an unknown or revoked token is refused with unauthenticated and audited
+// (REQ-MODEL-029). A launch token admits one worker that declares exactly its
+// template (REQ-MODEL-039, REQ-MODEL-040).
 func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	pool, err := s.poolByToken(ctx, req.PoolToken)
+	var grant *LaunchGrant
 	if err != nil {
-		s.auditEvent(ctx, "worker.refuse", s.poolIDByToken(ctx, req.PoolToken), "failed", "unauthenticated")
-		return Worker{}, err
+		if core.CodeOf(err) != core.CodeUnauthenticated || s.tokens == nil {
+			s.auditEvent(ctx, "worker.refuse", s.poolIDByToken(ctx, req.PoolToken), "failed", "unauthenticated")
+			return Worker{}, err
+		}
+		// A revoked pool token names its pool, so the refusal is audited
+		// against that pool; only an unknown token may be a join token.
+		if poolID := s.poolIDByToken(ctx, req.PoolToken); poolID != "[unknown]" {
+			s.auditEvent(ctx, "worker.refuse", poolID, "failed", "unauthenticated")
+			return Worker{}, err
+		}
+		g, lerr := s.tokens.ConsumeLaunchToken(ctx, req.PoolToken)
+		if lerr != nil {
+			s.auditEvent(ctx, "worker.refuse", "[join-token]", "failed", "unauthenticated")
+			return Worker{}, lerr
+		}
+		grant = &g
+		pool, err = s.Pool(ctx, g.Pool)
+		if err != nil {
+			s.auditEvent(ctx, "worker.refuse", g.Pool, "failed", "unauthenticated")
+			return Worker{}, err
+		}
 	}
 	if req.ProtocolVersion != "" && req.ProtocolVersion != ProtocolVersion {
 		s.auditEvent(ctx, "worker.refuse", pool.ID, "failed", "protocol")
@@ -279,6 +317,12 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 			return Worker{}, core.NewError(core.CodeInvalidArgument, "worker: descriptor has no model id", nil)
 		}
 	}
+	if grant != nil {
+		if err := grantMatches(*grant, req); err != nil {
+			s.auditEvent(ctx, "worker.refuse", pool.ID, "denied", "conflict")
+			return Worker{}, err
+		}
+	}
 	if err := s.checkConflict(ctx, pool.ID, req.Descriptors); err != nil {
 		s.auditEvent(ctx, "worker.refuse", pool.ID, "denied", "conflict")
 		return Worker{}, err
@@ -291,13 +335,17 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	if err != nil {
 		return Worker{}, err
 	}
+	template := ""
+	if grant != nil {
+		template = grant.Template
+	}
 	descJSON, _ := json.Marshal(req.Descriptors)
 	labelsJSON, _ := json.Marshal(normalizeLabels(req.Labels))
 	_, err = s.db.Execer().Exec(ctx,
-		`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, credential_hash, joined_unix_ms, heartbeat_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, 0)`,
+		`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, template_id, credential_hash, joined_unix_ms, heartbeat_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, ?, 0)`,
 		id, pool.ID, string(StateActive), string(descJSON), string(labelsJSON), req.Capacity,
-		hashToken(credential), unixms(s.now()))
+		template, hashToken(credential), unixms(s.now()))
 	if err != nil {
 		return Worker{}, err
 	}
@@ -335,8 +383,54 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 		Labels:      normalizeLabels(req.Labels),
 		Capacity:    req.Capacity,
 		Present:     true,
+		Template:    template,
 		Credential:  credential,
 	}, nil
+}
+
+// grantMatches refuses a launched worker whose descriptors, labels or capacity
+// differ from its template (REQ-MODEL-040).
+func grantMatches(g LaunchGrant, req JoinRequest) error {
+	if g.Capacity != req.Capacity {
+		return core.NewError(core.CodeConflict,
+			"a launched worker must declare its template's capacity",
+			map[string]any{"template": g.Template, "want": g.Capacity, "got": req.Capacity})
+	}
+	if !sameLabels(g.Labels, normalizeLabels(req.Labels)) {
+		return core.NewError(core.CodeConflict,
+			"a launched worker must declare its template's labels",
+			map[string]any{"template": g.Template})
+	}
+	if len(g.Descriptors) != len(req.Descriptors) {
+		return core.NewError(core.CodeConflict,
+			"a launched worker must declare exactly its template's descriptors",
+			map[string]any{"template": g.Template})
+	}
+	want := map[string]string{}
+	for _, d := range g.Descriptors {
+		want[d.ID] = d.canonical()
+	}
+	for _, d := range req.Descriptors {
+		c, ok := want[d.ID]
+		if !ok || c != d.canonical() {
+			return core.NewError(core.CodeConflict,
+				fmt.Sprintf("model %q does not match the worker template", d.ID),
+				map[string]any{"template": g.Template, "model": d.ID})
+		}
+	}
+	return nil
+}
+
+func sameLabels(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // poolIDByToken names the pool a token belongs to, revoked or not, without
@@ -470,11 +564,12 @@ func (s *Store) Worker(ctx context.Context, id string) (Worker, error) {
 		w                   Worker
 		state, desc, labels string
 		present, removed    int
+		templateID          string
 	)
 	err := s.db.Execer().QueryRow(ctx,
-		`SELECT worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed
+		`SELECT worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, template_id
 		 FROM worker_workers WHERE worker_id = ?`, id).
-		Scan(&w.ID, &w.Pool, &state, &desc, &labels, &w.Capacity, &w.UnitsInUse, &present, &removed)
+		Scan(&w.ID, &w.Pool, &state, &desc, &labels, &w.Capacity, &w.UnitsInUse, &present, &removed, &templateID)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return Worker{}, core.NewError(core.CodeNotFound, fmt.Sprintf("worker %q does not exist", id), map[string]any{"worker": id})
 	}
@@ -484,6 +579,7 @@ func (s *Store) Worker(ctx context.Context, id string) (Worker, error) {
 	w.State = State(state)
 	w.Present = present != 0
 	w.Removed = removed != 0
+	w.Template = templateID
 	_ = json.Unmarshal([]byte(desc), &w.Descriptors)
 	_ = json.Unmarshal([]byte(labels), &w.Labels)
 	if w.Labels == nil {
@@ -594,15 +690,14 @@ func (s *Store) TenantSettings(ctx context.Context, poolID string, tenant core.T
 
 // Availability reports what the catalog shows for a model in a pool. A pool
 // keeps the descriptors of workers that left, so it answers offline rather
-// than not_found while a worker restarts (REQ-MODEL-013).
+// than not_found while a worker restarts (REQ-MODEL-013); a worker template
+// makes it on_demand before any worker exists (REQ-MODEL-034).
 func (s *Store) Availability(ctx context.Context, poolID, modelID string) (Availability, error) {
 	var raw string
 	err := s.db.Execer().QueryRow(ctx,
 		`SELECT descriptor FROM worker_pool_models WHERE pool_id = ? AND model = ?`, poolID, modelID).Scan(&raw)
-	if core.CodeOf(err) == core.CodeNotFound {
-		return "", core.NewError(core.CodeNotFound, fmt.Sprintf("pool %q does not serve %q", poolID, modelID), map[string]any{"pool": poolID, "model": modelID})
-	}
-	if err != nil {
+	have := err == nil
+	if err != nil && core.CodeOf(err) != core.CodeNotFound {
 		return "", err
 	}
 	workers, err := s.ListWorkers(ctx, poolID)
@@ -623,7 +718,142 @@ func (s *Store) Availability(ctx context.Context, poolID, modelID string) (Avail
 			}
 		}
 	}
-	return AvailabilityOffline, nil
+	if s.templates != nil {
+		models, err := s.templates.TemplateModels(ctx, poolID)
+		if err != nil {
+			return "", err
+		}
+		for _, tm := range models {
+			if tm.Descriptor.ID == modelID {
+				return AvailabilityOnDemand, nil
+			}
+		}
+	}
+	if have {
+		return AvailabilityOffline, nil
+	}
+	return "", core.NewError(core.CodeNotFound, fmt.Sprintf("pool %q does not serve %q", poolID, modelID), map[string]any{"pool": poolID, "model": modelID})
+}
+
+// Catalog lists what a pool serves: the descriptors its workers declared and
+// the models its worker templates would serve, each with availability and the
+// template's cold start. Entries are ordered by model id (REQ-MODEL-034).
+func (s *Store) Catalog(ctx context.Context, poolID string) ([]CatalogModel, error) {
+	byID := map[string]CatalogModel{}
+	rows, err := s.db.Execer().Query(ctx,
+		`SELECT model, descriptor FROM worker_pool_models WHERE pool_id = ?`, poolID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		var d Descriptor
+		if err := json.Unmarshal([]byte(raw), &d); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		byID[id] = CatalogModel{Descriptor: d, Availability: AvailabilityOffline}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+	onDemand := map[string]time.Duration{}
+	if s.templates != nil {
+		models, err := s.templates.TemplateModels(ctx, poolID)
+		if err != nil {
+			return nil, err
+		}
+		for _, tm := range models {
+			entry, ok := byID[tm.Descriptor.ID]
+			if !ok {
+				entry = CatalogModel{Descriptor: tm.Descriptor}
+			}
+			onDemand[tm.Descriptor.ID] = tm.ColdStart
+			byID[tm.Descriptor.ID] = entry
+		}
+	}
+	workers, err := s.ListWorkers(ctx, poolID)
+	if err != nil {
+		return nil, err
+	}
+	online := map[string]bool{}
+	require := requiredLabels(ctx)
+	for _, w := range workers {
+		if !w.Present || w.State != StateActive && w.State != StateDraining {
+			continue
+		}
+		if !labelsMatch(w.Labels, require) {
+			continue
+		}
+		for _, d := range w.Descriptors {
+			online[d.ID] = true
+		}
+	}
+	out := make([]CatalogModel, 0, len(byID))
+	for id, entry := range byID {
+		switch {
+		case online[id]:
+			entry.Availability = AvailabilityOnline
+			entry.ColdStart = 0
+		case hasKey(onDemand, id):
+			entry.Availability = AvailabilityOnDemand
+			entry.ColdStart = onDemand[id]
+		default:
+			entry.Availability = AvailabilityOffline
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Descriptor.ID < out[j].Descriptor.ID })
+	return out, nil
+}
+
+func hasKey(m map[string]time.Duration, k string) bool {
+	_, ok := m[k]
+	return ok
+}
+
+// SetLaunchError records the launcher's last error for a pool, which a queue
+// timeout reports with code unavailable while a template is degraded
+// (REQ-MODEL-041).
+func (s *Store) SetLaunchError(ctx context.Context, poolID, msg string) error {
+	_, err := s.db.Execer().Exec(ctx, `UPDATE worker_pools SET launch_error = ? WHERE pool_id = ?`, msg, poolID)
+	return err
+}
+
+// LaunchError reads a pool's last launch error.
+func (s *Store) LaunchError(ctx context.Context, poolID string) (string, error) {
+	var msg string
+	err := s.db.Execer().QueryRow(ctx, `SELECT launch_error FROM worker_pools WHERE pool_id = ?`, poolID).Scan(&msg)
+	if core.CodeOf(err) == core.CodeNotFound {
+		return "", core.NewError(core.CodeNotFound, fmt.Sprintf("pool %q does not exist", poolID), map[string]any{"pool": poolID})
+	}
+	return msg, err
+}
+
+// WaitingInvocations lists a pool's waiting invocations, oldest first. The
+// scaler reads them to compute demand (REQ-MODEL-035).
+func (s *Store) WaitingInvocations(ctx context.Context, poolID string) ([]Invocation, error) {
+	rows, err := s.db.Execer().Query(ctx,
+		selectInvocation+` WHERE pool_id = ? AND state = ? ORDER BY queued_unix_ms, client_ref`, poolID, stateWaiting)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Invocation
+	for rows.Next() {
+		inv, err := scanInvocation(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
+	}
+	return out, rows.Err()
 }
 
 // Descriptors lists what a pool serves, with availability.

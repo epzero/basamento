@@ -12,6 +12,10 @@
 //	Secrets  localsecrets://<key>             ↔ awskms://… gcpkms://… hashivault://…  (gocloud.dev/secrets + Tink)
 //	Runtime  temporal-embedded:///data/tmp.db ↔ temporal://host:7233  |  local://
 //
+// Launcher. A Launcher starts workers from a worker template on demand
+// (ADR-0012 §12). The first implementations are platform/launcher's http and
+// process launchers; their conformance suite is platform/launcher/conformance.
+//
 // Audit has no URL: it is backed by the SQL store configured by SQL, shared
 // by every producer.
 //
@@ -264,6 +268,37 @@ type AuditEvent struct {
 	// Reason explains a denial or failure, empty for an allowed outcome. It
 	// is a safe category or error code, never a value or key material.
 	Reason string
+}
+
+// LaunchRequest asks a Launcher to start workers from one template. Every
+// worker gets one of JoinTokens; Count and len(JoinTokens) must agree, and
+// IdempotencyKey makes a repeated request for the same launch safe. Settings
+// and Credential come from the template: Credential is a "cred://" reference
+// the launcher resolves at the moment of use, never a value (ADR-0012 §12).
+type LaunchRequest struct {
+	Pool           string
+	Template       string
+	Count          int
+	JoinTokens     []string
+	IdempotencyKey string
+	Credential     string
+	Settings       map[string]string
+}
+
+// LaunchResult reports whether a launch request was accepted. Acceptance is
+// not proof that a worker started: a worker joining its pool is (ADR-0012
+// §12).
+type LaunchResult struct {
+	Accepted bool
+}
+
+// Launcher starts Count workers from a worker template, each with its own
+// single-use join token, under an idempotency key. It reports acceptance only;
+// a worker joining is the only proof it started. A launcher that cannot accept
+// the request fails with a core.Error whose message is safe to show as the
+// reason a template cannot scale.
+type Launcher interface {
+	Launch(ctx context.Context, req LaunchRequest) (LaunchResult, error)
 }
 
 // Audit records security-relevant decisions. There is one append-only store

@@ -158,12 +158,25 @@ descriptors, workers and the queue in the SQL store (ADR-0012 §3), so both
 profiles behave the same and several replicas can serve one pool.
 `kit worker --pool-token … --sql-url … --data-dir … --models …` joins one pool,
 declares what its provider manifests serve and pulls until it is stopped;
-`--capacity`, `--labels` and `--once` bound it. A manifest model may set
-`units` and `restart: safe` (ADR-0012 §6, §7). The first version wires the
-embedded profile's in-process transport (`worker.LocalTransport`); the cloud
-profile reaches the same contract over the generated gRPC client, which lands
-with WP-L3-08's launchers. The worker journal is a file under `--data-dir`, so
-a restarted worker resumes what it holds.
+`--capacity`, `--labels` and `--once` bound it, and `--idle-exit`,
+`--max-lifetime` and `--max-invocations` are its own exit. A manifest model may
+set `units` and `restart: safe` (ADR-0012 §6, §7). The worker journal is a file
+under `--data-dir`, so a restarted worker resumes what it holds.
+
+**On demand** (`model/worker/scale`, WP-L3-08) stores a pool's worker
+templates, the single-use join tokens of each launch and the scaler's state
+beside the queue. The scaler compares queued units with the free units of
+present workers and the capacity of pending launches, then asks the template's
+`platform.Launcher` for the difference, within the template's `min`/`max`, the
+deployment cap, a launch rate and a cooldown. `platform/launcher` ships the
+`http` and `process` launchers and the conformance suite both pass. A launched
+worker joins with its join token and must declare exactly its template;
+`kit worker describe --models … --labels … --capacity …` prints what an image
+serves, in the shape a template stores. The pool token never leaves the
+platform. `kit worker` accepts either a pool token or a join token, so the
+embedded profile needs no extra contract; reaching the same `Join` over the
+generated gRPC client is later work. The platform never kills a worker: it
+leaves by itself when idle or at its lifetime, or drains on `SIGTERM`.
 
 ## 7. Prices
 

@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-08 @runtime:any @level:component
+@wp:WP-L3-08 @runtime:any @level:component
 Feature: Workers started on demand
   A pool can hold worker templates. A scaler asks a launcher for workers when
   work waits, within limits, and the workers leave by themselves when idle.

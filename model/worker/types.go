@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -140,6 +141,9 @@ type PoolSpec struct {
 	// Grace is how long a started, non-restart-safe invocation stays in doubt
 	// for its own worker before it fails with worker_lost.
 	Grace time.Duration
+	// QueueTimeout, when set, is the pool's expected queue timeout. A worker
+	// template's cold start must be at most half of it (ADR-0012 §12).
+	QueueTimeout time.Duration
 }
 
 func (p PoolSpec) validate() error {
@@ -151,6 +155,9 @@ func (p PoolSpec) validate() error {
 	}
 	if p.Grace <= 0 {
 		return core.NewError(core.CodeInvalidArgument, "worker: pool grace must be positive", nil)
+	}
+	if p.QueueTimeout < 0 {
+		return core.NewError(core.CodeInvalidArgument, "worker: pool queue timeout must not be negative", nil)
 	}
 	return nil
 }
@@ -195,6 +202,9 @@ type Worker struct {
 	UnitsInUse  int
 	Present     bool
 	Removed     bool
+	// Template is the worker template a launch token started it from, empty
+	// for a worker that joined with a pool token (ADR-0012 §12).
+	Template string
 	// Credential is the short-lived credential a successful join yields.
 	Credential string
 }
@@ -224,8 +234,11 @@ type Invocation struct {
 	InDoubtUntil    time.Time
 	ChargedMpts     int64
 	Code            core.Code
-	Result          json.RawMessage
-	ProviderHandle  string
+	// Message is the failure reason a queue timeout records, such as a
+	// degraded template's launcher error (ADR-0012 §12).
+	Message        string
+	Result         json.RawMessage
+	ProviderHandle string
 }
 
 // LeaseRequest says what a worker can take right now.
@@ -265,4 +278,44 @@ func errLeaseLost(clientRef string) error {
 	return core.NewError(CodeLeaseLost,
 		fmt.Sprintf("invocation %q is no longer leased", clientRef),
 		map[string]any{"client_ref": clientRef})
+}
+
+// LaunchGrant is what a single-use join token admits: one worker, declaring
+// exactly the template's descriptors, labels and capacity, into the template's
+// pool (REQ-MODEL-039, REQ-MODEL-040).
+type LaunchGrant struct {
+	Pool        string
+	Template    string
+	Descriptors []Descriptor
+	Labels      map[string]string
+	Capacity    int
+}
+
+// LaunchTokens verifies and spends a single-use join token. It is implemented
+// by model/worker/scale; the worker package consumes it at Join so a launched
+// worker needs no pool token. An unknown, spent or expired token is refused
+// with core.CodeUnauthenticated.
+type LaunchTokens interface {
+	ConsumeLaunchToken(ctx context.Context, token string) (LaunchGrant, error)
+}
+
+// TemplateModel is one model a worker template serves.
+type TemplateModel struct {
+	Descriptor Descriptor
+	// ColdStart is how long a worker from the template usually takes to join.
+	ColdStart time.Duration
+}
+
+// TemplateCatalog names what a pool's worker templates would serve, so the
+// catalog can answer on_demand before any worker joins (REQ-MODEL-034).
+type TemplateCatalog interface {
+	TemplateModels(ctx context.Context, poolID string) ([]TemplateModel, error)
+}
+
+// CatalogModel is one catalog entry: what a pool serves and whether it is
+// online, offline or on demand.
+type CatalogModel struct {
+	Descriptor   Descriptor
+	Availability Availability
+	ColdStart    time.Duration
 }
