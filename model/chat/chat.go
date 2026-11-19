@@ -27,7 +27,6 @@ type Config struct {
 
 // Adapter implements model.Invoker over an eino chat model.
 type Adapter struct {
-	provider    string
 	descriptors []model.Descriptor
 	chat        einomodel.BaseChatModel
 	runs        *model.Registry
@@ -49,7 +48,6 @@ func New(cfg Config) (*Adapter, error) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the chat capability", nil)
 	}
 	return &Adapter{
-		provider:    cfg.Provider,
 		descriptors: cfg.Descriptors,
 		chat:        cfg.Model,
 		runs:        model.NewRegistry(cfg.Provider),

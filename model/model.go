@@ -5,8 +5,8 @@
 // block (Invoke) or follow events. See ADR-0006 and docs/architecture/model-layer.md.
 //
 // Chat messages and tool definitions travel as JSON of github.com/cloudwego/eino/schema
-// values, so this contract does not depend on eino itself. The chat adapter in
-// model/chat maps them to eino's types; the embedding adapter here maps
+// values, so the contract types do not depend on eino itself. The chat adapter
+// in model/chat maps them to eino's types; the embedding adapter here maps
 // Request.Texts to an eino Embedder. Registry holds the part every adapter owes
 // regardless of protocol: idempotent starts, the ordered event log, the
 // result, cancellation and lookup.
