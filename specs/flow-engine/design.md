@@ -217,8 +217,9 @@ given literally in its step, so no scenario derives a number.
   around node transitions, nor their exact `Data` JSON shape (deferred to
   WP-L6-01 / `specs/streaming`).
 - **Shapes that the compiler does not yet fix**: the node-spec fields
-  `duration` (`wait`), `schema`, `accept_if` and `timeout` (`gate`) and `flow`
+  `duration` (`wait`), `schema` and `timeout` (`gate`) and `flow`
   (`subflow`) are read from the node spec as the scenarios write them; the
-  compiler (WP-L4-01) does not check their shape yet. The `subflow` child's
+  compiler (WP-L4-01) checks the expression in `accept_if` (`gate`) and `over`
+  (`map`) but not the shape of the rest of the spec. The `subflow` child's
   run id and parent-close policy are not specified here.
 - **Compiler (`WP-L4-01`) coverage of `START` and `FAIL` edge ends**: `docs/architecture/flow-engine.md` §1 uses `START` as the entry edge source and `FAIL` as the failure edge target in the IR, and `WP-L4-03` (`REQ-FLOW-014`) specifies that `flow/builder` emits them, but `specs/flow-engine/compile.feature` (`WP-L4-01`) has no explicit requirement or scenario yet stating that `flow/compile` accepts `"START"` as an edge source and `"FAIL"` as an edge target without declaring nodes of those names.

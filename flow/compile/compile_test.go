@@ -16,7 +16,7 @@ func typedFlow() *flow.IR {
 		Name:    "triage",
 		Version: 1,
 		State: flow.StateSpec{
-			Schema: json.RawMessage(`{"type":"object","properties":{"failed":{"type":"integer"},"done":{"type":"boolean"}}}`),
+			Schema: json.RawMessage(`{"type":"object","properties":{"failed":{"type":"integer"},"done":{"type":"boolean"},"items":{"type":"array","items":{"type":"object"}}}}`),
 		},
 		Nodes: map[string]flow.Node{
 			"plan":  {Kind: "task"},
@@ -82,7 +82,59 @@ func TestCompileRejectsNodeInputThatIsNeitherCELNorJQ(t *testing.T) {
 	node := f.Nodes["check"]
 	node.In = "state.failed =="
 	f.Nodes["check"] = node
-	requireInvalid(t, errOf(t, f), `node "check"`, "input")
+	err := errOf(t, f)
+	requireInvalid(t, err, `node "check"`, "input")
+	// Neither parser's message is dropped: each says something different.
+	if !strings.Contains(err.Error(), "not CEL") || !strings.Contains(err.Error(), "not jq") {
+		t.Fatalf("message %q does not keep both parsers' errors", err)
+	}
+}
+
+func TestCompileRejectsGateAcceptIfThatDoesNotTypeCheck(t *testing.T) {
+	f := typedFlow()
+	node := f.Nodes["check"]
+	node.Kind = "gate"
+	node.Spec = json.RawMessage(`{"accept_if":"state.nope == 1"}`)
+	f.Nodes["check"] = node
+	requireInvalid(t, errOf(t, f), `node "check" gate accept_if`, "nope")
+}
+
+func TestCompileRejectsGateAcceptIfThatIsNotBoolean(t *testing.T) {
+	f := typedFlow()
+	node := f.Nodes["check"]
+	node.Kind = "gate"
+	node.Spec = json.RawMessage(`{"accept_if":"state.failed"}`)
+	f.Nodes["check"] = node
+	requireInvalid(t, errOf(t, f), `node "check" gate accept_if`, "bool")
+}
+
+func TestCompileRejectsMapOverThatDoesNotTypeCheck(t *testing.T) {
+	f := typedFlow()
+	node := f.Nodes["check"]
+	node.Kind = "map"
+	node.Spec = json.RawMessage(`{"over":"state.nope","node":"impl"}`)
+	f.Nodes["check"] = node
+	requireInvalid(t, errOf(t, f), `node "check" map over`, "nope")
+}
+
+func TestCompileAcceptsGateAcceptIfAndMapOver(t *testing.T) {
+	for _, spec := range []struct {
+		kind string
+		spec string
+	}{
+		{kind: "gate", spec: `{"accept_if":"state.done"}`},
+		{kind: "gate", spec: `{"schema":"review.json","accept_if":"state.failed == 0","timeout":"72h"}`},
+		{kind: "map", spec: `{"over":"state.items","node":"impl","max_parallel":4}`},
+	} {
+		f := typedFlow()
+		node := f.Nodes["check"]
+		node.Kind = spec.kind
+		node.Spec = json.RawMessage(spec.spec)
+		f.Nodes["check"] = node
+		if _, err := Compile(f); err != nil {
+			t.Fatalf("%s spec %s: %v", spec.kind, spec.spec, err)
+		}
+	}
 }
 
 func TestCompileAcceptsNodeInputCELAndJQ(t *testing.T) {

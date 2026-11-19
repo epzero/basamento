@@ -65,9 +65,10 @@ func (c *Compiled) Canonical() []byte {
 // Hash returns the lowercase hex SHA-256 of the canonical IR.
 func (c *Compiled) Hash() string { return c.hash }
 
-// checkExpressions type-checks node inputs, guard conditions and edge
-// conditions in a deterministic order: nodes by id, then edges in declaration
-// order. A mapping is CEL when it compiles as CEL, otherwise jq.
+// checkExpressions type-checks node inputs, node spec expressions, guard
+// conditions and edge conditions in a deterministic order: nodes by id, then
+// edges in declaration order. A mapping is CEL when it compiles as CEL,
+// otherwise jq.
 func checkExpressions(f *flow.IR) error {
 	if !hasExpressions(f) {
 		return nil
@@ -96,7 +97,7 @@ func checkExpressions(f *flow.IR) error {
 
 func hasExpressions(f *flow.IR) bool {
 	for _, node := range f.Nodes {
-		if node.In != "" || (node.Guard != nil && node.Guard.While != "") {
+		if node.In != "" || (node.Guard != nil && node.Guard.While != "") || len(nodeSpecExpressions(node)) > 0 {
 			return true
 		}
 	}
@@ -124,7 +125,7 @@ func expressionEnv(f *flow.IR) (*expr.Env, error) {
 
 func checkNode(env *expr.Env, id string, node flow.Node) error {
 	if node.In != "" {
-		if err := checkMapping(env, fmt.Sprintf("node %q", id), node.In); err != nil {
+		if err := checkMapping(env, fmt.Sprintf("node %q", id), "input mapping", node.In); err != nil {
 			return err
 		}
 	}
@@ -133,18 +134,109 @@ func checkNode(env *expr.Env, id string, node flow.Node) error {
 			return err
 		}
 	}
+	for _, spec := range nodeSpecExpressions(node) {
+		subject := fmt.Sprintf("node %q %s", id, spec.subject)
+		if spec.condition {
+			if err := checkCondition(env, subject, spec.value); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := checkMapping(env, subject, "", spec.value); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func checkMapping(env *expr.Env, subject, src string) error {
+// specExpression is one CEL or jq expression a node kind keeps in its spec. A
+// condition is type-checked as a boolean; a mapping is only checked as an
+// expression, because its result shape belongs to the node kind.
+type specExpression struct {
+	subject   string // names the kind and spec field in errors
+	value     string
+	condition bool
+}
+
+// nodeSpecExpressions returns the spec expressions the compiler checks: a
+// gate's accept_if and a map's over. A set node's assignments have no field in
+// the IR yet (specs/flow-engine/design.md §2, open questions), so there is
+// nothing to check for it.
+func nodeSpecExpressions(node flow.Node) []specExpression {
+	if len(node.Spec) == 0 {
+		return nil
+	}
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(node.Spec, &spec); err != nil {
+		return nil
+	}
+	switch node.Kind {
+	case "gate":
+		return specString(spec, "gate accept_if", "accept_if", true)
+	case "map":
+		return specString(spec, "map over", "over", false)
+	}
+	return nil
+}
+
+func specString(spec map[string]json.RawMessage, subject, field string, condition bool) []specExpression {
+	raw, ok := spec[field]
+	if !ok {
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || value == "" {
+		return nil
+	}
+	return []specExpression{{subject: subject, value: value, condition: condition}}
+}
+
+func checkMapping(env *expr.Env, subject, label, src string) error {
 	_, celErr := env.Compile(src, nil)
 	if celErr == nil {
 		return nil
 	}
-	if _, mappingErr := expr.CompileMapping(src, nil); mappingErr == nil {
+	_, mappingErr := expr.CompileMapping(src, nil)
+	if mappingErr == nil {
 		return nil
 	}
-	return expressionError(subject+": input mapping", celErr)
+	return expressionError(joinSubject(subject, label), bothMappingErrors(celErr, mappingErr))
+}
+
+// bothMappingErrors keeps the CEL and the jq message: neither parser says
+// alone why a text is neither.
+func bothMappingErrors(celErr, mappingErr error) error {
+	message := fmt.Sprintf("not CEL (%s) and not jq (%s)", messageOf(celErr), messageOf(mappingErr))
+	details := map[string]any{}
+	for _, err := range []error{celErr, mappingErr} {
+		for key, value := range errorDetails(err) {
+			details[key] = value
+		}
+	}
+	return core.NewError(core.CodeInvalidArgument, message, details)
+}
+
+func messageOf(err error) string {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Message
+	}
+	return err.Error()
+}
+
+func errorDetails(err error) map[string]any {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Details
+	}
+	return nil
+}
+
+func joinSubject(subject, label string) string {
+	if label == "" {
+		return subject
+	}
+	return subject + ": " + label
 }
 
 func checkCondition(env *expr.Env, subject, src string) error {

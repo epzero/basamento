@@ -46,7 +46,9 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 - Validates the state schema, reducer keys and reducer forms, node names and
   kinds, and edge references.
-- Type-checks every CEL expression against the state schema.
+- Type-checks every CEL expression against the state schema: edge `when`
+  conditions, node `in` mappings, guard `while` conditions, and the `accept_if`
+  of a `gate` and the `over` of a `map` in their node specs.
 - Requires at least one guarded node on every cycle, which bounds it.
 - Rejects unknown node kinds.
 - Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
