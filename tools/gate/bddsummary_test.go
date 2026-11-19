@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/epzero/basamento/internal/gate"
 )
 
 func TestPrintBDDSkipsBranches(t *testing.T) {
@@ -37,6 +39,45 @@ func TestPrintBDDSkipsBranches(t *testing.T) {
 		if out != tc.want {
 			t.Fatalf("got %q want %q", out, tc.want)
 		}
+	}
+}
+
+func TestPrintBDDSkipsFromPackageSubdirectory(t *testing.T) {
+	modRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(modRoot, "go.mod"), []byte("module x\n\ngo 1.26.11\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gateDir := filepath.Join(modRoot, ".gate")
+	if err := os.MkdirAll(gateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"outcome":"pass","skip_runs":{"postgres-unavailable":2}}`
+	if err := os.WriteFile(filepath.Join(gateDir, "bdd.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(modRoot, "internal", "bdd")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	modRootFound, err := gate.RepoRoot(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := captureToolStdout(t, func() {
+		if err := printBDDSkips(modRootFound); err != nil {
+			t.Fatal(err)
+		}
+	})
+	want := "gate: scenario runs skipped: 2 (postgres-unavailable: 2)\n"
+	if out != want {
+		t.Fatalf("got %q want %q", out, want)
 	}
 }
 

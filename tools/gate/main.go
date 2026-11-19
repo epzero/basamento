@@ -121,7 +121,9 @@ func main() {
 		must(err)
 		report("release-check", gate.ReleaseCheck(l))
 	case "bdd-skips":
-		must(printBDDSkips(root))
+		modRoot, err := gate.RepoRoot(root)
+		must(err)
+		must(printBDDSkips(modRoot))
 	case "redgreen":
 		fs := flag.NewFlagSet("redgreen", flag.ExitOnError)
 		base := fs.String("base", "", "git ref to compare against")
