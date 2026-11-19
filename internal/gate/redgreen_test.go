@@ -10,8 +10,11 @@ import (
 const redGreenGoMod = "module github.com/epzero/basamento\n\ngo 1.26.11\n"
 
 const (
-	// redGreenBDDRed fails if it ever runs: a compile-only check must not
-	// execute the base harness.
+	// redGreenBDDExecutes is for compile-check tests: if the test binary ever
+	// runs, init prints to stderr and exits non-zero.
+	redGreenBDDExecutes = "package bdd\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"testing\"\n)\n\nfunc init() {\n\tfmt.Fprintln(os.Stderr, \"harness ran during the compile check\")\n\tos.Exit(1)\n}\n\nfunc TestFeatures(t *testing.T) {}\n"
+	// redGreenBDDRed is a base harness whose TestFeatures fails when run: red
+	// at base in red→green scenario tests.
 	redGreenBDDRed    = "package bdd\n\nimport \"testing\"\n\nfunc TestFeatures(t *testing.T) {\n\tt.Fatal(\"red at base\")\n}\n"
 	redGreenBDDPasses = "package bdd\n\nimport \"testing\"\n\nfunc TestFeatures(t *testing.T) {}\n"
 )
@@ -52,9 +55,10 @@ func redGreenSpecTree(planned bool) map[string]string {
 }
 
 // TestBuildBaseForRedGreenAcceptsTestOnlyPackage proves the compile step
-// writes a test binary and returns: the harness body fails if it ever runs.
+// writes a test binary and returns without running it: the fixture's init
+// exits non-zero if the binary ever executes.
 func TestBuildBaseForRedGreenAcceptsTestOnlyPackage(t *testing.T) {
-	wt := writeBaseModule(t, "1.26.11", redGreenBDDRed)
+	wt := writeBaseModule(t, "1.26.11", redGreenBDDExecutes)
 	if err := buildBaseForRedGreen(wt); err != nil {
 		t.Fatalf("a package of only _test.go files must compile: %v", err)
 	}
@@ -71,8 +75,10 @@ func TestBuildBaseForRedGreenRejectsBrokenTestFile(t *testing.T) {
 	}
 }
 
+// TestBuildBaseForRedGreenRejectsNewerGoDirective uses go 1.999: no release
+// will reach that directive.
 func TestBuildBaseForRedGreenRejectsNewerGoDirective(t *testing.T) {
-	wt := writeBaseModule(t, "1.99", redGreenBDDPasses)
+	wt := writeBaseModule(t, "1.999", redGreenBDDPasses)
 	// An empty file proxy keeps the toolchain switch offline: looking up the
 	// missing toolchain fails at once instead of reaching the network.
 	t.Setenv("GOPROXY", "file://"+t.TempDir())
