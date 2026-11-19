@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: Evaluating expressions deterministically
   A compiled expression is evaluated on JSON values bound to its variables.
   The same expression on the same values gives the same result, or the same

@@ -44,6 +44,6 @@ Capabilities:
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
 | [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |
 | [`bus`](bus/requirements.md) | Planned (WP-L1-03). |
-| [`expr`](expr/requirements.md) | Planned (WP-L2-01). |
+| [`expr`](expr/requirements.md) | Implemented (WP-L2-01). |
 | [`blob`](blob/requirements.md) | Implemented (WP-L1-02); uploads planned (WP-L1-08). |
 | [`sql`](sql/requirements.md) | Implemented (WP-L1-01). |
