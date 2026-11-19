@@ -225,6 +225,73 @@ func TestEmbeddingAcceptsExactVectorCount(t *testing.T) {
 	}
 }
 
+func TestEmbeddingRejectsEmptyVectors(t *testing.T) {
+	cases := []struct {
+		name  string
+		texts []string
+		vecs  [][]float64
+		msg   string
+	}{
+		{name: "all empty", texts: []string{"a", "b"}, vecs: [][]float64{{}, {}}, msg: "embedding vector 0 is empty"},
+		{name: "second empty", texts: []string{"a", "b"}, vecs: [][]float64{{1}, {}}, msg: "embedding vector 1 is empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeEmbedder{vecs: tc.vecs}
+			adapter, _ := NewEmbedding(embedConfig(f))
+			res, err := Invoke(testCtx(t), adapter, Request{
+				Model: "sim-embed", Op: CapEmbed, Texts: tc.texts, ClientRef: "ref-" + tc.name,
+			})
+			if err != nil {
+				t.Fatalf("invoke: %v", err)
+			}
+			if res.State != StateFailed {
+				t.Fatalf("state = %q", res.State)
+			}
+			var failure Failure
+			_ = json.Unmarshal(res.Error, &failure)
+			if failure.Code != core.CodeVendor || failure.Message != tc.msg {
+				t.Fatalf("failure = %+v, want vendor %q", failure, tc.msg)
+			}
+		})
+	}
+}
+
+type panicEmbedder struct{}
+
+func (panicEmbedder) EmbedStrings(context.Context, []string, ...einoEmbedding.Option) ([][]float64, error) {
+	panic("embed panic")
+}
+
+func TestEmbeddingVendorPanicSurvives(t *testing.T) {
+	adapter, _ := NewEmbedding(EmbeddingConfig{
+		Provider:    "sim",
+		Descriptors: embedConfig(&fakeEmbedder{}).Descriptors,
+		Embedder:    &panicEmbedder{},
+	})
+	res, err := Invoke(testCtx(t), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-panic",
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if res.State != StateFailed {
+		t.Fatalf("state = %q", res.State)
+	}
+	var failure Failure
+	_ = json.Unmarshal(res.Error, &failure)
+	if failure.Code != core.CodeInternal || failure.Message != "vendor call panicked" {
+		t.Fatalf("failure = %+v", failure)
+	}
+	ok, err := Invoke(testCtx(t), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"y"}, ClientRef: "ref-after",
+	})
+	if err != nil {
+		t.Fatalf("second invoke: %v", err)
+	}
+	_ = ok
+}
+
 func TestEmbeddingDescribe(t *testing.T) {
 	adapter, _ := NewEmbedding(embedConfig(&fakeEmbedder{}))
 	ds, err := adapter.Describe(testCtx(t))
