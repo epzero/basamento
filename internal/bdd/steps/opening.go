@@ -8,6 +8,11 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// registerOpeningSteps wires the phrase "opening fails with code …". Godog has one
+// global step namespace per suite, and both SQL (specs/sql) and secrets
+// (specs/secrets/key-service.feature) scenarios use that text after a failed open.
+// SQL steps set world.SQL.openErr; secrets steps set world.Secrets.lastErr.
+// assertOpeningFailsWithCode checks SQL first, then secrets.
 func registerOpeningSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^opening fails with code "([^"]*)"$`, assertOpeningFailsWithCode)
 }
