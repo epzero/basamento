@@ -100,6 +100,9 @@ bdd:
 bdd-skips:
 	$(GATE) bdd-skips
 
+# pg-prefetch's --postgres-version is the driver's pin (embeddedpostgres.V16 in
+# internal/bdd/sqltest): the head BDD step starts that exact bundle, so the
+# literal must never drift from it (pinned by a test in internal/gate).
 pg-prefetch: ## download Postgres bundles into BDD_POSTGRES_CACHE_DIR (ADR-0015)
 	@mkdir -p .gate/bin
 	$(GO) build -o $(GATE_PG_BIN) $(EP_EMBEDDED_POSTGRES)
