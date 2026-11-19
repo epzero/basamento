@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const testLayeringYAML = `module: example.com/mod
@@ -510,13 +512,34 @@ func TestLayeringRepoLayeringYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Layering(root)
+	b, err := os.ReadFile(filepath.Join(root, "layering.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("repository layering.yaml: want ok, got %v", got)
+	var r LayeringRules
+	if err := yaml.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
 	}
+	t.Run("repository", func(t *testing.T) {
+		if got := layeringRulesKeyErrors(r); len(got) != 0 {
+			t.Fatalf("repository layering.yaml: want no key errors, got %v", got)
+		}
+	})
+	t.Run("bogus_key_in_memory", func(t *testing.T) {
+		r2 := r
+		if r2.DenyExternal == nil {
+			r2.DenyExternal = map[string][]string{}
+		}
+		r2.DenyExternal["not-a-real-layer"] = []string{"example.com/"}
+		got := layeringRulesKeyErrors(r2)
+		if len(got) == 0 {
+			t.Fatal("want error for bogus deny_external key")
+		}
+		want := `layering.yaml: deny_external key "not-a-real-layer" is not a layer; fix the key or add the layer (changing the graph needs an ADR)`
+		if !containsString(got, want) {
+			t.Fatalf("got %v, want containing %q", got, want)
+		}
+	})
 }
 
 func repoRootWithLayering(t *testing.T) (string, error) {
