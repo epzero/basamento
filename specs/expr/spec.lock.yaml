@@ -522,6 +522,18 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/46
         human:
             status: pending
+    EXPR-023-01:
+        hash: sha256:153a83b47998ad12a04e395e5c4985a77a9d33623977e94945432f6dbf4bd055
+        reqs:
+            - REQ-EXPR-023
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: cursor:spec-reviewer:891d18
+        approved_at: "2026-11-19"
+        note: 'Arbitrated fix: halt and env parameter rows match REQ-EXPR-023 and design.md; full outline checked against requirement list and sibling EXPR-024–026.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
     EXPR-024-01:
         hash: sha256:45f23123beb5777c55c2aa9b8784c0ff16cef1bf5e20e37059ca6928baab438a
         reqs:
