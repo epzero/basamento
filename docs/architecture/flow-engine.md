@@ -40,9 +40,9 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 - Validates the schema, references and node specs.
 - Type-checks every CEL expression against the state schema.
-- Requires at least one guarded node on every cycle, which bounds it.
+- Requires on every cycle a node whose guard carries an explicit budget (`max_visits` or `cost_mpts`): a `while` condition alone does not bound the cycle (REQ-FLOW-003).
 - Rejects unknown node kinds.
-- Error messages name the node or edge and the expression (REQ-FLOW-003/004).
+- Error messages name the node or edge and what is wrong: the expression that does not type-check (REQ-FLOW-004), or the node on the cycle and the missing guard bound (REQ-FLOW-003).
 
 ## 3. Machine
 
