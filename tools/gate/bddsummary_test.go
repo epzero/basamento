@@ -25,6 +25,7 @@ func TestPrintBDDSkipsBranches(t *testing.T) {
 	}{
 		{`{"outcome":"pass","skip_runs":{}}`, "gate: scenario runs skipped: 0\n"},
 		{`{"outcome":"pass","skip_runs":{"postgres-unavailable":3}}`, "gate: scenario runs skipped: 3 (postgres-unavailable: 3)\n"},
+		{`{"outcome":"pass","skip_runs":{"postgres-unavailable":1,"zzz-future":2}}`, "gate: scenario runs skipped: 3 (postgres-unavailable: 1, zzz-future: 2)\n"},
 	}
 	for _, tc := range cases {
 		write(tc.json)
