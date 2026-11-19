@@ -1,6 +1,8 @@
 package blob
 
 import (
+	"crypto/rand"
+	"io"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -22,6 +24,9 @@ type Options struct {
 	// read handler. When non-empty it must be at least 32 bytes. An empty key
 	// means proxied URLs are disabled. Wiring sets it.
 	SignKey []byte
+	// RandReader supplies random bytes for staging keys; defaults to
+	// crypto/rand.Reader.
+	RandReader io.Reader
 }
 
 func (o *Options) clock() core.Clock {
@@ -36,4 +41,11 @@ func (o *Options) maxTTL() time.Duration {
 		return o.MaxURLTTL
 	}
 	return DefaultMaxURLTTL
+}
+
+func (o *Options) rand() io.Reader {
+	if o.RandReader != nil {
+		return o.RandReader
+	}
+	return rand.Reader
 }
