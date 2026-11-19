@@ -1,12 +1,26 @@
 package catalog
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
 )
+
+func TestValidatePriceNegativeRateMessageIsStable(t *testing.T) {
+	p := Price{Rules: []Rule{{Rates: Rates{
+		"zebra": -1, "alpha": -2, "middle": -3,
+	}}}}
+	want := `model "sim-chat": rate "alpha" must not be negative`
+	for i := 0; i < 20; i++ {
+		err := validatePrice("sim-chat", p)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("run %d: err=%v want substring %q", i, err, want)
+		}
+	}
+}
 
 func TestSnapshotLoaderRejectsNegativeRate(t *testing.T) {
 	raw := []byte(`sim-chat:

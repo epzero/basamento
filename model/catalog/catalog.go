@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -49,7 +50,7 @@ func New(clock core.Clock) (*Catalog, error) {
 	if err != nil {
 		return nil, internalError("build price expression environment", err)
 	}
-	return &Catalog{
+	c := &Catalog{
 		clock:       clock,
 		descriptors: map[string]model.Descriptor{},
 		snapshot:    snapshot,
@@ -57,7 +58,13 @@ func New(clock core.Clock) (*Catalog, error) {
 		tenants:     map[core.TenantID]map[string]Price{},
 		env:         env,
 		programs:    map[string]*expr.Program{},
-	}, nil
+	}
+	for modelID, p := range snapshot {
+		if err := c.precompilePrice(modelID, p); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
 }
 
 // AddDescriptor stores d by its model id, replacing an earlier descriptor for
@@ -65,6 +72,9 @@ func New(clock core.Clock) (*Catalog, error) {
 func (c *Catalog) AddDescriptor(d model.Descriptor) error {
 	if d.ID == "" {
 		return core.NewError(core.CodeInvalidArgument, "descriptor has no model id", nil)
+	}
+	if err := c.precompileSource(d.ID, d.Price); err != nil {
+		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -89,7 +99,7 @@ func (c *Catalog) Lookup(_ context.Context, modelID string) (model.Descriptor, e
 func (c *Catalog) SetSnapshotPrice(modelID string, p Price) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return setPrice(c.snapshot, modelID, p)
+	return c.setPrice(c.snapshot, modelID, p)
 }
 
 // SetDeploymentPrice sets modelID's price in the deployment layer. An empty
@@ -97,7 +107,7 @@ func (c *Catalog) SetSnapshotPrice(modelID string, p Price) error {
 func (c *Catalog) SetDeploymentPrice(modelID string, p Price) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return setPrice(c.deployment, modelID, p)
+	return c.setPrice(c.deployment, modelID, p)
 }
 
 // SetTenantPrice sets modelID's price in tenant's layer. An empty Price removes
@@ -114,7 +124,7 @@ func (c *Catalog) SetTenantPrice(tenant core.TenantID, modelID string, p Price) 
 		m = map[string]Price{}
 		c.tenants[tenant] = m
 	}
-	if err := setPrice(m, modelID, p); err != nil {
+	if err := c.setPrice(m, modelID, p); err != nil {
 		if len(m) == 0 {
 			delete(c.tenants, tenant)
 		}
@@ -126,7 +136,7 @@ func (c *Catalog) SetTenantPrice(tenant core.TenantID, modelID string, p Price) 
 	return nil
 }
 
-func setPrice(layer map[string]Price, modelID string, p Price) error {
+func (c *Catalog) setPrice(layer map[string]Price, modelID string, p Price) error {
 	if !p.valid() {
 		delete(layer, modelID)
 		return nil
@@ -134,7 +144,44 @@ func setPrice(layer map[string]Price, modelID string, p Price) error {
 	if err := validatePrice(modelID, p); err != nil {
 		return err
 	}
+	if err := c.precompilePrice(modelID, p); err != nil {
+		return err
+	}
 	layer[modelID] = p.clone()
+	return nil
+}
+
+func (c *Catalog) precompilePrice(modelID string, p Price) error {
+	if err := c.precompileSource(modelID, p.Formula); err != nil {
+		return err
+	}
+	for _, rule := range p.Rules {
+		when := strings.TrimSpace(rule.When)
+		if when == "" || when == "always" {
+			continue
+		}
+		if err := c.precompileSource(modelID, when); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Catalog) precompileSource(modelID, src string) error {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return nil
+	}
+	c.progMu.Lock()
+	defer c.progMu.Unlock()
+	if _, ok := c.programs[src]; ok {
+		return nil
+	}
+	p, err := c.env.Compile(src, nil)
+	if err != nil {
+		return amountError(modelID, err)
+	}
+	c.programs[src] = p
 	return nil
 }
 

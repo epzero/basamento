@@ -330,6 +330,23 @@ func TestDefaultTokenFormula(t *testing.T) {
 	}
 }
 
+func TestDivideRoundedNamesModelOnOverflow(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	// Rates large enough that multiply exceeds int64 after rounding.
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{
+		"input":  9223372036854775807,
+		"output": 0,
+	}}}})
+	_, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 2_000_000, OutputLimit: 0})
+	if err == nil {
+		t.Fatal("want error for out-of-range amount")
+	}
+	if !strings.Contains(err.Error(), `sim-chat`) {
+		t.Fatalf("error=%v, want model id in message", err)
+	}
+}
+
 func TestSettleRejectsQuoteNotFromStart(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
@@ -673,6 +690,16 @@ func TestZeroAmountAccepted(t *testing.T) {
 	}
 }
 
+func TestBadWhenExpressionRefusedAtSet(t *testing.T) {
+	c, _ := newCatalog(t)
+	err := c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: "usage.input_tokens >", Rates: catalog.Rates{"input": 1000, "output": 0}},
+	}})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("SetSnapshotPrice: code=%s err=%v, want invalid_argument", core.CodeOf(err), err)
+	}
+}
+
 func TestFailingRateConditionFailsPricingNotFallback(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
@@ -726,7 +753,15 @@ func TestFormulaAmountMustBeExactInteger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := newCatalog(t)
 			mustAdd(t, c, chatDescriptor("sim-chat"))
-			mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: tt.formula})
+			if err := c.SetSnapshotPrice("sim-chat", catalog.Price{Formula: tt.formula}); err != nil {
+				if tt.refuse {
+					if core.CodeOf(err) != core.CodeInvalidArgument {
+						t.Fatalf("SetSnapshotPrice: code=%s err=%v, want invalid_argument", core.CodeOf(err), err)
+					}
+					return
+				}
+				t.Fatalf("SetSnapshotPrice: %v", err)
+			}
 			got, err := c.Estimate(context.Background(), catalog.Request{
 				Model: "sim-chat", InputTokens: tt.input, OutputLimit: 0,
 			})

@@ -125,14 +125,11 @@ func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params 
 func (c *Catalog) program(src string) (*expr.Program, error) {
 	c.progMu.Lock()
 	defer c.progMu.Unlock()
-	if p, ok := c.programs[src]; ok {
-		return p, nil
+	p, ok := c.programs[src]
+	if !ok {
+		return nil, internalError("price expression was not compiled at set time",
+			fmt.Errorf("missing compiled program for %q", src))
 	}
-	p, err := c.env.Compile(src, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.programs[src] = p
 	return p, nil
 }
 
@@ -259,11 +256,7 @@ func amountFromFloat(modelID string, v float64) (int64, error) {
 	if v <= -maxFloatMilliPoints || v >= maxFloatMilliPoints {
 		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
 	}
-	i := int64(v)
-	if float64(i) != v {
-		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
-	}
-	return i, nil
+	return int64(v), nil
 }
 
 func roundedRat(modelID string, r *big.Rat) (int64, error) {

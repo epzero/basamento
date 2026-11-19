@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -106,8 +107,13 @@ func validatePrice(modelID string, p Price) error {
 		return nil
 	}
 	for _, rule := range p.Rules {
-		for key, rate := range rule.Rates {
-			if rate < 0 {
+		keys := make([]string, 0, len(rule.Rates))
+		for key := range rule.Rates {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			if rule.Rates[key] < 0 {
 				return core.NewError(core.CodeInvalidArgument,
 					fmt.Sprintf("model %q: rate %q must not be negative", modelID, key), nil)
 			}
