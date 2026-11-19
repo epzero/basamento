@@ -24,26 +24,28 @@ import (
 )
 
 type secretsWorld struct {
-	sim              *simKeyRegistry
-	store            secrets.KeysetStore
-	codec            *secrets.Codec
-	codec2           *secrets.Codec
-	port             *secrets.Port
-	portURL          string
-	payloads         map[string]secrets.Payload
-	encoded          map[string]secrets.Payload
-	decoded          map[string]secrets.Payload
-	lastErr          error
-	lastOp           string
-	logBuf           *bytes.Buffer
-	logHandler       slog.Handler
-	ciphertext       []byte
-	lastEnc          secrets.Payload
-	lastDec          secrets.Payload
-	valuePlain       []byte
-	unwrapAtRestart  int
-	lastCodecUnwraps int
-	storeSnaps       map[string]secrets.StoredKeyset
+	sim                    *simKeyRegistry
+	store                  secrets.KeysetStore
+	codec                  *secrets.Codec
+	codec2                 *secrets.Codec
+	port                   *secrets.Port
+	portURL                string
+	payloads               map[string]secrets.Payload
+	encoded                map[string]secrets.Payload
+	decoded                map[string]secrets.Payload
+	lastErr                error
+	lastOp                 string
+	logBuf                 *bytes.Buffer
+	logHandler             slog.Handler
+	ciphertext             []byte
+	lastEnc                secrets.Payload
+	lastDec                secrets.Payload
+	valuePlain             []byte
+	lastVal                []byte
+	lastDecodedPayloadName string
+	unwrapAtRestart        int
+	lastCodecUnwraps       int
+	storeSnaps             map[string]secrets.StoredKeyset
 }
 
 func newSecretsWorld() *secretsWorld {
@@ -555,8 +557,13 @@ func decodePayload(ctx context.Context, name, tenant string) error {
 	if err != nil {
 		return nil
 	}
-	sw.decoded[name] = out
+	sw.recordDecoded(name, out)
 	return nil
+}
+
+func (sw *secretsWorld) recordDecoded(name string, out secrets.Payload) {
+	sw.decoded[name] = out
+	sw.lastDecodedPayloadName = name
 }
 
 func decodePayloadMustFail(ctx context.Context, name, tenant string) error {
@@ -578,7 +585,7 @@ func decodePayloadCodec1(ctx context.Context, name, tenant string) error {
 	sw.lastOp = "decode"
 	sw.lastDec = out
 	if err == nil {
-		sw.decoded[name] = out
+		sw.recordDecoded(name, out)
 	}
 	sw.lastCodecUnwraps = sw.sim.unwrapForCodec(sw.codec) - before
 	return nil
@@ -586,17 +593,19 @@ func decodePayloadCodec1(ctx context.Context, name, tenant string) error {
 
 func decodeNoTenant(ctx context.Context, name string) error {
 	sw := secretsW(ctx)
-	_, err := sw.codec.Decode(ctx, sw.encoded[name])
+	out, err := sw.codec.Decode(ctx, sw.encoded[name])
 	sw.lastErr = err
 	sw.lastOp = "decode"
+	sw.lastDec = out
 	return nil
 }
 
 func decodeRaw(ctx context.Context, name, tenant string) error {
 	sw := secretsW(ctx)
-	_, err := sw.codec.Decode(tenantCtx(ctx, tenant), sw.payloads[name])
+	out, err := sw.codec.Decode(tenantCtx(ctx, tenant), sw.payloads[name])
 	sw.lastErr = err
 	sw.lastOp = "decode"
+	sw.lastDec = out
 	return nil
 }
 
@@ -994,11 +1003,7 @@ func assertDecodedMeta(ctx context.Context, enc string) error {
 }
 
 func lastDecodedName(ctx context.Context) string {
-	// Most recent decode stored under same name as encoded step referenced.
-	for k := range secretsW(ctx).decoded {
-		return k
-	}
-	return ""
+	return secretsW(ctx).lastDecodedPayloadName
 }
 
 func assertDecodedEqualsPayload(ctx context.Context, name string) error {
@@ -1024,14 +1029,15 @@ func assertDecodedData(ctx context.Context, encName, tenant, data string) error 
 }
 
 func assertLastDecoded(ctx context.Context, data string) error {
-	sw := secretsW(ctx)
-	for _, p := range sw.decoded {
-		if string(p.Data) != data {
-			return fmt.Errorf("got %q", p.Data)
-		}
-		return nil
+	name := lastDecodedName(ctx)
+	if name == "" {
+		return fmt.Errorf("no decoded payload matching %q", data)
 	}
-	return fmt.Errorf("no decoded payload matching %q", data)
+	p := swDecoded(ctx, name)
+	if string(p.Data) != data {
+		return fmt.Errorf("got %q", p.Data)
+	}
+	return nil
 }
 
 func assertLastCode(ctx context.Context, code string) error {
@@ -1087,10 +1093,14 @@ func assertNoDecoded(ctx context.Context) error {
 }
 
 func assertNoValue(ctx context.Context) error {
-	if secretsW(ctx).lastErr != nil {
-		return nil
+	sw := secretsW(ctx)
+	if sw.lastErr == nil {
+		return fmt.Errorf("value returned without error")
 	}
-	return fmt.Errorf("value returned")
+	if len(sw.lastVal) != 0 {
+		return fmt.Errorf("value bytes returned with error")
+	}
+	return nil
 }
 
 func assertUnwrapSinceRestart(ctx context.Context, n int) error {
@@ -1145,6 +1155,7 @@ func encryptValue(ctx context.Context, v string) error {
 	sw.valuePlain = []byte(v)
 	ct, err := sw.port.Encrypt(ctx, sw.valuePlain)
 	sw.lastErr = err
+	sw.lastVal = ct
 	sw.ciphertext = ct
 	return nil
 }
@@ -1159,6 +1170,8 @@ func ciphertextLacks(ctx context.Context, sub string) error {
 func decryptCiphertext(ctx context.Context, want string) error {
 	sw := secretsW(ctx)
 	pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
+	sw.lastVal = pt
+	sw.lastErr = err
 	if err != nil {
 		return err
 	}
@@ -1183,21 +1196,24 @@ func decryptAfterChange(ctx context.Context, change string) error {
 		if err := openSecretsSeed(ctx, 4); err != nil {
 			return err
 		}
-		_, err := sw.port.Decrypt(ctx, sw.ciphertext)
+		pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
 		sw.lastErr = err
+		sw.lastVal = pt
 		return nil
 	default:
 		if strings.Contains(change, "seed 4") {
 			if err := openSecretsSeed(ctx, 4); err != nil {
 				return err
 			}
-			_, err := sw.port.Decrypt(ctx, sw.ciphertext)
+			pt, err := sw.port.Decrypt(ctx, sw.ciphertext)
 			sw.lastErr = err
+			sw.lastVal = pt
 			return nil
 		}
 	}
-	_, err := sw.port.Decrypt(ctx, ct)
+	pt, err := sw.port.Decrypt(ctx, ct)
 	sw.lastErr = err
+	sw.lastVal = pt
 	return nil
 }
 
