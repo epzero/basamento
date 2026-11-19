@@ -307,9 +307,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the read fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastReadErr, code)
-	})
+	sc.Step(`^the read fails with code "([^"]*)"$`, readFailsWithCode)
 
 	sc.Step(`^reading entry "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, key, code string) error {
 		_, _, err := world(ctx).Bus.bus.Get(ctx, key)
@@ -356,15 +354,6 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		if w.lastSwapRev <= w.putRevs[0] {
 			return fmt.Errorf("swap rev %d not greater than put rev %d", w.lastSwapRev, w.putRevs[0])
 		}
-		return nil
-	})
-
-	sc.Step(`^(.+?) pass(?:es)?$`, func(ctx context.Context, raw string) error {
-		d, err := parseDurationPass(raw)
-		if err != nil {
-			return err
-		}
-		world(ctx).Core.clock.Advance(d)
 		return nil
 	})
 }
