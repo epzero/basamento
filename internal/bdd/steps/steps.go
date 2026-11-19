@@ -21,6 +21,7 @@ type World struct {
 	SQL    *sqlWorld
 	Prompt *promptWorld
 	Blob   *blobWorld
+	Bus    *busWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -33,12 +34,14 @@ func Initialize(sc *godog.ScenarioContext) {
 			SQL:    newSQLWorld(),
 			Prompt: newPromptWorld(),
 			Blob:   newBlobWorld(),
+			Bus:    newBusWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerBus(sc)
 	registerSharedSteps(sc)
 }
 
