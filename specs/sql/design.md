@@ -100,8 +100,24 @@ Postgres for `serialization failure`, `deadlock`, `out of resources`, and
 
 Scenarios tagged with both `@profile:embedded` and `@profile:cloud` run once
 per dialect. The component driver always runs the SQLite pass, on a fresh file
-in a temporary directory. It runs the Postgres pass when the test environment
-names a Postgres server (the CI matrix of gate G3, `docs/engineering/qa-gate.md`),
-each scenario in a fresh database, and otherwise reports the pass as skipped,
-like any tool missing locally. "A database server address where nothing
-listens" is a loopback port the step opened and closed.
+in a temporary directory. "A database server address where nothing listens" is
+a loopback port the step opened and closed.
+
+The Postgres pass of the driver (the G3 matrix line in
+`docs/engineering/qa-gate.md`) takes its server, and reports when it cannot,
+as [ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md) decides:
+
+- **Server.** A non-empty `BDD_POSTGRES_URL` names the server, and only that
+  server: there is never a fallback to an embedded one. An empty or unset
+  `BDD_POSTGRES_URL` means an embedded Postgres on major version 16. The
+  driver depends on nothing but a server URL.
+- **No server.** When the named server is unreachable or unusable, or the
+  embedded one does not start, a run under `GATE_STRICT=1` fails. Otherwise
+  the Postgres pass is reported skipped with the one closed reason
+  `postgres-unavailable`. A server that is up but fails to create or use a
+  scenario's own database is a failed run, never a skip.
+- **Fresh database.** Each scenario of the Postgres pass opens its own fresh
+  database, and the driver creates and drops only the databases it created.
+- **Collation.** The server's default collation is not part of the contract:
+  REQ-SQL-017 orders text with `COLLATE "C"` wherever text is ordered, so
+  nothing depends on how the server was initialized.
