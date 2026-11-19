@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -440,4 +441,100 @@ func containsImportViolation(ss []string, pkg, dep string) bool {
 		}
 	}
 	return false
+}
+
+func layeringModuleYAML(t *testing.T, yaml string) string {
+	t.Helper()
+	return layeringModule(t, map[string]string{
+		"layering.yaml": yaml,
+	})
+}
+
+func TestLayeringDenyExternalUnknownLayer(t *testing.T) {
+	yaml := `module: example.com/mod
+layers:
+  low: []
+deny_external:
+  not-a-layer: [evil.com/]
+`
+	got, err := Layering(layeringModuleYAML(t, yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `layering.yaml: deny_external key "not-a-layer" is not a layer; fix the key or add the layer (changing the graph needs an ADR)`
+	if !reflect.DeepEqual(got, []string{want}) {
+		t.Fatalf("got %v, want %v", got, []string{want})
+	}
+}
+
+func TestLayeringTestOnlyAllowedFromUnknownLayer(t *testing.T) {
+	yaml := `module: example.com/mod
+layers:
+  low: []
+test_only: [support]
+test_only_allowed_from: [nope]
+`
+	got, err := Layering(layeringModuleYAML(t, yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `layering.yaml: test_only_allowed_from entry "nope" is not a layer; fix the key or add the layer (changing the graph needs an ADR)`
+	if !reflect.DeepEqual(got, []string{want}) {
+		t.Fatalf("got %v, want %v", got, []string{want})
+	}
+}
+
+func TestLayeringUnknownRuleKeysSorted(t *testing.T) {
+	yaml := `module: example.com/mod
+layers:
+  low: []
+deny_external:
+  z-bogus: [evil.com/]
+test_only_allowed_from: [a-bogus]
+`
+	got, err := Layering(layeringModuleYAML(t, yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`layering.yaml: deny_external key "z-bogus" is not a layer; fix the key or add the layer (changing the graph needs an ADR)`,
+		`layering.yaml: test_only_allowed_from entry "a-bogus" is not a layer; fix the key or add the layer (changing the graph needs an ADR)`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestLayeringRepoLayeringYAML(t *testing.T) {
+	root, err := repoRootWithLayering(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Layering(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("repository layering.yaml: want ok, got %v", got)
+	}
+}
+
+func repoRootWithLayering(t *testing.T) (string, error) {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "layering.yaml")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return dir, nil
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", os.ErrNotExist
+		}
+		dir = parent
+	}
 }

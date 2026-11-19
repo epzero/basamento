@@ -87,6 +87,7 @@ func Layering(root string) ([]string, error) {
 	if err := yaml.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("layering.yaml: %w", err)
 	}
+	errs := layeringRulesKeyErrors(r)
 	pkgs, err := goListPackages(root)
 	if err != nil {
 		return nil, err
@@ -95,7 +96,6 @@ func Layering(root string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var errs []string
 	add := func(msg string) {
 		if msg != "" {
 			errs = append(errs, msg)
@@ -206,6 +206,30 @@ func checkImport(r LayeringRules, rel, layer, imp string, ctx importCheck) strin
 		}
 	}
 	return ""
+}
+
+// layeringRulesKeyErrors reports deny_external and test_only_allowed_from entries
+// that do not name a layer key.
+func layeringRulesKeyErrors(r LayeringRules) []string {
+	layers := make(map[string]bool, len(r.Layers))
+	for k := range r.Layers {
+		layers[k] = true
+	}
+	var errs []string
+	for k := range r.DenyExternal {
+		if !layers[k] {
+			errs = append(errs, fmt.Sprintf(
+				`layering.yaml: deny_external key %q is not a layer; fix the key or add the layer (changing the graph needs an ADR)`, k))
+		}
+	}
+	for _, k := range r.TestOnlyOK {
+		if !layers[k] {
+			errs = append(errs, fmt.Sprintf(
+				`layering.yaml: test_only_allowed_from entry %q is not a layer; fix the key or add the layer (changing the graph needs an ADR)`, k))
+		}
+	}
+	sort.Strings(errs)
+	return errs
 }
 
 func keys(m map[string][]string) []string {
