@@ -49,4 +49,9 @@
 // [Store.InTx] rejects a nested InTx on the same store when fn uses the ctx InTx
 // provides. [Execer] documents the ? placeholder contract on both dialects.
 // [TextOrderClause] takes a simple SQL identifier for the column name.
+//
+// Postgres ?-to-$n scanning follows the dialect lexer for strings, comments, and
+// dollar quotes, including standard single-quote rules for U& strings, but does not
+// model U& double-quoted identifiers or standard_conforming_strings = off.
+// Jsonb operators ?, ?|, and ?& are out of contract for SQL passed through the store.
 package sql

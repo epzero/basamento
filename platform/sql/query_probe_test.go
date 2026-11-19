@@ -17,8 +17,8 @@ func TestRewritePostgresPlaceholderProbesEP063(t *testing.T) {
 		},
 		{
 			name: "u_and_doubled_quotes_hide_question_mark",
-			in:   `SELECT U&''?'', ?`,
-			want: `SELECT U&''?'', $1`,
+			in:   `SELECT U&'''?''', ?`,
+			want: `SELECT U&'''?''', $1`,
 		},
 	}
 	for _, tc := range tests {
