@@ -55,7 +55,7 @@ Feature: Opening a blob store from its location URL
       | 31  | the call fails with code "invalid_argument" |
       | 32  | the store is open                           |
 
-  @REQ-BLOB-045 @planned @wp:WP-L1-02 @id:BLOB-045-02
+  @REQ-BLOB-045 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-045-02
   Scenario: A store opened without a signing key issues no proxied blob URL
     Given a blob store is opened from a file URL of a temporary directory without a signing key
     And tenant "acme" has stored "hello" as "text/plain"

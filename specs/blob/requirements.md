@@ -152,12 +152,15 @@ A proxied blob URL is served from the application's own origin, so a browser
 renders whatever content the tenant stored next to the application's own pages.
 
 ### REQ-BLOB-044 — A proxied read response cannot run as a page of the application
-While a proxied blob URL is served, the response shall carry `Content-Disposition: attachment; filename="<content hash>"`, where `<content hash>` is the 64 hexadecimal digits of the blob's content key; `Content-Security-Policy: sandbox; default-src 'none'`; `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and it shall keep the blob's content type.
+When a proxied blob URL serves the blob, the response shall carry `Content-Disposition: attachment; filename="<content hash>"`, where `<content hash>` is the 64 hexadecimal digits of the blob's content key; `Content-Security-Policy: sandbox; default-src 'none'`; `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and it shall keep the blob's content type.
 
 ### REQ-BLOB-045 — The signing key has a minimum length
-If a blob store is opened with a signing key that is not empty and shorter than 32 bytes, then opening it shall fail with code `invalid_argument`. A store opened with an empty signing key shall issue no proxied blob URL: a blob URL request for a blob of the tenant shall fail with code `internal`.
+Where the profile is embedded, if a blob store is opened with a signing key that is not empty and shorter than 32 bytes, then opening it shall fail with code `invalid_argument`; and if it is opened with an empty signing key, then a blob URL request for a blob of the tenant shall fail with code `internal`.
 
 ## Writing
 
 ### REQ-BLOB-046 — Write failures carry their class
-If a write is cancelled or its source fails, then the blob store shall fail it with code `cancelled` or `invalid_argument` respectively and keep nothing under its content key; and if the bucket or the writer fails, then the blob store shall fail it with code `unavailable`.
+If a write fails because the caller's context is cancelled, its source fails, or its bucket or writer fails, then the blob store shall fail it with code `cancelled`, `invalid_argument` or `unavailable`, respectively, and the `unavailable` failure shall be marked retryable.
+
+### REQ-BLOB-047 — A failed write leaves nothing
+If a write fails for any reason, then the blob store shall keep nothing under its content key: no object, partial or whole, and no content type sidecar that the write created.
