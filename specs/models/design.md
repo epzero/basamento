@@ -424,3 +424,154 @@ rule's `when` does not hold: MODEL-073-03).
 5. **Rounding of an exact half (REQ-MODEL-076, MODEL-076-01..02).** The docs give no rule; half up was chosen (MODEL-076-01) because it never under-charges a fraction of cost. Confirm, or choose half to even.
 6. **The estimate's counted input tokens (REQ-MODEL-077, C4, MODEL-077-01, MODEL-078-01).** The docs say "counted input tokens" without saying by which tokenizer. The model's own tokenizer is proposed, with a deterministic test tokenizer in the gate; where a descriptor names none, the implementer must pick one and say so.
 7. **Error codes when no price rule holds (REQ-MODEL-073, MODEL-073-01) and for an unknown model id (REQ-MODEL-068, MODEL-068-01).** The price table uses the existing `core.CodeUnsupported` (`"unsupported"`) when no price rule matches and `core.CodeNotFound` (`"not_found"`) when a model id is not in the catalog (`core` already has the code, and ADR-0012 §2 uses the word for the catalog), adding nothing to `core/errors.go`; confirm both codes, the latter over `invalid_argument`.
+
+# Models: invocation retention (WP-L3-01, EP0-140)
+
+Decisions the implementer must follow in `model` (`model/registry.go`). The
+requirements are REQ-MODEL-004, REQ-MODEL-005 and REQ-MODEL-088
+(`requirements.md`, section "Retention"); where this note is silent, the
+requirements win. The scenarios are MODEL-088-01 to MODEL-088-05 in
+`contract.feature` and MODEL-005-03 in `starts.feature`.
+
+## R1. What is retained, and why it is bounded
+
+A registry keeps, per client ref, the invocation it began: the handle, the
+ordered event log from a cursor, and the result. It is the in-process dedupe
+and replay of one vendor call, not the durable event log of the run
+(WP-L6-01): run events, their order across nodes and their reattach belong to
+that log. Nothing in a registry survives a process restart.
+
+Without a bound, one event log per invocation ever started accumulates for the
+life of the process, and an event log of a streaming call is the call's whole
+output: the registry grows with every call and never shrinks. The bounds are a
+memory policy in two dimensions because neither alone is enough: time alone
+lets a burst hold as much as its rate allows, and a count alone keeps a quiet
+period's invocations for the whole life of the process.
+
+- **Retention, 1 hour by default.** An ended invocation is retained for an
+  hour after it ends. That is far longer than any caller can still need it: the
+  streaming attempt total timeout is 10 minutes (REQ-MODEL-059) and the model
+  node's retry of a crashed attempt follows at once, so the window covers a
+  retry with room to spare. Time alone would not bound a burst.
+- **Ended bound, 10,000 by default.** A registry holds at most that many ended
+  invocations; a new ended invocation past it evicts the oldest ended one.
+  A count alone would keep a quiet period's invocations for the whole life of
+  the process.
+
+Both bounds apply per registry, which is per provider instance: one adapter's
+traffic cannot evict another adapter's invocations.
+
+## R2. The two bounds
+
+- **Retention window.** An ended invocation is kept until its end time plus the
+  retention window. At or after that instant — `end + Retention <= now` on the
+  registry's clock — it is evicted by the next sweep. The window runs from the
+  invocation's **end**, not its start, so a video call that started hours ago
+  is retained for an hour after it finished.
+- **Ended bound.** The registry counts the ended invocations it holds. A sweep
+  that finds more than `MaxEnded` evicts from the oldest ended invocation
+  first; ended invocations are queued in end-time order, so "oldest ended" is
+  the queue's head. Two invocations that end at the same instant keep the order
+  in which they ended, so an equal-end-time tie never makes an eviction
+  arbitrary.
+- **A running invocation is never evicted**, whatever the clock reads and
+  however many ended invocations arrive. It enters the ended queue when it
+  ends, at its end time. Running invocations hold memory too, but only as many
+  as a caller keeps open, and dropping one would lose the result it is about
+  to deliver (MODEL-088-05).
+- An invocation whose end time is not yet known (still running) has no place
+  in the end-time queue; the sweep must never treat it as ended.
+
+## R3. The sweep, without a goroutine or a timer
+
+No goroutine and no timer per invocation: a timer per retained invocation
+means thousands of live timers at the ended bound, and eviction would then
+depend on scheduler timing rather than on the clock the gate controls. The
+sweep runs inline instead:
+
+- `Begin`, `Lookup`, `Events`, `Result` and `Cancel` sweep the registry before
+  they resolve the client ref or its handle.
+- The sweep pops the head of the ended queue while the head's end time plus
+  `Retention` is at or before the clock's reading, then pops the head while
+  the queue holds more than `MaxEnded` entries. Both loops are the same queue
+  in the same order; the first is time-bounded, the second count-bounded.
+- The sweep runs under the registry's lock. An invocation that ends while a
+  sweep runs is appended to the queue and seen by the next sweep. When an
+  invocation ends it reports its end time, read on the registry's clock, to the
+  registry; the sweep only reads the queue.
+- A registry on which no method is called evicts nothing, which loses no
+  observable behaviour: every method of the contract sweeps first, so no caller
+  can observe an invocation past its window.
+- Determinism: eviction depends only on end times and clock readings, both
+  from `core.Clock`, which the gate supplies as `coretest.FakeClock`. A
+  scenario advances the fake clock and then calls a sweeping method; no sleep,
+  no wall clock, no scheduler race.
+
+## R4. Observable behaviour after eviction
+
+An evicted client ref behaves exactly as a client ref the registry never held:
+
+- `Lookup(ctx, clientRef)` returns `(nil, nil)`.
+- `Events`, `Result` and `Cancel` with the handle return an error with
+  `core.CodeNotFound` (`not_found`) and `client_ref` in the details, as an
+  unknown handle does today. No new error code is added.
+- `Begin(ctx, clientRef)` opens a **new** invocation: `existed` is false, the
+  event log is empty, no result exists, and the adapter calls the vendor again.
+  Idempotency covers the retention window, not forever (REQ-MODEL-004,
+  REQ-MODEL-005).
+
+**No tombstones.** A tombstone would consume memory as well (so it would need
+its own bound and sweep, which is the same problem one layer down), and it
+would answer a question the contract refuses: whether a client ref once named
+an invocation. The registry answers the same for "forgotten" and "never
+existed", so eviction cannot be used to probe which calls ran.
+
+## R5. The caller's duty
+
+The window bounds what the registry remembers; the model node's ordering is
+what makes a retry safe:
+
+1. It derives the call's client ref from the run, the node path, the visit and
+   the input (`docs/architecture/model-layer.md` §4), and the attempt's ref from
+   that call ref and the attempt number (REQ-MODEL-054).
+2. It calls `Begin` (through `Start`) inside one activity attempt, and does not
+   split starting from waiting for the result across attempts.
+3. It records the result durably before that activity attempt acknowledges its
+   completion.
+
+So a late retry of the activity replays the recorded result and never reaches
+`Begin`, whether or not the invocation is still retained. Only an attempt that
+crashed between `Begin` and the durable record can find nothing to replay; its
+retry follows the crash at once, far inside the window, and resolves the
+ambiguous start by lookup (REQ-MODEL-005) — which finds the invocation when the
+start landed, and opens the gate when it finds nothing, because a forgotten ref
+can no longer prove the start never landed (MODEL-005-03). The registry cannot
+enforce this ordering and does not pretend to: it forgets on schedule, and the
+model node's durable record is what outlives it.
+
+## R6. Configuration
+
+- `WithClock(core.Clock)` supplies the clock the retention window and the end
+  times are read on. It is required: there is no fallback to the system clock,
+  so the gate can never depend on wall time by omission. A registry built
+  without it fails with `invalid_argument`.
+- `WithRetention(window time.Duration, maxEnded int)` sets both bounds. A zero
+  window or a zero `maxEnded` means that bound's default (1 hour, 10,000), so
+  `WithRetention(30*time.Minute, 0)` keeps the default count. A negative
+  window or a negative `maxEnded` is `invalid_argument`; there is no value
+  that means unbounded.
+- Options are validated once, at construction. The constructor returns
+  `(*Registry, error)`: a missing clock and an invalid bound are both
+  `core.CodeInvalidArgument` errors naming the offending option. `model` has no
+  registry yet, so it lands with this checked form from the start rather than
+  changing an existing one-valued `NewRegistry`.
+
+## Settled in review
+
+1. **The constructor's error return (R6).** The checked `(*Registry, error)` is
+   confirmed over a panicking constructor: a missing clock and an invalid bound
+   are `core.CodeInvalidArgument` errors naming the offending option, and the
+   adapters and their simulators call the checked form.
+2. **Defaults and the one-requirement shape.** 1 hour and 10,000 are confirmed,
+   and REQ-MODEL-088 keeps the bounds and their observable consequence in one
+   requirement.
