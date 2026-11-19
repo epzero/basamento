@@ -6,8 +6,8 @@
 // this package never imports package runtime (ADR-0011). This is what lets the same flow run on
 // every runtime with identical results (REQ-FLOW-*). See ADR-0003.
 //
-// Status: IR and compiler implemented (WP-L4-01); Machine contract only
-// (WP-L4-02).
+// Status: IR, compiler and Go builder implemented (WP-L4-01, WP-L4-03);
+// Machine contract only (WP-L4-02).
 package flow
 
 import "encoding/json"
