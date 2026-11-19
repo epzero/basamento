@@ -1,4 +1,4 @@
-@planned @wp:WP-L8-02 @security @level:component
+@wp:WP-L8-02 @security @level:component
 Feature: Permission checks
 
   @REQ-AUTH-004 @id:AUTH-004-01

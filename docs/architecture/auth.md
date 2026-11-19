@@ -1,9 +1,11 @@
 # Auth
 
 Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
-records (WP-L8-01, `auth/authn`). **Planned**: local accounts (argon2id
-passwords, passkeys, cookie sessions), request wiring in the API, and
-authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
+records (WP-L8-01, `auth/authn`), and for the permission check, the role and
+scope mapping and the denial audit (WP-L8-02, `auth/authz`). **Planned**: local
+accounts (argon2id passwords, passkeys, cookie sessions), the role-binding store,
+request wiring in the API, CEL conditions, and PostgreSQL row-level security.
+Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
 
@@ -34,9 +36,20 @@ new one and replacing the stored record. Every rejection is
 ## 2. Authorization
 
 - Permissions are declared in Go. Roles are bound per project and stored in SQL.
+  `viewer` reads a project and its runs, `editor` also creates and cancels runs,
+  and `admin` also manages the project. The binding store is behind
+  `authz.Bindings` and is read for the tenant in the request context, never for
+  a tenant named by the caller.
 - A single `authz.Check(principal, action, resource)` runs in a connect
-  interceptor. Denials return `permission_denied` and write an audit event
-  (REQ-AUTH-004).
+  interceptor. It denies by default: an absent binding, an unknown role and an
+  unknown action grant nothing, and a token scope grants only its exact action.
+  A denial returns `permission_denied` and writes an audit event (REQ-AUTH-004).
+- The check maps its failures so tenancy never leaks: a missing or invalid
+  principal or request tenant is `unauthenticated`; a principal or resource of
+  another tenant is `not_found`, the same answer as an object that does not
+  exist (REQ-AUTH-002); a binding lookup error fails closed. A denial whose
+  audit event cannot be stored fails with `unavailable`; no failure path becomes
+  an allow.
 - **Audit**: every producer, the credential store and this check among them,
   records through `platform.Audit`. There is one audit store, owned by the
   credential store (WP-L1-06): an append-only table with tenant-scoped reads.
@@ -45,7 +58,9 @@ new one and replacing the stored record. Every rejection is
   is a user ID or service token ID, and pool and join tokens are logged
   only as hashed identifiers. An event's tenant comes from the context;
   `Record` rejects an event that names a different tenant, and a producer
-  on a tenant path fails closed when it has no tenant. Events with no tenant
+  on a tenant path fails closed when it has no tenant. A denied authorization
+  names the attempted permission as its action, the project as its resource
+  and the mapped code as its reason. Events with no tenant
   are deployment-level: refused joins with an unknown pool token
   (REQ-MODEL-029), shared-pool and launch events (ADR-0012 §10, §12), and
   operator actions. Tenant-scoped reads never return them. See

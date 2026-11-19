@@ -7,6 +7,8 @@
 // second line in SaaS.
 //
 // Status: the none and oidc modes and the local bearer-token records are
-// implemented in auth/authn (WP-L8-01); local accounts (passwords, passkeys,
-// sessions), request wiring in the API, and authorization are planned.
+// implemented in auth/authn (WP-L8-01); role- and scope-based, tenant-scoped
+// permission checks with an audit event on every denial are implemented in
+// auth/authz (WP-L8-02). Local accounts, the role-binding store, request wiring
+// in the API, CEL conditions and row-level security are planned.
 package auth
