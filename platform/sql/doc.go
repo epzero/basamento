@@ -51,7 +51,7 @@
 // [TextOrderClause] takes a simple SQL identifier for the column name.
 //
 // Postgres ?-to-$n scanning follows the dialect lexer for strings, comments, and
-// dollar quotes, including standard single-quote rules for U& strings, but does not
-// model U& double-quoted identifiers or standard_conforming_strings = off.
+// dollar quotes, including standard single-quote rules for U&'…' strings; plain
+// single-quoted strings always assume standard_conforming_strings = on.
 // Jsonb operators ?, ?|, and ?& are out of contract for SQL passed through the store.
 package sql
