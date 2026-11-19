@@ -34,8 +34,9 @@
 // superstep; its edges are an unconditional fan-out. A map node evaluates its
 // spec's over expression to an array and runs the node named by its node field
 // once per element, carrying the element as the command input and the
-// one-based index as the attempt. The machine does not throttle map fan-out;
-// max_parallel is left to the host.
+// one-based index as the attempt, up to DefaultMaxFanout (10 000) items per
+// superstep; the host may lower the limit with WithMaxFanout. max_parallel is
+// the host's throttle on how many map children run at once, not a cap on fan-out.
 //
 // # Guards
 //

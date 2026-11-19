@@ -16,8 +16,9 @@ import (
 // Machine is the pure interpreter over one definition. The zero value is not
 // usable; call New.
 type Machine struct {
-	def      *flow.IR
-	edges    map[string][]compiledEdge
+	def       *flow.IR
+	maxFanout int
+	edges     map[string][]compiledEdge
 	guards   map[string]*expr.Program
 	inputs   map[string]*valueExpr
 	sets     map[string]*valueExpr
@@ -41,7 +42,7 @@ type valueExpr struct {
 // New compiles the expressions of def and returns a Machine that runs it. The
 // definition must pass flow/ir validation; an expression that does not
 // compile is rejected with code invalid_argument, naming the node or edge.
-func New(def *flow.IR) (*Machine, error) {
+func New(def *flow.IR, opts ...Option) (*Machine, error) {
 	if def == nil {
 		return nil, invalid("flow: nil definition", nil)
 	}
@@ -59,13 +60,19 @@ func New(def *flow.IR) (*Machine, error) {
 		return nil, invalid("flow: expressions: "+err.Error(), nil)
 	}
 	m := &Machine{
-		def:      def,
-		edges:    make(map[string][]compiledEdge, len(def.Nodes)),
+		def:       def,
+		maxFanout: DefaultMaxFanout,
+		edges:     make(map[string][]compiledEdge, len(def.Nodes)),
 		guards:   make(map[string]*expr.Program),
 		inputs:   make(map[string]*valueExpr),
 		sets:     make(map[string]*valueExpr),
 		mapOver:  make(map[string]*valueExpr),
-		mapNodes: make(map[string]string),
+		mapNodes:  make(map[string]string),
+	}
+	for _, opt := range opts {
+		if err := opt(m); err != nil {
+			return nil, err
+		}
 	}
 	for _, edge := range def.Edges {
 		compiled := compiledEdge{to: edge.To}
@@ -273,6 +280,9 @@ func (m *Machine) expand(s *flow.Snapshot, targets []string) ([]flow.Step, *flow
 			items, err := m.mapItems(s, id)
 			if err != nil {
 				return nil, nil, err
+			}
+			if len(items) > m.maxFanout {
+				return nil, fanoutFailure(id, len(items), m.maxFanout), nil
 			}
 			for i, item := range items {
 				steps = append(steps, flow.Step{Node: m.mapNodes[id], Attempt: i + 1, Input: item})
@@ -648,6 +658,12 @@ func runVars(s *flow.Snapshot) map[string]any {
 
 func failEndpoint(from string) *flow.Command {
 	return &flow.Command{Type: "fail", Node: from}
+}
+
+func fanoutFailure(id string, count, limit int) *flow.Command {
+	message := fmt.Sprintf("flow: node %q map over has %d items, limit %d", id, count, limit)
+	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
+	return &flow.Command{Type: "fail", Node: id, Input: payload}
 }
 
 func guardFailure(id string, node flow.Node) *flow.Command {
