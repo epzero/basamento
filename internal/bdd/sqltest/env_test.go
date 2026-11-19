@@ -20,8 +20,8 @@ func TestSkipRunsAccounting(t *testing.T) {
 	if SkipTotal() != 2 {
 		t.Fatalf("total %d", SkipTotal())
 	}
-	s := SortedSkipSummary()
-	if s != "(postgres-unavailable: 2)" {
-		t.Fatalf("summary %q", s)
+	runs := SkipRuns()
+	if runs["postgres-unavailable"] != 2 {
+		t.Fatalf("runs %v", runs)
 	}
 }

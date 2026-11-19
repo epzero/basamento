@@ -23,11 +23,6 @@ func PostgresAdminURL() string {
 	return os.Getenv("BDD_POSTGRES_URL")
 }
 
-// PostgresConfigured reports whether the cloud BDD pass should run.
-func PostgresConfigured() bool {
-	return PostgresAvailable()
-}
-
 var bddDBSeq atomic.Uint64
 
 const bddDBCreateMaxAttempts = 8

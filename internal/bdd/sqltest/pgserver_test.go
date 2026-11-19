@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/epzero/basamento/internal/bdd/modroot"
 )
 
 func TestPostgresURLPrecedenceNoEmbeddedFallback(t *testing.T) {
@@ -80,7 +82,7 @@ func TestNormalizePostgresScheme(t *testing.T) {
 }
 
 func TestModuleRoot(t *testing.T) {
-	root, err := moduleRoot()
+	root, err := modroot.Find()
 	if err != nil {
 		t.Fatal(err)
 	}

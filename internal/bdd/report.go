@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/epzero/basamento/internal/bdd/modroot"
 	"github.com/epzero/basamento/internal/bdd/sqltest"
 )
 
@@ -61,15 +62,5 @@ func moduleRoot() (string, error) {
 	if !ok {
 		return "", errors.New("bdd: cannot locate module root")
 	}
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errors.New("bdd: go.mod not found")
-		}
-		dir = parent
-	}
+	return modroot.FindFrom(filepath.Dir(file))
 }

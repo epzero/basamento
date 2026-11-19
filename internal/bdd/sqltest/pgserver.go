@@ -7,11 +7,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres/v2"
+
+	"github.com/epzero/basamento/internal/bdd/modroot"
 )
 
 // PostgresServerMode names how the gate obtained Postgres: "embedded" or "url" (ADR-0015).
@@ -182,13 +183,6 @@ func processPostgresPassword() string {
 	return fmt.Sprintf("bddpw_%d", os.Getpid())
 }
 
-// PostgresFailed reports whether resolution tried and failed (URL or embedded).
-func PostgresFailed() bool {
-	pgMu.Lock()
-	defer pgMu.Unlock()
-	return pgFailed
-}
-
 const supervisorRel = ".gate/bin/embedded-postgres"
 
 // resolveSupervisorPath returns the supervisor built from the pinned module (never a release download).
@@ -207,7 +201,7 @@ func resolveSupervisorPath() (string, error) {
 		}
 		return ap, nil
 	}
-	root, err := moduleRoot()
+	root, err := modroot.Find()
 	if err != nil {
 		return "", err
 	}
@@ -218,20 +212,3 @@ func resolveSupervisorPath() (string, error) {
 	return "", fmt.Errorf("%s missing; run make pg-prefetch to build the supervisor", candidate)
 }
 
-func moduleRoot() (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("bdd: cannot locate module root")
-	}
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("bdd: go.mod not found")
-		}
-		dir = parent
-	}
-}

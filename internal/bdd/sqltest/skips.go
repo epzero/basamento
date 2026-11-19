@@ -2,7 +2,6 @@ package sqltest
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 )
 
@@ -59,24 +58,3 @@ func SkipTotal() int {
 	return n
 }
 
-// SortedSkipSummary returns "(reason: count, ...)" with reasons in lexicographic order.
-func SortedSkipSummary() string {
-	skipMu.Lock()
-	defer skipMu.Unlock()
-	if len(skipCounts) == 0 {
-		return ""
-	}
-	reasons := make([]string, 0, len(skipCounts))
-	for r := range skipCounts {
-		reasons = append(reasons, r)
-	}
-	sort.Strings(reasons)
-	var b string
-	for i, r := range reasons {
-		if i > 0 {
-			b += ", "
-		}
-		b += fmt.Sprintf("%s: %d", r, skipCounts[r])
-	}
-	return "(" + b + ")"
-}
