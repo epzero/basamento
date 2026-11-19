@@ -235,7 +235,6 @@ func registerBlob(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the call fails with code "([^"]*)"$`, assertBlobCallCode)
 	sc.Step(`^tenant "([^"]*)" has a blob under key "([^"]*)"$`, func(ctx context.Context, tenant, key string) error {
 		ok, err := world(ctx).Blob.blob.Exists(world(ctx).Blob.tenantCtx(ctx, tenant), key)
 		if err != nil {
