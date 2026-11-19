@@ -339,7 +339,6 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^decoding fails with code "([^"]*)" and message "([^"]*)"$`, assertLastCodeMessage)
 	sc.Step(`^encoding fails with code "([^"]*)" and message "([^"]*)"$`, assertLastCodeMessage)
 	sc.Step(`^opening fails with code "([^"]*)" and message "(.+)"$`, assertLastCodeMessage)
-	sc.Step(`^opening fails with code "([^"]*)"$`, assertLastCode)
 	sc.Step(`^the rotation fails with code "([^"]*)"$`, assertLastCode)
 	sc.Step(`^rotation fails with code "([^"]*)"$`, assertLastCode)
 	sc.Step(`^the data key of tenant "([^"]*)" is rotated$`, rotateDataKey)

@@ -34,4 +34,5 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerSecrets(sc)
+	registerOpeningSteps(sc)
 }
