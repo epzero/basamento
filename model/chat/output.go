@@ -32,8 +32,22 @@ func messageHasAssistantOutput(m *schema.Message) bool {
 	if len(m.ToolCalls) > 0 {
 		return true
 	}
+	// MultiContent is deprecated in eino but ConcatMessages still merges it.
 	for i := range m.MultiContent {
-		if chatPartHasOutput(m.MultiContent[i]) {
+		p := m.MultiContent[i]
+		if p.Text != "" {
+			return true
+		}
+		if p.ImageURL != nil && (p.ImageURL.URL != "" || p.ImageURL.URI != "") {
+			return true
+		}
+		if p.AudioURL != nil && p.AudioURL.URL != "" {
+			return true
+		}
+		if p.VideoURL != nil && p.VideoURL.URL != "" {
+			return true
+		}
+		if p.FileURL != nil && p.FileURL.URL != "" {
 			return true
 		}
 	}
@@ -41,25 +55,6 @@ func messageHasAssistantOutput(m *schema.Message) bool {
 		if outputPartHasOutput(m.AssistantGenMultiContent[i]) {
 			return true
 		}
-	}
-	return false
-}
-
-func chatPartHasOutput(p schema.ChatMessagePart) bool {
-	if p.Text != "" {
-		return true
-	}
-	if p.ImageURL != nil && (p.ImageURL.URL != "" || p.ImageURL.URI != "") {
-		return true
-	}
-	if p.AudioURL != nil && p.AudioURL.URL != "" {
-		return true
-	}
-	if p.VideoURL != nil && p.VideoURL.URL != "" {
-		return true
-	}
-	if p.FileURL != nil && p.FileURL.URL != "" {
-		return true
 	}
 	return false
 }
