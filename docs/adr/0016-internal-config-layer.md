@@ -51,8 +51,8 @@ Path-segment prefix grants only:
 files for other platforms are reviewed by hand (superseded by ADR-0018,
 2026-11-19). `_test.go` is out of scope (as `test_only`) (superseded by
 ADR-0018, 2026-11-19). The allow-list blocks `platform` and `runtime`;
-`deny_external`
-blocks the prefixes above. The gate does not classify port vendors — add a new
+`deny_external` blocks the prefixes above. The gate does not classify port
+vendors — add a new
 vendor prefix in the change that brings the library; an unlisted import can pass
 and is a review finding. By policy, untrusted code does not live under `internal/`
 (not gate-checked); new `internal/<pkg>` rows and grants need an ADR.

@@ -26,11 +26,11 @@ GOOS=linux GOARCH=amd64 go list -json ./internal/gate ./platform/sql
 `migrate_lock_other.go`, `sqlite_file_other.go`. `go list` `Imports`: **0**
 production importers outside `internal/bdd` of paths under `internal/bdd`.
 
-In-flight survey: **36** unmerged branches plus `main` (`grep -c '^### '
-/tmp/archer/inflight70.out` → 37); **16** of the 36 add `platform/bus` tests
-importing `internal/bdd/natstest`. Every finding except one is a harness import
-cleared by decision 2. The exception is **EP0-117**: external test
-`runtime/conformance/conformance_test.go` imports `platform/secrets` without a
+A scratch survey of **36** unmerged branches plus `main` on 2026-11-19 (same
+method as above, not kept) found: **16** of the 36 have `platform/bus` tests
+importing `internal/bdd/natstest`; every finding except one is a harness import
+cleared by decision 2; the exception is **EP0-117's** external test
+`runtime/conformance/conformance_test.go` importing `platform/secrets` without a
 grant.
 
 ## Decision
