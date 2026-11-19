@@ -2,57 +2,110 @@ package secrets_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform/secrets"
 )
 
-type aadStore struct {
-	data map[string]secrets.StoredKeyset
+// passThroughKey does not bind keyset material to a tenant at the master layer.
+type passThroughKey struct {
+	id string
 }
 
-func (a *aadStore) Get(context.Context, string) (secrets.StoredKeyset, bool, error) {
-	return secrets.StoredKeyset{}, false, nil
-}
-func (a *aadStore) CreateIfAbsent(_ context.Context, tenant string, r secrets.StoredKeyset) (bool, error) {
-	a.data[tenant] = r
-	return true, nil
-}
-func (a *aadStore) CompareAndSwap(context.Context, string, uint64, secrets.StoredKeyset) error {
-	return nil
-}
-func (a *aadStore) Count(context.Context) (int, error)        { return len(a.data), nil }
-func (a *aadStore) Tenants(context.Context) ([]string, error) { return nil, nil }
+func (k passThroughKey) MasterKeyID() string { return k.id }
 
-type aadKey struct{ id string }
+func (k passThroughKey) Close() error { return nil }
 
-func (k aadKey) MasterKeyID() string { return k.id }
-func (k aadKey) Close() error        { return nil }
-func (k aadKey) Wrap(ctx context.Context, tenant string, plain []byte) ([]byte, error) {
-	return secrets.FrameBoundPlaintext(tenant, plain)
+func (k passThroughKey) Wrap(_ context.Context, _ string, plain []byte) ([]byte, error) {
+	return append([]byte(nil), plain...), nil
 }
-func (k aadKey) Unwrap(ctx context.Context, tenant string, ct []byte) ([]byte, error) {
-	return secrets.ParseBoundPlaintext(tenant, ct)
+
+func (k passThroughKey) Unwrap(_ context.Context, _ string, ct []byte) ([]byte, error) {
+	return append([]byte(nil), ct...), nil
 }
 
 func TestPayloadTenantAADEnforced(t *testing.T) {
 	t.Parallel()
-	store := &aadStore{data: map[string]secrets.StoredKeyset{}}
-	ks := aadKey{id: "mk"}
+	store := secrets.NewTestMemKeysetStore()
+	ks := passThroughKey{id: "aad-mk-tenant"}
 	c, err := secrets.NewCodec(store, []secrets.KeyService{ks})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctxAcme := core.WithTenant(context.Background(), "acme")
 	ctxGlobex := core.WithTenant(context.Background(), "globex")
-	p := secrets.Payload{Metadata: map[string][]byte{"encoding": []byte("json/plain")}, Data: []byte("secret")}
-	enc, err := c.Encode(ctxAcme, p)
+	plain := secrets.Payload{Metadata: map[string][]byte{"encoding": []byte("json/plain")}, Data: []byte("secret")}
+	enc, err := c.Encode(ctxAcme, plain)
 	if err != nil {
+		t.Fatal(err)
+	}
+	acmeRec, ok, err := store.Get(ctxAcme, "acme")
+	if err != nil || !ok {
+		t.Fatalf("acme keyset: ok=%v err=%v", ok, err)
+	}
+	if _, err := store.CreateIfAbsent(ctxGlobex, "globex", acmeRec); err != nil {
 		t.Fatal(err)
 	}
 	_, err = c.Decode(ctxGlobex, enc)
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("cross-tenant decode: %v", err)
+		t.Fatalf("globex decode: err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "payload cannot be decrypted") {
+		t.Fatalf("message: %v", err)
+	}
+	out, err := c.Decode(ctxAcme, enc)
+	if err != nil {
+		t.Fatalf("acme decode: %v", err)
+	}
+	if string(out.Data) != "secret" {
+		t.Fatalf("data %q", out.Data)
+	}
+}
+
+func TestPayloadKeyIDAADRejectsRelabelAfterRotation(t *testing.T) {
+	t.Parallel()
+	store := secrets.NewTestMemKeysetStore()
+	ks := passThroughKey{id: "aad-mk-keyid"}
+	c, err := secrets.NewCodec(store, []secrets.KeyService{ks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := core.WithTenant(context.Background(), "acme")
+	plain := secrets.Payload{Metadata: map[string][]byte{"encoding": []byte("json/plain")}, Data: []byte("data")}
+	enc, err := c.Encode(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RotateDataKey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	newID, err := c.PrimaryDataKeyID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(enc.Metadata[secrets.MetaEncryptionKeyID]) == newID {
+		t.Fatal("rotation must change primary id")
+	}
+	forged := enc
+	forged.Metadata = map[string][]byte{}
+	for meta, v := range enc.Metadata {
+		forged.Metadata[meta] = append([]byte(nil), v...)
+	}
+	forged.Metadata[secrets.MetaEncryptionKeyID] = []byte(newID)
+	_, err = c.Decode(ctx, forged)
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("forged key id decode: %v", err)
+	}
+	if !strings.Contains(err.Error(), "payload cannot be decrypted") {
+		t.Fatalf("message: %v", err)
+	}
+	out, err := c.Decode(ctx, enc)
+	if err != nil {
+		t.Fatalf("original decode after rotation: %v", err)
+	}
+	if string(out.Data) != "data" {
+		t.Fatalf("data %q", out.Data)
 	}
 }
