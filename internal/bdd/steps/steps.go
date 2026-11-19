@@ -22,6 +22,11 @@ type World struct {
 	Prompt  *promptWorld
 	Blob    *blobWorld
 	Secrets *secretsWorld
+	Expr    *exprWorld
+	Schema  *schemaWorld
+	Flow    *flowWorld
+	Machine *machineWorld
+	Host    *hostWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -35,6 +40,11 @@ func Initialize(sc *godog.ScenarioContext) {
 			Prompt:  newPromptWorld(),
 			Blob:    newBlobWorld(),
 			Secrets: newSecretsWorld(),
+			Expr:    &exprWorld{bindings: map[string]any{}},
+			Schema:  newSchemaWorld(),
+			Flow:    newFlowWorld(),
+			Machine: newMachineWorld(),
+			Host:    newHostWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -43,6 +53,11 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlob(sc)
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
+	registerExpr(sc)
+	registerSchema(sc)
+	registerFlowCompile(sc)
+	registerFlowMachine(sc)
+	registerFlowHost(sc)
 	registerSharedSteps(sc)
 }
 
