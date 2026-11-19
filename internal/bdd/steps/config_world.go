@@ -179,30 +179,6 @@ type kitProcess struct {
 	code   int
 }
 
-var (
-	kitOnce sync.Once
-	kitPath string
-	kitErr  error
-)
-
-func kitBinary() (string, error) {
-	kitOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "kit-bin-")
-		if err != nil {
-			kitErr = err
-			return
-		}
-		path := filepath.Join(dir, "kit")
-		cmd := exec.Command("go", "build", "-o", path, "github.com/epzero/basamento/cmd/kit")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			kitErr = fmt.Errorf("build kit: %w: %s", err, out)
-			return
-		}
-		kitPath = path
-	})
-	return kitPath, kitErr
-}
-
 func startKit(dir string, args, env []string) (*kitProcess, error) {
 	bin, err := kitBinary()
 	if err != nil {
