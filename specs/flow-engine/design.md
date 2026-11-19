@@ -96,8 +96,85 @@ exists in the state schema's properties.
 ## 2. Compiler and machine
 
 WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
-requirements REQ-FLOW-001 … 006, scenarios `compile.feature`,
+requirements REQ-FLOW-001 … 006 and 045 … 046, scenarios `compile.feature`,
 `routing.feature` and `runs.feature`.
+
+### 2.1 Bounded cycles (REQ-FLOW-003)
+
+A cycle terminates only if something it passes through is consumed on every
+lap. `guard.max_visits` counts the visits of its node and `guard.cost_mpts`
+counts the milli-points spent there; either is a finite number in the IR, so a
+bound exists for the machine to enforce. What a run does when a guard is
+reached is the machine's behavior (`specs/glossary.md`, "Repair guard"), not
+the compiler's. One of the two is enough: a node on the cycle with
+`{max_visits: 3}` and a node on it with `{cost_mpts: 5000}` both bound the
+cycle.
+
+`guard.while` does not bound a cycle. A predicate says when the cycle may
+leave; it can hold on every lap, and the compiler cannot prove a CEL predicate
+false from the definition alone — `{"while": "true"}` is a valid predicate and
+bounds nothing. It narrows an exit, it does not count. In the example of
+`docs/architecture/flow-engine.md` §1 the bound is `repair`'s
+`{max_visits: 3, cost_mpts: 5000}`; the `when` on `verify -> repair` and any
+`while` only choose when the loop leaves.
+
+`flow/ir` therefore accepts a cycle only when one of its nodes has a guard
+carrying a positive `max_visits` or `cost_mpts`, and rejects it otherwise
+naming a node on the cycle and the missing bound. REQ-FLOW-045 separately
+rejects a budget above its maximum (§2.2), so a cycle can only be bounded by a
+guard the compiler accepts. It names the smallest node id on the cycle, so two
+runs of the compiler report the same node whatever the map order.
+
+### 2.2 Guard maxima (REQ-FLOW-045)
+
+| Field | Maximum | Reason |
+| --- | --- | --- |
+| `max_visits` | **1,000,000** visits | 244 complete passes over the largest accepted flow (4,096 nodes); above that a flow that loops over a collection is a `map` node, and the bound is indistinguishable from no bound. It is almost 13 orders of magnitude below the greatest value a 64-bit `int` field admits. |
+| `cost_mpts` | **1,000,000,000** milli-points (1,000,000 points) | 200,000 times the 5,000 mpts of the repair guard in `docs/architecture/flow-engine.md` §1, so an expensive cycle still fits; a single-cycle budget need not approach a run's whole budget. |
+
+Both ceilings are round decimal values that fit a signed 32-bit integer, so
+neither a counter nor a stored `int32` can overflow, and both are far below
+the `2^63 - 1` that made a guard meaningless.
+
+`0` means the field is absent: both fields are `omitempty`, and a guard with
+neither field is treated as no guard at all, so a cycle it guards is rejected
+by REQ-FLOW-003 rather than by the range check. A **negative** value is
+contradictory and rejected wherever the guard appears, on a cycle or not. The
+error is `*core.Error` with code `invalid_argument` naming the node, the field
+and the maximum, for example
+`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`.
+
+The check is per guard field. A node whose guard carries only `cost_mpts`
+bounds a cycle; its `max_visits` stays absent.
+
+### 2.3 Definition size limits (REQ-FLOW-046)
+
+| Measure | Maximum | Reason |
+| --- | --- | --- |
+| Node count | **4,096** nodes | The recursive cycle search follows the longest path, and the measured cost of validation was 0.95 s at 20,000 nodes (quadratic before the linearization in WP-L4-01's pull request) and 15 s at 80,000, with stack exhaustion on multi-million-node chains. 4,096 is five times below the first measurement and about a thousandth of the chain that exhausts the stack. Real flows have tens of nodes; fan-out is a `map` or `parallel` node. |
+| Edge count | **16,384** edges | Four edges per node at the node maximum: enough for if/else ladders on many nodes. Routing scans a node's outgoing edges (REQ-FLOW-001), and reachability scans the edge list, so this bounds both the compile and the run cost of routing. |
+| Expression size | **16,384 bytes** | The UTF-8 length of one expression in the IR: an edge `when`, a node `in` mapping (CEL or jq), a guard `while` or a gate `accept_if`. A hand-written condition is a few hundred bytes, so this is two orders of magnitude of headroom. The parser and type-checker run once per expression, and every node and edge may carry one, so a single expression must not consume the definition's budget. |
+| Definition size | **1,048,576 bytes** (1 MiB) | The canonical JSON bytes, because those are what is hashed, pinned and stored, independent of the YAML or JSON spelling. 1 MiB repeats the repository's message-size precedent (REQ-BUS-011) and the expression output limit (REQ-EXPR-020). A flow at the node and edge maxima is about 0.6 MiB, so the graph limits are reachable inside it. |
+
+The limits are requirements, not implementation guidance: REQ-FLOW-046 makes
+each one a rejection with code `invalid_argument` naming the limit and its
+maximum, for example `flow: 4097 nodes is above the maximum 4096`. They are
+constants in `flow/ir`, not configuration, and apply to an IR built in Go as
+well as to one decoded from YAML or JSON.
+
+`core/schema`'s untrusted-JSON limits (WP-L2-02) bound the nesting depth and
+the number literals of one JSON value, not the size of a document; they do not
+replace these limits. A definition that passes one set can fail the other, and
+both apply: the state schema, a node spec or a default value is still checked
+by the schema package when it is compiled or canonicalized.
+
+**Enforcement order.** `flow/ir.Validate` checks the node and edge counts, the
+guard values and the expression sizes first, in linear time, so an over-limit
+definition is rejected before any graph work. `flow/compile.Compile`
+canonicalizes once and rejects a canonical form above 1 MiB before hashing and
+before type-checking expressions; `ir.Canonical` and `ir.Hash` are then never
+asked to hash a definition the compiler would reject. A definition over
+several limits reports the first check in that order, deterministically.
 
 ## 3. Flow host (WP-L4-04)
 
