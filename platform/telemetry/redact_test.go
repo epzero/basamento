@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,18 @@ func (e sliceError) Error() string { return "secret=" + e[0].Secret }
 type doublePointerHolder struct{ inner **innerCreds }
 
 func (h doublePointerHolder) Error() string { return "password=" + (*h.inner).Password }
+
+// structMapStringer hides its payload in an unexported map field. The map's
+// keys are data, so the type must be canonicalised rather than rendered.
+type structMapStringer struct{ m map[string]string }
+
+func (s structMapStringer) String() string { return "password=" + s.m["password"] }
+
+// intKeyMapStringer carries a non-string-keyed map, which reflection redacts
+// whole; its text form must not bypass that.
+type intKeyMapStringer struct{ m map[int]string }
+
+func (s intKeyMapStringer) String() string { return "token=" + s.m[1] }
 
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
@@ -350,6 +363,36 @@ func TestRedactorCanonicalisesContainerBackedText(t *testing.T) {
 	}
 }
 
+func TestRedactorCanonicalisesStructMapFields(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Map(map[string]any{
+		"stringKey": structMapStringer{m: map[string]string{"password": "S3cretField"}},
+		"intKey":    intKeyMapStringer{m: map[int]string{1: "S3cretField"}},
+	})
+	for key, value := range got {
+		if text, ok := value.(string); ok {
+			t.Errorf("%s kept the text form %q instead of canonicalising", key, text)
+		}
+	}
+
+	stringKey, ok := got["stringKey"].(map[string]any)
+	if !ok {
+		t.Fatalf("string-key map holder = %T, want a canonicalised struct", got["stringKey"])
+	}
+	inner, ok := stringKey["m"].(map[string]any)
+	if !ok || inner["password"] != Redacted {
+		t.Errorf("string-key map holder = %#v, want its password key redacted", stringKey)
+	}
+
+	intKey, ok := got["intKey"].(map[string]any)
+	if !ok {
+		t.Fatalf("int-key map holder = %T, want a canonicalised struct", got["intKey"])
+	}
+	if intKey["m"] != Redacted {
+		t.Errorf("int-key map holder = %#v, want the non-string-keyed map redacted whole", intKey)
+	}
+}
+
 func containsRedactedSecret(value any) bool {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -379,6 +422,43 @@ func TestRedactorKeepsOpaqueStringersAsText(t *testing.T) {
 	}
 }
 
+// TestOpaqueFieldTypeIsPinnedByKind pins the rule at the kind level: only a
+// struct that is itself opaque (time.Time) may be rendered through an owner's
+// text method. An interface can hold any error or Stringer at runtime, and a
+// map's keys are data rather than types, so neither is ever trusted. A slice
+// or array is decided by its element type; a scalar, func or chan field holds
+// no payload reflection could redact, so it is trusted.
+func TestOpaqueFieldTypeIsPinnedByKind(t *testing.T) {
+	type exposedStruct struct{ Password string }
+	cases := []struct {
+		name string
+		typ  reflect.Type
+		want bool
+	}{
+		{"map/string-key", reflect.TypeOf(map[string]string{}), false},
+		{"map/int-key", reflect.TypeOf(map[int]string{}), false},
+		{"slice/trusted-elem", reflect.TypeOf([]string{}), true},
+		{"slice/payload-elem", reflect.TypeOf([]exposedStruct{}), false},
+		{"array/trusted-elem", reflect.TypeOf([2]string{}), true},
+		{"array/payload-elem", reflect.TypeOf([2]exposedStruct{}), false},
+		{"struct/opaque", reflect.TypeOf(time.Time{}), true},
+		{"struct/payload", reflect.TypeOf(exposedStruct{}), false},
+		{"pointer/struct-opaque", reflect.TypeOf(&time.Time{}), true},
+		{"pointer/struct-payload", reflect.TypeOf(&exposedStruct{}), false},
+		{"pointer/scalar", reflect.TypeOf((*string)(nil)), false},
+		{"interface", reflect.TypeOf((*any)(nil)).Elem(), false},
+		{"func", reflect.TypeOf(func() {}), true},
+		{"chan", reflect.TypeOf(make(chan string)), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := opaqueFieldType(tc.typ, 0, map[reflect.Type]bool{}); got != tc.want {
+				t.Errorf("opaqueFieldType(%v) = %v, want %v", tc.typ, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedactorCanonicalisesDelegateValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
 	got := r.Value("blob", []byte("plain bytes"))
@@ -398,6 +478,8 @@ func TestLogHandlerRedactsContainerBackedText(t *testing.T) {
 		slog.Any("mapStringer", mapStringer{"password": "S3cretField", "note": "kept"}),
 		slog.Any("sliceError", sliceError{errorCredential{Secret: "S3cretField"}}),
 		slog.Any("doublePointer", doublePointerHolder{inner: &inner}),
+		slog.Any("structMap", structMapStringer{m: map[string]string{"password": "S3cretField"}}),
+		slog.Any("intKeyMap", intKeyMapStringer{m: map[int]string{1: "S3cretField"}}),
 	)
 	rec := setup.Logs()[0]
 	if containsText(rec.Attrs, "S3cretField") {
@@ -408,6 +490,17 @@ func TestLogHandlerRedactsContainerBackedText(t *testing.T) {
 	}
 	if sliced, ok := rec.Attrs["sliceError"].([]any); !ok || len(sliced) != 1 {
 		t.Errorf("slice-backed error = %#v, want one canonicalised item", rec.Attrs["sliceError"])
+	}
+	structMap, ok := rec.Attrs["structMap"].(map[string]any)
+	if !ok {
+		t.Fatalf("map-field Stringer = %#v, want a canonicalised struct", rec.Attrs["structMap"])
+	}
+	if inner, ok := structMap["m"].(map[string]any); !ok || inner["password"] != Redacted {
+		t.Errorf("map-field Stringer = %#v, want its map's password key redacted", structMap)
+	}
+	intKeyMap, ok := rec.Attrs["intKeyMap"].(map[string]any)
+	if !ok || intKeyMap["m"] != Redacted {
+		t.Errorf("int-key map holder = %#v, want the non-string-keyed map redacted whole", rec.Attrs["intKeyMap"])
 	}
 }
 

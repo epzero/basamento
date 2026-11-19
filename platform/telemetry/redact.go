@@ -262,8 +262,9 @@ func opaqueType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
 // opaqueFieldType reports whether a field's type can only hold values that are
 // safe to render through the owner's text method. An interface can hold any
 // error or Stringer at runtime, a struct or pointer to struct can hold an
-// exported sensitive field, and a container can hold either, so all of them are
-// inspected rather than trusted.
+// exported sensitive field, and a map's keys are data rather than types, so
+// none of them is trusted; a slice or array is inspected through its element
+// type.
 func opaqueFieldType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bool {
 	if depth > maxRedactDepth {
 		return false
@@ -280,7 +281,11 @@ func opaqueFieldType(typ reflect.Type, depth int, seen map[reflect.Type]bool) bo
 	case reflect.Slice, reflect.Array:
 		return opaqueFieldType(typ.Elem(), depth+1, seen)
 	case reflect.Map:
-		return opaqueFieldType(typ.Key(), depth+1, seen) && opaqueFieldType(typ.Elem(), depth+1, seen)
+		// A map is always canonically encoded, never rendered through its
+		// owner's text method: a key such as "password" is data, so no type
+		// check can prove the rendered text safe. Non-string keys would be
+		// redacted whole by reflection, which a text method bypasses.
+		return false
 	default:
 		return true
 	}

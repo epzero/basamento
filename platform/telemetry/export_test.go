@@ -601,6 +601,8 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		slog.Any("mapStringer", mapStringer{"password": "S3cretField", "note": "kept"}),
 		slog.Any("sliceError", sliceError{errorCredential{Secret: "S3cretField"}}),
 		slog.Any("doublePointer", doublePointerHolder{inner: &deep}),
+		slog.Any("structMap", structMapStringer{m: map[string]string{"password": "S3cretField"}}),
+		slog.Any("intKeyMap", intKeyMapStringer{m: map[int]string{1: "S3cretField"}}),
 	)
 	// OTel attribute values are primitives, so the structured maps go through
 	// the same redactor at the record boundary and then the OTLP encoder.
@@ -613,6 +615,8 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		"mapStringer":    mapStringer{"password": "S3cretField", "note": "kept"},
 		"sliceError":     sliceError{errorCredential{Secret: "S3cretField"}},
 		"doublePointer":  doublePointerHolder{inner: &deep},
+		"structMap":      structMapStringer{m: map[string]string{"password": "S3cretField"}},
+		"intKeyMap":      intKeyMapStringer{m: map[int]string{1: "S3cretField"}},
 	})
 	recordTestSpan(t, setup, SpanData{
 		TraceID:    "0102030405060708090a0b0c0d0e0f10",
