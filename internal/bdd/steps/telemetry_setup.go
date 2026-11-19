@@ -36,11 +36,17 @@ func registerTelemetrySetup(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the span store retention period is (\d+) hours?$`, func(ctx context.Context, hours int) error {
 		w := world(ctx).Telemetry
+		retention := time.Duration(hours) * time.Hour
+		spans, err := telemetry.NewSQLSpanStore(ctx, w.store, retention)
+		if err != nil {
+			return err
+		}
+		w.spans = spans
 		setup, err := telemetry.New(telemetry.Config{
 			Profile:         telemetry.ProfileEmbedded,
 			Clock:           telemetryClock{core: world(ctx).Core},
-			Spans:           w.spans,
-			RetentionPeriod: time.Duration(hours) * time.Hour,
+			Spans:           spans,
+			RetentionPeriod: retention,
 		})
 		if err != nil {
 			return err

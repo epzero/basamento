@@ -18,24 +18,72 @@ type SpanStore interface {
 	// the tenant of ctx. It fails with not_found when runID belongs to another
 	// tenant.
 	ByRun(ctx context.Context, runID string) ([]SpanData, error)
-	// Purge deletes the spans that ended before before and returns the count.
-	Purge(ctx context.Context, before time.Time) (int64, error)
+	// Purge deletes the spans that ended more than the store's retention
+	// period before now and returns the count.
+	Purge(ctx context.Context, now time.Time) (int64, error)
 }
 
-// SQLSpanStore is the SpanStore over a platform/sql store. Its table and index
-// are the platform/sql migration 00001_telemetry_spans, applied by Open.
+// spanSQLStore is the part of a *psql.Store the span store uses. It exists so
+// the dialect guard can be tested without a second database.
+type spanSQLStore interface {
+	Dialect() string
+	Execer() *psql.Execer
+}
+
+// SQLSpanStore is the SpanStore over an embedded profile platform/sql store.
+// The table belongs to this package: it is created if absent, has one shape,
+// and is not part of the platform/sql migration set.
 type SQLSpanStore struct {
-	store *psql.Store
+	store     spanSQLStore
+	retention time.Duration
 }
 
-// NewSQLSpanStore returns a span store on store. The caller owns store and must
-// have opened it with the platform/sql migrations; this constructor only reads
-// and writes spans.
-func NewSQLSpanStore(_ context.Context, store *psql.Store) (*SQLSpanStore, error) {
+const spanSchema = `CREATE TABLE IF NOT EXISTS telemetry_spans (
+	tenant_id TEXT NOT NULL,
+	run_id TEXT NOT NULL,
+	span_id TEXT NOT NULL,
+	trace_id TEXT NOT NULL,
+	parent_span_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	start_at BIGINT NOT NULL,
+	end_at BIGINT NOT NULL,
+	status TEXT NOT NULL,
+	attrs TEXT NOT NULL,
+	PRIMARY KEY (tenant_id, span_id)
+)`
+
+const spanIndex = `CREATE INDEX IF NOT EXISTS telemetry_spans_run ON telemetry_spans (run_id, tenant_id, start_at, span_id)`
+
+// NewSQLSpanStore returns a span store on an embedded SQLite store, creating
+// telemetry_spans and its run index if they are absent. It refuses a different
+// dialect and a negative retention; zero means DefaultRetentionPeriod.
+func NewSQLSpanStore(ctx context.Context, store *psql.Store, retention time.Duration) (*SQLSpanStore, error) {
 	if store == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: nil SQL store", nil)
 	}
-	return &SQLSpanStore{store: store}, nil
+	return newSQLSpanStore(ctx, store, retention)
+}
+
+func newSQLSpanStore(ctx context.Context, store spanSQLStore, retention time.Duration) (*SQLSpanStore, error) {
+	if store == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: nil SQL store", nil)
+	}
+	if store.Dialect() != "sqlite" {
+		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: the span store requires SQLite", nil)
+	}
+	if retention < 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: negative retention period", nil)
+	}
+	if retention == 0 {
+		retention = DefaultRetentionPeriod
+	}
+	if _, err := store.Execer().Exec(ctx, spanSchema); err != nil {
+		return nil, spanStoreError("create span table", err)
+	}
+	if _, err := store.Execer().Exec(ctx, spanIndex); err != nil {
+		return nil, spanStoreError("create span index", err)
+	}
+	return &SQLSpanStore{store: store, retention: retention}, nil
 }
 
 // Append implements SpanStore. The tenant comes from ctx when present, so a
@@ -121,10 +169,11 @@ func (s *SQLSpanStore) ByRun(ctx context.Context, runID string) ([]SpanData, err
 }
 
 // Purge implements SpanStore.
-func (s *SQLSpanStore) Purge(ctx context.Context, before time.Time) (int64, error) {
+func (s *SQLSpanStore) Purge(ctx context.Context, now time.Time) (int64, error) {
+	cutoff := now.Add(-s.retention)
 	res, err := s.store.Execer().Exec(ctx,
 		`DELETE FROM telemetry_spans WHERE end_at < ?`,
-		psql.TruncateMicrosecond(before).UnixMicro())
+		psql.TruncateMicrosecond(cutoff).UnixMicro())
 	if err != nil {
 		return 0, spanStoreError("purge spans", err)
 	}

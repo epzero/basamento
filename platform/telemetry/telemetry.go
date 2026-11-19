@@ -42,7 +42,8 @@ type Config struct {
 	// Clock is the only source of time for records, spans and metric points.
 	Clock core.Clock
 	// RetentionPeriod is how long an embedded span stays readable. Zero means
-	// DefaultRetentionPeriod.
+	// DefaultRetentionPeriod; the span store applies it, and a negative value is
+	// refused when the store is built.
 	RetentionPeriod time.Duration
 	// Secrets supplies extra credential values to redact. Values added through
 	// SetCredential are always redacted too; a nil source simply adds none.
@@ -86,8 +87,8 @@ func New(cfg Config) (*Setup, error) {
 	if cfg.Clock == nil {
 		cfg.Clock = core.SystemClock{}
 	}
-	if cfg.RetentionPeriod <= 0 {
-		cfg.RetentionPeriod = DefaultRetentionPeriod
+	if cfg.RetentionPeriod < 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "telemetry: negative retention period", nil)
 	}
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = DefaultServiceName
@@ -192,14 +193,14 @@ func (s *Setup) SpanByName(name string) (SpanData, bool) {
 	return SpanData{}, false
 }
 
-// PurgeSpans deletes the embedded spans that ended more than the configured
-// retention period ago and reports how many rows went (REQ-TELEM-014).
+// PurgeSpans deletes the embedded spans that ended more than the span store's
+// retention period ago and reports how many rows went (REQ-TELEM-014). The
+// store owns the retention and its default; the setup only supplies the time.
 func (s *Setup) PurgeSpans(ctx context.Context) (int64, error) {
 	if s.cfg.Profile != ProfileEmbedded || s.cfg.Spans == nil {
 		return 0, nil
 	}
-	cutoff := s.clock.Now().Add(-s.cfg.RetentionPeriod)
-	return s.cfg.Spans.Purge(ctx, cutoff)
+	return s.cfg.Spans.Purge(ctx, s.clock.Now())
 }
 
 // ExportOnce makes one delivery attempt for each pending signal type. A batch

@@ -9,9 +9,10 @@
 // REQ-TELEM-007).
 //
 // In the embedded profile ended spans are kept in a SQL span store
-// (REQ-TELEM-010 through REQ-TELEM-014). Its `telemetry_spans` table and index
-// are the platform/sql migration 00001_telemetry_spans, so the span store only
-// queries and never creates schema at runtime. In the cloud profile spans, log
+// (REQ-TELEM-010 through REQ-TELEM-014). The span table belongs to this
+// package: NewSQLSpanStore creates `telemetry_spans` and its run index if they
+// are absent on the SQLite store it is given. The table has one shape and is
+// not part of the platform/sql migration set. In the cloud profile spans, log
 // records and metric points are exported over OTLP to Config.CollectorURL
 // without ever making the work wait, and an undeliverable batch is dropped
 // without a retry (REQ-TELEM-015 through REQ-TELEM-019). Shutdown stops the

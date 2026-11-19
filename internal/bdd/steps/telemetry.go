@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"testing/fstest"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -88,12 +89,15 @@ func (w *telemetryWorld) startEmbedded(ctx context.Context, coreWorld *coreWorld
 		return err
 	}
 	w.dataDir = dir
-	store, err := psql.Open(ctx, "sqlite:///"+filepath.Join(dir, "telemetry.db"), psql.Migrations())
+	migrations := fstest.MapFS{
+		"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n\n-- +goose Down\nSELECT 1;\n")},
+	}
+	store, err := psql.Open(ctx, "sqlite:///"+filepath.Join(dir, "telemetry.db"), migrations)
 	if err != nil {
 		return err
 	}
 	w.store = store
-	spans, err := telemetry.NewSQLSpanStore(ctx, store)
+	spans, err := telemetry.NewSQLSpanStore(ctx, store, 0)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,37 @@ import (
 	"time"
 
 	"github.com/epzero/basamento/core"
+	psql "github.com/epzero/basamento/platform/sql"
 )
+
+type fakeSQLStore struct{ dialect string }
+
+func (f fakeSQLStore) Dialect() string      { return f.dialect }
+func (f fakeSQLStore) Execer() *psql.Execer { return nil }
+
+func TestNewSQLSpanStoreRefusesNonSQLite(t *testing.T) {
+	_, err := newSQLSpanStore(t.Context(), fakeSQLStore{dialect: "postgres"}, 0)
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %s, want invalid_argument", code)
+	}
+}
+
+func TestNewSQLSpanStoreRefusesNegativeRetention(t *testing.T) {
+	_, err := NewSQLSpanStore(t.Context(), newTestSQLStore(t), -time.Hour)
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %s, want invalid_argument", code)
+	}
+}
+
+func TestNewSQLSpanStoreDefaultsRetention(t *testing.T) {
+	store, err := NewSQLSpanStore(t.Context(), newTestSQLStore(t), 0)
+	if err != nil {
+		t.Fatalf("NewSQLSpanStore: %v", err)
+	}
+	if store.retention != DefaultRetentionPeriod {
+		t.Errorf("retention = %v, want %v", store.retention, DefaultRetentionPeriod)
+	}
+}
 
 func TestSpanStoreReadsRunInStartThenSpanIDOrder(t *testing.T) {
 	store := newTestSpanStore(t)
@@ -63,7 +93,7 @@ func TestAppendTakesTheTenantFromTheContext(t *testing.T) {
 
 func TestSpanStoreErrorsAreInternal(t *testing.T) {
 	store := newTestSQLStore(t)
-	spans, err := NewSQLSpanStore(t.Context(), store)
+	spans, err := NewSQLSpanStore(t.Context(), store, 0)
 	if err != nil {
 		t.Fatalf("NewSQLSpanStore: %v", err)
 	}
@@ -179,7 +209,7 @@ func TestSpanStorePurgesOnlyExpiredSpans(t *testing.T) {
 			t.Fatalf("Append: %v", err)
 		}
 	}
-	n, err := store.Purge(ctx, base.Add(-24*time.Hour))
+	n, err := store.Purge(ctx, base)
 	if err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
@@ -197,7 +227,10 @@ func TestSpanStorePurgesOnlyExpiredSpans(t *testing.T) {
 
 func TestPurgeSpansUsesConfiguredRetention(t *testing.T) {
 	clock := newFakeClockAt(time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC))
-	store := newTestSpanStore(t)
+	store, err := NewSQLSpanStore(t.Context(), newTestSQLStore(t), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("NewSQLSpanStore: %v", err)
+	}
 	setup, err := New(Config{Profile: ProfileEmbedded, Clock: clock, Spans: store, RetentionPeriod: 24 * time.Hour})
 	if err != nil {
 		t.Fatalf("New: %v", err)
