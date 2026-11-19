@@ -26,8 +26,8 @@ func ParseBoundPlaintext(expectTenant string, inner []byte) ([]byte, error) {
 	return parseTagged(frameKeysetV1, expectTenant, inner)
 }
 
-// FrameValuePlaintext builds the value-domain plaintext for Port.Encrypt.
-func FrameValuePlaintext(plaintext []byte) []byte {
+// frameValuePlaintext tags plaintext for Port.Encrypt (value domain).
+func frameValuePlaintext(plaintext []byte) []byte {
 	var buf []byte
 	buf = append(buf, frameValueV1...)
 	buf = append(buf, 0)
@@ -35,8 +35,8 @@ func FrameValuePlaintext(plaintext []byte) []byte {
 	return buf
 }
 
-// ParseValuePlaintext unwraps the value-domain plaintext after Decrypt.
-func ParseValuePlaintext(inner []byte) ([]byte, error) {
+// parseValuePlaintext unwraps the value-domain plaintext after Decrypt.
+func parseValuePlaintext(inner []byte) ([]byte, error) {
 	if len(inner) < len(frameValueV1)+1 {
 		return nil, errInvalidArgument(msgValueCannotDecrypt)
 	}
