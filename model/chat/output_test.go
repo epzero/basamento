@@ -34,6 +34,22 @@ func TestContentlessStreamFails(t *testing.T) {
 				ResponseMeta: &schema.ResponseMeta{FinishReason: "content_filter"},
 			}},
 		},
+		{
+			name: "bare tool call",
+			chunks: []*schema.Message{{
+				Role:      schema.Assistant,
+				ToolCalls: []schema.ToolCall{{}},
+			}},
+		},
+		{
+			name: "tool call arguments only",
+			chunks: []*schema.Message{{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					Function: schema.FunctionCall{Arguments: `{"x":1}`},
+				}},
+			}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +106,22 @@ func TestOutputBearingStreamsSucceed(t *testing.T) {
 				ToolCalls: []schema.ToolCall{{
 					Index: &index, ID: "c1", Type: "function",
 					Function: schema.FunctionCall{Name: "fn", Arguments: `{}`},
+				}},
+			}},
+		},
+		{
+			name: "tool call id only",
+			chunks: []*schema.Message{{
+				Role:      schema.Assistant,
+				ToolCalls: []schema.ToolCall{{ID: "call-only-id"}},
+			}},
+		},
+		{
+			name: "tool call name only",
+			chunks: []*schema.Message{{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{{
+					Function: schema.FunctionCall{Name: "only_name"},
 				}},
 			}},
 		},
