@@ -331,6 +331,7 @@ Feature: Generating schemas from Go types
     And the value is encoded with encoding/json
     Then the schema generated from "Doc" accepts the encoded value
     And the schema rejects the instance {"v": "3"} with a violation at "/v" of keyword "type"
+    And the schema accepts the instance {"v": 3}
 
   @REQ-SCHEMA-047 @id:SCHEMA-047-01
   Scenario Outline: A string-option string holds the quoted string
