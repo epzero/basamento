@@ -180,6 +180,21 @@ func TestGenerateMarshalValidateEmbeddedFields(t *testing.T) {
 		zzEmbedInt
 		Note string `json:"note"`
 	}
+	type rawOnly struct {
+		json.RawMessage
+	}
+	type rawPtrOnly struct {
+		*json.RawMessage
+	}
+	type withRawField struct {
+		R rawOnly `json:"r"`
+	}
+	type withRawSlice struct {
+		S []rawOnly `json:"s"`
+	}
+	type withRawMap struct {
+		M map[string]rawOnly `json:"m"`
+	}
 	cases := []struct {
 		name string
 		v    any
@@ -212,12 +227,41 @@ func TestGenerateMarshalValidateEmbeddedFields(t *testing.T) {
 		{"unexp_hidden", unexpHidden{}},
 		{"unexp_two_level", unexpTwoLevel{unexpMid: unexpMid{zzstUnexp: zzstUnexp{A: 1}}}},
 		{"unexp_nonstruct_ignored", zzEmbedIntWrap{zzEmbedInt: 3}},
+		{"raw_only_array", rawOnly{json.RawMessage(`[1,2]`)}},
+		{"raw_only_number", rawOnly{json.RawMessage(`5`)}},
+		{"raw_only_string", rawOnly{json.RawMessage(`"s"`)}},
+		{"raw_only_bool", rawOnly{json.RawMessage(`true`)}},
+		{"raw_only_object", rawOnly{json.RawMessage(`{"k":1}`)}},
+		{"raw_only_empty_object", rawOnly{json.RawMessage(`{}`)}},
+		{"raw_only_null", rawOnly{json.RawMessage(`null`)}},
+		{"raw_only_nil", rawOnly{}},
+		{"raw_ptr_only_array", rawPtrOnly{RawMessage: ptr(json.RawMessage(`[1]`))}},
+		{"raw_ptr_only_string", rawPtrOnly{RawMessage: ptr(json.RawMessage(`"x"`))}},
+		{"raw_field_array", withRawField{R: rawOnly{json.RawMessage(`[3]`)}}},
+		{"raw_slice_mixed", withRawSlice{S: []rawOnly{
+			{json.RawMessage(`1`)},
+			{json.RawMessage(`"two"`)},
+		}}},
+		{"raw_map_mixed", withRawMap{M: map[string]rawOnly{
+			"a": {json.RawMessage(`true`)},
+			"b": {json.RawMessage(`{}`)},
+		}}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			marshalValidateAccept(t, tc.v)
 		})
+	}
+}
+
+func TestForTypeRawPtrEmbed(t *testing.T) {
+	type rawPtrOnly struct {
+		*json.RawMessage
+	}
+	_, err := ForType(reflect.TypeOf(rawPtrOnly{}))
+	if err != nil {
+		t.Fatalf("ForType: %v", err)
 	}
 }
 

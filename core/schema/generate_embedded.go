@@ -19,11 +19,27 @@ func patchEmbeddedJSONFields(raw json.RawMessage, root reflect.Type, opts *gjsch
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if t.Kind() != reflect.Struct {
+	switch t.Kind() {
+	case reflect.Struct:
+		if err := patchStructObject(doc, t, opts); err != nil {
+			return nil, err
+		}
+	case reflect.Slice:
+		if items, ok := doc["items"].(map[string]any); ok {
+			if err := patchElementSchema(items, t.Elem(), opts); err != nil {
+				return nil, err
+			}
+		}
+	case reflect.Map:
+		if t.Key().Kind() == reflect.String {
+			if ap, ok := doc["additionalProperties"].(map[string]any); ok {
+				if err := patchElementSchema(ap, t.Elem(), opts); err != nil {
+					return nil, err
+				}
+			}
+		}
+	default:
 		return raw, nil
-	}
-	if err := patchStructObject(doc, t, opts); err != nil {
-		return nil, err
 	}
 	out, err := json.Marshal(doc)
 	if err != nil {
@@ -39,13 +55,6 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 		obj["properties"] = props
 	}
 	required := requiredStrings(obj["required"])
-
-	if structEmbedsRawMessage(t) {
-		// encoding/json inlines RawMessage and may emit null for a zero value.
-		obj["type"] = []any{"null", "object"}
-		obj["additionalProperties"] = true
-		required = nil
-	}
 
 	for _, f := range reflect.VisibleFields(t) {
 		if !anonymousEmbedJSONRelevant(f) {
@@ -91,7 +100,7 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 			continue
 		}
 
-		if ft == rawMessageReflectType {
+		if rawMessageFieldType(ft) {
 			continue
 		}
 
@@ -107,10 +116,33 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 		required = appendIfMissing(required, key)
 	}
 
+	for _, f := range reflect.VisibleFields(t) {
+		if !f.IsExported() || f.Anonymous {
+			continue
+		}
+		key := jsonName(f)
+		if key == "" || rawMessageFieldType(f.Type) {
+			continue
+		}
+		elem := f.Type
+		for elem.Kind() == reflect.Pointer {
+			elem = elem.Elem()
+		}
+		switch elem.Kind() {
+		case reflect.Struct, reflect.Slice, reflect.Map:
+			sub, err := typeSchemaMap(f.Type, opts)
+			if err != nil {
+				return err
+			}
+			props[key] = sub
+			required = appendIfMissing(required, key)
+		}
+	}
+
 	setRequired(obj, required)
 
 	for _, f := range reflect.VisibleFields(t) {
-		if !f.IsExported() || !f.Anonymous {
+		if !f.IsExported() || !f.Anonymous || rawMessageFieldType(f.Type) {
 			continue
 		}
 		name := jsonName(f)
@@ -128,6 +160,9 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 			}
 		}
 	}
+	if structEmbedsRawMessage(t) {
+		clearEmbeddedRawMessageObjectSchema(obj)
+	}
 	return nil
 }
 
@@ -140,18 +175,53 @@ func typeSchemaMap(t reflect.Type, opts *gjschema.ForOptions) (map[string]any, e
 	if err != nil {
 		return nil, invalidArgf("marshal subschema: %v", err)
 	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, invalidArgf("unmarshal subschema: %v", err)
+	m, err := schemaMapFromMarshaled(t, raw)
+	if err != nil {
+		return nil, err
 	}
 	patchSchemaValue(m, false)
 	inner := structFieldType(t)
-	if inner.Kind() == reflect.Struct {
+	switch inner.Kind() {
+	case reflect.Struct:
 		if err := patchStructObject(m, inner, opts); err != nil {
 			return nil, err
 		}
+	case reflect.Slice:
+		if items, ok := m["items"].(map[string]any); ok {
+			if err := patchElementSchema(items, inner.Elem(), opts); err != nil {
+				return nil, err
+			}
+		}
+	case reflect.Map:
+		if inner.Key().Kind() == reflect.String {
+			if ap, ok := m["additionalProperties"].(map[string]any); ok {
+				if err := patchElementSchema(ap, inner.Elem(), opts); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	return m, nil
+}
+
+func schemaMapFromMarshaled(t reflect.Type, raw []byte) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		// gjschema marshals an empty Schema for RawMessage as JSON true.
+		if rawMessageFieldType(t) {
+			return map[string]any{}, nil
+		}
+		return nil, invalidArgf("unmarshal subschema: %v", err)
+	}
+	return m, nil
+}
+
+func patchElementSchema(node map[string]any, elem reflect.Type, opts *gjschema.ForOptions) error {
+	elem = structFieldType(elem)
+	if elem.Kind() != reflect.Struct {
+		return nil
+	}
+	return patchStructObject(node, elem, opts)
 }
 
 // anonymousEmbedJSONRelevant is true when encoding/json considers an anonymous field.
@@ -179,6 +249,13 @@ func structFieldType(ft reflect.Type) reflect.Type {
 	return ft
 }
 
+func rawMessageFieldType(ft reflect.Type) bool {
+	if ft == rawMessageReflectType {
+		return true
+	}
+	return ft.Kind() == reflect.Pointer && ft.Elem() == rawMessageReflectType
+}
+
 func embedPromotes(f reflect.StructField) bool {
 	if !f.Anonymous {
 		return false
@@ -200,11 +277,22 @@ func embedPromotes(f reflect.StructField) bool {
 
 func structEmbedsRawMessage(t reflect.Type) bool {
 	for _, f := range reflect.VisibleFields(t) {
-		if f.Anonymous && f.IsExported() && f.Type == rawMessageReflectType {
+		if !anonymousEmbedJSONRelevant(f) {
+			continue
+		}
+		if rawMessageFieldType(f.Type) {
 			return true
 		}
 	}
 	return false
+}
+
+// clearEmbeddedRawMessageObjectSchema replaces a struct schema with an unconstrained
+// schema so every JSON value encoding/json may emit via promoted MarshalJSON validates.
+func clearEmbeddedRawMessageObjectSchema(obj map[string]any) {
+	for k := range obj {
+		delete(obj, k)
+	}
 }
 
 func jsonFieldNames(t reflect.Type) []string {
