@@ -39,6 +39,14 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("master key is required")
 	}
+	seen := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		id := k.MasterKeyID()
+		if _, dup := seen[id]; dup {
+			return nil, errInvalidArgument("duplicate master key id in codec configuration")
+		}
+		seen[id] = struct{}{}
+	}
 	o := applyOptions(opts)
 	return &Codec{store: store, keys: keys, cache: map[string]cacheEntry{}, opts: o}, nil
 }
@@ -459,21 +467,29 @@ func (c *Codec) keysetReadOnly(ctx context.Context, tenant string) (*keyset.Hand
 // OpenCodec opens a payload codec with the current master key url and optional
 // previous master key urls (design §2).
 func OpenCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, opts ...Option) (*Codec, error) {
-	o := applyOptions(opts)
-	cur, err := OpenKeyService(ctx, currentURL, WithLogger(o.logger))
+	cur, err := OpenKeyService(ctx, currentURL)
 	if err != nil {
 		return nil, err
 	}
 	keys := []KeyService{cur}
 	for _, u := range prevURLs {
-		ks, err := OpenKeyService(ctx, u, WithLogger(o.logger))
+		ks, err := OpenKeyService(ctx, u)
 		if err != nil {
-			for _, opened := range keys {
-				_ = opened.Close()
-			}
+			closeKeyServices(keys)
 			return nil, err
 		}
 		keys = append(keys, ks)
 	}
-	return NewCodec(store, keys, opts...)
+	c, err := NewCodec(store, keys, opts...)
+	if err != nil {
+		closeKeyServices(keys)
+		return nil, err
+	}
+	return c, nil
+}
+
+func closeKeyServices(keys []KeyService) {
+	for _, k := range keys {
+		_ = k.Close()
+	}
 }
