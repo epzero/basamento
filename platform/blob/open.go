@@ -52,16 +52,20 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 		signKey = append([]byte(nil), opts.SignKey...)
 	}
 	st := &Store{
-		bucket:   bucket,
+		bucket:   wrapBucket(bucket),
 		clock:    opts.clock(),
 		maxTTL:   opts.maxTTL(),
 		embedded: embedded,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
 		signKey:  signKey,
+		rand:     opts.rand(),
+	}
+	if st.embedded {
+		st.sweepAtOpen(ctx)
 	}
 	var handler http.Handler
 	if embedded {
-		handler = (&URLHandler{Store: st}).Mount()
+		handler = newEmbeddedHandler(st)
 	}
 	return st, handler, nil
 }

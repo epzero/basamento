@@ -234,7 +234,7 @@ func (b *testBucket) Close() error { return nil }
 func openStoreWithTestBucket(t *testing.T, b *testBucket) *Store {
 	t.Helper()
 	bkt := blob.NewBucket(b)
-	st := &Store{bucket: bkt}
+	st := &Store{bucket: wrapBucket(bkt)}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
@@ -249,7 +249,7 @@ func openStoreFailWriterClose(t *testing.T, code gcerrors.ErrorCode) *Store {
 	t.Helper()
 	drv := newTestBucket(0, code)
 	bkt := blob.NewBucket(&closeFailBucket{testBucket: drv, closeErr: &codedDriverErr{code: code, msg: "close failed"}})
-	st := &Store{bucket: bkt}
+	st := &Store{bucket: wrapBucket(bkt)}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
@@ -268,7 +268,7 @@ func openStoreBlockWriteUntilCancel(t *testing.T, failAt int) *Store {
 	t.Helper()
 	drv := newTestBucket(failAt, gcerrors.Unknown)
 	bkt := blob.NewBucket(&blockFailBucket{testBucket: drv, failAt: failAt})
-	st := &Store{bucket: bkt}
+	st := &Store{bucket: wrapBucket(bkt)}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
 }

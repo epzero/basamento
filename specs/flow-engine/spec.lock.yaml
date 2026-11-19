@@ -39,6 +39,42 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    FLOW-003-02:
+        hash: sha256:28ef1cceec78049906e317edae34d9c14e428dc57a46fbb0ec9f34d64498f333
+        reqs:
+            - REQ-FLOW-003
+        tier: P1
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'REQ-FLOW-003''s approved text changed: a cycle must pass a node with a finite guard budget (max_visits or cost_mpts); a while-only guard no longer bounds it.'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-003-03:
+        hash: sha256:6224b2afa0d721f230064bb19ea4d2bbd6defc0dde0c6c54a34292c33a099636
+        reqs:
+            - REQ-FLOW-003
+        tier: P1
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'REQ-FLOW-003''s approved text changed: a cycle must pass a node with a finite guard budget (max_visits or cost_mpts); a while-only guard no longer bounds it.'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-003-04:
+        hash: sha256:9a53470177699d95890fc62dac061ef77517073333c8bf23447b3a29e0ca93b8
+        reqs:
+            - REQ-FLOW-003
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
     FLOW-004-01:
         hash: sha256:92a5969fa28d0d02a773134a5bf0449ae4875c9982713482dac357b21772b68a
         reqs:
@@ -475,3 +511,51 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/21
+    FLOW-045-01:
+        hash: sha256:7032e06c25553f789277b1b5e0628421a520c24dba7cad15cfefcbbbec31a652
+        reqs:
+            - REQ-FLOW-045
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-045-02:
+        hash: sha256:33cb1d9d6e7aba07e96e533f56bccfc93065a7429533e9b5a4b2328f42cc89e2
+        reqs:
+            - REQ-FLOW-045
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-046-01:
+        hash: sha256:d8b73f6ed8cdd6bdf27d3fd56f88ec54e3ad9bc3a02b5c0c655aaf8afae09f6b
+        reqs:
+            - REQ-FLOW-046
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-046-02:
+        hash: sha256:c323ac29ded297cb99cbe62b42faca7edf6cc62b8f9df1db97e4b44746bd2a04
+        reqs:
+            - REQ-FLOW-046
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending

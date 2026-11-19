@@ -28,7 +28,7 @@
 // '=', and '.'. Every Bus and KV method rejects a malformed subject or key
 // with code invalid_argument before touching storage.
 //
-// Status: Blob is implemented (WP-L1-02); other ports remain contract-only.
+// Status: Blob is implemented (WP-L1-02, WP-L1-08); other ports remain contract-only.
 package platform
 
 import (
@@ -39,13 +39,41 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// UploadOptions are what a client may do with an upload URL. Every field is a
+// bound: the staged object must meet all of them, or Commit refuses it.
+type UploadOptions struct {
+	MaxSize     int64         // bytes, must be > 0
+	ContentType string        // one type/subtype, no list, no wildcard, no parameters
+	TTL         time.Duration // must be 0 < TTL <= the store maximum blob URL lifetime
+}
+
+// Upload is one staging slot returned by StartUpload.
+type Upload struct {
+	URL        string    // where the client PUTs the body
+	StagingKey string    // opaque; one commit, then spent
+	Expires    time.Time // now + TTL, from the store clock
+}
+
 // Blob is content storage. Keys are content hashes for immutable assets.
+// StartUpload and Commit stage large bodies through short-lived upload URLs
+// (ADR-0013); the client never names a content key.
 type Blob interface {
 	Put(ctx context.Context, key string, r io.Reader, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Exists(ctx context.Context, key string) (bool, error)
 	Delete(ctx context.Context, key string) error
 	SignedURL(ctx context.Context, key string, ttl time.Duration) (string, error) // embedded: proxied URL
+	// StartUpload opens a staging slot under the tenant of ctx and returns an
+	// upload URL. It fails with invalid_argument when ctx has no tenant or when
+	// any option is out of bounds, and unavailable on store errors.
+	StartUpload(ctx context.Context, o UploadOptions) (Upload, error)
+	// Commit reads the staged object for stagingKey, enforces the slot bounds,
+	// stores the body under its content key via Put, and spends the slot. It
+	// fails with invalid_argument for a missing tenant or malformed staging key,
+	// not_found when the slot is unknown, expired, spent or not yet uploaded, and
+	// invalid_argument when the staged object violates a bound (the slot is then
+	// spent). Store errors map to unavailable and leave the slot open for retry.
+	Commit(ctx context.Context, stagingKey string) (key string, err error)
 }
 
 // Message is one retained bus payload. Seq is the bus sequence JetStream
