@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-03 @runtime:any @level:component
+@wp:WP-L7-03 @runtime:any @level:component
 Feature: Coordinating the turns of a conversation
   A conversation is one coordinator run that starts one child run per turn and
   never runs two turns at once. Streaming, detach and reattach are in

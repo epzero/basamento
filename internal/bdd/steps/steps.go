@@ -15,33 +15,34 @@ type worldKey struct{}
 // World is per-scenario state. Never share it between scenarios. Fields stay
 // sorted alphabetically.
 type World struct {
-	Agent       *agentWorld
-	Auth        *authWorld
-	Blob        *blobWorld
-	Bus         *busWorld
-	Catalog     *catalogWorld
-	Codegen     *codegenWorld
-	Config      *configWorld
-	Core        *coreWorld
-	Credentials *credentialsWorld
-	Eventlog    *eventlogWorld
-	Expr        *exprWorld
-	Flow        *flowWorld
-	FlowBuilder *builderWorld
-	Host        *hostWorld
-	Local       *localWorld
-	Machine     *machineWorld
-	Model       *modelWorld
-	Node        *nodeWorld
-	Prompt      *promptWorld
-	Providers   *providerWorld
-	Schema      *schemaWorld
-	Secrets     *secretsWorld
-	SQL         *sqlWorld
-	Stream      *streamWorld
-	Telemetry   *telemetryWorld
-	Temporal    *temporalWorld
-	Tool        *toolWorld
+	Agent        *agentWorld
+	Auth         *authWorld
+	Blob         *blobWorld
+	Bus          *busWorld
+	Catalog      *catalogWorld
+	Codegen      *codegenWorld
+	Config       *configWorld
+	Conversation *convWorld
+	Core         *coreWorld
+	Credentials  *credentialsWorld
+	Eventlog     *eventlogWorld
+	Expr         *exprWorld
+	Flow         *flowWorld
+	FlowBuilder  *builderWorld
+	Host         *hostWorld
+	Local        *localWorld
+	Machine      *machineWorld
+	Model        *modelWorld
+	Node         *nodeWorld
+	Prompt       *promptWorld
+	Providers    *providerWorld
+	Schema       *schemaWorld
+	Secrets      *secretsWorld
+	SQL          *sqlWorld
+	Stream       *streamWorld
+	Telemetry    *telemetryWorld
+	Temporal     *temporalWorld
+	Tool         *toolWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -69,6 +70,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCodegen(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
+	registerConversation(sc)
 	registerCore(sc)
 	registerCredentials(sc)
 	registerEventlog(sc)
