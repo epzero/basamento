@@ -19,6 +19,13 @@ require (
 )
 
 require (
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/itchyny/timefmt-go v0.1.9 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+)
+
+require (
+	cel.dev/cel-go v0.33.4
 	cel.dev/expr v0.25.3 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.1 // indirect
@@ -77,6 +84,7 @@ require (
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.5 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
+	github.com/itchyny/gojq v0.12.20
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -126,7 +134,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/grpc v1.84.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
+	google.golang.org/protobuf v1.36.12
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
