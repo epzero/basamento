@@ -6,12 +6,13 @@ import (
 	"unicode/utf8"
 )
 
-// ValidateTenant mirrors REQ-CORE-005 until core ships its own (EP0-52 / PR #60).
+// maxTenantLen is the maximum byte length of a tenant id (REQ-CORE-005).
 const maxTenantLen = 128
 
 const msgTenantInvalid = "tenant id is not valid"
 
-// ValidateTenant enforces the tenant id grammar of REQ-CORE-005.
+// ValidateTenant mirrors the grammar of REQ-CORE-005, which core.TenantFrom enforces
+// for every tenant read from a context; EP0-84 replaces this copy.
 func ValidateTenant(tenant string) error {
 	if tenant == "" {
 		return errInvalidArgument(msgTenantRequired)

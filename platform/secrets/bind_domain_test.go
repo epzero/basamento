@@ -1,47 +1,41 @@
 package secrets
 
 import (
-	"context"
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/core"
 )
 
-type domainFakeKeeper struct{}
-
-func (domainFakeKeeper) Encrypt(_ context.Context, plain []byte) ([]byte, error) {
-	return append([]byte("ct:"), plain...), nil
-}
-
-func (domainFakeKeeper) Decrypt(_ context.Context, ct []byte) ([]byte, error) {
-	if len(ct) < 3 || string(ct[:3]) != "ct:" {
-		return nil, core.NewError(core.CodeInvalidArgument, "bad", nil)
-	}
-	return ct[3:], nil
-}
-
 func TestValueFrameRejectsKeysetPlaintext(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
 	fr, err := FrameBoundPlaintext("acme", []byte("keyset"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ct, err := domainFakeKeeper{}.Encrypt(ctx, FrameValuePlaintext([]byte("stolen")))
-	if err != nil {
-		t.Fatal(err)
+	_, err = ParseValuePlaintext(fr)
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("ParseValuePlaintext(keyset frame): err=%v", err)
 	}
-	// Attacker stores keyset frame as if it were a value ciphertext path: Unwrap path uses ParseBoundPlaintext
-	if _, err := ParseBoundPlaintext("victim", append([]byte("ct:"), ct[3:]...)); err == nil {
-		t.Fatal("value passthrough must not unwrap as keyset")
+	if !strings.Contains(err.Error(), msgValueCannotDecrypt) {
+		t.Fatalf("message: %v", err)
 	}
-	_ = fr
 }
 
 func TestKeysetFrameRejectsValueDomain(t *testing.T) {
 	t.Parallel()
-	inner := FrameValuePlaintext([]byte("secret"))
-	if _, err := ParseBoundPlaintext("acme", inner); err == nil || core.CodeOf(err) != core.CodeInternal {
+	keysetBytes := []byte("serialized-keyset-body")
+	framed, err := frameTagged(frameKeysetV1, "acme", keysetBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := framed[len(frameKeysetV1)+1:]
+	attack := FrameValuePlaintext(append([]byte{'x'}, body...))
+	_, err = ParseBoundPlaintext("acme", attack)
+	if err == nil || core.CodeOf(err) != core.CodeInternal {
 		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), msgKeysetCannotUnwrap) {
+		t.Fatalf("message: %v", err)
 	}
 }
