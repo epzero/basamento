@@ -6,6 +6,7 @@ require (
 	github.com/cucumber/gherkin/go/v42 v42.0.0
 	github.com/cucumber/godog v0.16.0
 	github.com/cucumber/messages/go/v34 v34.2.0
+	github.com/google/jsonschema-go v0.3.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/nats-io/nats-server/v2 v2.11.15
@@ -13,6 +14,7 @@ require (
 	github.com/nats-io/nuid v1.0.1
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pressly/goose/v3 v3.24.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/tink-crypto/tink-go/v2 v2.9.0
 	gocloud.dev v0.49.0
 	google.golang.org/protobuf v1.36.12
