@@ -28,7 +28,7 @@ Capabilities:
 | [`core`](core/requirements.md) | Implemented (ids). |
 | [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
 | [`runtime`](runtime/requirements.md) | Planned (WP-L5-*). |
-| [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
+| [`streaming`](streaming/requirements.md) | Partly implemented (WP-L6-01, `stream/eventlog`; WP-L6-02 … WP-L6-04 planned). |
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
