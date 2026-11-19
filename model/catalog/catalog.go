@@ -154,6 +154,9 @@ func (c *Catalog) Start(ctx context.Context, req Request) (Quote, error) {
 		return Quote{}, unsupportedPrice(req.Model)
 	}
 	usage := model.Usage{InputTokens: req.InputTokens, OutputTokens: req.OutputLimit}
+	if err := validateUsage(usage); err != nil {
+		return Quote{}, err
+	}
 	rule, err := c.chooseRule(entry, req.Model, req.Params, usage, at, tenant)
 	if err != nil {
 		return Quote{}, err
@@ -193,6 +196,9 @@ func (c *Catalog) Estimate(ctx context.Context, req Request) (int64, error) {
 func (c *Catalog) Settle(q Quote, usage model.Usage) (Charge, error) {
 	if q.Model == "" {
 		return Charge{}, core.NewError(core.CodeInvalidArgument, "quote has no model", nil)
+	}
+	if err := validateUsage(usage); err != nil {
+		return Charge{}, err
 	}
 	rule, err := c.chooseRule(q.pinned.entry, q.Model, q.pinned.params, usage, q.pinned.at, q.pinned.tenant)
 	if err != nil {

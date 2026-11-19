@@ -314,6 +314,34 @@ func TestDefaultTokenFormula(t *testing.T) {
 	}
 }
 
+func TestUsageValidatedBeforeRuleSelectionOnSettle(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: `usage.input_tokens > 1000000`, Rates: catalog.Rates{"input": 560, "output": 2200}},
+	}})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 2_000_000, OutputLimit: 100})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_, err = c.Settle(q, model.Usage{InputTokens: 1000, OutputTokens: 100, CachedTokens: 2000})
+	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+		t.Fatalf("code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	}
+}
+
+func TestUsageValidatedBeforeRuleSelectionOnStart(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{Rates: catalog.Rates{"input": 1000, "output": 0}},
+	}})
+	_, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: -1, OutputLimit: 0})
+	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+		t.Fatalf("code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	}
+}
+
 func TestMoreCachedThanInputFails(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
