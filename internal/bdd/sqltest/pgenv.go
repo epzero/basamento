@@ -15,12 +15,17 @@ import (
 
 // PostgresAdminURL is the admin connection (typically ends in /postgres).
 func PostgresAdminURL() string {
+	pgMu.Lock()
+	defer pgMu.Unlock()
+	if pgReady && pgAdmin != "" {
+		return pgAdmin
+	}
 	return os.Getenv("BDD_POSTGRES_URL")
 }
 
 // PostgresConfigured reports whether the cloud BDD pass should run.
 func PostgresConfigured() bool {
-	return PostgresAdminURL() != ""
+	return PostgresAvailable()
 }
 
 var bddDBSeq atomic.Uint64

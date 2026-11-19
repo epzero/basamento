@@ -252,7 +252,8 @@ func skipByProfile(scn *godog.Scenario, profile string) error {
 		if hasEmbedded && !hasCloud {
 			return godog.ErrSkip
 		}
-		if !sqltest.PostgresConfigured() {
+		if !sqltest.PostgresAvailable() {
+			sqltest.RecordSkipRun(sqltest.SkipPostgresUnavailable)
 			return godog.ErrSkip
 		}
 	}

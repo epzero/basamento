@@ -1,6 +1,7 @@
 package bdd
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -70,35 +71,48 @@ func scenarioPaths() []string {
 }
 
 // bddGateProfiles returns dialect profiles to run in the component gate for one tag filter pass.
-func bddGateProfiles(postgresConfigured bool) []string {
-	out := []string{"embedded"}
-	if postgresConfigured {
-		out = append(out, "cloud")
-	}
-	return out
+func bddGateProfiles() []string {
+	return []string{"embedded", "cloud"}
 }
 
 func TestBDDGateProfiles(t *testing.T) {
-	got := bddGateProfiles(false)
-	if len(got) != 1 || got[0] != "embedded" {
-		t.Fatalf("without postgres: %v", got)
-	}
-	got = bddGateProfiles(true)
-	if len(got) != 2 || got[1] != "cloud" {
-		t.Fatalf("with postgres: %v", got)
+	got := bddGateProfiles()
+	if len(got) != 2 || got[0] != "embedded" || got[1] != "cloud" {
+		t.Fatalf("profiles: %v", got)
 	}
 }
 
 // TestFeatures runs every scenario under specs/ in strict mode: undefined or
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
 func TestFeatures(t *testing.T) {
-	tags := scenarioTags()
-	configured := sqltest.PostgresConfigured()
-	for _, profile := range bddGateProfiles(configured) {
-		runSuite(t, tags, profile)
+	sqltest.ResetSkipCounts()
+	failed := false
+	defer func() {
+		if err := WriteBDDReport(failed); err != nil {
+			t.Errorf("bdd report: %v", err)
+		}
+	}()
+	defer func() { _ = sqltest.ClosePostgres() }()
+
+	if err := sqltest.InitPostgres(context.Background()); err != nil {
+		failed = true
+		t.Fatal(err)
 	}
-	if !configured {
-		t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
+	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
+		failed = true
+		t.Fatalf("gate strict: %d skipped postgres runs", sqltest.SkipTotal())
+	}
+
+	tags := scenarioTags()
+	for _, profile := range bddGateProfiles() {
+		runSuite(t, tags, profile)
+		if t.Failed() {
+			failed = true
+		}
+	}
+	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
+		failed = true
+		t.Fatalf("gate strict: %d skipped postgres runs", sqltest.SkipTotal())
 	}
 }
 
@@ -107,38 +121,23 @@ func runSuite(t *testing.T, tags, profile string) {
 	if profile != "" {
 		name = "basamento-" + profile
 	}
-	if profile != "" {
-		t.Run(profile, func(t *testing.T) {
+	t.Run(profile, func(t *testing.T) {
+		if profile != "" {
 			t.Setenv("BDD_SQL_PROFILE", profile)
-			suite := godog.TestSuite{
-				Name:                name,
-				ScenarioInitializer: steps.Initialize,
-				Options: &godog.Options{
-					Format:   "pretty",
-					Paths:    scenarioPaths(),
-					Tags:     tags,
-					Strict:   true,
-					TestingT: t,
-				},
-			}
-			if code := suite.Run(); code != 0 {
-				t.Fatalf("godog exited with status %d", code)
-			}
-		})
-		return
-	}
-	suite := godog.TestSuite{
-		Name:                name,
-		ScenarioInitializer: steps.Initialize,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    scenarioPaths(),
-			Tags:     tags,
-			Strict:   true,
-			TestingT: t,
-		},
-	}
-	if code := suite.Run(); code != 0 {
-		t.Fatalf("godog exited with status %d", code)
-	}
+		}
+		suite := godog.TestSuite{
+			Name:                name,
+			ScenarioInitializer: steps.Initialize,
+			Options: &godog.Options{
+				Format:   "pretty",
+				Paths:    scenarioPaths(),
+				Tags:     tags,
+				Strict:   true,
+				TestingT: t,
+			},
+		}
+		if code := suite.Run(); code != 0 {
+			t.Fatalf("godog exited with status %d", code)
+		}
+	})
 }
