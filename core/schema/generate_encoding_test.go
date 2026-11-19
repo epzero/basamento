@@ -272,6 +272,23 @@ func TestStringOptionOnNamedPointerKeepsItsOwnEncoding(t *testing.T) {
 		[]string{string(b), `{"v":null}`}, []string{`{"v":"3"}`})
 }
 
+func TestStringOptionFollowsOneUnnamedPointerOnly(t *testing.T) {
+	value := 3
+	inner := &value
+	sample := struct {
+		V **int `json:"v,string"` //nolint:staticcheck // encoding/json ignores the option past one pointer; that is the case under test.
+	}{V: &inner}
+	b, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"v":3}` {
+		t.Fatalf("marshal %s", b)
+	}
+	validateGenerated(t, sample,
+		[]string{string(b), `{"v":null}`}, []string{`{"v":"3"}`})
+}
+
 func TestStringOptionKeepsOwnEncoding(t *testing.T) {
 	sample := struct {
 		V testTextString `json:"v,string"`

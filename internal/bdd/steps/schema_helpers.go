@@ -124,6 +124,13 @@ func (*PointerStamp) MarshalJSON() ([]byte, error) { return []byte("[1]"), nil }
 // IntKeyed maps integer keys, which encoding/json writes as strings.
 type IntKeyed map[int]string
 
+// IntPtr is a named pointer to an integer. encoding/json ignores the string
+// option on it, because the option follows only one unnamed pointer.
+type IntPtr *int
+
+// StrPtr is a named pointer to a string, encoded like IntPtr without quotes.
+type StrPtr *string
+
 // textKey implements encoding.TextMarshaler so a map key is written as text.
 type textKey string
 
@@ -145,6 +152,8 @@ var declaredNamedTypes = map[string]reflect.Type{
 	"JSONStamp":    reflect.TypeFor[JSONStamp](),
 	"PointerStamp": reflect.TypeFor[PointerStamp](),
 	"IntKeyed":     reflect.TypeFor[IntKeyed](),
+	"IntPtr":       reflect.TypeFor[IntPtr](),
+	"StrPtr":       reflect.TypeFor[StrPtr](),
 	"TextKeyed":    reflect.TypeFor[TextKeyed](),
 	"FloatKeyed":   reflect.TypeFor[FloatKeyed](),
 	"TimeStamp":    reflect.TypeFor[time.Time](),
@@ -190,6 +199,9 @@ func embeddedHolder(t reflect.Type) reflect.Type {
 func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) {
 	s = strings.TrimSpace(s)
 	if t, ok := named[s]; ok {
+		return t, nil
+	}
+	if t, ok := declaredNamedTypes[s]; ok {
 		return t, nil
 	}
 	if strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "<") {
@@ -439,6 +451,23 @@ func parseSchemaObject(raw json.RawMessage) (map[string]any, error) {
 
 func instanceRejected(err error) bool {
 	return err != nil && len(schema.Violations(err)) > 0
+}
+
+// instanceVerdictError reports why a validation result does not match the
+// verdict a scenario expects. A rejection needs at least one violation: a
+// malformed instance or a failed decode says the instance was not rejected by
+// the schema, and the message carries the underlying error.
+func instanceVerdictError(verdict string, err error) error {
+	if verdict == "accepted" && err != nil {
+		return fmt.Errorf("accepted: %w", err)
+	}
+	if verdict == "rejected" && !instanceRejected(err) {
+		if err != nil {
+			return fmt.Errorf("rejected without a violation: %w", err)
+		}
+		return fmt.Errorf("accepted")
+	}
+	return nil
 }
 
 func rejectFromErr(err error, loc, kw string) error {

@@ -579,14 +579,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 		return compareViolationRuns(schemaCtx(ctx).lastViolRuns, tableViolations(table))
 	})
 	sc.Step(`^the instance is (accepted|rejected)$`, func(ctx context.Context, verdict string) error {
-		err := schemaCtx(ctx).lastErr
-		if verdict == "accepted" && err != nil {
-			return fmt.Errorf("accepted: %w", err)
-		}
-		if verdict == "rejected" && !instanceRejected(err) {
-			return fmt.Errorf("accepted")
-		}
-		return nil
+		return instanceVerdictError(verdict, schemaCtx(ctx).lastErr)
 	})
 	sc.Step(`^the validation fails with code "([^"]*)" at instance location "([^"]*)"$`, func(ctx context.Context, code, loc string) error {
 		w := schemaCtx(ctx)

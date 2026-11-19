@@ -367,22 +367,26 @@ func stringOptionSchema(t reflect.Type, settings map[string]bool) map[string]any
 	if !settings["string"] {
 		return nil
 	}
-	// encoding/json follows only an unnamed pointer before reading the option,
-	// so a named pointer type keeps its ordinary pointer encoding.
-	if t.Kind() == reflect.Pointer && t.Name() != "" {
-		return nil
+	// encoding/json follows one unnamed pointer before reading the option and
+	// applies it only when the result is a supported kind, so a named pointer
+	// type keeps its ordinary pointer encoding, and so does a pointer to a
+	// pointer.
+	base := t
+	if base.Kind() == reflect.Pointer {
+		if base.Name() != "" {
+			return nil
+		}
+		base = base.Elem()
+		if base.Kind() == reflect.Pointer {
+			return nil
+		}
 	}
 	switch typeEncoding(t) {
 	case ruleNone, ruleNumber:
 	default:
 		return nil
 	}
-	nullable := false
-	base := t
-	for base.Kind() == reflect.Pointer {
-		nullable = true
-		base = base.Elem()
-	}
+	nullable := t.Kind() == reflect.Pointer
 	pattern := stringOptionPattern(base)
 	if pattern == "" {
 		return nil
