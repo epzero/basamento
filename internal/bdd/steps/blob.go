@@ -395,14 +395,6 @@ func registerBlob(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^([^"]+) pass$`, func(ctx context.Context, elapsed string) error {
-		d, err := parseElapsed(elapsed)
-		if err != nil {
-			return err
-		}
-		world(ctx).Core.clock.Advance(d)
-		return nil
-	})
 	sc.Step(`^the blob store is closed and opened again on the same location$`, func(ctx context.Context) error {
 		w := world(ctx).Blob
 		if w.store != nil {
@@ -769,6 +761,8 @@ func parsePositiveDuration(s string) (time.Duration, error) {
 		}
 		unit := parts[i+1]
 		switch {
+		case strings.HasPrefix(unit, "millisecond"):
+			total += time.Duration(n) * time.Millisecond
 		case strings.HasPrefix(unit, "second"):
 			total += time.Duration(n) * time.Second
 		case strings.HasPrefix(unit, "minute"):

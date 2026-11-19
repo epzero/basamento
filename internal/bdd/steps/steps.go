@@ -46,6 +46,16 @@ func Initialize(sc *godog.ScenarioContext) {
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
+}
+
+func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
+	d, err := parseElapsed(elapsed)
+	if err != nil {
+		return err
+	}
+	world(ctx).Core.clock.Advance(d)
+	return nil
 }
 
 func assertCallFailsWithCode(ctx context.Context, code string) error {

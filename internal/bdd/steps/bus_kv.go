@@ -359,12 +359,4 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(.+?) pass(?:es)?$`, func(ctx context.Context, raw string) error {
-		d, err := parseDurationPass(raw)
-		if err != nil {
-			return err
-		}
-		world(ctx).Core.clock.Advance(d)
-		return nil
-	})
 }

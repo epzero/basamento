@@ -412,28 +412,6 @@ func parseQuotedList(s string) []string {
 	return parts
 }
 
-func parseDurationPass(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, " passes")
-	s = strings.TrimSuffix(s, " pass")
-	fields := strings.Fields(s)
-	if len(fields) == 2 {
-		n, err := strconv.Atoi(fields[0])
-		if err != nil {
-			return 0, err
-		}
-		switch fields[1] {
-		case "millisecond", "milliseconds":
-			return time.Duration(n) * time.Millisecond, nil
-		case "second", "seconds":
-			return time.Duration(n) * time.Second, nil
-		case "day", "days":
-			return time.Duration(n) * 24 * time.Hour, nil
-		}
-	}
-	return time.ParseDuration(s)
-}
-
 func (w *busWorld) stopServer() {
 	if w.fake != nil {
 		w.fake.Stop()

@@ -89,77 +89,59 @@ func TestBDDGateProfiles(t *testing.T) {
 	}
 }
 
-type bddPass struct {
-	name       string
-	busBackend string
-	sqlProfile string
-	paths      []string
-}
-
-func gatePasses(postgresConfigured bool) []bddPass {
-	oneBus := os.Getenv("BDD_BUS_BACKEND")
-	var out []bddPass
-
-	if oneBus == "" || oneBus == "fake" {
-		out = append(out, bddPass{
-			name:       "default",
-			busBackend: "fake",
-			sqlProfile: "embedded",
-			paths:      []string{"../../specs"},
-		})
-		if postgresConfigured && (oneBus == "" || oneBus == "fake") {
-			out = append(out, bddPass{
-				name:       "sql-cloud",
-				busBackend: "fake",
-				sqlProfile: "cloud",
-				paths:      []string{"../../specs"},
-			})
-		}
-	}
-	for _, bb := range []string{"embedded", "cloud"} {
-		if oneBus != "" && oneBus != bb {
-			continue
-		}
-		out = append(out, bddPass{
-			name:       "bus-" + bb,
-			busBackend: bb,
-			sqlProfile: "embedded",
-			paths:      []string{"../../specs/bus"},
-		})
-	}
-	return out
-}
-
 // TestFeatures runs every scenario under specs/ in strict mode: undefined or
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
 // BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
 	tags := scenarioTags()
-	postgres := sqltest.PostgresConfigured()
-	for _, pass := range gatePasses(postgres) {
-		pass := pass
-		t.Run(pass.name, func(t *testing.T) {
-			t.Setenv("BDD_BUS_BACKEND", pass.busBackend)
-			t.Setenv("BDD_SQL_PROFILE", pass.sqlProfile)
-			suite := godog.TestSuite{
-				Name:                "basamento-" + pass.name,
-				ScenarioInitializer: steps.Initialize,
-				Options: &godog.Options{
-					Format:   "pretty",
-					Paths:    pass.paths,
-					Tags:     tags,
-					Strict:   true,
-					TestingT: t,
-				},
-			}
-			if code := suite.Run(); code != 0 {
-				t.Fatalf("godog exited with status %d", code)
-			}
-		})
+	configured := sqltest.PostgresConfigured()
+
+	if os.Getenv("BDD_PATHS") != "" {
+		for _, profile := range bddGateProfiles(configured) {
+			runSuite(t, tags, profile)
+		}
+		if !configured {
+			t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
+		}
+		return
 	}
-	if !postgres {
+
+	oneBus := os.Getenv("BDD_BUS_BACKEND")
+	if oneBus == "" || oneBus == "fake" {
+		for _, profile := range bddGateProfiles(configured) {
+			runSuite(t, tags, profile)
+		}
+	}
+	for _, backend := range []string{"embedded", "cloud"} {
+		if oneBus != "" && oneBus != backend {
+			continue
+		}
+		runBusBackendSuite(t, tags, backend)
+	}
+	if !configured {
 		t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
 	}
+}
+
+func runBusBackendSuite(t *testing.T, tags, backend string) {
+	t.Run("bus-"+backend, func(t *testing.T) {
+		t.Setenv("BDD_BUS_BACKEND", backend)
+		t.Setenv("BDD_SQL_PROFILE", "embedded")
+		suite := godog.TestSuite{
+			Name:                "basamento-bus-" + backend,
+			ScenarioInitializer: steps.Initialize,
+			Options: &godog.Options{
+				Format:   "pretty",
+				Paths:    []string{"../../specs/bus"},
+				Tags:     tags,
+				Strict:   true,
+				TestingT: t,
+			},
+		}
+		if code := suite.Run(); code != 0 {
+			t.Fatalf("godog exited with status %d", code)
+		}
+	})
 }
 
 func runSuite(t *testing.T, tags, profile string) {
