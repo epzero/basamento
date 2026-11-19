@@ -1,6 +1,6 @@
 module github.com/epzero/basamento/runtime/temporal/embedded
 
-go 1.26.10
+go 1.26.11
 
 require (
 	go.temporal.io/api v1.63.5
