@@ -237,7 +237,7 @@ func concurrentChangesDuringRead(ctx context.Context, n1 int, run1 string, n2 in
 		w.lastReadErr = err
 		return nil
 	}
-	w.lastRead = append(first, second...)
+	w.lastRead = append(append([]eventlog.Event{}, first...), second...)
 	w.lastReadErr = nil
 	return nil
 }
