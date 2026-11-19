@@ -167,10 +167,10 @@ Feature: JSON mappings
     Examples:
       | mapping                                  | name            |
       | def now: 1; now                          | now             |
-      | def halt: 1; . \| halt                   | halt            |
+      | def halt: 1; .                           | halt            |
       | def env: 1; env                          | env             |
       | def f(env): env; f(1)                    | env             |
-      | def f(env): 1; f(2) \| env               | env             |
+      | def f(env): 1; f(2)                      | env             |
       | def f: def g: now; g; f                  | now             |
       | {entries: (def inputs: 1; inputs)}       | inputs          |
       | def f(input): {"in": input}; f(1)        | input           |
