@@ -76,15 +76,35 @@ func (r encodingRule) schemaFor() *gjschema.Schema {
 	return nil
 }
 
+// genOptions carries the encoding overrides twice: full is every override, and
+// lib is the subset the generator library may see. jsonschema-go v0.4 rejects
+// an anonymous embedded field whose override is not an object schema, so those
+// overrides are withheld from the library walk and applied by the patch pass.
+type genOptions struct {
+	full *gjschema.ForOptions
+	lib  *gjschema.ForOptions
+}
+
+// librarySchema returns the schema for t: its encoding override when it has
+// one, else the library's schema, which never sees an override it would reject
+// for an anonymous embedded field.
+func librarySchema(t reflect.Type, opts *genOptions) (*gjschema.Schema, error) {
+	if s := opts.full.TypeSchemas[t]; s != nil {
+		return s, nil
+	}
+	return gjschema.ForType(t, opts.lib)
+}
+
 // generationOptions overrides every type whose encoding the generator must
 // describe, wherever it appears. Maps with a key encoding/json writes as a
 // string get an object schema because the library only accepts string keys.
-func generationOptions(root reflect.Type) (*gjschema.ForOptions, error) {
+func generationOptions(root reflect.Type) (*genOptions, error) {
 	ts := map[reflect.Type]*gjschema.Schema{
 		byteSliceReflectType:  byteSliceSchema(),
 		rawMessageReflectType: rawMessageSchema(),
 	}
 	needMap := map[reflect.Type]bool{}
+	embedded := map[reflect.Type]bool{}
 	seen := map[reflect.Type]bool{}
 	var visit func(reflect.Type) error
 	visit = func(t reflect.Type) error {
@@ -101,6 +121,9 @@ func generationOptions(root reflect.Type) (*gjschema.ForOptions, error) {
 		switch t.Kind() {
 		case reflect.Struct:
 			for _, f := range reflect.VisibleFields(t) {
+				if f.Anonymous {
+					embedded[f.Type] = true
+				}
 				if !f.IsExported() && (!f.Anonymous || !embedStructKind(f.Type)) {
 					continue
 				}
@@ -124,11 +147,20 @@ func generationOptions(root reflect.Type) (*gjschema.ForOptions, error) {
 	if err := visit(root); err != nil {
 		return nil, err
 	}
-	opts := &gjschema.ForOptions{TypeSchemas: ts}
-	if err := buildMapSchemas(needMap, opts); err != nil {
+	full := &gjschema.ForOptions{TypeSchemas: ts}
+	if err := buildMapSchemas(needMap, full); err != nil {
 		return nil, err
 	}
-	return opts, nil
+	libTS := make(map[reflect.Type]*gjschema.Schema, len(ts))
+	for t, s := range ts {
+		libTS[t] = s
+	}
+	for t := range embedded {
+		if s := ts[t]; s != nil && s.Type != "object" {
+			delete(libTS, t)
+		}
+	}
+	return &genOptions{full: full, lib: &gjschema.ForOptions{TypeSchemas: libTS}}, nil
 }
 
 // buildMapSchemas resolves map overrides bottom up so an element schema never
@@ -195,7 +227,7 @@ func subtreeHasPendingMap(t reflect.Type, pending map[reflect.Type]bool) bool {
 // patchGeneratedSchema fixes the parts of the generated tree the library and
 // the shape-based null patch cannot know: the string tag option, embedded
 // non-struct fields and pointers whose type has its own encoding.
-func patchGeneratedSchema(raw json.RawMessage, t reflect.Type, opts *gjschema.ForOptions) (json.RawMessage, error) {
+func patchGeneratedSchema(raw json.RawMessage, t reflect.Type, opts *genOptions) (json.RawMessage, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return raw, nil
@@ -210,7 +242,7 @@ func patchGeneratedSchema(raw json.RawMessage, t reflect.Type, opts *gjschema.Fo
 	return out, nil
 }
 
-func patchSchemaNode(node map[string]any, t reflect.Type, opts *gjschema.ForOptions) error {
+func patchSchemaNode(node map[string]any, t reflect.Type, opts *genOptions) error {
 	for t.Kind() == reflect.Pointer {
 		ensureNullAdmitted(node)
 		t = t.Elem()
@@ -233,7 +265,7 @@ func patchSchemaNode(node map[string]any, t reflect.Type, opts *gjschema.ForOpti
 	return nil
 }
 
-func patchObjectNode(node map[string]any, t reflect.Type, opts *gjschema.ForOptions) error {
+func patchObjectNode(node map[string]any, t reflect.Type, opts *genOptions) error {
 	props, _ := node["properties"].(map[string]any)
 	if props == nil {
 		props = map[string]any{}
@@ -292,8 +324,8 @@ func patchObjectNode(node map[string]any, t reflect.Type, opts *gjschema.ForOpti
 	return nil
 }
 
-func generateSubSchema(t reflect.Type, opts *gjschema.ForOptions) (any, error) {
-	s, err := gjschema.ForType(t, opts)
+func generateSubSchema(t reflect.Type, opts *genOptions) (any, error) {
+	s, err := librarySchema(t, opts)
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}

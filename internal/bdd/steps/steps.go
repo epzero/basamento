@@ -38,6 +38,7 @@ type World struct {
 	SQL         *sqlWorld
 	Telemetry   *telemetryWorld
 	Temporal    *temporalWorld
+	Tool        *toolWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -87,4 +88,5 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerTelemetry(sc)
 	registerTemporal(sc)
 	registerTemporalLocalRunSteps(sc)
+	registerTool(sc)
 }

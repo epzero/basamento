@@ -264,6 +264,9 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 		return err
 	}
 	w := world(ctx)
+	if w.Tool != nil && w.Tool.pending != nil {
+		return w.Tool.advance(w, d)
+	}
 	if cw := w.Model.call; cw != nil {
 		// The call runs on its own virtual runtime over the scenario clock, so
 		// advancing it also fires the call's timers and wakes its goroutine.
