@@ -281,7 +281,9 @@ func repairJSON(s string) ([]byte, bool) {
 	if s == "" {
 		return nil, false
 	}
+	s = normalizeQuotes(s)
 	s = removeTrailingCommas(s)
+	s = escapeInvalidEscapes(s)
 	if !json.Valid([]byte(s)) {
 		return nil, false
 	}
@@ -290,6 +292,50 @@ func repairJSON(s string) ([]byte, bool) {
 		return nil, false
 	}
 	return out.Bytes(), true
+}
+
+// normalizeQuotes turns typographic quotes into JSON's straight ones. They
+// are syntax, not content: a model that answers with curly quotes meant a
+// JSON string.
+func normalizeQuotes(s string) string {
+	return strings.NewReplacer(
+		"\u201c", `"`, "\u201d", `"`,
+		"\u2018", `'`, "\u2019", `'`,
+	).Replace(s)
+}
+
+// escapeInvalidEscapes doubles a backslash that starts no JSON escape, so a
+// model's "\d" becomes a JSON string containing "\d" instead of a parse error.
+func escapeInvalidEscapes(s string) string {
+	var out []byte
+	inString, escaped := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			switch {
+			case escaped:
+				if !strings.ContainsRune(`"\\/bfnrtu`, rune(c)) {
+					out = append(out, '\\')
+				}
+				out = append(out, c)
+				escaped = false
+			case c == '\\':
+				out = append(out, c)
+				escaped = true
+			default:
+				out = append(out, c)
+				if c == '"' {
+					inString = false
+				}
+			}
+			continue
+		}
+		out = append(out, c)
+		if c == '"' {
+			inString = true
+		}
+	}
+	return string(out)
 }
 
 func stripFences(s string) string {
