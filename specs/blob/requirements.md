@@ -81,7 +81,7 @@ provider's presigned PUT does not enforce the size.
 When the blob store starts an upload, the blob store shall reserve a staging key and an upload URL that are random, distinct from every earlier one and derived from no content.
 
 ### REQ-BLOB-022 — Upload options are bounds
-If an upload is started with a maximum size that is not positive, a content type that is not a single `type/subtype`, a non-positive lifetime or a lifetime above the maximum blob URL lifetime, then the blob store shall reject the start with code `invalid_argument`.
+If an upload is started with a maximum size that is not positive, a content type that is not a single `type/subtype` or is longer than 128 bytes, a non-positive lifetime or a lifetime above the maximum blob URL lifetime, then the blob store shall reject the start with code `invalid_argument`.
 
 ### REQ-BLOB-023 — A proxied upload URL is signed over its staging slot and bounds
 If a request to a proxied upload URL does not carry a valid signature over the tenant, the staging key, the expiry, the maximum size and the content type, then the blob store shall refuse it with HTTP status 403 and an empty body.

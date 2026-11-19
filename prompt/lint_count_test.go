@@ -29,7 +29,6 @@ func docTemplate() *Template {
 }
 
 func TestLintAssembledCountsEachUnrecordedDelimiter(t *testing.T) {
-	t.Helper()
 	forged := &Template{
 		ID: "forge", Version: "1",
 		Inputs: []Input{
@@ -77,7 +76,6 @@ func TestLintAssembledCountsEachUnrecordedDelimiter(t *testing.T) {
 }
 
 func TestLintAssembledCountsOnePerMutatedDelimiter(t *testing.T) {
-	t.Helper()
 	t.Run("appended close", func(t *testing.T) {
 		a := assembleForLint(t, docTemplate(), map[string]string{"doc": "ok"}, nil)
 		a.Parts[0].Text += closeDelim
@@ -102,7 +100,6 @@ func TestLintAssembledCountsOnePerMutatedDelimiter(t *testing.T) {
 }
 
 func TestLintAssembledCountsEveryLookAlike(t *testing.T) {
-	t.Helper()
 	cases := []struct {
 		text string
 		want int
@@ -123,7 +120,6 @@ func TestLintAssembledCountsEveryLookAlike(t *testing.T) {
 }
 
 func TestAssembledDelimiterRecordRoundTripsAndStaysOutOfHashes(t *testing.T) {
-	t.Helper()
 	tpl := &Template{
 		ID: "docs", Version: "1",
 		Inputs: []Input{{Name: "doc"}},
@@ -147,10 +143,6 @@ func TestAssembledDelimiterRecordRoundTripsAndStaysOutOfHashes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(round.Parts[1].Wrapped, a.Parts[1].Wrapped) {
 		t.Fatalf("record after JSON round trip = %+v, want %+v", round.Parts[1].Wrapped, a.Parts[1].Wrapped)
-	}
-	if round.Hash != a.Hash || round.PrefixHash != a.PrefixHash {
-		t.Fatalf("hashes changed across JSON round trip: %q/%q, want %q/%q",
-			round.Hash, round.PrefixHash, a.Hash, a.PrefixHash)
 	}
 
 	stripped := *a

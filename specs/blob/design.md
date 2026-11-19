@@ -175,7 +175,7 @@ Commit(ctx context.Context, stagingKey string) (key string, err error)
 // Commit refuses it.
 type UploadOptions struct {
 	MaxSize     int64         // bytes, > 0
-	ContentType string        // one type/subtype, no list, no wildcard
+	ContentType string        // one type/subtype, no list, no wildcard, at most 128 bytes
 	TTL         time.Duration // 0 < TTL <= the maximum blob URL lifetime
 }
 
@@ -226,6 +226,15 @@ the cloud store needs no stub for a request it never receives.
   read from the URL, so they survive a restart of the embedded store and a
   replica that did not issue the URL. The slot is open while its metadata
   exists and its expiry has not passed. It lives until the sweep deletes it.
+  The expiry is stored at nanosecond precision while a proxied upload URL
+  carries it as `exp` in whole seconds rounded up, so a lifetime shorter than
+  a second (REQ-BLOB-022 rejects only a non-positive or above-maximum
+  lifetime) is live for its whole TTL and never dead at birth
+  (`TestSubSecondUploadSlotLiveUntilTTL`). The bound content type is at most
+  128 bytes (REQ-BLOB-022), which keeps the encoded metadata inside the
+  4096-byte cap `Commit` reads it with: a longer type would reserve a slot
+  whose metadata reads only as `corrupt staging slot`, which no commit and no
+  sweep removes (`TestSlotMetaFitsReadCap`, `TestUploadContentTypeLengthBound`).
 - **Commit record:** `<tenant id>/stage/<staging key>.committed`, with an
   empty body. It is internal to the store: clients never see it, and no
   scenario asserts it. A staging key with a commit record is spent: `Commit` answers
@@ -322,9 +331,14 @@ the bucket through `gocloud.dev/blob`, then calls
 `bucket.SignedURL(ctx, <tenant>/stage/<staging key>,
 &blob.SignedURLOptions{Method: http.MethodPut, Expiry: o.TTL, ContentType:
 o.ContentType})`: the provider enforces the expiry and the signature, and
-signs the content type. No condition on the size is set (`IfNotExists()` is dropped: it
-expresses existence, not a bound). The size is enforced by `Commit` only, and
-the bucket lifecycle rule below expires abandoned slots.
+signs the content type. When the driver reports that presigning with a bound
+content type is `Unimplemented`, `StartUpload` signs again without the content
+type: the signature then covers no type and `Commit` stays authoritative
+(REQ-BLOB-034). Any other failure is returned, and only `Unimplemented` is
+retried (`TestPresignRetryOnlyUnimplemented`). No condition on the size is set
+(`IfNotExists()` is dropped: it expresses existence, not a bound). The size is
+enforced by `Commit` only, and the bucket lifecycle rule below expires
+abandoned slots.
 - **Abandoned multipart uploads, an operator requirement.** A presigned PUT
   large enough to be multipart leaves its parts in the bucket until the
   upload is completed or aborted. The operator configures an
@@ -361,7 +375,7 @@ the bucket lifecycle rule below expires abandoned slots.
 | Situation | `StartUpload` | `Commit` | Proxied upload URL |
 | --- | --- | --- | --- |
 | no tenant in `ctx` | `invalid_argument` | `invalid_argument` | — |
-| bad option: `MaxSize <= 0`, a content type that is not one `type/subtype`, `TTL <= 0` or `> max` | `invalid_argument` | — | — |
+| bad option: `MaxSize <= 0`, a content type that is not one `type/subtype` or is longer than 128 bytes, `TTL <= 0` or `> max` | `invalid_argument` | — | — |
 | a key that is not a staging key | — | `invalid_argument` | 403 |
 | a key no slot metadata covers: never issued by the tenant or by an expired or swept slot, or of another tenant | — | `not_found` | 403 |
 | an open slot with no staged object | — | `not_found` (the slot stays open) | 201, the PUT writes it |
