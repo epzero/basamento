@@ -20,73 +20,151 @@ import (
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	logsv1 "go.opentelemetry.io/proto/otlp/logs/v1"
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
+	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
-// exporter is a bounded, non-blocking OTLP/HTTP queue. Recording only
-// appends; delivery happens on Flush, Shutdown or an explicit ExportOnce, so a
-// slow or unreachable collector never delays the work (REQ-TELEM-016). A batch
-// that cannot be delivered is removed and not retried (REQ-TELEM-017).
+const (
+	// exportBatchSize bounds one export request per signal type. Delivery
+	// drains a larger queue in several bounded batches.
+	exportBatchSize = 1024
+	// exportTrigger is the number of pending signals that wakes the background
+	// exporter. Delivery is size-triggered, never clock-triggered.
+	exportTrigger = 512
+)
+
+// exporter is a non-blocking OTLP/HTTP queue with an owned delivery goroutine.
+// Recording only appends and wakes the goroutine at exportTrigger, so a slow or
+// unreachable collector never delays the work (REQ-TELEM-016). A batch that
+// cannot be delivered is removed and not retried (REQ-TELEM-017).
 type exporter struct {
-	endpoint string
-	client   *http.Client
+	endpoint    string
+	serviceName string
+	client      *http.Client
+
+	// deliverMu serialises every delivery attempt, so Flush, Shutdown, an
+	// explicit ExportOnce and the background goroutine never overlap. A
+	// shutdown that returns therefore has no delivery still in flight.
+	deliverMu sync.Mutex
 
 	mu      sync.Mutex
 	spans   []SpanData
 	logs    []LogRecord
 	metrics []MetricPoint
+
+	wake     chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
-func newExporter(endpoint string) *exporter {
-	return &exporter{
-		endpoint: strings.TrimRight(endpoint, "/"),
-		client:   &http.Client{Timeout: 5 * time.Second},
+func newExporter(endpoint, serviceName string) *exporter {
+	e := &exporter{
+		endpoint:    strings.TrimRight(endpoint, "/"),
+		serviceName: serviceName,
+		client:      &http.Client{Timeout: 5 * time.Second},
+		wake:        make(chan struct{}, 1),
+		stop:        make(chan struct{}),
+		done:        make(chan struct{}),
+	}
+	go e.run()
+	return e
+}
+
+// run is the owned delivery goroutine. It drains when the queue reaches
+// exportTrigger and exits when Shutdown closes stop.
+func (e *exporter) run() {
+	defer close(e.done)
+	for {
+		select {
+		case <-e.stop:
+			return
+		case <-e.wake:
+			_ = e.drain(context.Background())
+		}
 	}
 }
 
 func (e *exporter) enqueueSpan(span SpanData) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.spans) < maxPendingSignals {
-		e.spans = append(e.spans, span)
-	}
+	e.spans = append(e.spans, span)
+	e.notifyLocked()
 }
 
 func (e *exporter) enqueueLog(rec LogRecord) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.logs) < maxPendingSignals {
-		e.logs = append(e.logs, rec)
-	}
+	e.logs = append(e.logs, rec)
+	e.notifyLocked()
 }
 
 func (e *exporter) enqueueMetric(point MetricPoint) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.metrics) < maxPendingSignals {
-		e.metrics = append(e.metrics, point)
+	e.metrics = append(e.metrics, point)
+	e.notifyLocked()
+}
+
+func (e *exporter) notifyLocked() {
+	if len(e.spans)+len(e.logs)+len(e.metrics) < exportTrigger {
+		return
+	}
+	select {
+	case e.wake <- struct{}{}:
+	default:
 	}
 }
 
 func (e *exporter) flush(ctx context.Context) error {
-	return e.deliver(ctx)
+	return e.drain(ctx)
 }
 
 func (e *exporter) attempt(ctx context.Context) error {
-	return e.deliver(ctx)
+	e.deliverMu.Lock()
+	defer e.deliverMu.Unlock()
+	_, err := e.deliverBatchLocked(ctx)
+	return err
 }
 
-// deliver drains the queues and makes at most one request per signal type. A
-// failed request drops that batch and is not retried.
-func (e *exporter) deliver(ctx context.Context) error {
-	e.mu.Lock()
-	spans, logs, metrics := e.spans, e.logs, e.metrics
-	e.spans, e.logs, e.metrics = nil, nil, nil
-	e.mu.Unlock()
+// shutdown stops the owned goroutine, waits for any delivery it has in flight,
+// then drains the rest. It is safe to call more than once and from several
+// goroutines: every call waits for delivery to finish.
+func (e *exporter) shutdown(ctx context.Context) error {
+	e.stopOnce.Do(func() { close(e.stop) })
+	<-e.done
+	return e.drain(ctx)
+}
+
+// drain delivers every pending signal in bounded batches. A failed batch is
+// dropped; the remaining batches are still attempted (REQ-TELEM-017).
+func (e *exporter) drain(ctx context.Context) error {
+	e.deliverMu.Lock()
+	defer e.deliverMu.Unlock()
+	var errs []error
+	for {
+		more, err := e.deliverBatchLocked(ctx)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if !more {
+			return errors.Join(errs...)
+		}
+	}
+}
+
+// deliverBatchLocked takes at most exportBatchSize signals per type and makes
+// at most one request per type. A failed request drops that batch and is not
+// retried.
+func (e *exporter) deliverBatchLocked(ctx context.Context) (bool, error) {
+	spans, logs, metrics := e.takeLocked(exportBatchSize)
+	if len(spans) == 0 && len(logs) == 0 && len(metrics) == 0 {
+		return false, nil
+	}
 
 	var errs []error
 	if len(spans) > 0 {
-		body, err := marshalRequest(traceResourceSpans(spans))
+		body, err := marshalRequest(traceResourceSpans(spans, e.serviceName))
 		if err != nil {
 			errs = append(errs, err)
 		} else if err := e.post(ctx, "/v1/traces", body); err != nil {
@@ -94,7 +172,7 @@ func (e *exporter) deliver(ctx context.Context) error {
 		}
 	}
 	if len(logs) > 0 {
-		body, err := marshalRequest(logsResourceLogs(logs))
+		body, err := marshalRequest(logsResourceLogs(logs, e.serviceName))
 		if err != nil {
 			errs = append(errs, err)
 		} else if err := e.post(ctx, "/v1/logs", body); err != nil {
@@ -102,14 +180,39 @@ func (e *exporter) deliver(ctx context.Context) error {
 		}
 	}
 	if len(metrics) > 0 {
-		body, err := marshalRequest(metricsResourceMetrics(metrics))
+		body, err := marshalRequest(metricsResourceMetrics(metrics, e.serviceName))
 		if err != nil {
 			errs = append(errs, err)
 		} else if err := e.post(ctx, "/v1/metrics", body); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return true, errors.Join(errs...)
+}
+
+func (e *exporter) takeLocked(limit int) ([]SpanData, []LogRecord, []MetricPoint) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var spans []SpanData
+	var logs []LogRecord
+	var metrics []MetricPoint
+	spans, e.spans = takePrefix(e.spans, limit)
+	logs, e.logs = takePrefix(e.logs, limit)
+	metrics, e.metrics = takePrefix(e.metrics, limit)
+	return spans, logs, metrics
+}
+
+func takePrefix[T any](items []T, limit int) ([]T, []T) {
+	n := len(items)
+	if n > limit {
+		n = limit
+	}
+	if n == 0 {
+		return nil, items
+	}
+	out := make([]T, n)
+	copy(out, items[:n])
+	return out, items[n:]
 }
 
 // marshalRequest encodes a single ResourceSpans, ResourceLogs or
@@ -141,7 +244,19 @@ func (e *exporter) post(ctx context.Context, path string, body []byte) error {
 	return nil
 }
 
-func traceResourceSpans(spans []SpanData) *tracev1.ResourceSpans {
+// resource names the process that produced a signal. service.name is the OTLP
+// resource attribute collectors use to group a service (REQ-TELEM-015).
+func resource(serviceName string) *resourcev1.Resource {
+	if serviceName == "" {
+		return nil
+	}
+	return &resourcev1.Resource{Attributes: []*commonv1.KeyValue{{
+		Key:   "service.name",
+		Value: &commonv1.AnyValue{Value: &commonv1.AnyValue_StringValue{StringValue: serviceName}},
+	}}}
+}
+
+func traceResourceSpans(spans []SpanData, serviceName string) *tracev1.ResourceSpans {
 	out := make([]*tracev1.Span, 0, len(spans))
 	for _, span := range spans {
 		var code tracev1.Status_StatusCode
@@ -165,11 +280,12 @@ func traceResourceSpans(spans []SpanData) *tracev1.ResourceSpans {
 		})
 	}
 	return &tracev1.ResourceSpans{
+		Resource:   resource(serviceName),
 		ScopeSpans: []*tracev1.ScopeSpans{{Spans: out}},
 	}
 }
 
-func logsResourceLogs(records []LogRecord) *logsv1.ResourceLogs {
+func logsResourceLogs(records []LogRecord, serviceName string) *logsv1.ResourceLogs {
 	out := make([]*logsv1.LogRecord, 0, len(records))
 	for _, rec := range records {
 		out = append(out, &logsv1.LogRecord{
@@ -181,11 +297,12 @@ func logsResourceLogs(records []LogRecord) *logsv1.ResourceLogs {
 		})
 	}
 	return &logsv1.ResourceLogs{
+		Resource:  resource(serviceName),
 		ScopeLogs: []*logsv1.ScopeLogs{{LogRecords: out}},
 	}
 }
 
-func metricsResourceMetrics(points []MetricPoint) *metricsv1.ResourceMetrics {
+func metricsResourceMetrics(points []MetricPoint, serviceName string) *metricsv1.ResourceMetrics {
 	out := make([]*metricsv1.Metric, 0, len(points))
 	for _, point := range points {
 		attrs := keyValues(point.Labels)
@@ -216,6 +333,7 @@ func metricsResourceMetrics(points []MetricPoint) *metricsv1.ResourceMetrics {
 		out = append(out, metric)
 	}
 	return &metricsv1.ResourceMetrics{
+		Resource:     resource(serviceName),
 		ScopeMetrics: []*metricsv1.ScopeMetrics{{Metrics: out}},
 	}
 }

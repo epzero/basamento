@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -47,6 +48,10 @@ func newEmbeddedTestSetup(t *testing.T, clock core.Clock) *Setup {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { _ = setup.Shutdown(t.Context()) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = setup.Shutdown(ctx)
+	})
 	return setup
 }

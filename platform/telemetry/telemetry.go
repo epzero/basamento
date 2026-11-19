@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -28,10 +29,6 @@ const (
 // DefaultRetentionPeriod is the span retention used when Config.RetentionPeriod
 // is zero in the embedded profile (REQ-TELEM-014).
 const DefaultRetentionPeriod = 24 * time.Hour
-
-// maxPendingSignals bounds each local export queue. A full queue drops the new
-// signal: telemetry observes work and must never make it wait.
-const maxPendingSignals = 1024
 
 // maxKeptSignals bounds the in-process copies kept for inspection.
 const maxKeptSignals = 1024
@@ -72,12 +69,12 @@ type Setup struct {
 	mp     *meterProvider
 	prop   propagation.TextMapPropagator
 
-	mu       sync.Mutex
-	closed   bool
-	shutdown bool
-	logs     []LogRecord
-	metrics  []MetricPoint
-	spans    []SpanData
+	mu          sync.Mutex
+	closed      bool
+	logs        []LogRecord
+	metrics     []MetricPoint
+	spans       []SpanData
+	droppedSpan atomic.Int64
 }
 
 // New validates cfg and returns a ready setup. The embedded profile requires a
@@ -120,7 +117,7 @@ func New(cfg Config) (*Setup, error) {
 	s.mp = &meterProvider{setup: s}
 	s.meter = s.mp.Meter(cfg.ServiceName)
 	if cfg.Profile == ProfileCloud {
-		s.export = newExporter(cfg.CollectorURL)
+		s.export = newExporter(cfg.CollectorURL, cfg.ServiceName)
 	}
 	return s, nil
 }
@@ -226,29 +223,24 @@ func (s *Setup) Flush(ctx context.Context) error {
 }
 
 // Shutdown drains the finished recordings, then makes every later record call a
-// no-op (REQ-TELEM-022, REQ-TELEM-023). It is idempotent.
+// no-op (REQ-TELEM-022, REQ-TELEM-023). It returns only after every signal
+// accepted before the call has been delivered or dropped, including a delivery
+// another goroutine already had in flight. It is idempotent.
 func (s *Setup) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
-	if s.shutdown {
-		s.mu.Unlock()
-		return nil
-	}
-	s.shutdown = true
 	s.closed = true
 	s.mu.Unlock()
 
 	if s.export == nil {
 		return nil
 	}
-	return s.export.flush(ctx)
+	return s.export.shutdown(ctx)
 }
 
-// IsShutdown reports whether Shutdown has been called.
-func (s *Setup) IsShutdown() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.shutdown
-}
+// DroppedSpans reports how many ended spans the embedded span store rejected.
+// Recording never fails because of a store error; the count is how a caller
+// notices that spans are missing.
+func (s *Setup) DroppedSpans() int64 { return s.droppedSpan.Load() }
 
 func (s *Setup) isClosed() bool {
 	s.mu.Lock()
@@ -258,41 +250,43 @@ func (s *Setup) isClosed() bool {
 
 func (s *Setup) recordLog(rec LogRecord) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return
 	}
 	s.logs = appendCapped(s.logs, rec)
-	s.mu.Unlock()
 	if s.export != nil {
+		// Enqueue under the same lock that Shutdown takes: once closed is set
+		// no record can land in a queue after the final drain.
 		s.export.enqueueLog(rec)
 	}
 }
 
 func (s *Setup) recordMetric(point MetricPoint) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		return
 	}
 	s.metrics = appendCapped(s.metrics, point)
-	s.mu.Unlock()
 	if s.export != nil {
 		s.export.enqueueMetric(point)
 	}
 }
 
-func (s *Setup) recordSpan(span SpanData) {
+// recordSpan reports whether the span was accepted. A span rejected here must
+// not be written to the span store afterwards.
+func (s *Setup) recordSpan(span SpanData) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
-		return
+		return false
 	}
 	s.spans = appendCapped(s.spans, span)
-	s.mu.Unlock()
 	if s.export != nil {
 		s.export.enqueueSpan(span)
 	}
+	return true
 }
 
 // appendCapped keeps the newest maxKeptSignals entries without growing forever.

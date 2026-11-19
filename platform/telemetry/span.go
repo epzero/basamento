@@ -10,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/embedded"
+
+	"github.com/epzero/basamento/core"
 )
 
 // Span status values kept by the span store.
@@ -129,12 +131,20 @@ func (s *recordingSpan) End(...trace.SpanEndOption) {
 	s.mu.Unlock()
 
 	setup := s.provider.setup
-	if setup.isClosed() {
+	if !setup.recordSpan(span) {
 		return
 	}
-	setup.recordSpan(span)
-	if setup.cfg.Profile == ProfileEmbedded && setup.cfg.Spans != nil {
-		_ = setup.cfg.Spans.Append(context.Background(), span)
+	if setup.cfg.Profile != ProfileEmbedded || setup.cfg.Spans == nil {
+		return
+	}
+	ctx := context.Background()
+	if s.tenant != "" {
+		ctx = core.WithTenant(ctx, core.TenantID(s.tenant))
+	}
+	if err := setup.cfg.Spans.Append(ctx, span); err != nil {
+		// The span was accepted; a store failure must not fail the work. The
+		// counter is how a caller notices missing spans.
+		setup.droppedSpan.Add(1)
 	}
 }
 
