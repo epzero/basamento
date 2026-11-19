@@ -67,8 +67,16 @@ func runServe(args []string) {
 		opened = append(opened, port)
 	}
 
+	rt, err := startRuntime(result.Config)
+	if err != nil {
+		closePorts(opened)
+		fmt.Fprintf(os.Stderr, "%s %q could not start: %v\n", "runtime", runtimeName, err)
+		os.Exit(1)
+	}
+
 	ln, err := net.Listen("tcp", result.Config.Listen.Addr)
 	if err != nil {
+		rt.close()
 		closePorts(opened)
 		fmt.Fprintf(os.Stderr, "listen.addr %q could not be bound: %v\n", result.Config.Listen.Addr, err)
 		os.Exit(1)
@@ -79,6 +87,10 @@ func runServe(args []string) {
 		w.WriteHeader(http.StatusOK)
 	})
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
+	_, _ = fmt.Fprintf(os.Stdout, " %s=%s", rt.name, rt.implementation)
+	if rt.hostPort != "" {
+		_, _ = fmt.Fprintf(os.Stdout, " %s.addr=%s", rt.name, rt.hostPort)
+	}
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
 	}
@@ -88,6 +100,7 @@ func runServe(args []string) {
 	srv := config.NewServer(ln, mux, opened, result.Config.Shutdown.Timeout, nil)
 	code := srv.Serve(ctx)
 	stop()
+	rt.close()
 	os.Exit(code)
 }
 
@@ -98,8 +111,7 @@ func closePorts(ports []config.Port) {
 }
 
 // wire returns the port openers in start-up order and the runtime name for the
-// ready line. The temporal runtime is WP-L5-02/03; until it lands the runtime
-// step opens nothing.
+// ready line. The runtime itself starts after the ports (startRuntime).
 func wire(cfg config.Config) ([]wirePort, string) {
 	if cfg.Profile == config.ProfileCloud {
 		return wireCloud(cfg), "temporal"

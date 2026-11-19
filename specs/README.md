@@ -27,7 +27,7 @@ Capabilities:
 | --- | --- |
 | [`core`](core/requirements.md) | Implemented (ids). |
 | [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
-| [`runtime`](runtime/requirements.md) | Temporal implemented (WP-L5-02); local and embedded planned (WP-L5-01, WP-L5-03). |
+| [`runtime`](runtime/requirements.md) | Temporal and its embedded server implemented (WP-L5-02, WP-L5-03); local planned (WP-L5-01). |
 | [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |

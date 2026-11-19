@@ -2,8 +2,8 @@
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
 **Implemented** (`flow/host`, WP-L4-04); `runtime/temporal` **Implemented**
-(WP-L5-02); `runtime/local` and the embedded server **Planned** (WP-L5-01,
-WP-L5-03). Decisions: ADR-0002, ADR-0011.
+(WP-L5-02); the embedded server **Implemented** (WP-L5-03); `runtime/local`
+**Planned** (WP-L5-01). Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
 
@@ -78,3 +78,25 @@ Settings for the embedded profile:
 
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.
+
+### How `kit serve` starts it
+
+On the embedded profile, `kit serve` starts the server after the ports open
+and before it binds its listener: the database is `$(data.dir)/temporal.db`,
+its frontend takes a free loopback port, and `Start` returns only once a
+health check answers. The `ready` line names it (`temporal=embedded`,
+`temporal.addr=127.0.0.1:<port>`); shutdown stops it after the ports close.
+A server that cannot start closes the ports in reverse order and exits 1. The
+cloud profile starts no server: it talks to the Temporal service the operator
+runs. `RT-003-01` starts `kit serve` on an empty directory, reads
+`temporal.addr` from the ready line, and runs the `linear` conformance flow on
+that server through an SDK worker, so the run proves the started server, not
+the in-memory simulation.
+
+The module is linked into the binary through a local compatibility build of
+`go.opentelemetry.io/otel/log` in `third_party/otel-log`. Server v1.32.2 still
+uses the pre-v1 `log.KeyValue` / `log.String` helpers, which
+`go.opentelemetry.io/otel/log` v1.47.0 (selected by `gocloud.dev` v0.49.0)
+removed; a module graph has one version per module, so the server does not
+compile against v1.47.0. The local build is upstream v1.47.0 plus those
+helpers; its `README.md` says when to remove it.

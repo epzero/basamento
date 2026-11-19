@@ -68,6 +68,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
 	registerTemporal(sc)
+	registerEmbedded(sc)
 	registerSharedSteps(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()

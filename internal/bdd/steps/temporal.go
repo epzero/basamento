@@ -876,12 +876,23 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^gate "([^"]*)" is resolved with payload (\{.*\})$`, func(ctx context.Context, gate, payload string) error {
 		w := temporalW(ctx)
-		return w.rt.Resolve(core.WithTenant(context.Background(), w.lastRef.TenantID), w.lastRef, gate, json.RawMessage(payload))
+		// Resolve hands the payload to the run; the run consumes it on its own
+		// goroutine. Wait for it to settle so the next assertion sees the
+		// post-resolution state instead of racing it.
+		callCtx := core.WithTenant(context.Background(), w.lastRef.TenantID)
+		if err := w.rt.Resolve(callCtx, w.lastRef, gate, json.RawMessage(payload)); err != nil {
+			return err
+		}
+		return w.rt.Wait(callCtx, w.lastRef)
 	})
 	sc.Step(`^gate "([^"]*)" on run "([^"]*)" is resolved with payload (\{.*\})$`, func(ctx context.Context, gate, runID, payload string) error {
 		w := temporalW(ctx)
 		ref := runtime.RunRef{RunID: runID}
-		return w.rt.Resolve(core.WithTenant(context.Background(), "acme"), ref, gate, json.RawMessage(payload))
+		callCtx := core.WithTenant(context.Background(), "acme")
+		if err := w.rt.Resolve(callCtx, ref, gate, json.RawMessage(payload)); err != nil {
+			return err
+		}
+		return w.rt.Wait(callCtx, ref)
 	})
 	sc.Step(`^the run was continued as new at least once$`, func(ctx context.Context) error {
 		w := temporalW(ctx)
