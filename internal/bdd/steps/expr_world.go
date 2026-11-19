@@ -18,6 +18,7 @@ type exprWorld struct {
 	varDecls          []expr.Var
 	costLimit         *uint64
 	stepLimit         *uint64
+	outputLimit       *int
 	env               *expr.Env
 	envErr            error
 	program           *expr.Program
@@ -183,6 +184,9 @@ func exprMappingDeclare(ctx context.Context, src string, vars []string, limit *u
 	} else if e.stepLimit != nil {
 		opts = append(opts, expr.WithStepLimit(*e.stepLimit))
 	}
+	if e.outputLimit != nil {
+		opts = append(opts, expr.WithOutputLimit(*e.outputLimit))
+	}
 	m, err := expr.CompileMapping(src, vars, opts...)
 	if err != nil {
 		e.mapCompile = err
@@ -192,6 +196,12 @@ func exprMappingDeclare(ctx context.Context, src string, vars []string, limit *u
 	e.mapping = m
 	e.mapCompile = nil
 	return nil
+}
+
+func exprMappingDeclareOutput(ctx context.Context, src string, limit int) error {
+	e := world(ctx).Expr
+	e.outputLimit = &limit
+	return exprMappingDeclare(ctx, src, nil, nil)
 }
 
 func exprMappingEval(ctx context.Context, input any, n int) error {
