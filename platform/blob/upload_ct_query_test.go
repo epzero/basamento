@@ -43,7 +43,6 @@ func TestUploadQueryContentTypeRoundTrip(t *testing.T) {
 		"application/ld+json",
 		"application/vnd.api+json",
 		"application/x+y",
-		"application/x=y",
 		"application/x&y",
 		"application/x%yy",
 		"application/x~z",

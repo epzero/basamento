@@ -73,9 +73,8 @@ func TestEmbeddedContentKeyShapedStageStillUploads(t *testing.T) {
 		_ = st.Close()
 	}()
 	ctx := core.WithTenant(context.Background(), "acme")
-	hex := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	key := keyPrefix + hex
 	body := []byte("via-put")
+	key := ContentKeyOf(body)
 	if err := st.Put(ctx, key, bytes.NewReader(body), "application/octet-stream"); err != nil {
 		t.Fatal(err)
 	}
