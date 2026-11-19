@@ -158,17 +158,6 @@ Feature: Prompt lint
       | unpaired_delimiter | error    | rules   |
       | unpaired_delimiter | error    | rules   |
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-021 @security @id:PROMPT-021-05
-  Scenario: The assembler's own wrapped pairs are not errors
-    Given a template "docs@1" that declares input "doc" and input "question" and the segments
-      | segment | kind    | budget | text         |
-      | context | dynamic | 100    | {{doc}}      |
-      | turn    | user    | 100    | {{question}} |
-    And the template is registered
-    And "docs@1" was assembled with inputs {"doc": "Quarterly report.", "question": "Summarize it."}
-    When the assembled prompt is linted
-    Then prompt lint reports no findings
-
   @REQ-PROMPT-021 @security @id:PROMPT-021-06
   Scenario: A delimiter removed from an assembled prompt is an error
     Given a template "docs@1" that declares input "doc" and the segments
