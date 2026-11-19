@@ -278,12 +278,13 @@ rule's `when` does not hold: MODEL-073-03).
   formula and naming the model and the offending count (REQ-MODEL-085,
   MODEL-085-01); the details are `model` and `field`, the latter one of
   `input_tokens`, `output_tokens`, `cached_tokens` or `reasoning_tokens` as
-  the CEL bindings name them. The `C > I` check keeps running first, so
-  MODEL-082-01 still fails for the cached-versus-input reason; both orders
-  return `core.CodeInvalidArgument`, which is what a caller can observe. The
-  check is needed even though a negative amount later fails too (below): a
-  formula such as `usage.input_tokens * usage.input_tokens` would otherwise
-  price a negative count as a positive amount.
+  the CEL bindings name them. The negative-count checks run before the `C > I`
+  check, so each of MODEL-085-01's rows names its own field; MODEL-082-01
+  (every count non-negative) still fails for the cached-versus-input reason.
+  Both orders return `core.CodeInvalidArgument`, which is what a caller can
+  observe. The check is needed even though a negative amount later fails too
+  (below): a formula such as `usage.input_tokens * usage.input_tokens` would
+  otherwise price a negative count as a positive amount.
 - **Cache writes are not priced.** `model.Usage` has no cache-write or
   cache-creation field, so cache-write tokens, a `rates.cache_write`, TTL or
   storage are not priced by the default formula and no rule rate for them
