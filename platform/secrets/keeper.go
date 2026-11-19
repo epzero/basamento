@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/epzero/basamento/core"
+	"gocloud.dev/gcerrors"
 	"gocloud.dev/secrets"
 	"gocloud.dev/secrets/localsecrets"
 )
@@ -128,9 +130,23 @@ func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, strin
 }
 
 func classifyOpenKeeperErr(ctx context.Context, err error, scheme string) error {
-	c := classifyKeeperErr(ctx, err, scheme, opWrapKeyset)
-	if core.CodeOf(c) == core.CodeUnavailable {
-		return c
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: ctx.Err()}
+		}
+		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: ctx.Err(), Retryable: true}
+	}
+	if errors.Is(err, context.Canceled) {
+		return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: err}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: err, Retryable: true}
+	}
+	if errorCode(err) == gcerrors.ResourceExhausted {
+		return errUnavailableRetry(scheme)
 	}
 	return errInvalidArgument(fmt.Sprintf(msgInvalidKeyURL, scheme))
 }
