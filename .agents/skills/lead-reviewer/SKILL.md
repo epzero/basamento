@@ -36,19 +36,44 @@ stop and say so: do not guess an account.
 
 ## Every wake
 
-1. Read the tickets assigned to you, by priority, and
+1. Read the scheduled **nightly** run (`docs/engineering/qa-gate.md`, "Who
+   reads the nightly") — always, before anything else:
+
+   ```bash
+   ( set -o pipefail
+     gh run list --workflow nightly.yml --event schedule --limit 5 \
+       --json conclusion,status,createdAt,url | go tool gate nightly
+   )
+   ```
+
+   `pipefail` applies only inside that subshell, not the lead's session.
+
+   Exit **0** (ok): do nothing. Exit **1** (failed or stale): open one ticket
+   for the architect unless an **open** ticket titled `nightly failed: …` or
+   `nightly stale: …` already exists (dedupe on that prefix, not on the run
+   id, so one ongoing failure keeps one ticket). The title is `nightly failed:
+   run <id>`, `nightly stale: run <id>`, or `nightly stale: no scheduled run`.
+   Hand-off: `design-needed`, state *Todo*, assign the
+   architect (`agent-workflow.md` §3); the comment quotes the one stdout line.
+   Any other exit (`gh` failed or unusable input; stderr has `nightly: ...`):
+   retry the pipeline once in the same wake; if it still fails, open one
+   architect ticket titled `nightly reader: cannot read the schedule` (dedupe
+   while an open ticket has that title; put stderr in the body) — never a
+   failed or stale ticket.
+2. Read the tickets assigned to you, by priority, and
    `go tool gate agent list`, as summaries (`agent-workflow.md` §2.1). Look
    also at the tickets you handed to the owner: take back one whose latest
-   comment is the owner's. A wake with nothing to act on ends at once.
-2. For each ticket read the latest hand-off comment, then do the next step
+   comment is the owner's. After the nightly read, a wake with nothing to act
+   on ends at once.
+3. For each ticket read the latest hand-off comment, then do the next step
    from the table below. Run several work items at once, up to your width,
    never two whose owned directories overlap.
-3. Hand a ticket on with a comment, its `ask` label, the new assignee and
+4. Hand a ticket on with a comment, its `ask` label, the new assignee and
    the state together (`agent-workflow.md` §3; the words in backticks in the
    tables below are `ask` labels). The comment stands on its own and gives
    your reasons. How each step is done in your tracker is in its skill,
    `tracker-<name>`, which your prompt names.
-4. Release the sessions of merged branches: `git fetch --prune`, then
+5. Release the sessions of merged branches: `git fetch --prune`, then
    `go tool gate agent release`.
 
 You write no specs and no code, and never touch a ticket assigned to someone
