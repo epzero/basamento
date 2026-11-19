@@ -48,7 +48,7 @@ go tool gate spec trace       # requirement → scenario matrix
 | `core/` | ids, clock, errors, JSON Schema (implemented); `core/coretest` test-only fakes |
 | `platform/`, `expr/`, `model/`, `prompt/`, `flow/`, `runtime/`, `stream/`, `agent/`, `tool/`, `auth/`, `api/` | Ports and contracts per layer (see `layering.yaml`) |
 | `contracts/` | Protobuf contracts (stream, invocation, browser runner), linted with buf |
-| `cmd/kit` | The product binary (skeleton) |
+| `cmd/kit` | The product binary: `serve` and `config validate` |
 | `tools/gate`, `internal/gate` | The QA gate tool |
 | `internal/bdd` | godog suite and step library |
 | `specs/` | Constitution, glossary, requirements, scenarios, approval ledgers |

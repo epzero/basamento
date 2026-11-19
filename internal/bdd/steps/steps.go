@@ -34,6 +34,8 @@ type World struct {
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
+	Config      *configWorld
+	Auth        *authWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -58,6 +60,8 @@ func Initialize(sc *godog.ScenarioContext) {
 			Machine:   newMachineWorld(),
 			Host:      newHostWorld(),
 			Local:     newLocalWorld(),
+			Config:    newConfigWorld(),
+			Auth:      newAuthWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -77,8 +81,15 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
 	registerLocal(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
+	registerAuth(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

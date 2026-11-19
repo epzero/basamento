@@ -13,7 +13,7 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 
 | Package | Role | Owned by |
 | --- | --- | --- |
-| `internal/config` | load, validate, effective report, schema of known keys | WP-L1-05 |
+| `internal/config` | load, validate, effective report, schema of known keys, and the port-agnostic serve lifecycle (`serve.go`) | WP-L1-05 |
 | `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
@@ -75,6 +75,12 @@ import the implementations and their constructors. `cmd/kit` may already
 import `platform` and `runtime`; with the row in place it also imports
 `internal/config`.
 
+`serve.go` holds the part of `kit serve` that does not know a port: it opens
+the ports it is given in order, binds the listener, prints the ready line and
+drains requests on shutdown. `cmd/kit` supplies the openers; the component
+suite supplies fakes and a timer, so `CONFIG-023-01` and `CONFIG-024-01` drive
+the same code as the binary without a sleep.
+
 ## 2. Keys, types and defaults
 
 One table in `structs.go` is the single source for the kebab-case key, the Go
@@ -84,6 +90,7 @@ renders and what the environment mapping is derived from.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `profile` | string | `embedded` | one of `embedded`, `cloud` |
+| `auth.mode` | string | `none` | one of `none`, `local`, `oidc` |
 | `listen.addr` | host:port | `127.0.0.1:8080` | parses, port > 0 |
 | `data.dir` | path | `./.kit/data` | non-empty |
 | `log.level` | string | `info` | one of `debug`, `info`, `warn`, `error` |
@@ -93,6 +100,9 @@ renders and what the environment mapping is derived from.
 | `bus.url` | URL | profile-dependent | scheme per profile |
 | `secrets.url` | URL | profile-dependent | scheme per profile |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
+
+`auth.mode` selects the authentication mode (ADR-0008); in `none` the server
+refuses a non-loopback `listen.addr` (REQ-AUTH-001).
 
 The embedded profile defaults the four port URLs to
 `sqlite://$(data.dir)/kit.db`, `file://$(data.dir)/blobs`,
