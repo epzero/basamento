@@ -68,6 +68,14 @@ every CEL or jq expression — edge `when` conditions, node `in` mappings, `set`
 assignments, guard `while` conditions and gate `accept_if` conditions
 (REQ-FLOW-004). The builder keeps expressions in the IR as written.
 
+A jq `in` or `over` mapping is parsed, checked for reserved names and measured
+against the expression size limit, but it cannot be type-checked against the
+state schema: a jq mapping has no `state` binding, so REQ-FLOW-004's schema
+check binds CEL in practice, and `over` is only required to be an expression
+whose result shape is the `map` node's business. Checking what a node's input
+must be, per kind, against the state schema is the machine's (WP-L4-02) and the
+host's (WP-L4-04) work, because only they know the kind's contract.
+
 **Determinism** (REQ-FLOW-011): nodes go into `flow.IR.Nodes` and reducers
 into `flow.IR.State.Reducers`, both maps whose keys the canonical JSON form
 (`core/schema`, RFC 8785) sorts, so their declaration order does not reach the
@@ -142,7 +150,9 @@ by REQ-FLOW-003 rather than by the range check. A **negative** value is
 contradictory and rejected wherever the guard appears, on a cycle or not. The
 error is `*core.Error` with code `invalid_argument` naming the node, the field
 and the maximum, for example
-`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`.
+`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`,
+and, for a negative value,
+`flow: node "repair": guard max_visits -1 is negative; the maximum is 1000000`.
 
 The check is per guard field. A node whose guard carries only `cost_mpts`
 bounds a cycle; its `max_visits` stays absent.
@@ -153,14 +163,21 @@ bounds a cycle; its `max_visits` stays absent.
 | --- | --- | --- |
 | Node count | **4,096** nodes | The recursive cycle search follows the longest path, and the measured cost of validation was 0.95 s at 20,000 nodes (quadratic before the linearization in WP-L4-01's pull request) and 15 s at 80,000, with stack exhaustion on multi-million-node chains. 4,096 is five times below the first measurement and about a thousandth of the chain that exhausts the stack. Real flows have tens of nodes; fan-out is a `map` or `parallel` node. |
 | Edge count | **16,384** edges | Four edges per node at the node maximum: enough for if/else ladders on many nodes. Routing scans a node's outgoing edges (REQ-FLOW-001), and reachability scans the edge list, so this bounds both the compile and the run cost of routing. |
-| Expression size | **16,384 bytes** | The UTF-8 length of one expression in the IR: an edge `when`, a node `in` mapping (CEL or jq), a `set` assignment, a guard `while` or a gate `accept_if`. A hand-written condition is a few hundred bytes, so this is two orders of magnitude of headroom. The parser and type-checker run once per expression, and every node and edge may carry one, so a single expression must not consume the definition's budget. |
+| Expression size | **16,384 bytes** | The UTF-8 length of one expression in the IR: an edge `when`, a node `in` mapping (CEL or jq), a guard `while`, a gate's `accept_if` or a map's `over`. A hand-written condition is a few hundred bytes, so this is two orders of magnitude of headroom. The parser and type-checker run once per expression, and every node and edge may carry one, so a single expression must not consume the definition's budget. |
 | Definition size | **1,048,576 bytes** (1 MiB) | The canonical JSON bytes, because those are what is hashed, pinned and stored, independent of the YAML or JSON spelling. 1 MiB repeats the repository's message-size precedent (REQ-BUS-011) and the expression output limit (REQ-EXPR-020). A flow at the node and edge maxima is about 0.6 MiB, so the graph limits are reachable inside it. |
 
 The limits are requirements, not implementation guidance: REQ-FLOW-046 makes
 each one a rejection with code `invalid_argument` naming the limit and its
-maximum, for example `flow: 4097 nodes is above the maximum 4096`. They are
-constants in `flow/ir`, not configuration, and apply to an IR built in Go as
-well as to one decoded from YAML or JSON.
+maximum, for example `flow: node count limit of 4096 nodes exceeded: 4097
+nodes`. An expression rejection also names where the expression sits, for
+example `flow: expression size limit of 16384 bytes exceeded: edge "verify" ->
+"repair" when is 16385 bytes`. They are constants in `flow/ir`, not
+configuration, and apply to an IR built in Go as well as to one decoded from
+YAML or JSON.
+
+The IR has no field for a `set` node's assignments yet (Open questions), so
+`flow/ir` measures the expressions that do exist: an edge `when`, a node `in`,
+a guard `while`, a gate's `accept_if` and a map's `over`.
 
 `core/schema`'s untrusted-JSON limits (WP-L2-02) bound the nesting depth and
 the number literals of one JSON value, not the size of a document; they do not
@@ -294,8 +311,9 @@ given literally in its step, so no scenario derives a number.
   around node transitions, nor their exact `Data` JSON shape (deferred to
   WP-L6-01 / `specs/streaming`).
 - **Shapes that the compiler does not yet fix**: the node-spec fields
-  `duration` (`wait`), `schema`, `accept_if` and `timeout` (`gate`) and `flow`
+  `duration` (`wait`), `schema` and `timeout` (`gate`) and `flow`
   (`subflow`) are read from the node spec as the scenarios write them; the
-  compiler (WP-L4-01) does not check their shape yet. The `subflow` child's
+  compiler (WP-L4-01) checks the expression in `accept_if` (`gate`) and `over`
+  (`map`) but not the shape of the rest of the spec. The `subflow` child's
   run id and parent-close policy are not specified here.
 - **Compiler (`WP-L4-01`) coverage of `START` and `FAIL` edge ends**: `docs/architecture/flow-engine.md` §1 uses `START` as the entry edge source and `FAIL` as the failure edge target in the IR, and `WP-L4-03` (`REQ-FLOW-014`) specifies that `flow/builder` emits them, but `specs/flow-engine/compile.feature` (`WP-L4-01`) has no explicit requirement or scenario yet stating that `flow/compile` accepts `"START"` as an edge source and `"FAIL"` as an edge target without declaring nodes of those names.
