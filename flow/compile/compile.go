@@ -79,17 +79,18 @@ func (c *Compiled) Hash() string { return c.hash }
 // conditions and edge conditions in a deterministic order: nodes by id, then
 // edges in declaration order. A mapping is CEL when it compiles as CEL,
 // otherwise jq.
+//
+// The environment is built for every definition, with expressions or without:
+// a state schema the expression layer cannot type-check must give one verdict
+// whichever flow carries it, not pass because its flow happens to have no
+// expression.
 func checkExpressions(f *flow.IR) error {
-	if !hasExpressions(f) {
-		return nil
-	}
 	env, err := expressionEnv(f)
 	if err != nil {
 		return err
 	}
 	for _, id := range sortedNodeIDs(f) {
-		node := f.Nodes[id]
-		if err := checkNode(env, id, node); err != nil {
+		if err := checkNode(env, id, f.Nodes[id]); err != nil {
 			return err
 		}
 	}
@@ -103,20 +104,6 @@ func checkExpressions(f *flow.IR) error {
 		}
 	}
 	return nil
-}
-
-func hasExpressions(f *flow.IR) bool {
-	for _, node := range f.Nodes {
-		if node.In != "" || (node.Guard != nil && node.Guard.While != "") || len(nodeSpecExpressions(node)) > 0 {
-			return true
-		}
-	}
-	for _, edge := range f.Edges {
-		if edge.When != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func expressionEnv(f *flow.IR) (*expr.Env, error) {

@@ -362,3 +362,16 @@ func fencedBlock(t *testing.T, doc, language string) string {
 	}
 	return rest[:end]
 }
+
+// A state schema the expression layer cannot read gets one verdict: it fails
+// for a flow with expressions and for one without, because the environment is
+// built either way. A boolean false schema is valid JSON Schema and admits no
+// value, so expr cannot type-check anything against it.
+func TestCompileGivesOneVerdictPerStateSchema(t *testing.T) {
+	for _, when := range []string{"", "true"} {
+		f := typedFlow()
+		f.State.Schema = json.RawMessage(`false`)
+		f.Edges[1].When = when
+		requireInvalid(t, errOf(t, f), `variable "state"`, "invalid schema")
+	}
+}
