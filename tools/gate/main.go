@@ -15,8 +15,9 @@
 //	gate spec human -id A -status accepted|rejected -by <github-login> [-note …]
 //	gate spec queue           # human review queue, most critical first
 //	gate release-check        # P0 scenarios need human acceptance before a release
-//	gate redgreen -base <ref> # newly active scenarios must fail at base
+//	gate nightly              # scheduled nightly workflow ok, failed or stale (exit 0/1/2; JSON from gh on stdin)
 //	gate bdd-skips            # print gate: scenario runs skipped: … from .gate/bdd.json
+//	gate redgreen -base <ref> # newly active scenarios must fail at base
 //
 // See docs/engineering/qa-gate.md and docs/engineering/agent-workflow.md.
 package main
@@ -120,6 +121,14 @@ func main() {
 		l, err := gate.ReadLedger(root)
 		must(err)
 		report("release-check", gate.ReleaseCheck(l))
+	case "nightly":
+		out, err := gate.EvaluateNightly(os.Stdin, time.Now())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Println(gate.FormatNightlyLine(out))
+		os.Exit(out.ExitCode())
 	case "bdd-skips":
 		modRoot, err := gate.RepoRoot(root)
 		must(err)
@@ -338,6 +347,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | bdd-skips | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | nightly | bdd-skips | redgreen -base <ref>")
 	os.Exit(2)
 }

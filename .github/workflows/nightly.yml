@@ -78,7 +78,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Informational: pending P0 acceptances are expected; the blocking nightly signal is line (EP0-95 tracks a reader).
+      # Informational: pending P0 acceptances are expected; blocking signal is line. The reviewer lead reads the schedule via go tool gate nightly (docs/engineering/qa-gate.md, "Who reads the nightly").
       - name: release-check
         continue-on-error: true
         run: go tool gate release-check
