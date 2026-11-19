@@ -26,7 +26,7 @@ Capabilities:
 | Capability | Status |
 | --- | --- |
 | [`core`](core/requirements.md) | Implemented (ids). |
-| [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
+| [`flow-engine`](flow-engine/requirements.md) | Implemented (IR and compiler, WP-L4-01); machine, builder and host planned (WP-L4-02, 03, 04). |
 | [`runtime`](runtime/requirements.md) | Planned (WP-L5-*). |
 | [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
