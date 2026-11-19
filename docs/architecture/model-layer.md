@@ -1,6 +1,8 @@
 # Model layer
 
-Status: contract in `model/model.go`; implementation **Planned** (WP-L3-*).
+Status: contract in `model/model.go`; the catalog and price table in
+`model/catalog` (WP-L3-06); the rest of the implementation **Planned**
+(WP-L3-*).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -162,4 +164,7 @@ gets a formula of its own in its descriptor.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run
-time, so the same commit prices the same call the same way.
+time, so the same commit prices the same call the same way. `model/catalog`
+loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
+and tenant layers above it, and keeps the entry and start time of a call in a
+quote until settlement.
