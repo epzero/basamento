@@ -403,7 +403,7 @@ func recvNothing(ctx context.Context, b busKV, subject string) error {
 	return nil
 }
 
-func parseQuotedList(s string) []string {
+func parseBusQuotedList(s string) []string {
 	parts := strings.Split(s, `", "`)
 	for i, p := range parts {
 		p = strings.Trim(p, `" `)

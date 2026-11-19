@@ -233,7 +233,7 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 
 	sc.Step(`^the subscriber receives (.+) in that order and nothing else$`, func(ctx context.Context, list string) error {
 		w := world(ctx).Bus
-		want := parseQuotedList(list)
+		want := parseBusQuotedList(list)
 		return recvWithSentinel(ctx, w.bus, w.subs["sub"], want)
 	})
 
@@ -255,7 +255,7 @@ func registerBusPublish(sc *godog.ScenarioContext) {
 		if err := w.ensureOpen(ctx); err != nil {
 			return err
 		}
-		want := parseQuotedList(list)
+		want := parseBusQuotedList(list)
 		subCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		ch, err := w.bus.Subscribe(subCtx, subject, 0)

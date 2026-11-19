@@ -17,10 +17,16 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core   *coreWorld
-	SQL    *sqlWorld
-	Prompt *promptWorld
-	Bus    *busWorld
+	Core    *coreWorld
+	SQL     *sqlWorld
+	Prompt  *promptWorld
+	Bus     *busWorld
+	Expr    *exprWorld
+	Schema  *schemaWorld
+	Flow    *flowWorld
+	Machine *machineWorld
+	Host    *hostWorld
+	Local   *localWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -29,15 +35,28 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			SQL:    newSQLWorld(),
-			Prompt: newPromptWorld(),
+			Core:    newCoreWorld(),
+			SQL:     newSQLWorld(),
+			Prompt:  newPromptWorld(),
+			Bus:     newBusWorld(),
+			Expr:    &exprWorld{bindings: map[string]any{}},
+			Schema:  newSchemaWorld(),
+			Flow:    newFlowWorld(),
+			Machine: newMachineWorld(),
+			Host:    newHostWorld(),
+			Local:   newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBus(sc)
+	registerExpr(sc)
+	registerSchema(sc)
+	registerFlowCompile(sc)
+	registerFlowMachine(sc)
+	registerFlowHost(sc)
+	registerLocal(sc)
 	registerSharedSteps(sc)
 }
 
