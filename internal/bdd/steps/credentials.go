@@ -702,9 +702,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			}
 			return nil
 		})
-	sc.Step(`^the credential store reopens on the same SQL store and master key "([^"]*)"$`, func(ctx context.Context, mk string) error {
-		return reopenCredentialsStore(ctx, mk)
-	})
+	sc.Step(`^the credential store reopens on the same SQL store and master key "([^"]*)"$`, reopenCredentialsStore)
 	sc.Step(`^no credential is stored for any tenant$`, func(ctx context.Context) error {
 		var n int
 		if err := credentialsW(ctx).db.Execer().QueryRow(context.Background(),
@@ -930,7 +928,7 @@ func credentialsCode(err error, code string) error {
 		return fmt.Errorf("succeeded, want code %s", code)
 	}
 	if got := core.CodeOf(err); string(got) != code {
-		return fmt.Errorf("got code %s, want %s: %v", got, code, err)
+		return fmt.Errorf("got code %s, want %s: %w", got, code, err)
 	}
 	return nil
 }

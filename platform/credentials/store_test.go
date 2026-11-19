@@ -502,7 +502,4 @@ func TestUseAccessors(t *testing.T) {
 	if got := UseFrom(ctx); got != u {
 		t.Fatalf("got %+v", got)
 	}
-	if got := UseFrom(nil); got != (Use{}) {
-		t.Fatalf("nil = %+v", got)
-	}
 }

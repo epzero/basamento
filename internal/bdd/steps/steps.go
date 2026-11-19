@@ -59,7 +59,7 @@ func registerShared(sc *godog.ScenarioContext) {
 			return fmt.Errorf("opening succeeded, want %s", code)
 		}
 		if got := core.CodeOf(err); string(got) != code {
-			return fmt.Errorf("got code %s, want %s: %v", got, code, err)
+			return fmt.Errorf("got code %s, want %s: %w", got, code, err)
 		}
 		return nil
 	})
