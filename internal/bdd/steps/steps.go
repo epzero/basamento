@@ -27,6 +27,7 @@ type World struct {
 	Credentials *credentialsWorld
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
+	Catalog     *catalogWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -43,6 +44,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Blob:        newBlobWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
+			Catalog:     newCatalogWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -59,6 +61,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
+	registerCatalog(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

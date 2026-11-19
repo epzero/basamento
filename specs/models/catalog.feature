@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-06 @level:component
+@wp:WP-L3-06 @level:component
 Feature: Model catalog and price table
   The catalog holds a descriptor for every model id and the price table holds
   what a call of it costs: rates shipped with the binary, overridden per
