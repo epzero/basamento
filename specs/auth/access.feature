@@ -7,7 +7,7 @@ Feature: Authentication and tenancy
     When "kit serve" is asked to listen on "0.0.0.0:8080"
     Then the server does not start and explains that auth is required for non-loopback addresses
 
-  @planned @REQ-AUTH-002 @wp:WP-L6-03 @level:system @id:AUTH-002-01
+  @REQ-AUTH-002 @wp:WP-L6-03 @level:system @id:AUTH-002-01
   Scenario: A principal cannot read another tenant's run
     Given tenants "acme" and "globex" each have a run
     When a principal of "acme" lists runs and fetches the "globex" run by id

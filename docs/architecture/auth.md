@@ -1,10 +1,12 @@
 # Auth
 
 Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
-records (WP-L8-01, `auth/authn`), and for the permission check, the role and
-scope mapping and the denial audit (WP-L8-02, `auth/authz`). **Planned**: local
-accounts (argon2id passwords, passkeys, cookie sessions), the role-binding store,
-request wiring in the API, CEL conditions, and PostgreSQL row-level security.
+records (WP-L8-01, `auth/authn`), for the permission check, the role and
+scope mapping and the denial audit (WP-L8-02, `auth/authz`), and for the API
+request wiring that authenticates a request, puts its principal's tenant on the
+request and checks a side effect through `authz.Check` (WP-L6-03, `api`).
+**Planned**: local accounts (argon2id passwords, passkeys, cookie sessions),
+the role-binding store, CEL conditions, and PostgreSQL row-level security.
 Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
