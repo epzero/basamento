@@ -52,7 +52,7 @@ func TestParseNightlyRuns(t *testing.T) {
 func TestClassifyNightlySchedules(t *testing.T) {
 	t.Parallel()
 	const (
-		urlOK = "https://github.com/epzero/basamento/actions/runs/100"
+		urlOK  = "https://github.com/epzero/basamento/actions/runs/100"
 		urlOld = "https://github.com/epzero/basamento/actions/runs/99"
 	)
 	thirtyFiveH := 35*time.Hour + 59*time.Minute + 59*time.Second
@@ -65,9 +65,9 @@ func TestClassifyNightlySchedules(t *testing.T) {
 	}
 
 	tests := []struct {
-		name  string
-		runs  []NightlyRun
-		want  NightlyStatus
+		name string
+		runs []NightlyRun
+		want NightlyStatus
 	}{
 		{name: "empty array stale", runs: nil, want: NightlyStale},
 		{name: "only in progress stale", runs: []NightlyRun{
@@ -99,9 +99,9 @@ func TestClassifyNightlySchedules(t *testing.T) {
 	for _, c := range failedConclusions {
 		c := c
 		tests = append(tests, struct {
-			name  string
-			runs  []NightlyRun
-			want  NightlyStatus
+			name string
+			runs []NightlyRun
+			want NightlyStatus
 		}{
 			name: "failed " + c,
 			runs: []NightlyRun{run("completed", c, nightlyCreated(fiveH), urlOK)},

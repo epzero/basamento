@@ -30,8 +30,37 @@ set it.
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
 the **line** job above, and a flake hunt (repeated runs that look for
 nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
-No automatic reader for nightly **line** failures yet (tracked **EP0-95**);
-the **release-readiness** job uses `continue-on-error` and is informational only (P0 backlog is expected); **line** is the blocking nightly signal.
+The **release-readiness** job uses `continue-on-error` and is informational
+only (P0 backlog is expected); **line** is the blocking nightly signal.
+
+## Who reads the nightly
+
+The scheduled **nightly** workflow runs what must not stay silent:
+**line** (`govulncheck` on the newest patch of the pinned Go minor,
+`ADR-0014`), the flake hunt, the slow lanes and the release-readiness
+summary.
+
+The reviewer lead reads the schedule on every wake:
+
+```bash
+gh run list --workflow nightly.yml --event schedule --limit 5 \
+  --json conclusion,status,createdAt,url | go tool gate nightly
+```
+
+`go tool gate nightly` classifies the newest **completed** scheduled run
+(ignoring runs still queued or in progress):
+
+| State | Meaning | Exit |
+| --- | --- | --- |
+| **ok** | Newest completed run concluded `success` and started within the last **36 hours** | 0 |
+| **failed** | Newest completed run concluded anything other than `success` | 1 |
+| **stale** | No completed scheduled run, or the newest completed one is older than **36 hours** (a disabled or never-firing schedule) | 1 |
+
+When it reports **failed** or **stale**, the reviewer lead opens one ticket
+for the architect unless an open ticket already names that run in its title
+(dedupe by the Actions run id from the URL). **Cost of this choice:** a
+failure that happens in a quiet period is seen at the next wake, not when the
+workflow finishes.
 
 ## Conflict markers
 
