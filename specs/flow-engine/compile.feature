@@ -26,6 +26,12 @@ Feature: Compiling flows
     When the flow is compiled
     Then compilation succeeds
 
+  @REQ-FLOW-003 @id:FLOW-003-04
+  Scenario: A cycle bounded by a cost budget is accepted
+    Given a flow where node "repair" routes back to node "verify" and only "repair" has a guard of 5000 milli-points
+    When the flow is compiled
+    Then compilation succeeds
+
   @REQ-FLOW-045 @id:FLOW-045-01
   Scenario: A cycle bounded at the guard maxima is accepted
     Given a flow where node "repair" routes back to node "verify" and only "repair" has a guard of 1000000 visits and 1000000000 milli-points
@@ -41,6 +47,7 @@ Feature: Compiling flows
     Examples:
       | value      | unit         | field      | maximum    |
       | -1         | visits       | max_visits | 1000000    |
+      | -1         | milli-points | cost_mpts  | 1000000000 |
       | 1000001    | visits       | max_visits | 1000000    |
       | 1000000001 | milli-points | cost_mpts  | 1000000000 |
 
