@@ -1,11 +1,10 @@
 package blobmatrix_test
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/epzero/basamento/internal/bdd/blobmatrix"
+	"github.com/epzero/basamento/internal/bdd/modroot"
 )
 
 func TestMatrixKeyOutline(t *testing.T) {
@@ -22,7 +21,10 @@ func TestMatrixKeyOutline(t *testing.T) {
 }
 
 func TestPickleIDsOpeningFeature(t *testing.T) {
-	root := moduleRoot(t)
+	root, err := modroot.Find()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ids, err := blobmatrix.PickleIDs(root)
 	if err != nil {
 		t.Fatal(err)
@@ -39,23 +41,5 @@ func TestPickleIDsOpeningFeature(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing ids: %v", want)
-	}
-}
-
-func moduleRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("no go.mod")
-		}
-		dir = parent
 	}
 }
