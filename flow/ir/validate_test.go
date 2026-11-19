@@ -2,9 +2,11 @@ package ir
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/flow"
@@ -227,4 +229,36 @@ func TestValidateRequiresName(t *testing.T) {
 	f := simpleFlow()
 	f.Name = ""
 	requireInvalid(t, Validate(f), "name")
+}
+
+// Validation indexes edges once and walks cycles iteratively, so a chain's
+// cost is linear in its nodes and edges. Before that, the reachability walk
+// rescanned every edge per node and the cycle search recursed once per node.
+func TestValidateLongChainIsLinear(t *testing.T) {
+	const nodes = 50_000
+	f := &flow.IR{
+		Name:    "chain",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes:   make(map[string]flow.Node, nodes),
+		Edges:   make([]flow.Edge, 0, nodes+1),
+	}
+	ids := make([]string, nodes)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("n%05d", i)
+		f.Nodes[ids[i]] = flow.Node{Kind: "task"}
+	}
+	f.Edges = append(f.Edges, flow.Edge{From: Start, To: ids[0]})
+	for i := 0; i+1 < len(ids); i++ {
+		f.Edges = append(f.Edges, flow.Edge{From: ids[i], To: ids[i+1]})
+	}
+	f.Edges = append(f.Edges, flow.Edge{From: ids[len(ids)-1], To: Fail})
+
+	start := time.Now()
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("validating %d nodes took %s, want well under a second", nodes, elapsed)
+	}
 }

@@ -133,17 +133,23 @@ func validateEdges(f *flow.IR) error {
 }
 
 func validateReachable(f *flow.IR) error {
+	// Outgoing edges are indexed once: rescanning the edge list per dequeued
+	// node made validation quadratic in the size of the flow.
+	out := make(map[string][]string, len(f.Nodes)+1)
+	for _, edge := range f.Edges {
+		out[edge.From] = append(out[edge.From], edge.To)
+	}
 	reached := map[string]bool{Start: true}
 	queue := []string{Start}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, edge := range f.Edges {
-			if edge.From != current || edge.To == Fail || reached[edge.To] {
+		for _, next := range out[current] {
+			if next == Fail || reached[next] {
 				continue
 			}
-			reached[edge.To] = true
-			queue = append(queue, edge.To)
+			reached[next] = true
+			queue = append(queue, next)
 		}
 	}
 	for _, id := range sortedKeys(f.Nodes) {
@@ -206,7 +212,9 @@ func hasGuardedNode(f *flow.IR, component []string) bool {
 }
 
 // stronglyConnected returns the strongly connected components (Tarjan), so a
-// cycle with another path out and back is still one component.
+// cycle with another path out and back is still one component. The search uses
+// an explicit stack of frames rather than recursion, so a long chain cannot
+// exhaust the goroutine stack.
 func stronglyConnected(adjacency map[string][]string) [][]string {
 	ids := make([]string, 0, len(adjacency))
 	for id := range adjacency {
@@ -221,7 +229,7 @@ func stronglyConnected(adjacency map[string][]string) [][]string {
 	}
 	for _, id := range ids {
 		if _, seen := state.indices[id]; !seen {
-			state.visit(id)
+			state.run(id)
 		}
 	}
 	return state.components
@@ -233,28 +241,54 @@ type tarjanState struct {
 	low        map[string]int
 	onStack    map[string]bool
 	stack      []string
+	frames     []tarjanFrame
 	adj        map[string][]string
 	components [][]string
 }
 
-func (s *tarjanState) visit(id string) {
+// tarjanFrame is one node whose outgoing edges are being walked, and the index
+// of the next edge to look at.
+type tarjanFrame struct {
+	id   string
+	edge int
+}
+
+func (s *tarjanState) push(id string) {
 	s.indices[id] = s.next
 	s.low[id] = s.next
 	s.next++
 	s.stack = append(s.stack, id)
 	s.onStack[id] = true
+	s.frames = append(s.frames, tarjanFrame{id: id})
+}
 
-	for _, next := range s.adj[id] {
-		if _, seen := s.indices[next]; !seen {
-			s.visit(next)
-			if s.low[next] < s.low[id] {
-				s.low[id] = s.low[next]
+func (s *tarjanState) run(root string) {
+	s.push(root)
+	for len(s.frames) > 0 {
+		frame := &s.frames[len(s.frames)-1]
+		if frame.edge < len(s.adj[frame.id]) {
+			next := s.adj[frame.id][frame.edge]
+			frame.edge++
+			if _, seen := s.indices[next]; !seen {
+				s.push(next)
+			} else if s.onStack[next] && s.indices[next] < s.low[frame.id] {
+				s.low[frame.id] = s.indices[next]
 			}
-		} else if s.onStack[next] && s.indices[next] < s.low[id] {
-			s.low[id] = s.indices[next]
+			continue
 		}
+		id := frame.id
+		s.frames = s.frames[:len(s.frames)-1]
+		if len(s.frames) > 0 {
+			parent := s.frames[len(s.frames)-1].id
+			if s.low[id] < s.low[parent] {
+				s.low[parent] = s.low[id]
+			}
+		}
+		s.closeComponent(id)
 	}
+}
 
+func (s *tarjanState) closeComponent(id string) {
 	if s.low[id] != s.indices[id] {
 		return
 	}
