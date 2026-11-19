@@ -87,7 +87,7 @@ Feature: Blob URLs
     And a client with no credentials fetches the blob URL
     Then the response has status 200, content type "text/plain" and body "hello"
 
-  @REQ-BLOB-044 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-044-01
+  @REQ-BLOB-044 @security @profile:embedded @wp:WP-L1-02 @id:BLOB-044-01
   Scenario: A proxied read of stored HTML is served as an inert attachment
     Given tenant "acme" has stored "<h1>hello</h1>" as "text/html"
     And tenant "acme" has a blob URL for the content key of "<h1>hello</h1>" with a lifetime of 15 minutes
@@ -100,7 +100,7 @@ Feature: Blob URLs
       | Cache-Control           | private, no-store                                                                        |
       | X-Content-Type-Options  | nosniff                                                                                  |
 
-  @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-016-03
+  @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @wp:WP-L1-02 @id:BLOB-016-03
   Scenario Outline: A proxied blob URL serves a tenant whose id needs escaping
     Given tenant "<tenant>" has stored "hello" as "text/plain"
     And tenant "<tenant>" has a blob URL for the content key of "hello" with a lifetime of 15 minutes
@@ -115,7 +115,7 @@ Feature: Blob URLs
       | a#b     |
       | aéb     |
 
-  @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @planned @wp:WP-L1-02 @id:BLOB-016-04
+  @REQ-BLOB-016 @REQ-BLOB-010 @security @profile:embedded @wp:WP-L1-02 @id:BLOB-016-04
   Scenario: A proxied blob URL of an escaped tenant cannot be turned into another tenant's
     Given tenant "a b" has stored "hello" as "text/plain"
     And tenant "globex" has stored "hello" as "text/markdown"
