@@ -8,6 +8,8 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/epzero/basamento/platform/bus"
 )
 
 func registerBusAssets(sc *godog.ScenarioContext) {
@@ -15,9 +17,7 @@ func registerBusAssets(sc *godog.ScenarioContext) {
 		return provisionBusAssets(ctx, "matching", "")
 	})
 
-	sc.Step(`^a second client created the bus asset "([^"]*)" on the cloud test server as "([^"]*)"$`, func(ctx context.Context, asset, fault string) error {
-		return provisionBusAssets(ctx, asset, fault)
-	})
+	sc.Step(`^a second client created the bus asset "([^"]*)" on the cloud test server as "([^"]*)"$`, provisionBusAssetsStep)
 
 	sc.Step(`^the bus asset "([^"]*)" is still configured as "([^"]*)"$`, func(ctx context.Context, asset, fault string) error {
 		w := world(ctx).Bus
@@ -47,6 +47,10 @@ func registerBusAssets(sc *godog.ScenarioContext) {
 	})
 }
 
+func provisionBusAssetsStep(ctx context.Context, asset, fault string) error {
+	return provisionBusAssets(ctx, asset, fault)
+}
+
 func provisionBusAssets(ctx context.Context, asset, fault string) error {
 	w := world(ctx).Bus
 	if w.backend != "cloud" {
@@ -64,12 +68,12 @@ func provisionBusAssets(ctx context.Context, asset, fault string) error {
 	if err != nil {
 		return err
 	}
-	switch {
-	case asset == "matching":
+	switch asset {
+	case "matching":
 		return createMatchingAssets(ctx, js, w.opts(world(ctx).Core.clock).MaxMessageSize)
-	case asset == "KIT_BUS":
+	case "KIT_BUS":
 		return createFaultyBusStream(ctx, js, fault, w.opts(world(ctx).Core.clock).MaxMessageSize)
-	case asset == "KIT_KV":
+	case "KIT_KV":
 		return createFaultyKV(ctx, js, fault)
 	default:
 		return fmt.Errorf("unknown asset %q", asset)
@@ -91,7 +95,7 @@ func createMatchingAssets(ctx context.Context, js jetstream.JetStream, maxMsg in
 	if err != nil {
 		return err
 	}
-	_, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "KIT_KV", History: 1})
+	_, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: bus.KVDataBucket, History: 1})
 	return err
 }
 

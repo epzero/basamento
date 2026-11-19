@@ -22,6 +22,9 @@ const (
 	metaPF     = "pf."
 )
 
+// KVDataBucket is the JetStream KV bucket for application keys.
+const KVDataBucket = dataBucket
+
 // Store implements platform.Bus and platform.KV over one JetStream deployment.
 type Store struct {
 	clock        core.Clock
@@ -32,6 +35,7 @@ type Store struct {
 	data         jetstream.KeyValue
 	subBuf       int
 	publishLimit int
+	kvValueLimit int
 
 	closeSrv  func()
 	inprocess *server.Server
@@ -90,9 +94,8 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		nc.Close()
 		return nil, unavailable()
 	}
-	if mp := nc.MaxPayload(); mp > 0 {
-		need := MinClusterMaxPayload(opts.MaxMessageSize)
-		if int(mp) < need {
+	if mp := int(nc.MaxPayload()); mp > 0 {
+		if clusterMaxPayloadTooSmall(mp) {
 			nc.Close()
 			return nil, clusterPayloadTooSmall()
 		}
@@ -107,7 +110,7 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		nc.Close()
 		return nil, err
 	}
-	limit := opts.MaxMessageSize
+	lim := LimitsFor(opts.MaxMessageSize, int(nc.MaxPayload()))
 	if closeSrv == nil {
 		closeSrv = func() {}
 	}
@@ -119,7 +122,8 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		meta:         assets.meta,
 		data:         assets.data,
 		subBuf:       opts.SubBuffer,
-		publishLimit: limit,
+		publishLimit: lim.MaxPublish,
+		kvValueLimit: lim.MaxKVValue,
 		closeSrv:     closeSrv,
 	}, nil
 }
@@ -247,7 +251,7 @@ func (s *Store) LastSeq(ctx context.Context, subject string) (uint64, error) {
 	return lastSeqForSubject(ctx, s.stream, s.meta, subject)
 }
 
-// Purge implements platform.Bus.
+// purgeThrough raises the purge floor and purges stream messages up through through.
 func (s *Store) purgeThrough(ctx context.Context, subject string, through uint64) error {
 	if through == 0 {
 		return nil
@@ -259,6 +263,7 @@ func (s *Store) purgeThrough(ctx context.Context, subject string, through uint64
 	return mapConnErr(s.stream.Purge(ctx, jetstream.WithPurgeSubject(wire), jetstream.WithPurgeSequence(through+1)))
 }
 
+// Purge implements platform.Bus.
 func (s *Store) Purge(ctx context.Context, subject string) error {
 	if err := checkCallCtx(ctx); err != nil {
 		return err
@@ -391,7 +396,7 @@ func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Dura
 	if !ValidKey(key) {
 		return 0, invalidKey()
 	}
-	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+	if err := checkKVValueLen(value, s.kvValueLimit); err != nil {
 		return 0, err
 	}
 	if ttl < 0 {
@@ -416,7 +421,7 @@ func (s *Store) CompareAndSwap(ctx context.Context, key string, value []byte, re
 	if !ValidKey(key) {
 		return 0, invalidKey()
 	}
-	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+	if err := checkKVValueLen(value, s.kvValueLimit); err != nil {
 		return 0, err
 	}
 	if ttl < 0 {
@@ -487,21 +492,6 @@ func (s *Store) kvCreate(ctx context.Context, key string, enc []byte) (uint64, e
 		return 0, mapConnErr(err)
 	}
 	return rev, nil
-}
-
-// WriteForeignKVRecord stores raw bytes without encoding (BDD driver for REQ-BUS-026).
-func (s *Store) WriteForeignKVRecord(ctx context.Context, key string, raw []byte) error {
-	if err := checkCallCtx(ctx); err != nil {
-		return err
-	}
-	if err := s.ready(); err != nil {
-		return err
-	}
-	if !ValidKey(key) {
-		return invalidKey()
-	}
-	_, err := s.data.Put(ctx, key, raw)
-	return mapConnErr(err)
 }
 
 // Delete implements platform.KV.

@@ -14,27 +14,6 @@ const DefaultSubBuffer = 256
 // MaxKVKeyLen is the longest KV key the client accepts before calling JetStream.
 const MaxKVKeyLen = 512
 
-// kvWireSlack is JetStream KV framing beyond the logical record (expected revision, etc.).
-const kvWireSlack = 64
-
-// MaxKVValueBytes is the largest logical KV value for Put and CompareAndSwap (REQ-BUS-032).
-func MaxKVValueBytes(maxMessage int) int {
-	if maxMessage <= deadlineSize {
-		return 0
-	}
-	return maxMessage - deadlineSize
-}
-
-// MinClusterMaxPayload is the smallest server max_payload required to open the store.
-func MinClusterMaxPayload(maxMessage int) int {
-	return maxMessage
-}
-
-// MinClusterMaxPayloadKV is the smallest max_payload that can carry a CAS at MaxKVValueBytes.
-func MinClusterMaxPayloadKV(maxMessage int) int {
-	return maxMessage + kvWireSlack
-}
-
 // ValidSubject reports whether subject matches the Bus grammar in platform/platform.go.
 func ValidSubject(subject string) bool {
 	if subject == "" {
@@ -96,8 +75,8 @@ func ValidKey(key string) bool {
 	return true
 }
 
-func checkKVValueLen(value []byte, maxMessage int) error {
-	if len(value) > MaxKVValueBytes(maxMessage) {
+func checkKVValueLen(value []byte, kvLimit int) error {
+	if len(value) > kvLimit {
 		return valueTooLarge()
 	}
 	return nil

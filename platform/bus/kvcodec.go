@@ -17,9 +17,6 @@ const deadlineSize = 8
 
 var errKVRecordShort = errors.New("short kv record")
 
-// KVDeadlineHeaderBytes is the on-wire deadline prefix size (REQ-BUS-032).
-func KVDeadlineHeaderBytes() int { return deadlineSize }
-
 // EncodeKVBucketsValue builds the KV bucket payload bytes for a logical value.
 func EncodeKVBucketsValue(value []byte, deadline time.Time) []byte {
 	return encodeKV(kvRecord{Deadline: deadline, Value: value})

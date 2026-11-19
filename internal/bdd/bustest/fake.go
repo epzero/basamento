@@ -16,11 +16,12 @@ import (
 // Fake implements platform.Bus and platform.KV with the same semantics as the
 // JetStream-backed store.
 type Fake struct {
-	clock   core.Clock
-	mu      sync.Mutex
-	pubMu   sync.Mutex
-	bufSize int
-	maxSize int
+	clock        core.Clock
+	mu           sync.Mutex
+	pubMu        sync.Mutex
+	bufSize      int
+	maxSize      int
+	kvValueLimit int
 
 	stopped bool
 
@@ -71,13 +72,15 @@ func NewFake(clock core.Clock, opts bus.Options) *Fake {
 	if opts.MaxMessageSize <= 0 {
 		opts.MaxMessageSize = bus.DefaultMaxMessageSize
 	}
+	lim := bus.LimitsFor(opts.MaxMessageSize, int(bus.EmbeddedServerMaxPayload(opts.MaxMessageSize)))
 	return &Fake{
-		clock:      clock,
-		bufSize:    opts.SubBuffer,
-		maxSize:    opts.MaxMessageSize,
-		retained:   map[string][]retainedMsg{},
-		purgeFloor: map[string]uint64{},
-		kv:         map[string]kvEntry{},
+		clock:        clock,
+		bufSize:      opts.SubBuffer,
+		maxSize:      lim.MaxPublish,
+		kvValueLimit: lim.MaxKVValue,
+		retained:     map[string][]retainedMsg{},
+		purgeFloor:   map[string]uint64{},
+		kv:           map[string]kvEntry{},
 	}
 }
 
@@ -129,7 +132,7 @@ func (f *Fake) checkTTL(ttl time.Duration) error {
 }
 
 func (f *Fake) checkKVValue(value []byte) error {
-	if len(value) > bus.MaxKVValueBytes(f.maxSize) {
+	if len(value) > f.kvValueLimit {
 		return core.NewError(core.CodeInvalidArgument, "kv value too large", nil)
 	}
 	return nil

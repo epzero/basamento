@@ -11,7 +11,7 @@ func TestPutKVValueBound(t *testing.T) {
 	st, _, _ := openTestEmbedded(t)
 	ctx := context.Background()
 	key := "cursor.r1"
-	max := MaxKVValueBytes(DefaultMaxMessageSize)
+	const max = embedKVOK
 	okVal := make([]byte, max)
 	big := make([]byte, max+1)
 	if _, err := st.Put(ctx, key, okVal, 0); err != nil {
@@ -36,7 +36,7 @@ func TestCompareAndSwapKVValueBound(t *testing.T) {
 	st, _, _ := openTestEmbedded(t)
 	ctx := context.Background()
 	key := "lock.r1"
-	max := MaxKVValueBytes(DefaultMaxMessageSize)
+	const max = embedKVOK
 	if _, err := st.Put(ctx, key, []byte("seed"), 0); err != nil {
 		t.Fatal(err)
 	}

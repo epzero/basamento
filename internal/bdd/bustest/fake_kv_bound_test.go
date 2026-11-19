@@ -14,7 +14,8 @@ func TestFakeKVValueBound(t *testing.T) {
 	f := NewFake(clk, bus.Options{MaxMessageSize: bus.DefaultMaxMessageSize})
 	ctx := context.Background()
 	key := "cursor.r1"
-	max := bus.MaxKVValueBytes(bus.DefaultMaxMessageSize)
+	lim := bus.LimitsFor(bus.DefaultMaxMessageSize, int(bus.EmbeddedServerMaxPayload(bus.DefaultMaxMessageSize)))
+	max := lim.MaxKVValue
 	if _, err := f.Put(ctx, key, make([]byte, max), 0); err != nil {
 		t.Fatal(err)
 	}

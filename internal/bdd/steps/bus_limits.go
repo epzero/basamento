@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform/bus"
@@ -15,20 +17,7 @@ import (
 func registerBusLimits(sc *godog.ScenarioContext) {
 	registerBusLimitsOutcomes(sc)
 	sc.Step(`^the entry "([^"]*)" is overwritten outside the store with "([^"]*)"$`, func(ctx context.Context, key, value string) error {
-		w := world(ctx).Bus
-		if err := w.ensureOpen(ctx); err != nil {
-			return err
-		}
-		raw := []byte(value)
-		if w.fake != nil {
-			w.fake.WriteForeignRecord(key, raw)
-			return nil
-		}
-		st, ok := w.bus.(*bus.Store)
-		if !ok {
-			return fmt.Errorf("foreign record needs store")
-		}
-		return st.WriteForeignKVRecord(ctx, key, raw)
+		return overwriteForeignKV(ctx, key, []byte(value))
 	})
 
 	sc.Step(`^the bus receives call "([^"]*)" on subject "([^"]*)" and key "([^"]*)" with a cancelled context$`, func(ctx context.Context, call, subject, key string) error {
@@ -48,7 +37,7 @@ func registerBusLimits(sc *godog.ScenarioContext) {
 		}
 		msg := w.lastErr.Error()
 		if strings.Contains(msg, a) || strings.Contains(msg, b) {
-			return fmt.Errorf("error contains forbidden text: %v", w.lastErr)
+			return fmt.Errorf("error contains forbidden text: %w", w.lastErr)
 		}
 		return nil
 	})
@@ -59,27 +48,70 @@ func registerBusLimits(sc *godog.ScenarioContext) {
 			return err
 		}
 		readCtx := context.Background()
-		ch, err := w.bus.Subscribe(readCtx, "run.r1.deltas", 0)
+		subject := "run.r1.deltas"
+		key := "cursor.r1"
+		seq, err := w.bus.LastSeq(readCtx, subject)
 		if err != nil {
 			return err
 		}
-		select {
-		case m, ok := <-ch:
-			if ok {
-				return fmt.Errorf("unexpected message %q", m.Data)
-			}
-		default:
+		if seq != 0 {
+			return fmt.Errorf("LastSeq %d want 0", seq)
 		}
-		_ = ch
-		_, _, err = w.bus.Get(readCtx, "cursor.r1")
+		_, _, err = w.bus.Get(readCtx, key)
 		if err == nil {
 			return fmt.Errorf("key should be absent")
 		}
 		if string(core.CodeOf(err)) != string(core.CodeNotFound) {
-			return fmt.Errorf("get: %v", err)
+			return fmt.Errorf("get: %w", err)
 		}
 		return nil
 	})
+}
+
+func overwriteForeignKV(ctx context.Context, key string, raw []byte) error {
+	w := world(ctx).Bus
+	if err := w.ensureOpen(ctx); err != nil {
+		return err
+	}
+	if w.fake != nil {
+		w.fake.WriteForeignRecord(key, raw)
+		return nil
+	}
+	st, ok := w.bus.(*bus.Store)
+	if !ok {
+		return fmt.Errorf("foreign record needs store")
+	}
+	var nc *nats.Conn
+	var err error
+	switch w.backend {
+	case "embedded":
+		srv := st.InProcessServer()
+		if srv == nil {
+			return fmt.Errorf("no in-process server")
+		}
+		nc, err = nats.Connect("", nats.InProcessServer(srv), nats.Timeout(2*time.Second))
+	case "cloud":
+		if err := w.ensureCloudServer(); err != nil {
+			return err
+		}
+		nc, err = nats.Connect(w.nats.URL, nats.Timeout(2*time.Second))
+	default:
+		return fmt.Errorf("unsupported backend %q", w.backend)
+	}
+	if err != nil {
+		return err
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
+	kv, err := js.KeyValue(ctx, bus.KVDataBucket)
+	if err != nil {
+		return err
+	}
+	_, err = kv.Put(ctx, key, raw)
+	return err
 }
 
 func ctxCancelled() context.Context {
@@ -174,8 +206,7 @@ func registerBusLimitsOutcomes(sc *godog.ScenarioContext) {
 
 func matchPutOutcome(ctx context.Context, tail string) error {
 	w := world(ctx).Bus
-	switch tail {
-	case `succeeds`:
+	if tail == `succeeds` {
 		return w.checkCode(w.lastErr, "")
 	}
 	if strings.HasPrefix(tail, `fails with code "`) {
@@ -191,8 +222,7 @@ func matchSwapOutcome(ctx context.Context, tail string) error {
 	if err == nil {
 		err = w.lastErr
 	}
-	switch tail {
-	case `succeeds`:
+	if tail == `succeeds` {
 		return w.checkCode(err, "")
 	}
 	if strings.HasPrefix(tail, `fails with code "`) {
@@ -200,44 +230,4 @@ func matchSwapOutcome(ctx context.Context, tail string) error {
 		return w.checkCode(err, code)
 	}
 	return fmt.Errorf("unknown swap outcome %q", tail)
-}
-
-func matchReadingEntryOutcome(ctx context.Context, key, tail string) error {
-	w := world(ctx).Bus
-	if strings.HasPrefix(tail, `returns `) && strings.HasSuffix(tail, ` bytes`) {
-		var n int
-		if _, err := fmt.Sscanf(tail, "returns %d bytes", &n); err != nil {
-			return err
-		}
-		got, _, err := w.bus.Get(ctx, key)
-		if err != nil {
-			return err
-		}
-		if len(got) != n {
-			return fmt.Errorf("len %d want %d", len(got), n)
-		}
-		return nil
-	}
-	if strings.HasPrefix(tail, `returns the `) {
-		want := strings.TrimPrefix(tail, `returns the `)
-		want = strings.TrimSuffix(want, ` of "seed"`)
-		var n int
-		if _, err := fmt.Sscanf(want, "%d bytes", &n); err != nil {
-			return err
-		}
-		got, _, err := w.bus.Get(ctx, key)
-		if err != nil {
-			return err
-		}
-		if len(got) != n || string(got) != "seed" {
-			return fmt.Errorf("got %q len %d", got, len(got))
-		}
-		return nil
-	}
-	if strings.HasPrefix(tail, `fails with code "`) {
-		_, _, err := w.bus.Get(ctx, key)
-		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
-		return w.checkCode(err, code)
-	}
-	return fmt.Errorf("unknown reading outcome %q", tail)
 }
