@@ -440,18 +440,6 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/52
         human:
             status: pending
-    PROMPT-021-05:
-        hash: sha256:facbc7e32f7f366fb2ae7cbd2d08c529bc132a6b97cd11f731725f766a36c4a5
-        reqs:
-            - REQ-PROMPT-021
-        tier: P0
-        author: claude-code:spec-author:ep0057
-        reviewer: opencode:spec-reviewer:e7172c
-        approved_at: "2026-11-18"
-        note: 'Security boundary: the assembler''s own recorded pairs must lint clean, so the rule catches forgeries without refusing legitimate wrapping.'
-        ref: https://github.com/epzero/basamento/pull/52
-        human:
-            status: pending
     PROMPT-021-06:
         hash: sha256:0b5c810d553fce1916b2be974748be4cadf5bda93e98296d2eba4909b419159b
         reqs:
