@@ -50,24 +50,24 @@ grant.
    a `test_only` import is allowed and **layer checks skip that dep**; allow-list
    and `deny_external` still apply to every other import in the test.
 
-3. **Every `.go` file is read.** The gate walks the module's own code — the same
-   set `go list ./...` would cover if no file were build-excluded — every `.go`
-   file under the module root. Skip `testdata`, `vendor`, directories whose name
-   begins with `.` or `_`, and nested modules (a directory below the root with its
-   own `go.mod`). Files
-   attributed by plain `go list -json ./...` to a package are checked through
-   its `Imports`, `TestImports`, and `XTestImports`. Every other file — paths in
-   `IgnoredGoFiles`, files in directories `go list ./...` omits because all
-   sources are build-excluded, and lone `//go:build ignore` sources — is parsed
-   with `go/parser.ImportsOnly` and checked with the **layer of its directory**
-   (production rules, except `_test.go`, which use test rules). A directory with
-   such files and no `layering.yaml` row is an error, like an unlisted package
-   today. **Invariant:** the union of imports from every `.go` file is checked,
-   so the result does not depend on GOOS, GOARCH, build tags, or `CGO_ENABLED`
-   on the host. Plain `go list -json ./...` stays; when `go list` cannot read a
-   package it fails with its own message (unchanged). `ImportsOnly` suffices
-   because every import precedes every declaration; if the import section cannot
-   be parsed, the gate errors naming the file.
+3. **Every `.go` file is read.** Every `.go` file of the module's own code is
+   read: the set `go list ./...` would cover if no file were build-excluded. The
+   gate walks the module root and skips `testdata`, `vendor`, directories whose
+   name begins with `.` or `_`, and nested modules (a directory below the root
+   with its own `go.mod`). Files attributed by plain `go list -json ./...` to a
+   package are checked through its `Imports`, `TestImports`, and `XTestImports`.
+   Every other file — paths in `IgnoredGoFiles`, files in directories `go list
+   ./...` omits because all sources are build-excluded, and lone `//go:build
+   ignore` sources — is parsed with `go/parser.ImportsOnly` and checked with the
+   **layer of its directory** (production rules, except `_test.go`, which use
+   test rules). A directory with such files and no `layering.yaml` row is an
+   error, like an unlisted package today. **Invariant:** the union of imports
+   from every `.go` file is checked, so the result does not depend on GOOS,
+   GOARCH, build tags, or `CGO_ENABLED` on the host. Plain `go list -json ./...`
+   stays; when `go list` cannot read a package it fails with its own message
+   (unchanged). `ImportsOnly` suffices because every import precedes every
+   declaration; if the import section cannot be parsed, the gate errors naming
+   the file.
 
 4. **No `go list -test`** (duplicate `pkg.test` records).
 
