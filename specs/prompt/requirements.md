@@ -1,6 +1,6 @@
 # Prompt: versioned templates, segments and untrusted input
 
-Status: **Planned** (WP-L3-05). Package: `prompt` (imports only `core`).
+Status: **Implemented** (WP-L3-05). Package: `prompt` (imports only `core`).
 Design: [`design.md`](design.md), `docs/architecture/overview.md` §3.
 
 A **prompt template** is stored under an id and a version and never changes

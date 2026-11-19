@@ -497,7 +497,10 @@ scenarios:
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
     PROMPT-024-02:
         hash: sha256:82284fa1b309526837bb0c547999c56fb0d9abb883cc998d1acaca7bfb2fa78f
         reqs:
@@ -509,7 +512,10 @@ scenarios:
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
     PROMPT-024-03:
         hash: sha256:779afc3cca9463823f692c4b5a1c23578de1fb00b937fccb058e68718faf173f
         reqs:
@@ -521,7 +527,10 @@ scenarios:
         note: 'Security: history roles outside ^[A-Za-z][A-Za-z0-9_-]{0,31}$ fail assembly with invalid_argument and without echoing the rejected role.'
         ref: https://github.com/epzero/basamento/pull/42
         human:
-            status: pending
+            status: accepted
+            by: human:epzero
+            at: "2026-11-18"
+            note: https://linear.app/epzero/issue/EP0-54/p0-acceptance-ep0-50-specsprompt-history-role-validation-prompt-024#comment-cc0c55dc
     PROMPT-025-01:
         hash: sha256:30e1d6bcf99540a23fdff9c077aebfd22951139458e7ee063a1e0dc8e6e7affb
         reqs:

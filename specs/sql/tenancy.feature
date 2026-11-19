@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
+@wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
 Feature: Tenant-scoped repositories
   Every repository call carries a tenant, and sees and changes only that
   tenant's records. Another tenant's record looks exactly like one that does
