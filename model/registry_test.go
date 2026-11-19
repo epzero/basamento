@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,10 +87,11 @@ func TestResultAfterSuccess(t *testing.T) {
 	}
 }
 
-func TestFailRecordsTheMappedCode(t *testing.T) {
+func TestFailStripsRawVendorTextFromStoredError(t *testing.T) {
+	const secret = "401: invalid key sk-secret"
 	reg := NewRegistry("test")
 	run, _ := reg.Begin(t.Context(), "ref-1")
-	run.Fail(core.NewError(core.CodeRateLimited, "slow down", nil))
+	run.Fail(errors.New(secret))
 
 	res, err := reg.Result(t.Context(), run.Handle())
 	if err != nil {
@@ -98,12 +100,45 @@ func TestFailRecordsTheMappedCode(t *testing.T) {
 	if res.State != StateFailed {
 		t.Fatalf("state = %q, want failed", res.State)
 	}
+	if bytes.Contains(res.Error, []byte("sk-secret")) {
+		t.Fatalf("stored error leaks vendor text: %s", res.Error)
+	}
 	var failure Failure
 	if err := json.Unmarshal(res.Error, &failure); err != nil {
-		t.Fatalf("decode error: %v", err)
+		t.Fatalf("decode: %v", err)
 	}
-	if failure.Code != core.CodeRateLimited {
-		t.Fatalf("code = %q, want rate_limited", failure.Code)
+	if failure.Code != core.CodeVendor || failure.Message != "vendor call failed" {
+		t.Fatalf("failure = %+v", failure)
+	}
+}
+
+func TestFailRecordsPlatformCoreError(t *testing.T) {
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	run.Fail(core.NewError(core.CodeRateLimited, "slow down", nil))
+
+	res, _ := reg.Result(t.Context(), run.Handle())
+	var failure Failure
+	if err := json.Unmarshal(res.Error, &failure); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if failure.Code != core.CodeRateLimited || failure.Message != "slow down" {
+		t.Fatalf("failure = %+v", failure)
+	}
+}
+
+func TestFailMapsContextErrorsBeforePersisting(t *testing.T) {
+	reg := NewRegistry("test")
+	run, _ := reg.Begin(t.Context(), "ref-1")
+	run.Fail(context.Canceled)
+
+	res, _ := reg.Result(t.Context(), run.Handle())
+	var failure Failure
+	if err := json.Unmarshal(res.Error, &failure); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if failure.Code != core.CodeCancelled {
+		t.Fatalf("code = %q, want cancelled", failure.Code)
 	}
 }
 

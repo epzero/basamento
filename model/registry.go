@@ -169,8 +169,11 @@ func (r *Run) Succeed(res Result) bool {
 	return r.Finish(res)
 }
 
-// Fail ends the invocation as failed and records the mapped error.
+// Fail ends the invocation as failed. It maps err with MapError then records
+// FailureOf(err) so Result.Error never carries raw vendor text; the original
+// stays on MapError's Cause for in-process callers.
 func (r *Run) Fail(err error) bool {
+	err = MapError(err)
 	data, marshalErr := json.Marshal(FailureOf(err))
 	if marshalErr != nil {
 		data = []byte(`{"code":"internal"}`)
@@ -230,7 +233,7 @@ func (r *Run) eventsAfter(ctx context.Context, after int64) <-chan Event {
 		for {
 			r.mu.Lock()
 			var batch []Event
-			start := int(next) + 1
+			start := int(next)
 			if start < 0 {
 				start = 0
 			}

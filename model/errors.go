@@ -17,9 +17,12 @@ type Failure struct {
 	Retryable bool      `json:"retryable,omitempty"`
 }
 
-// FailureOf describes err as a Failure. An error that is not a core.Error is
-// the adapter's vendor failure and keeps code "vendor_error". A nil error is
-// an internal failure: it only reaches here from a bug, never from a vendor.
+// FailureOf describes err as a Failure suitable for persisting on Result.Error.
+// A *core.Error keeps its code and message; any other error keeps code
+// vendor_error with the fixed message "vendor call failed" so raw vendor text
+// never lands in the stored record. Call MapError first when the original
+// should remain on Cause for in-process callers. A nil error is an internal
+// failure: it only reaches here from a bug, never from a vendor.
 func FailureOf(err error) Failure {
 	if err == nil {
 		return Failure{Code: core.CodeInternal, Message: "invocation failed without an error"}
@@ -28,14 +31,14 @@ func FailureOf(err error) Failure {
 	if errors.As(err, &pe) {
 		return Failure{Code: pe.Code, Message: pe.Message, Retryable: pe.Retryable}
 	}
-	return Failure{Code: core.CodeVendor, Message: err.Error()}
+	return Failure{Code: core.CodeVendor, Message: "vendor call failed"}
 }
 
 // MapError returns err as a platform error. A *core.Error passes through; a
 // canceled or expired context becomes "cancelled" or a retryable "timeout";
-// any other error becomes a non-retryable "vendor_error" that wraps the
-// original. Adapters use it at the boundary of a vendor call so callers see
-// one error taxonomy (ADR-0006).
+// any other error becomes a non-retryable "vendor_error" with message
+// "vendor call failed" that wraps the original in Cause. Adapters use it at
+// the boundary of a vendor call so callers see one error taxonomy (ADR-0006).
 func MapError(err error) error {
 	if err == nil {
 		return nil
