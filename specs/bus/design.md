@@ -112,18 +112,23 @@ system clock in production):
 
 | Setting | Default | Requirement |
 | --- | --- | --- |
-| Maximum message size | 1 MiB (also bounded by the server's `max_payload`) | REQ-BUS-011 |
+| Maximum message size | 1 MiB, also bounded by the server's `max_payload` less the headers a create or swap adds | REQ-BUS-011 |
 | Subscription buffer | 256 messages | REQ-BUS-010 |
 
-- **KV value**: one bound covers both a message and a KV value. A KV value is at
-  most the maximum message size minus the eight-byte deadline header that
-  every KV record starts with: 1 MiB − 8 = 1,048,568 bytes by default. `Put`
-  and `CompareAndSwap` refuse a larger value with `invalid_argument` on every
-  backend, before writing (REQ-BUS-032). The largest KV record is therefore
-  the maximum message size, header included, so the connection's `max_payload`
-  must allow at least the maximum message size; when it does not, the open
-  fails with `invalid_argument` instead of accepting values the transport
-  cannot carry.
+- **KV value**: one bound covers both a message and a KV value. A put sends
+  the KV record as its payload; a create or a swap also carries the JetStream
+  expectation header `Nats-Expected-Last-Subject-Sequence`, at most 71 bytes,
+  and both the client and the server count headers in `max_payload`. The
+  maximum message size is therefore the smaller of the configured 1 MiB and
+  `max_payload` minus those 71 bytes: 1 MiB on the embedded server, which is
+  started with room for the headers, and 1,048,505 bytes against a stock 1 MiB
+  server. A KV value is at most that size minus the eight-byte deadline header
+  that every KV record starts with: 1,048,568 bytes on the embedded server and
+  against a server that allows a 1 MiB message plus the header, 1,048,497
+  against a stock 1 MiB server. `Put` and `CompareAndSwap` refuse a larger
+  value with `invalid_argument` on every backend, before writing
+  (REQ-BUS-032). A `max_payload` that cannot carry the expectation header, the
+  deadline header and one byte fails the open with `invalid_argument`.
 - **Subject**: one or more dot-separated tokens of letters, digits, `-` and `_`;
   no empty token, no wildcard (`*`, `>`), no whitespace.
 - **Key**: ASCII letters and digits and `-`, `_`, `/`, `=`, `.`; 1 to 512
@@ -146,6 +151,8 @@ system clock in production):
 | Swap at a revision that is not current; create on an existing entry | `conflict` |
 | A purge-floor record that cannot be decoded (shorter than eight bytes) | `internal`, with no key, value or server text: it is never read as *nothing purged* |
 | Server unreachable or connection not established | `unavailable`, returned at once: publishes are not buffered while disconnected |
+| A stream or KV bucket that opens but differs from what the bus requires (REQ-BUS-030) | `invalid_argument`, detail `asset` naming it; nothing is changed |
+| A KV bucket that exists but does not load as a key-value store (REQ-BUS-030) | `unavailable`; nothing is changed |
 | The context of the call is cancelled | `cancelled` |
 | The context of the call has passed its deadline | `timeout` |
 | A KeyValue entry cannot be decoded as a KV entry | `internal`, with no key, value or server text in the error |
@@ -224,6 +231,8 @@ system clock in production):
   into a mirror or a work-queue stream (API errors 10055 and 10052), and a
   `KIT_KV` backing stream created directly as a mirror or a work-queue stream
   is not a key-value store the client can load, so that open fails with
-  `unavailable`, without detail `asset`. The step checks the configuration
+  `unavailable`, without detail `asset`; BUS-030-03 sets up that case by
+  creating the `KV_KIT_KV` stream directly with work-queue retention. The step
+  checks the configuration
   again after the refused open, so the scenario also shows that a refusal
   changes nothing.
