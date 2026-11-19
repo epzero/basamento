@@ -4,24 +4,26 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-
-	"github.com/epzero/basamento/internal/bdd/blobmatrix"
 )
 
 // s3MatrixNoS3Marker lists matrix scenario ids that must not emit an S3 open marker.
+// Keys are MatrixKey ids (first outline example bare id, rest #NN). Reasons quote the
+// examples row from specs/blob/opening.feature. Ids are bound to feature line via
+// blobmatrix.PickleKeyForRuntime; inserting or reordering outline rows changes line
+// keys and TestS3Matrix fails until this map is updated (it must not pass silently).
 var s3MatrixNoS3Marker = map[string]string{
-	"BLOB-018-01":      "explicit file:// open in scheme outline",
-	"BLOB-019-01":      "unsupported URL; fails before Open",
-	"BLOB-019-01#01":   "unsupported URL; fails before Open",
-	"BLOB-019-01#02":   "unsupported URL; fails before Open",
-	"BLOB-019-01#03":   "unsupported URL; fails before Open",
-	"BLOB-020-01":      "explicit file URL of subdirectory",
+	"BLOB-018-01":    `opening.feature row: "a file URL of a temporary directory"`,
+	"BLOB-019-01":    `opening.feature row: "mem://"`,
+	"BLOB-019-01#01": `opening.feature row: "ftp://example.test/blobs"`,
+	"BLOB-019-01#02": `opening.feature row: "/var/lib/kit/blobs"`,
+	"BLOB-019-01#03": `opening.feature row: "" (empty url)`,
+	"BLOB-020-01":    `opening.feature: explicit file URL of subdirectory "blobs"`,
 }
 
 var (
 	scenarioSummaryRE = regexp.MustCompile(`(\d+)\s+scenarios`)
 	passedSummaryRE   = regexp.MustCompile(`(\d+)\s+passed`)
-	s3OpenMarkerRE    = regexp.MustCompile(`(?m)^blob-conformance backend=s3 opened=s3 id=([^\s]+)`)
+	s3OpenMarkerRE    = regexp.MustCompile(`(?m)^blob-conformance backend=s3 opened=s3 id=([^\s]+) scenario="([^"]*)"`)
 )
 
 func parseGodogSummary(output string) (scenarios, passed int, err error) {
@@ -47,13 +49,23 @@ func parseGodogSummary(output string) (scenarios, passed int, err error) {
 	return scenarios, passed, nil
 }
 
-func parseS3OpenMarkers(output string) map[string]int {
-	out := make(map[string]int)
+type s3Marker struct {
+	count int
+	names []string
+}
+
+func parseS3OpenMarkers(output string) map[string]s3Marker {
+	out := make(map[string]s3Marker)
 	for _, m := range s3OpenMarkerRE.FindAllStringSubmatch(output, -1) {
-		if len(m) < 2 {
+		if len(m) < 3 {
 			continue
 		}
-		out[m[1]]++
+		id := m[1]
+		name := m[2]
+		e := out[id]
+		e.count++
+		e.names = append(e.names, name)
+		out[id] = e
 	}
 	return out
 }
@@ -73,15 +85,16 @@ func verifyS3MatrixOutput(output string, wantScenarios int, matrixIDs []string) 
 	marked := 0
 	allow := 0
 	for _, id := range matrixIDs {
-		n := markers[id]
+		m := markers[id]
 		if reason, skip := s3MatrixNoS3Marker[id]; skip {
 			allow++
-			if n > 0 {
-				return fmt.Errorf("scenario %s on allow-list (%s) but has %d s3 marker(s)", id, reason, n)
+			if m.count > 0 {
+				return fmt.Errorf("scenario %s on allow-list (%s) but has %d s3 marker(s) (godog: %q)",
+					id, reason, m.count, firstMarkerName(m))
 			}
 			continue
 		}
-		if n < 1 {
+		if m.count < 1 {
 			return fmt.Errorf("scenario %s expected s3 open marker, got none", id)
 		}
 		marked++
@@ -92,6 +105,9 @@ func verifyS3MatrixOutput(output string, wantScenarios int, matrixIDs []string) 
 	return nil
 }
 
-func blobMatrixPickleIDs(root string) ([]string, error) {
-	return blobmatrix.PickleIDs(root)
+func firstMarkerName(m s3Marker) string {
+	if len(m.names) == 0 {
+		return ""
+	}
+	return m.names[0]
 }
