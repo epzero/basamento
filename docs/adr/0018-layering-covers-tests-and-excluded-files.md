@@ -50,9 +50,11 @@ grant.
    a `test_only` import is allowed and **layer checks skip that dep**; allow-list
    and `deny_external` still apply to every other import in the test.
 
-3. **Every `.go` file is read.** The gate walks every `.go` file under the
-   module root. Skip `testdata`, directories whose name begins with `.` or `_`,
-   and nested modules (a directory below the root with its own `go.mod`). Files
+3. **Every `.go` file is read.** The gate walks the module's own code — the same
+   set `go list ./...` would cover if no file were build-excluded — every `.go`
+   file under the module root. Skip `testdata`, `vendor`, directories whose name
+   begins with `.` or `_`, and nested modules (a directory below the root with its
+   own `go.mod`). Files
    attributed by plain `go list -json ./...` to a package are checked through
    its `Imports`, `TestImports`, and `XTestImports`. Every other file — paths in
    `IgnoredGoFiles`, files in directories `go list ./...` omits because all
