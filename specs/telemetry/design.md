@@ -19,7 +19,7 @@ type Config struct {
     Clock           core.Clock    // the only source of time (REQ-TELEM-003)
     RetentionPeriod time.Duration // embedded span store retention (REQ-TELEM-014)
     Secrets         SecretsSource // credential values to redact
-    Spans           SpanStore     // SQLite span store in the embedded profile (WP-L1-01)
+    Spans           SpanStore     // SQLite span store in the embedded profile (NewSQLSpanStore)
 }
 
 type Telemetry interface {
@@ -83,14 +83,17 @@ worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
   `platform/telemetry` ever needs its own layer entry in `layering.yaml`, that
   change must land first in its own pull request with an ADR
   (`docs/engineering/agent-workflow.md` §4).
-- The SQLite table and migration for the embedded span store live in
-  `platform/sql` (owned by WP-L1-01). If WP-L1-01 does not already include the
-  span table, the implementer lands that schema change first or notes it in the
-  pull request with a reviewer from WP-L1-01 (`agent-workflow.md` §4).
+- The span table belongs to `platform/telemetry`, not to `platform/sql`.
+  `NewSQLSpanStore` creates the table `telemetry_spans` idempotently on the
+  `platform/sql` store it is given (create if absent); it is
+  not part of the product's versioned migration set, and WP-L1-01 ships no
+  span table. Spans are disposable data that live only for the retention
+  period, so a later change to the table's columns replaces the table rather
+  than migrating rows.
+- **Default retention.** When `Config.RetentionPeriod` is zero, the embedded
+  span store keeps spans for 24 hours (`DefaultRetentionPeriod`,
+  REQ-TELEM-014). Spans serve debugging of recent runs; a day covers that
+  without letting a local database grow without bound. Configuration
+  (WP-L1-05) passes a set value through and sets no other default.
 - The simulated OTLP collector and test harness helpers live in `internal/bdd`
   (and `_test.go` files), never in `platform/telemetry`.
-
-## Open questions
-
-1. **Default embedded span retention period (`REQ-TELEM-014`):** `REQ-TELEM-014` specifies purging spans older than the configured retention period (`Config.RetentionPeriod`); what default duration (e.g., `24h` vs `7d`) should `WP-L1-05` (`internal/config`) wire when none is set?
-2. **Embedded span store migration ownership (`WP-L1-01` vs `WP-L1-07`):** Should the SQLite migration for the embedded `spans` table land in `WP-L1-01` (`platform/sql`) before `WP-L1-07` implementation starts, or in `WP-L1-07` with a `platform/sql` cross-area note and reviewer?
