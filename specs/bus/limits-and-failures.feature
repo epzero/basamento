@@ -1,5 +1,5 @@
 @planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
-Feature: Limits, invalid arguments and an unreachable server
+Feature: Limits, invalid arguments, an unreachable server, corrupt records and cancelled calls
   Calls the bus or the KV store cannot honor fail at once with a stable error
   code and leave nothing behind.
 
@@ -59,6 +59,49 @@ Feature: Limits, invalid arguments and an unreachable server
     And entry "lock.r1" is read
     Then the publish fails with code "unavailable"
     And the read fails with code "unavailable"
+
+  @REQ-BUS-026 @security @id:BUS-026-01
+  Scenario: A KV record the store did not write fails reads, swaps and creates with internal
+    Given the entry "cursor.r1" is overwritten outside the store with "T0K"
+    When entry "cursor.r1" is read
+    And entry "cursor.r1" is swapped to "2" at revision 1
+    And entry "cursor.r1" is created with value "2"
+    Then the read fails with code "internal"
+    And the swap fails with code "internal"
+    And the create fails with code "internal"
+    And none of the errors contains "cursor.r1" or "T0K"
+
+  @REQ-BUS-027 @id:BUS-027-01
+  Scenario Outline: A call whose context is cancelled fails with cancelled
+    When the bus receives call "<call>" on subject "run.r1.deltas" and key "cursor.r1" with a cancelled context
+    Then the call fails with code "cancelled"
+    And the subject and the key hold no message and no entry
+
+    Examples:
+      | call                     |
+      | Publish                  |
+      | Subscribe from the start |
+      | LastSeq                  |
+      | Purge                    |
+      | Get                      |
+      | CompareAndSwap           |
+      | Delete                   |
+
+  @REQ-BUS-028 @id:BUS-028-01
+  Scenario Outline: A call whose context deadline has passed fails with timeout
+    When the bus receives call "<call>" on subject "run.r1.deltas" and key "cursor.r1" with a context whose deadline has passed
+    Then the call fails with code "timeout"
+    And the subject and the key hold no message and no entry
+
+    Examples:
+      | call                     |
+      | Publish                  |
+      | Subscribe from the start |
+      | LastSeq                  |
+      | Purge                    |
+      | Get                      |
+      | CompareAndSwap           |
+      | Delete                   |
 
   @REQ-BUS-029 @security @id:BUS-029-01
   Scenario Outline: A cloud URL with credentials over plain nats is accepted only on loopback
