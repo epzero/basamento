@@ -37,6 +37,19 @@ func (f *Fake) ReplaySettled(subject string) <-chan struct{} {
 	return nil
 }
 
+// SubscriptionOccupiedAtLeast reports whether undelivered replay plus channel length
+// meets n on the first live subscription for subject (test oracle for REQ-BUS-010).
+func (f *Fake) SubscriptionOccupiedAtLeast(subject string, n int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.subs {
+		if s.subject == subject {
+			return s.bufferOccupied() >= n
+		}
+	}
+	return false
+}
+
 // SubscriptionEnded reports whether the subscription on subject has ended (fast overflow check).
 func (f *Fake) SubscriptionEnded(subject string) bool {
 	f.mu.Lock()

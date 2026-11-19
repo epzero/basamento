@@ -236,9 +236,9 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 				}
 			}
 			f.mu.Lock()
-			blocking := s.replayActive || s.replayPending > 0 || len(s.ch) > 0
+			replayLeft := s.replayActive || s.replayPending > 0
 			f.mu.Unlock()
-			if blocking {
+			if replayLeft {
 				f.replaySend(subCtx, s, msg)
 				continue
 			}
@@ -301,7 +301,20 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 		}
 		if msg.Seq > s.replayThrough {
 			s.noteLivePublish(msg.Seq)
+			if s.replayActive {
+				if !s.dropLive {
+					s.livePending = append(s.livePending, msg)
+					select {
+					case s.liveWake <- struct{}{}:
+					default:
+					}
+				}
+				continue
+			}
 			if s.dropLive {
+				if s.replayPending > 0 {
+					continue
+				}
 				terminate = append(terminate, s)
 				continue
 			}
@@ -427,8 +440,8 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			<-subCtx.Done()
 			f.terminateSub(s)
 		}()
-		if s.replayGate != nil {
-			<-s.replayGate
+		if replayGate != nil {
+			<-replayGate
 		}
 		for _, m := range replay {
 			f.mu.Lock()
