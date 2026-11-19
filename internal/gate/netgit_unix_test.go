@@ -4,10 +4,10 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -76,7 +76,18 @@ func TestGitPipeHolderProcess(t *testing.T) {
 	if pidPath := os.Getenv("GATE_TEST_PIPE_PID"); pidPath != "" {
 		_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
 	}
-	if os.Getenv("GATE_TEST_PIPE_EXIT_IMMEDIATE") == "1" {
+	if readyPath := os.Getenv("GATE_TEST_PIPE_READY"); readyPath != "" {
+		ready, err := os.OpenFile(readyPath, os.O_WRONLY, 0)
+		if err != nil {
+			os.Exit(1)
+		}
+		if _, err := ready.Write([]byte{1}); err != nil {
+			_ = ready.Close()
+			os.Exit(1)
+		}
+		_ = ready.Close()
+	}
+	if os.Getenv("GATE_TEST_PIPE_EXIT_AFTER_READY") == "1" {
 		os.Exit(0)
 	}
 	releasePath := os.Getenv("GATE_TEST_PIPE_RELEASE")
@@ -102,19 +113,20 @@ func TestGitPipeHolderProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-// TestRemoteGitTimeoutBoundsTheWallClock proves the deadline bounds the call,
-// not only its message: git is killed at the deadline, and a transport helper
-// that survived the kill and still holds the output pipes cannot extend the
-// wait past gitWaitDelay. The call must return while the helper still blocks
-// on a test-controlled release; only then does the test let the helper exit.
-func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
+// TestRemoteGitCancelBoundsCallDespitePipeHolder proves a cancel (or deadline)
+// bounds the call while a transport helper that survived the kill still holds
+// the output pipes: the test cancels a parent context only after the helper
+// blocks on the release fifo, so helper start time does not affect pass/fail.
+func TestRemoteGitCancelBoundsCallDespitePipeHolder(t *testing.T) {
 	bin := t.TempDir()
 	mark := filepath.Join(t.TempDir(), "holder")
 	holderPID := mark + ".pid"
 	started := mark + ".script"
+	readyFIFO := filepath.Join(t.TempDir(), "holder-ready.fifo")
 	releaseFIFO := filepath.Join(t.TempDir(), "holder-release.fifo")
 	doneFIFO := filepath.Join(t.TempDir(), "holder-done.fifo")
 	for path, mode := range map[string]uint32{
+		readyFIFO:   0o600,
 		releaseFIFO: 0o600,
 		doneFIFO:    0o600,
 	} {
@@ -123,10 +135,7 @@ func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
 		}
 	}
 
-	// The warmup branch execs this exact file once before the timed call, so
-	// the clock starts after the OS has the script cached; otherwise a cold
-	// first exec on macOS can take longer than the timeout under test.
-	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = warmup ]; then exit 0; fi\necho started > %q\n%q -test.run='^TestGitPipeHolderProcess$' &\nwait\n",
+	script := fmt.Sprintf("#!/bin/sh\necho started > %q\n%q -test.run='^TestGitPipeHolderProcess$' &\nwait\n",
 		started, os.Args[0])
 	gitPath := filepath.Join(bin, "git")
 	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
@@ -136,6 +145,7 @@ func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
 	t.Setenv("GATE_TEST_PIPE_HOLDER", "1")
 	t.Setenv("GATE_TEST_PIPE_MARK", mark)
 	t.Setenv("GATE_TEST_PIPE_PID", holderPID)
+	t.Setenv("GATE_TEST_PIPE_READY", readyFIFO)
 	t.Setenv("GATE_TEST_PIPE_RELEASE", releaseFIFO)
 	t.Setenv("GATE_TEST_PIPE_DONE", doneFIFO)
 
@@ -151,16 +161,23 @@ func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
 		})
 	}
 	var waitOnce sync.Once
-	waitHolderExited := func() {
+	waitHolderExited := func(fatal bool) {
 		t.Helper()
 		waitOnce.Do(func() {
 			r, err := os.Open(doneFIFO)
 			if err != nil {
-				t.Fatalf("waiting for the pipe holder to exit: %v", err)
+				if fatal {
+					t.Fatalf("waiting for the pipe holder to exit: %v", err)
+				}
+				t.Errorf("waiting for the pipe holder to exit: %v", err)
+				return
 			}
 			defer func() { _ = r.Close() }()
 			if _, err := io.ReadAll(r); err != nil {
-				t.Fatalf("reading holder-done fifo: %v", err)
+				if fatal {
+					t.Fatalf("reading holder-done fifo: %v", err)
+				}
+				t.Errorf("reading holder-done fifo: %v", err)
 			}
 		})
 	}
@@ -168,34 +185,52 @@ func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
 		if _, err := os.Stat(mark); err != nil {
 			return
 		}
+		pidBytes, err := os.ReadFile(holderPID)
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+		if err != nil {
+			return
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+			return
+		}
 		releaseHolder()
-		waitHolderExited()
+		waitHolderExited(false)
 	})
 
-	if out, err := exec.Command(gitPath, "warmup").CombinedOutput(); err != nil {
-		t.Fatalf("warming up the fake git: %v: %s", err, out)
-	}
-
-	const timeout, waitDelay = 200 * time.Millisecond, 300 * time.Millisecond
+	const waitDelay = 300 * time.Millisecond
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	done := make(chan struct{})
 	var remoteErr error
 	go func() {
-		_, remoteErr = gitRemoteWithin(context.Background(), t.TempDir(), timeout, waitDelay, "fetch", "origin")
+		// A long child timeout ensures the only bound is the cancel the test
+		// fires after the helper has signalled readiness.
+		_, remoteErr = gitRemoteWithin(parent, t.TempDir(), time.Hour, waitDelay, "fetch", "origin")
 		close(done)
 	}()
+
+	// Blocking read: no polling, no timer. If the helper never starts (broken
+	// test binary path, etc.) this blocks until go test's own timeout.
+	ready, err := os.Open(readyFIFO)
+	if err != nil {
+		t.Fatalf("opening holder-ready fifo: %v", err)
+	}
+	defer func() { _ = ready.Close() }()
+	if _, err := ready.Read(make([]byte, 1)); err != nil && err != io.EOF {
+		t.Fatalf("reading holder-ready fifo: %v", err)
+	}
+
+	cancel()
 	<-done
 
-	if remoteErr == nil || !strings.Contains(remoteErr.Error(), "timed out after") {
-		t.Fatalf("a remote call whose helper holds the pipes must time out: %v", remoteErr)
+	if remoteErr == nil || !errors.Is(remoteErr, context.Canceled) {
+		t.Fatalf("a cancelled remote call whose helper holds the pipes must report cancel: %v", remoteErr)
 	}
-	for _, want := range []string{"git remote -v", "network", "credentials"} {
-		if !strings.Contains(remoteErr.Error(), want) {
-			t.Errorf("the timeout error must say what to check (%q): %v", want, remoteErr)
-		}
-	}
-	// The helper must really have survived the kill and kept the pipes open,
-	// or the test would only be timing a plain kill.
 	if b, err := os.ReadFile(mark); err != nil || string(b) != "setsid ok" {
 		log, _ := os.ReadFile(started)
 		t.Fatalf("the pipe holder did not leave git's process group (%q, %v); script log %q", b, err, log)
@@ -213,5 +248,30 @@ func TestRemoteGitTimeoutBoundsTheWallClock(t *testing.T) {
 	}
 
 	releaseHolder()
-	waitHolderExited()
+	waitHolderExited(true)
+}
+
+// TestRemoteGitDeadlineErrorBeforeExec proves the deadline branch's message
+// without waiting on the wall clock or on a pipe-holding helper.
+func TestRemoteGitDeadlineErrorBeforeExec(t *testing.T) {
+	bin := t.TempDir()
+	ranMarker := filepath.Join(t.TempDir(), "git-ran")
+	gitPath := filepath.Join(bin, "git")
+	if err := os.WriteFile(gitPath, []byte(fmt.Sprintf("#!/bin/sh\necho ran > %q\n", ranMarker)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := gitRemoteWithin(context.Background(), t.TempDir(), time.Nanosecond, time.Millisecond, "fetch", "origin")
+	if err == nil || !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("want the deadline error before exec starts: %v", err)
+	}
+	for _, want := range []string{"git remote -v", "network", "credentials"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the timeout error must say what to check (%q): %v", want, err)
+		}
+	}
+	if _, err := os.Stat(ranMarker); err == nil {
+		t.Fatalf("the fake git must not run when the context is already expired")
+	}
 }
