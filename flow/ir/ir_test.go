@@ -296,6 +296,70 @@ func TestDecodeAcceptsFlowStyleYAMLMapping(t *testing.T) {
 	}
 }
 
+// A stream of more than one document is rejected in both formats: only the
+// first would be compiled and hashed, so a corrected definition appended after
+// a stale one would vanish.
+func TestDecodeRejectsASecondJSONDocument(t *testing.T) {
+	text := `{"name":"first","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"plan":{"kind":"task"}},"edges":[{"from":"START","to":"plan"}]}
+	{"name":"second","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"plan":{"kind":"task"}},"edges":[{"from":"START","to":"plan"}]}`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, "more than one document") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestDecodeRejectsASecondYAMLDocument(t *testing.T) {
+	text := `
+name: first
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}]
+---
+name: second
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}]
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, "more than one document") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+// A single YAML document with a document start marker is still one document.
+func TestDecodeAcceptsOneDocumentWithAStartMarker(t *testing.T) {
+	text := `---
+name: x
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}, {from: plan, to: FAIL}]
+`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Name != "x" || len(f.Nodes) != 1 {
+		t.Fatalf("decoded %+v", f)
+	}
+}
+
 func TestDecodeRejectsNonObjectTopLevel(t *testing.T) {
 	for _, text := range []string{"null", `[{"name":"x"}]`, `"x"`, "42", "true"} {
 		_, err := Decode([]byte(text))

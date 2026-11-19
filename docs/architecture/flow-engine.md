@@ -11,10 +11,11 @@ reducers, nodes and edges. Its sha256 is its identity, and runs pin it. Authors
 write YAML, use the Go builder, or have an LLM generate the IR; all three
 compile to the same IR.
 
-`flow/ir` decodes that JSON or YAML, rejects unknown fields and duplicate
-keys, produces the RFC 8785 canonical bytes and the content hash, and enforces
-the structural rules below. `flow/compile` type-checks expressions and
-returns the validated canonical form of the same IR.
+`flow/ir` decodes that JSON or YAML, rejects unknown fields, duplicate keys and
+a stream carrying more than one document, produces the RFC 8785 canonical bytes
+and the content hash, and enforces the structural rules below. `flow/compile`
+type-checks expressions, enforces the definition limits and returns the
+validated canonical form of the same IR.
 
 ```yaml
 name: codegen.feature
