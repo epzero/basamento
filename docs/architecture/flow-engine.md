@@ -17,17 +17,25 @@ the structural rules below. `flow/compile` type-checks expressions and
 returns the validated canonical form of the same IR.
 
 ```yaml
-flow: codegen.feature
+name: codegen.feature
 version: 3
 state:
-  schema: { $ref: codegen-state.json }
+  schema:
+    type: object
+    properties:
+      messages: { type: array, items: { type: object } }
+      files:    { type: array, items: { type: object } }
+      attempts: { type: integer }
+      plan:     { type: object, properties: { modules: { type: array, items: { type: object } } } }
+      tests:    { type: object, properties: { failed: { type: integer } } }
+    required: [messages, files, attempts, plan, tests]
   reducers: { messages: append, files: merge_by(path), attempts: sum }
 nodes:
   plan:   { kind: agent, spec: { agent: planner }, out: plan }
   impl:   { kind: map, spec: { over: "state.plan.modules", node: impl_module, max_parallel: 4 } }
   verify: { kind: tool, spec: { tool: run_tests } }
   repair: { kind: agent, spec: { agent: fixer }, guard: { max_visits: 3, cost_mpts: 5000 } }
-  review: { kind: gate, spec: { schema: review.json, accept_if: "input.approved || size(input.notes) > 0", timeout: 72h } }
+  review: { kind: gate, spec: { schema: "review.json", accept_if: "input.approved || size(input.notes) > 0", timeout: "72h" } }
 edges:
   - { from: START,  to: plan }
   - { from: plan,   to: impl }

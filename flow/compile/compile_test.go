@@ -3,6 +3,8 @@ package compile
 import (
 	"encoding/json"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -251,4 +253,37 @@ func errOf(t *testing.T, f *flow.IR) error {
 	t.Helper()
 	_, err := Compile(f)
 	return err
+}
+
+// TestDocumentedExampleCompiles keeps the canonical IR in
+// docs/architecture/flow-engine.md §1 honest: prose that stops compiling fails
+// here, and the example cannot drift from what the compiler accepts.
+func TestDocumentedExampleCompiles(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "architecture", "flow-engine.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	example := fencedBlock(t, string(doc), "yaml")
+	c, err := CompileJSON([]byte(example))
+	if err != nil {
+		t.Fatalf("the documented example does not compile: %v", err)
+	}
+	if c.Hash() == "" || len(c.IR().Nodes) != 5 {
+		t.Fatalf("compiled the documented example to %d nodes", len(c.IR().Nodes))
+	}
+}
+
+func fencedBlock(t *testing.T, doc, language string) string {
+	t.Helper()
+	opening := "```" + language + "\n"
+	start := strings.Index(doc, opening)
+	if start < 0 {
+		t.Fatalf("no %q fenced block in the architecture document", language)
+	}
+	rest := doc[start+len(opening):]
+	end := strings.Index(rest, "```")
+	if end < 0 {
+		t.Fatalf("unterminated %q fenced block", language)
+	}
+	return rest[:end]
 }
