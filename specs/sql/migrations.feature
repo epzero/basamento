@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
+@wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
 Feature: Migrations from the binary
   Every SQL store migrates its database on open, from the migrations embedded
   in the binary. Upgrades keep existing data, a failed migration leaves no

@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component
+@wp:WP-L1-01 @level:component
 Feature: Failures of the SQL store on both dialects
   Constraint violations and database failures map to the same stable codes on
   SQLite and Postgres, so a caller can retry what is retryable and fix what is
