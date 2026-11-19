@@ -18,6 +18,8 @@ var s3MatrixNoS3Marker = map[string]string{
 	"BLOB-019-01#02": `opening.feature row: "/var/lib/kit/blobs"`,
 	"BLOB-019-01#03": `opening.feature row: "" (empty url)`,
 	"BLOB-020-01":    `opening.feature: explicit file URL of subdirectory "blobs"`,
+	"BLOB-045-01":    `opening.feature row: key 31 — Open refused before store (explicit file URL)`,
+	"BLOB-045-01#01": `opening.feature row: key 32 — explicit file URL open (signing key accepted)`,
 }
 
 var (
