@@ -7,8 +7,11 @@
 // master key and encrypts runtime payloads with the tenant's primary data key,
 // authenticating tenant and key id.
 //
-// Tenant ids must satisfy REQ-CORE-005 (see ValidateTenant); until core ships a
-// shared helper (EP0-52), this package enforces the same rule locally.
+// core.TenantFrom (merged in EP0-52, REQ-CORE-005) is the single place that
+// decides whether a context carries a valid tenant; Encode, Decode, and rotation
+// read the tenant from the context. ValidateTenant still validates tenant strings
+// for the keyset store port; EP0-84 will make this package use core's grammar
+// instead of its local copy.
 //
 // Each Encode performs one keyset store read; when the stored revision matches
 // the in-memory cache, no master-key unwrap runs.
