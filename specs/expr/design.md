@@ -114,6 +114,19 @@ nothing is coerced from strings.
   Go map order, including which error an evaluation reports first. A custom
   type adapter that returns a sorted map for every native map, and an AST
   or evaluation decorator for map literals, is one way to do it.
+- **Key equality and lookup** (REQ-EXPR-021): the kind ladder is the
+  iteration order only. Equality and lookup compare keys by CEL numeric
+  equality: an `int`, `uint` or `double` key is the same key as a key of
+  another of those kinds with the same value, in either direction, so
+  `{1: 'a', 2.0: 'b'} == {1u: 'a', 2: 'b'}` and
+  `{1: 'a', 2.0: 'b'} == {1.0: 'a', 2: 'b'}` are `true`, and
+  `{1: 'a', 2.0: 'b'}[1u]` and `{1.0: 'a', 2: 'b'}[1]` are `'a'`. A numeric
+  key and a key of a non-numeric kind are distinct. The `Find`, `Contains`
+  and `Equal` of the sorted map implement that equality, not one derived
+  from the ladder. Delegating them to cel-go's Go-map accessor is not
+  enough: it matches a `double` lookup key against an `int` or `uint` entry
+  key, but not the reverse, so `{1.0: 'a', 2: 'b'}[1]` would miss and map
+  equality would depend on operand order.
 - **Keys of no order** (REQ-EXPR-022): a map key with any
   other CEL type, such as a timestamp, a duration or a list, has no place in
   that order. An evaluation that iterates over such a map fails with the
@@ -130,10 +143,10 @@ nothing is coerced from strings.
   expressions: it is unbounded for any comprehension over a list of unknown
   size.
 
-## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-020)
+## 5. Mappings (REQ-EXPR-013 … REQ-EXPR-026)
 
 - **Variables**: named variables (`$params`, `$inputs`…) declared at compile
-  time; `$ENV` is never one of them.
+  time. `$ENV`, `$__loc__` and `$__prog_args` are never one of them.
 - **Rejected** at compile time, by walking the parsed query, wherever they
   appear, including inside function definitions:
 
@@ -146,7 +159,37 @@ nothing is coerced from strings.
   | `import`, `include`, `modulemeta` | read modules from files |
 
   Pure time functions on given values (`gmtime`, `mktime`, `strftime`,
-  `strptime`, `todate`, `fromdate`) are allowed.
+  `strptime`, `todate`, `fromdate`) are allowed, and so are step functions
+  such as `range`, `limit`, `first`, `last` and `nth`. `input_line_number` and `get_search_list` are rejected as well, and so are
+  the variables `$ENV`, `$__loc__` and `$__prog_args`, the shorthand `{$ENV}`
+  included (REQ-EXPR-024). The walk inspects every function call, every
+  definition name and parameter, every variable reference outside pattern
+  bindings (including ObjectKeyVal shorthand), and queries inside index/slice
+  expressions and pattern computed keys (PatternObject.KeyQuery,
+  PatternObject.KeyString), at any depth: inside another definition, an
+  array, an object, a string interpolation, an if, a try, a reduce, a
+  foreach, a label or break, or a function argument (f(now)). It fails closed
+  on unknown gojq AST constructs; omitting WithEnvironLoader, WithInputIter
+  and WithModuleLoader is the backing guard for env/$ENV, input/inputs and
+  modules.
+
+  The walk is the only guard for the names gojq already defines: its
+  `WithFunction` and `WithIterFunction` options are looked up only after the
+  internal functions, so they cannot shadow `now`, `env`, `input`, `halt` or
+  `modulemeta`.
+- **Reserved names** (REQ-EXPR-023): the rejected names are reserved even
+  when a mapping defines its own function or parameter with them, as in
+  `def now: 1; now` or `def f(env): 1; f(2)`. gojq resolves a definition or
+  a parameter before the builtin; telling that harmless shadowing from a
+  call of the builtin would need gojq's resolution to be reimplemented, and
+  would leave the other places open. Refusing the name everywhere leaves one
+  place for it to be banned, and the case is rare, because a mapping that
+  wants its own function called `now` can rename it. The error names the
+  function and says the name is reserved.
+- **Imports** (REQ-EXPR-026): `import` and `include` are rejected from
+  Query.Imports of the parsed query before any module loader is asked for
+  the file, with or without metadata or a body query. A data import
+  (`import "path" as $name`) is in the same list.
 - **Object order**: gojq iterates objects (`.[]`, `to_entries`, `keys`) and
   encodes them (`tojson`) in ascending key order. Scenarios pin this so a
   future gojq upgrade cannot change it silently. Functions the gojq library

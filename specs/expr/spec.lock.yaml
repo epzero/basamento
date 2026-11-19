@@ -498,6 +498,18 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/46
         human:
             status: pending
+    EXPR-021-05:
+        hash: sha256:597e3c230f42631796cd19380d445c3cca043c69689346bc83fbdd6259090c58
+        reqs:
+            - REQ-EXPR-021
+        tier: P1
+        author: claude-code:spec-author:b58551
+        reviewer: opencode:spec-reviewer:55941c
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: map key identity for == and [key] is CEL numeric equality across int, uint and double, symmetric in both directions, and a numeric key never equals a string key. Verified against cel-go v0.33.4: stock is asymmetric (int/uint lookups miss double entries) and operand-order-dependent, so this deliberately goes beyond its accessor; iteration order (EXPR-021-01..04) is unchanged.'
+        ref: https://github.com/epzero/basamento/pull/84
+        human:
+            status: pending
     EXPR-022-01:
         hash: sha256:ae3c9fc45a96a51fd4e3b89ced86a23dc173b09ece1b47dbf322b0c3bc1fab0e
         reqs:
@@ -520,5 +532,53 @@ scenarios:
         approved_at: "2026-11-19"
         note: 'Agreed behavior: a map key of no order fails iteration with the cause unordered key instead of being skipped in Go order, while a non-iterating access keeps every entry; verified against cel-go v0.33.4.'
         ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-023-01:
+        hash: sha256:153a83b47998ad12a04e395e5c4985a77a9d33623977e94945432f6dbf4bd055
+        reqs:
+            - REQ-EXPR-023
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: cursor:spec-reviewer:891d18
+        approved_at: "2026-11-19"
+        note: 'Arbitrated fix: halt and env parameter rows match REQ-EXPR-023 and design.md; full outline checked against requirement list and sibling EXPR-024–026.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-024-01:
+        hash: sha256:45f23123beb5777c55c2aa9b8784c0ff16cef1bf5e20e37059ca6928baab438a
+        reqs:
+            - REQ-EXPR-024
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'Security: $ENV, $__loc__ and $__prog_args expose the process environment, source paths and arguments, and using them would break replay determinism; refusing them is the guard that keeps a mapping pure.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-025-01:
+        hash: sha256:5e8786d98517130a3c3317c57446a7680a50b417c8e3267e125d16984bcea004
+        reqs:
+            - REQ-EXPR-025
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'New behavior: provider fields named like reserved builtins stay readable as data; no approved scenario text changed, so no tier above P2.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-026-01:
+        hash: sha256:60ca3ca4fa0fe3b281a697270d9b8d6f891c7475f02ae69af21fc5ef515903ed
+        reqs:
+            - REQ-EXPR-026
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:1cc967
+        approved_at: "2026-11-18"
+        note: 'Security: a mapping that includes a module or imports a data file reads the host filesystem, and module contents would make evaluation depend on files not bound as variables; refusing both at compile time keeps a mapping closed over its inputs and replay-deterministic. Covers the include and data-import forms; the plain module import is already approved in EXPR-015-01.'
+        ref: https://github.com/epzero/basamento/pull/51
         human:
             status: pending
