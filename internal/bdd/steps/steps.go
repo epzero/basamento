@@ -36,6 +36,7 @@ type World struct {
 	Local       *localWorld
 	Config      *configWorld
 	Auth        *authWorld
+	Worker      *workerWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -62,6 +63,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Local:     newLocalWorld(),
 			Config:    newConfigWorld(),
 			Auth:      newAuthWorld(),
+			Worker:    newWorkerWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -86,6 +88,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerAuth(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
+	registerWorker(sc)
 	registerBlobUploads(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()

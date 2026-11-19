@@ -1,0 +1,253 @@
+syntax = "proto3";
+
+// The worker contract. A worker dials out, joins one pool with a pool token,
+// declares what it serves and pulls invocations in short calls, so it works
+// behind NAT and survives a dropped connection (ADR-0012 §4). Every call names
+// the worker and, where it is about one invocation, the lease it is about.
+package basamento.worker.v1;
+
+import "google/protobuf/struct.proto";
+
+// Restart says whether an interrupted invocation may be started again.
+enum Restart {
+  RESTART_UNSPECIFIED = 0;
+  // Interrupting the invocation loses only time (a local ffmpeg or GPU model).
+  RESTART_SAFE = 1;
+  // Interrupting the invocation may have cost money; it is never restarted on
+  // the platform's own decision.
+  RESTART_UNSAFE = 2;
+}
+
+// WorkerState is whether a worker takes work.
+enum WorkerState {
+  WORKER_STATE_UNSPECIFIED = 0;
+  WORKER_STATE_ACTIVE = 1;
+  WORKER_STATE_DRAINING = 2;
+  WORKER_STATE_PAUSED = 3;
+}
+
+// Class is the priority class of an invocation.
+enum Class {
+  CLASS_UNSPECIFIED = 0;
+  CLASS_INTERACTIVE = 1;
+  CLASS_NORMAL = 2;
+  CLASS_BATCH = 3;
+}
+
+// Descriptor is catalog data for one model a worker serves. A pool keeps one
+// descriptor per model id and refuses a worker that declares a different one
+// while another worker of the pool serves it (ADR-0012 §2).
+message Descriptor {
+  string id = 1;
+  // Capabilities, e.g. "video.generate".
+  repeated string caps = 2;
+  // JSON Schema of the parameters, checked by the worker again before a start.
+  google.protobuf.Struct params_schema = 3;
+  repeated InputSlot inputs = 4;
+  // CEL over `params`, `usage` and `rates` returning milli-points.
+  string price = 5;
+  // stream | single | poll | webhook | socket | command.
+  string protocol = 6;
+  // Units the model costs on a worker (1 unless its manifest says more).
+  int32 units = 7;
+  Restart restart = 8;
+}
+
+// InputSlot names an input a model accepts, e.g. prompt, first_frame, mask.
+message InputSlot {
+  string name = 1;
+  // text | messages | image | video | audio
+  string media = 2;
+  bool required = 3;
+  int32 max = 4;
+}
+
+// Worker is the identity and state the platform keeps for one connected worker.
+message Worker {
+  string id = 1;
+  string pool = 2;
+  WorkerState state = 3;
+  repeated Descriptor descriptors = 4;
+  // Labels such as gpu or region, matched by routing.
+  map<string, string> labels = 5;
+  int32 capacity = 6;
+  int32 units_in_use = 7;
+}
+
+// JoinRequest is one worker joining one pool. The pool token is the only
+// credential it carries; joining yields a short-lived worker credential.
+message JoinRequest {
+  // Pool token, sent once. The platform stores only its hash.
+  string pool_token = 1;
+  // Protocol version of this contract; an incompatible one is refused with a
+  // message that says which side to upgrade.
+  string protocol_version = 2;
+  repeated Descriptor descriptors = 3;
+  map<string, string> labels = 4;
+  int32 capacity = 5;
+}
+
+// JoinResponse is the worker id, its credential and the heartbeat cadence.
+message JoinResponse {
+  string worker_id = 1;
+  // Short-lived credential; heartbeats renew it.
+  string credential = 2;
+  int32 heartbeat_interval_seconds = 3;
+}
+
+// LeaseRequest says what a worker can take right now.
+message LeaseRequest {
+  string worker_id = 1;
+  string credential = 2;
+  // Units free on the worker.
+  int32 free_units = 3;
+  // Models already loaded, preferred among invocations that tie.
+  repeated string warm_models = 4;
+  // How long the worker will stay connected.
+  int32 time_left_seconds = 5;
+  // Long-poll timeout; the platform answers with nothing after it.
+  int32 wait_seconds = 6;
+}
+
+// LeaseResponse carries the invocations handed to the worker, in the platform's
+// order.
+message LeaseResponse {
+  repeated Invocation invocations = 1;
+}
+
+// Invocation is what a worker is given. It holds no credential and no more
+// about the tenant than the work needs (ADR-0012 §10).
+message Invocation {
+  string client_ref = 1;
+  string model = 2;
+  // Opaque request payload, as model.Request.
+  google.protobuf.Struct request = 3;
+  int32 units = 4;
+  // Attempt number of this invocation, starting at 1.
+  int32 attempt = 5;
+  // Lease expiry, Unix milliseconds.
+  int64 lease_expires_unix_ms = 6;
+  // Spans join the run's trace.
+  string trace_parent = 7;
+}
+
+// StartingRequest is sent before the worker calls its provider; StartedRequest
+// carries the provider's handle afterwards.
+message StartingRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+}
+
+// StartingResponse is empty.
+message StartingResponse {}
+
+// StartedRequest reports the provider handle.
+message StartedRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+  string provider_handle = 4;
+}
+
+// StartedResponse is empty.
+message StartedResponse {}
+
+// Event is one piece of partial output.
+message Event {
+  int64 seq = 1;
+  string kind = 2;
+  string text = 3;
+  bytes audio = 4;
+  double progress = 5;
+  int32 attempt = 6;
+  google.protobuf.Struct data = 7;
+}
+
+// EventsRequest batches partial output for one lease.
+message EventsRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+  repeated Event events = 4;
+}
+
+// EventsResponse is empty.
+message EventsResponse {}
+
+// FinishRequest is the result of an invocation. Files went to blob storage
+// through scoped URLs before it.
+message FinishRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+  string state = 4;
+  google.protobuf.Struct result = 5;
+  string error_code = 6;
+  int64 cost_milli_points = 7;
+}
+
+// FinishResponse is empty.
+message FinishResponse {}
+
+// ReleaseRequest gives a lease back: unused, or not before a time.
+message ReleaseRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+  bool unused = 4;
+  int64 not_before_unix_ms = 5;
+}
+
+// ReleaseResponse is empty.
+message ReleaseResponse {}
+
+// HeartbeatRequest keeps the worker present and its leases alive.
+message HeartbeatRequest {
+  string worker_id = 1;
+  string credential = 2;
+  int32 free_units = 3;
+}
+
+// HeartbeatResponse carries what the platform wants from the worker.
+message HeartbeatResponse {
+  // Client refs to cancel at the provider.
+  repeated string cancel = 1;
+  // Drain, then leave.
+  bool drain = 2;
+  // New lease expiry, Unix milliseconds; zero leaves the leases as they are.
+  int64 lease_expires_unix_ms = 3;
+  WorkerState state = 4;
+}
+
+// LeaveRequest is a clean exit.
+message LeaveRequest {
+  string worker_id = 1;
+  string credential = 2;
+}
+
+// LeaveResponse is empty.
+message LeaveResponse {}
+
+// WorkerService is the short-call contract a worker implements the client side
+// of. It dials out; the platform never dials the worker.
+service WorkerService {
+  // Join exchanges a pool token for a worker id and a short-lived credential.
+  rpc Join(JoinRequest) returns (JoinResponse);
+  // Lease is a long poll for invocations the worker can take.
+  rpc Lease(LeaseRequest) returns (LeaseResponse);
+  // Starting is sent before the worker calls its provider.
+  rpc Starting(StartingRequest) returns (StartingResponse);
+  // Started is sent after the provider accepted, with its handle.
+  rpc Started(StartedRequest) returns (StartedResponse);
+  // Events sends partial output in batches.
+  rpc Events(EventsRequest) returns (EventsResponse);
+  // Finish reports the result.
+  rpc Finish(FinishRequest) returns (FinishResponse);
+  // Release gives a lease back.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+  // Heartbeat keeps the worker present and its leases alive.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Leave is a clean exit.
+  rpc Leave(LeaveRequest) returns (LeaveResponse);
+}

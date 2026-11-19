@@ -153,6 +153,18 @@ launchers are `http` (a templated request: Modal, Fly, RunPod, a relay) and
 `process` (a local command). Services that scale on requests (Cloud Run
 services, Lambda) are remote invokers instead and need none of this.
 
+**The first implementation** (`model/worker`, WP-L3-07) stores pools,
+descriptors, workers and the queue in the SQL store (ADR-0012 §3), so both
+profiles behave the same and several replicas can serve one pool.
+`kit worker --pool-token … --sql-url … --data-dir … --models …` joins one pool,
+declares what its provider manifests serve and pulls until it is stopped;
+`--capacity`, `--labels` and `--once` bound it. A manifest model may set
+`units` and `restart: safe` (ADR-0012 §6, §7). The first version wires the
+embedded profile's in-process transport (`worker.LocalTransport`); the cloud
+profile reaches the same contract over the generated gRPC client, which lands
+with WP-L3-08's launchers. The worker journal is a file under `--data-dir`, so
+a restarted worker resumes what it holds.
+
 ## 7. Prices
 
 Costs are whole **milli-points**. A point is the deployment's unit of account;

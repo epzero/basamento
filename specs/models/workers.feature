@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-07 @runtime:any @level:component
+@wp:WP-L3-07 @runtime:any @level:component
 Feature: Workers pull invocations from their pool's queue
   A worker serves what it declared to the pool it joined. The platform keeps
   the queue: it decides the order, respects what each worker can take, and

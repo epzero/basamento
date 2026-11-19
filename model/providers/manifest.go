@@ -49,6 +49,12 @@ type ModelSpec struct {
 	// Price is the model's CEL price formula in milli-points. Empty uses the
 	// catalog's rate rules and default token formula.
 	Price string `yaml:"price,omitempty"`
+	// Units is what one invocation costs on a worker; 0 reads as 1
+	// (ADR-0012 §6). It has no meaning for a provider that is not a worker.
+	Units int `yaml:"units,omitempty"`
+	// Restart is "safe" when an interrupted invocation may be started again
+	// on another worker (ADR-0012 §7); empty or "unsafe" is the default.
+	Restart string `yaml:"restart,omitempty"`
 }
 
 // HTTP is the generic HTTP API driver. Every call is one HTTP request whose
@@ -247,6 +253,14 @@ func (m ModelSpec) validate() error {
 		if strings.TrimSpace(string(c)) == "" {
 			return fmt.Errorf("model %q has an empty capability", m.ID)
 		}
+	}
+	if m.Units < 0 {
+		return fmt.Errorf("model %q has negative units", m.ID)
+	}
+	switch m.Restart {
+	case "", "unsafe", "safe":
+	default:
+		return fmt.Errorf("model %q has unknown restart %q (safe or unsafe)", m.ID, m.Restart)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ layers:
   stream:           [core, platform]
   model:            [core, platform, expr]
   model/node:       [core, platform, expr, model, runtime]
+  model/worker:     [core, platform, expr, model, tool]
   prompt:           [core]
   flow:             [core, expr]
   flow/host:        [core, expr, flow, runtime]

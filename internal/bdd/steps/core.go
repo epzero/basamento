@@ -123,6 +123,9 @@ func registerCore(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the request fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)
+		if w.Worker != nil && w.Worker.lastErr != nil {
+			return workerCode(w.Worker.lastErr, code)
+		}
 		if w.Core.lastErr == nil && w.Auth.lastErr != nil {
 			return assertAuthFailsWithCode(ctx, code)
 		}
