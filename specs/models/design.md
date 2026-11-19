@@ -204,6 +204,23 @@ rule's `when` does not hold: MODEL-073-03).
   usage being priced: the estimated usage (`input_tokens` = counted input
   tokens, `output_tokens` = output limit) when estimating before start, and
   actual usage at settlement. The evaluation sees no clock.
+- A `when` that errors (division by zero, a missing parameter key) or returns
+  anything but a boolean fails pricing with `core.CodeInvalidArgument` and
+  stops the rule search (REQ-MODEL-083, MODEL-083-01). The rule is not
+  skipped: skipping it would silently price the call with a later, possibly
+  cheaper, rule, and the caller would never learn that its price data or its
+  parameters are broken. Errors from `expr` already carry that code, so the
+  catalog returns them unchanged. This is the fail-closed rule of C3 applied
+  to the condition.
+- A rate below zero is refused where it is set — tenant, deployment or
+  snapshot layer — and while the shipped snapshot loads, with
+  `core.CodeInvalidArgument` and details `model` and `rate` naming the model
+  id and the rate key (REQ-MODEL-084, MODEL-084-01, MODEL-084-02). A negative
+  rate would turn a charge into a credit, so bad price data fails closed
+  exactly as bad usage does in C3; nothing downstream has to defend against a
+  rate the catalog accepted. The shipped snapshot is a golden file generated
+  at build time (C6), so the load check is what keeps a bad generation from
+  shipping.
 - The tenant is taken from the tenant context of the call (constitution
   article 8); the catalog never keys an override by a value in the request
   (REQ-MODEL-072). A call made outside any tenant uses the deployment layer:
@@ -257,6 +274,16 @@ rule's `when` does not hold: MODEL-073-03).
   default one or a model's own, since a model's formula may read `usage` too;
   it is what keeps bad provider data from turning into a credit. The
   reservation estimate sets `C = 0` (C4), so it passes the check every time.
+  A negative `I`, `O`, `C` or `R` fails pricing the same way, before any
+  formula and naming the model and the offending count (REQ-MODEL-085,
+  MODEL-085-01); the details are `model` and `field`, the latter one of
+  `input_tokens`, `output_tokens`, `cached_tokens` or `reasoning_tokens` as
+  the CEL bindings name them. The `C > I` check keeps running first, so
+  MODEL-082-01 still fails for the cached-versus-input reason; both orders
+  return `core.CodeInvalidArgument`, which is what a caller can observe. The
+  check is needed even though a negative amount later fails too (below): a
+  formula such as `usage.input_tokens * usage.input_tokens` would otherwise
+  price a negative count as a positive amount.
 - **Cache writes are not priced.** `model.Usage` has no cache-write or
   cache-creation field, so cache-write tokens, a `rates.cache_write`, TTL or
   storage are not priced by the default formula and no rule rate for them
@@ -267,12 +294,32 @@ rule's `when` does not hold: MODEL-073-03).
 - A model that declares its own formula (image, video, `params.duration_s`,
   …) uses it with `rates` bound to the chosen rule's rates, whatever usage
   it reads.
+- **A formula's amount is whole, and never negative** (REQ-MODEL-086,
+  REQ-MODEL-087): a formula that returns an amount below zero fails pricing
+  with `core.CodeInvalidArgument`, while `0` is a valid amount and prices the
+  call at nothing (MODEL-086-01, MODEL-086-02). The amount must also be a
+  whole number of milli-points: CEL has no exact decimal, so
+  `double(usage.input_tokens) * 0.145` on 100 tokens is the `double`
+  `14.499999999999998`, and half-up rounding (REQ-MODEL-076) would silently
+  turn it into 14 instead of 15. (CEL needs the explicit `double(...)`
+  conversion; `int × double` does not type-check, and the failure of that
+  form is a compile error, not this check.) The catalog therefore accepts an
+  `int`, a `uint` that fits in `int64`, or a `double` that is an exact integer
+  of magnitude at most 2^53, and fails any other `double` with
+  `core.CodeInvalidArgument` naming the model (MODEL-087-01). Fractional
+  formulas wait for an exact decimal in the CEL environment — a separate
+  design decision for the architect, not a WP-L3-06 change. The default token
+  formula is unaffected: it computes in exact `big.Int` arithmetic and divides
+  by one million once, as above.
 - **Rounding (REQ-MODEL-076):** the formula and the rule rates are evaluated
   over exact decimal values and the result is rounded to the nearest whole
   milli-point, halves away from zero (up, since prices are not negative:
   MODEL-076-01, MODEL-076-02). The rounding happens once, on the final
   amount; no intermediate value is rounded. Implementations evaluate in
-  `math/big.Rat` or integers scaled by 10^6, never `float64`.
+  `math/big.Rat` or integers scaled by 10^6, never `float64` — except that a
+  model's own formula may return a `double` (above), which is converted
+  exactly with `big.Rat.SetFloat64` and accepted only when that exact value is
+  a whole number, so the check itself introduces no rounding.
 
 ## C4. Estimation for a reservation
 
