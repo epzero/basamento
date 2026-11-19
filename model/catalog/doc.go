@@ -13,4 +13,6 @@
 // usage and tenant. A model with rules and no formula of its own uses the
 // default token formula; a model with its own formula uses it with the chosen
 // rule's rates. Amounts are whole milli-points, rounded half away from zero.
+// A model's own formula must return a whole number of milli-points in integer
+// arithmetic; rates and priced amounts are never negative.
 package catalog

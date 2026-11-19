@@ -167,4 +167,5 @@ or models.dev) and reviewed like a golden file. Nothing fetches prices at run
 time, so the same commit prices the same call the same way. `model/catalog`
 loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
 and tenant layers above it, and keeps the entry and start time of a call in a
-quote until settlement.
+quote until settlement. A model's own formula must return a whole number of
+milli-points in integer arithmetic; rates and priced amounts are never negative.

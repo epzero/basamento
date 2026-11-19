@@ -210,23 +210,36 @@ func amountFromCEL(modelID string, out any) (int64, error) {
 		}
 		return int64(v), nil
 	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return 0, amountError(modelID, fmt.Errorf("amount is not a number"))
-		}
-		r := new(big.Rat).SetFloat64(v)
-		return roundedRat(modelID, r)
+		return amountFromFloat(modelID, v)
 	case json.Number:
 		if i, err := v.Int64(); err == nil {
 			return i, nil
 		}
-		f, err := v.Float64()
-		if err != nil {
-			return 0, amountError(modelID, fmt.Errorf("amount is not a number"))
-		}
-		return amountFromCEL(modelID, f)
+		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
 	default:
 		return 0, amountError(modelID, fmt.Errorf("formula returned %T, want a number", out))
 	}
+}
+
+// maxFloatMilliPoints is 2^53; larger integers are not exact in float64, so a
+// formula that returns a double cannot be trusted at or beyond this magnitude.
+const maxFloatMilliPoints = 9007199254740992
+
+func amountFromFloat(modelID string, v float64) (int64, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, amountError(modelID, fmt.Errorf("amount is not a number"))
+	}
+	if v != math.Trunc(v) {
+		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
+	}
+	if v <= -maxFloatMilliPoints || v >= maxFloatMilliPoints {
+		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
+	}
+	i := int64(v)
+	if float64(i) != v {
+		return 0, amountError(modelID, fmt.Errorf("formula must return a whole number of milli-points using integer arithmetic"))
+	}
+	return i, nil
 }
 
 func roundedRat(modelID string, r *big.Rat) (int64, error) {

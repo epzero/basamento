@@ -549,3 +549,63 @@ func TestZeroAmountAccepted(t *testing.T) {
 		t.Fatalf("charge = %d, want 0", charge.MilliPoints)
 	}
 }
+
+func TestFormulaAmountMustBeExactInteger(t *testing.T) {
+	tests := []struct {
+		name    string
+		formula string
+		input   int64
+		want    int64
+		refuse  bool
+	}{
+		{
+			name:    "double above exact range",
+			formula: "double(9007199254740993)",
+			refuse:  true,
+		},
+		{
+			name:    "decimal multiplication refused",
+			formula: "usage.input_tokens * 0.145",
+			input:   100,
+			refuse:  true,
+		},
+		{
+			name:    "integral double arithmetic",
+			formula: "double(5) * 2.0",
+			want:    10,
+		},
+		{
+			name:    "integer formula unchanged",
+			formula: "usage.input_tokens * 10",
+			input:   7,
+			want:    70,
+		},
+		{
+			name:    "uint too large",
+			formula: "uint(9223372036854775808)",
+			refuse:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newCatalog(t)
+			mustAdd(t, c, chatDescriptor("sim-chat"))
+			mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: tt.formula})
+			got, err := c.Estimate(context.Background(), catalog.Request{
+				Model: "sim-chat", InputTokens: tt.input, OutputLimit: 0,
+			})
+			if tt.refuse {
+				if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+					t.Fatalf("code=%s err=%v, want invalid_argument", core.CodeOf(err), err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Estimate: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("estimate=%d want=%d", got, tt.want)
+			}
+		})
+	}
+}
