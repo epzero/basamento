@@ -30,7 +30,8 @@ func ForType(t reflect.Type) (*Schema, error) {
 	if path, ok := invalidFieldPath(t); ok {
 		return nil, invalidArg("type has no JSON form", map[string]any{"field": path})
 	}
-	s, err := gjschema.ForType(t, forOptions(t))
+	opts := forOptions(t)
+	s, err := gjschema.ForType(t, opts)
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}
@@ -39,6 +40,10 @@ func ForType(t reflect.Type) (*Schema, error) {
 		return nil, invalidArgf("marshal generated schema: %v", err)
 	}
 	raw = patchNullTypesInGeneratedSchema(raw)
+	raw, err = patchEmbeddedJSONFields(raw, t, opts)
+	if err != nil {
+		return nil, err
+	}
 	canonical, err := Canonicalize(raw)
 	if err != nil {
 		return nil, err
@@ -113,10 +118,10 @@ func collectAliasByteSliceTypes(t reflect.Type, ts map[reflect.Type]*gjschema.Sc
 		switch typ.Kind() {
 		case reflect.Struct:
 			for _, f := range reflect.VisibleFields(typ) {
-				if f.Anonymous || !f.IsExported() {
+				if !f.IsExported() {
 					continue
 				}
-				if jsonName(f) == "" {
+				if jsonName(f) == "" && (!f.Anonymous || !embedStructKind(f.Type)) {
 					continue
 				}
 				walk(f.Type)
@@ -243,10 +248,10 @@ func walkInvalidField(t reflect.Type, prefix string, seen map[reflect.Type]bool)
 		return prefix, true
 	case reflect.Struct:
 		for _, f := range reflect.VisibleFields(t) {
-			if f.Anonymous || !f.IsExported() {
+			if !f.IsExported() {
 				continue
 			}
-			if jsonName(f) == "" {
+			if jsonName(f) == "" && (!f.Anonymous || !embedStructKind(f.Type)) {
 				continue
 			}
 			next := f.Name
