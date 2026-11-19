@@ -31,7 +31,7 @@ type SecretsSource interface {
 }
 
 // StaticSecrets is a SecretsSource over values added at runtime. It is safe
-// for concurrent use and is what Config.Secrets falls back to.
+// for concurrent use; a Setup keeps one for SetCredential.
 type StaticSecrets struct {
 	mu     sync.RWMutex
 	values []string
