@@ -4,10 +4,16 @@
 // poll, webhook, WebSocket, command line) are adapter details. Callers either
 // block (Invoke) or follow events. See ADR-0006 and docs/architecture/model-layer.md.
 //
-// Chat messages and tool definitions use github.com/cloudwego/eino/schema once
-// WP-L3-01 lands; here they travel as JSON so this contract stays dependency-free.
+// Chat messages and tool definitions travel as JSON of github.com/cloudwego/eino/schema
+// values, so this contract does not depend on eino itself. The chat adapter in
+// model/chat maps them to eino's types; the embedding adapter here maps
+// Request.Texts to an eino Embedder. Registry holds the part every adapter owes
+// regardless of protocol: idempotent starts, the ordered event log, the
+// result, cancellation and lookup.
 //
-// Status: contract only (WP-L3-*).
+// Provider construction (vendor SDKs, eino-ext, OpenAI-compatible endpoints for
+// MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping is
+// WP-L3-02.
 package model
 
 import (
@@ -91,6 +97,7 @@ type Request struct {
 	Tools        json.RawMessage       `json:"tools,omitempty"`
 	OutputSchema json.RawMessage       `json:"output_schema,omitempty"` // structured output
 	Text         map[string]string     `json:"text,omitempty"`
+	Texts        []string              `json:"texts,omitempty"` // embedding inputs, in order
 	Assets       map[string][]AssetRef `json:"assets,omitempty"`
 	Params       json.RawMessage       `json:"params,omitempty"`
 	Seed         *int64                `json:"seed,omitempty"`
@@ -181,7 +188,9 @@ type Invoker interface {
 }
 
 // Invoke starts an invocation and waits for its result: the blocking form of
-// the contract, for callers that do not follow events.
+// the contract, for callers that do not follow events. The adapter keeps
+// publishing into its event buffer while Invoke waits, so a blocking caller
+// cannot starve the invocation.
 func Invoke(ctx context.Context, p Invoker, r Request) (Result, error) {
 	h, err := p.Start(ctx, r)
 	if err != nil {
