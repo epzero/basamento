@@ -44,7 +44,7 @@ type Telemetry interface {
 | --- | --- | --- |
 | Span processor | writes ended spans to the span store (`REQ-TELEM-010`, `REQ-TELEM-011`) | batch exporter to `CollectorURL` (`REQ-TELEM-015`) |
 | Metrics & logs | held in-process / `slog` handler | OTLP batch export to `CollectorURL` (`REQ-TELEM-015`) |
-| Purge | deletes rows whose end time is older than `Config.RetentionPeriod` (`REQ-TELEM-014`) | none |
+| Purge | deletes rows whose end time is older than the effective retention period: `Config.RetentionPeriod`, or 24 hours when it is zero (`REQ-TELEM-014`) | none |
 
 ## Redaction
 
@@ -84,16 +84,26 @@ worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
   change must land first in its own pull request with an ADR
   (`docs/engineering/agent-workflow.md` §4).
 - The span table belongs to `platform/telemetry`, not to `platform/sql`.
-  `NewSQLSpanStore` creates the table `telemetry_spans` idempotently on the
-  `platform/sql` store it is given (create if absent); it is
-  not part of the product's versioned migration set, and WP-L1-01 ships no
-  span table. Spans are disposable data that live only for the retention
-  period, so a later change to the table's columns replaces the table rather
-  than migrating rows.
-- **Default retention.** When `Config.RetentionPeriod` is zero, the embedded
-  span store keeps spans for 24 hours (`DefaultRetentionPeriod`,
-  REQ-TELEM-014). Spans serve debugging of recent runs; a day covers that
-  without letting a local database grow without bound. Configuration
-  (WP-L1-05) passes a set value through and sets no other default.
+  `NewSQLSpanStore` creates the table `telemetry_spans` if it is absent, on
+  the `platform/sql` store it is given; WP-L1-01 ships no span table. The span
+  store is embedded only, so `NewSQLSpanStore` accepts a SQLite store and
+  refuses any other dialect with `invalid_argument`.
+- **What owning the table outside the migration set gives up.** The table is
+  not in the product's versioned migration set, so the schema version of the
+  SQL store does not cover it, and REQ-SQL-005, REQ-SQL-008 and REQ-SQL-009
+  give it no guarantee. Create-if-absent never changes an existing table, so
+  the table has one shape. A change to that shape is a spec change of its own,
+  and it must say how spans still inside the retention period are kept, since
+  REQ-TELEM-012 returns them and REQ-TELEM-014 deletes only older ones.
+- **Default retention.** The span store, not configuration, applies the
+  default: when `Config.RetentionPeriod` is zero it keeps spans for 24 hours
+  (`DefaultRetentionPeriod`, REQ-TELEM-014), and a negative period is refused
+  with `invalid_argument` when the store is built. Spans serve debugging of
+  recent runs; a day covers that without letting a local database grow
+  without bound. `specs/config` has no retention key; adding one is a change
+  to that spec.
+- The statements about `NewSQLSpanStore` describe the work package's
+  implementation before it is reviewed; the implementer and the code reviewer
+  check them against the code, including the SQLite DDL.
 - The simulated OTLP collector and test harness helpers live in `internal/bdd`
   (and `_test.go` files), never in `platform/telemetry`.
