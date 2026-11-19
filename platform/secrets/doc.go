@@ -17,4 +17,8 @@
 // After a master-key rotation, another process or a partially failed rotation
 // may leave records on an old master id; rerun the rotation before removing
 // the previous master from configuration (idempotent).
+//
+// Master-key rotation retires replaced KeyService values without closing them;
+// Codec.Close closes the ring and every retired key once, so in-flight calls
+// that snapshot the ring can finish before their keeper is released.
 package secrets

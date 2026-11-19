@@ -38,7 +38,8 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if _, ok := core.TenantFrom(core.WithTenant(context.Background(), core.TenantID(tenant))); !ok {
+	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
+	if _, ok := core.TenantFrom(ctx); !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -66,9 +67,9 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	h.Store.maybeSweep(r.Context())
+	h.Store.maybeSweep(ctx)
 	tid := core.TenantID(tenant)
-	meta, slotOK, err := h.Store.readSlot(r.Context(), tid, stageKey)
+	meta, slotOK, err := h.Store.readSlot(ctx, tid, stageKey)
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -77,7 +78,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if spent, err := h.Store.commitRecordExists(r.Context(), tid, stageKey); err != nil {
+	if spent, err := h.Store.commitRecordExists(ctx, tid, stageKey); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	} else if spent {
@@ -102,7 +103,7 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if err := h.writeStaged(r.Context(), tid, stageKey, stagePath, meta.ContentType, max, r.Body); err != nil {
+	if err := h.writeStaged(ctx, tid, stageKey, stagePath, meta.ContentType, max, r.Body); err != nil {
 		if errors.Is(err, errBodyTooLarge) {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return

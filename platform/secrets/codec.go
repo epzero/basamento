@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"strconv"
 	"sync"
 
@@ -24,12 +25,14 @@ type cacheEntry struct {
 // record is unwrapped once and the cache is replaced. Decode parses the key id
 // first; on authentication failure it does not reload the keyset.
 type Codec struct {
-	store  KeysetStore
-	keysMu sync.RWMutex
-	keys   []KeyService
-	mu     sync.Mutex
-	cache  map[string]cacheEntry
-	opts   options
+	store   KeysetStore
+	keysMu  sync.RWMutex
+	keys    []KeyService
+	retired []KeyService
+	shut    bool
+	mu      sync.Mutex
+	cache   map[string]cacheEntry
+	opts    options
 }
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
@@ -58,16 +61,29 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 	return &Codec{store: store, keys: keys, cache: map[string]cacheEntry{}, opts: o}, nil
 }
 
-// Close closes every configured master KeyService.
+// Close closes every master KeyService in the ring and any retired by a prior
+// master-key rotation. Rotation does not close replaced keys because in-flight
+// Encode, Decode, or RotateDataKey calls may still hold a snapshot of the ring;
+// those instances are moved to retired and closed here. A second Close does not
+// close keys again; a second Close is a no-op.
 func (c *Codec) Close() error {
-	c.keysMu.RLock()
-	defer c.keysMu.RUnlock()
+	c.keysMu.Lock()
+	defer c.keysMu.Unlock()
+	if c.shut {
+		return nil
+	}
 	var first error
-	for _, k := range c.keys {
-		if err := k.Close(); err != nil && first == nil {
-			first = err
+	closeAll := func(list []KeyService) {
+		for _, k := range list {
+			if err := k.Close(); err != nil && first == nil {
+				first = err
+			}
 		}
 	}
+	closeAll(c.keys)
+	closeAll(c.retired)
+	c.retired = nil
+	c.shut = true
 	return first
 }
 
@@ -325,6 +341,7 @@ const maxRotationPasses = 3
 const maxCASRetries = 3
 
 // RotateMasterKey rewraps every stored keyset under keys[0] (the new master).
+// Replaced master keys are retired, not closed, until Codec.Close; see Close.
 func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error {
 	if err := canaryMaster(ctx, newMaster); err != nil {
 		return err
@@ -363,15 +380,29 @@ func (c *Codec) prependMasterKeyLocked(ks KeyService) {
 	id := ks.MasterKeyID()
 	out := []KeyService{ks}
 	for _, k := range c.keys {
-		if k.MasterKeyID() == id {
-			if err := k.Close(); err != nil {
-				slog.Error("close dropped master key", "master_key_id", id, "err", err)
-			}
+		if k.MasterKeyID() != id {
+			out = append(out, k)
 			continue
 		}
-		out = append(out, k)
+		if sameKeyService(k, ks) {
+			continue
+		}
+		c.retired = append(c.retired, k)
 	}
 	c.keys = out
+}
+
+// sameKeyService reports whether a and b are the same KeyService instance.
+func sameKeyService(a, b KeyService) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ta := reflect.TypeOf(a)
+	tb := reflect.TypeOf(b)
+	if ta != tb || !ta.Comparable() {
+		return false
+	}
+	return a == b
 }
 
 func canaryMaster(ctx context.Context, ks KeyService) error {

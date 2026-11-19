@@ -1,7 +1,6 @@
 package blob
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"path"
@@ -44,7 +43,8 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if _, ok := core.TenantFrom(core.WithTenant(context.Background(), core.TenantID(tenant))); !ok {
+	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
+	if _, ok := core.TenantFrom(ctx); !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -60,7 +60,6 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
 	contentKey := key
 	ctype, err := h.Store.ContentType(ctx, contentKey)
 	if err != nil {

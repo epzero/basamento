@@ -164,14 +164,10 @@ error — nothing has served a request yet — and becomes
 
 ### 2.5 Tenant ids
 
-- Every tenant id is checked against the grammar of REQ-CORE-005 by
-  `ValidateTenant`: non-empty, at most 128 bytes, valid UTF-8, no control
-  characters from U+0000 to U+001F and U+007F, not `.` or `..`, no `/` or
-  `\`, and no leading or trailing Unicode white space. The file store, the
-  keyset framing and the codec's context lookup all call it.
-- The local check is interim: `core.TenantFrom` enforces the same grammar, and
-  the package will rely on it and drop the copy. Until then `ValidateTenant`
-  is a copy of the rule and changes with it.
+- Every tenant id satisfies REQ-CORE-005 and is checked only by
+  `core.TenantFrom`. The codec's context lookup calls it directly; the file
+  store and keyset framing, which receive the id as a string, call it through
+  one helper (`tenantStringOK`). The package keeps no copy of the grammar.
 
 ## 3. Encoded payload
 

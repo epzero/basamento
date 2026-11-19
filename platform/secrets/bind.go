@@ -9,7 +9,8 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
-// maxTenantLen is the maximum byte length of a tenant id (REQ-CORE-005).
+// maxTenantLen caps the protobuf length prefix when a keyset frame is parsed so
+// int(n) cannot overflow; a longer prefix is refused early. It is not a grammar check.
 const maxTenantLen = 128
 
 // tenantStringOK checks tenant against REQ-CORE-005 via core.TenantFrom.
