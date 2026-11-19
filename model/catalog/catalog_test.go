@@ -181,6 +181,31 @@ func TestFirstHoldingRateRuleWins(t *testing.T) {
 	}
 }
 
+func TestRateRuleSeesTenant(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	c.SetSnapshotPrice("sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: `tenant == "acme"`, Rates: catalog.Rates{"input": 1000, "output": 0}},
+		{Rates: catalog.Rates{"input": 5000, "output": 0}},
+	}})
+	req := catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 0}
+
+	acme, err := c.Estimate(core.WithTenant(context.Background(), "acme"), req)
+	if err != nil {
+		t.Fatalf("Estimate acme: %v", err)
+	}
+	if acme != 1 {
+		t.Fatalf("acme estimate = %d, want 1", acme)
+	}
+	globex, err := c.Estimate(core.WithTenant(context.Background(), "globex"), req)
+	if err != nil {
+		t.Fatalf("Estimate globex: %v", err)
+	}
+	if globex != 5 {
+		t.Fatalf("globex estimate = %d, want 5", globex)
+	}
+}
+
 func TestOverrideRulesDoNotFallThrough(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
