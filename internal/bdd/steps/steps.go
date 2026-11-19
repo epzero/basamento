@@ -79,6 +79,8 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCatalog(sc)
 	registerModel(sc)
 	registerModelRetention(sc)
+	registerMiddleware(sc)
+	registerMiddlewareCalls(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
