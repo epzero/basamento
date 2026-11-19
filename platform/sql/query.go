@@ -162,14 +162,14 @@ func skipSingleQuotedString(q string, i int) int {
 }
 
 // skipPostgresPrefixedString skips typed string literals (E'/e', B'/b', X'/x', U&'/u&')
-// when not preceded by an identifier character. The second bool is true when i was advanced.
+// when not preceded by an identifier character. U& strings use the standard single-quote
+// rule. The second bool is true when i was advanced.
 func skipPostgresPrefixedString(q string, i int) (int, bool, error) {
 	if i > 0 && postgresIdentTailByte(q[i-1]) {
 		return i, false, nil
 	}
 	if i+2 < len(q) && (q[i] == 'U' || q[i] == 'u') && q[i+1] == '&' && q[i+2] == '\'' {
-		j, err := skipPostgresEscapeString(q, i+2)
-		return j, true, err
+		return skipSingleQuotedString(q, i+2), true, nil
 	}
 	if i+1 < len(q) {
 		switch q[i] {
