@@ -21,6 +21,7 @@ type World struct {
 	Expr        *exprWorld
 	SQL         *sqlWorld
 	Prompt      *promptWorld
+	Bus         *busWorld
 	Blob        *blobWorld
 	Secrets     *secretsWorld
 	Credentials *credentialsWorld
@@ -45,7 +46,9 @@ func Initialize(sc *godog.ScenarioContext) {
 			Expr:      &exprWorld{bindings: map[string]any{}},
 			SQL:       newSQLWorld(),
 			Prompt:    newPromptWorld(),
+			Bus:       newBusWorld(),
 			Blob:      newBlobWorld(),
+			Secrets:   newSecretsWorld(),
 			Schema:    newSchemaWorld(),
 			Model:     newModelWorld(),
 			Catalog:   newCatalogWorld(),
@@ -61,6 +64,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerExpr(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
+	registerBus(sc)
 	registerBlob(sc)
 	registerSecrets(sc)
 	registerCredentials(sc)
@@ -94,6 +98,12 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 			}
 			return nil
 		}
+	}
+	if w.Bus != nil && w.Bus.lastErr != nil {
+		if string(core.CodeOf(w.Bus.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Bus.lastErr), code)
+		}
+		return nil
 	}
 	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
 		return assertBlobCallCode(ctx, code)
