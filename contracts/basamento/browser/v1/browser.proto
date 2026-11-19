@@ -51,7 +51,19 @@ message Target {
   string locale = 4;
 }
 
+// Replay re-executes a recorded action sequence deterministically, with no
+// model in the loop (docs/engineering/bdd-convention.md §5).
+message Replay {
+  // The recorded action sequence, in its JSON form. A runner may instead be
+  // given the blob key it was stored under.
+  bytes actions = 1;
+  string blob_key = 2;
+}
+
 // SessionSpec is the params of a "browser.session" invocation.
+//
+// Every session first navigates to target.base_url and reports that
+// navigation as a progress event; its actions follow in order.
 message SessionSpec {
   SessionMode mode = 1;
   Target target = 2;
@@ -62,6 +74,8 @@ message SessionSpec {
   string instructions = 5;
   Budget budget = 6;
   Recording recording = 7;
+  // Replay, when set, replaces the feature or goal with a recorded sequence.
+  Replay replay = 8;
 }
 
 // StepResult is the outcome of one scripted step.
@@ -121,9 +135,22 @@ message Artifact {
   string kind = 1;
   string blob_key = 2;
   string mime = 3;
+  // Milliseconds since session start covered by this artifact, aligned with
+  // the SessionEvent timestamps; 0 and 0 when the kind has no time range.
+  int64 start_ms = 4;
+  int64 end_ms = 5;
 }
 
 // GetArtifactsResponse lists evidence.
 message GetArtifactsResponse {
   repeated Artifact artifacts = 1;
+}
+
+// SessionFailure is the JSON form of a failed invocation result's error
+// (basamento.invoke.v1.GetResultResponse.error), so a runner and its callers
+// agree on why a session ended.
+message SessionFailure {
+  // "budget_exceeded" | "step_failed" | "error"
+  string reason = 1;
+  string message = 2;
 }

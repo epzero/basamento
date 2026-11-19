@@ -1,7 +1,8 @@
 # Browser runner
 
 Status: contract in `contracts/basamento/browser/v1`; conformance suite
-**Planned** (WP-L9-01). Decision: ADR-0009. Specs: `specs/browser`.
+**Implemented** (WP-L9-01, `browser/conformance`). Decision: ADR-0009.
+Specs: `specs/browser`.
 
 The browser runner is a **separate service** that drives real browsers for
 agents and records what happens. This repository owns its contract and its
@@ -56,3 +57,31 @@ a Temporal worker:
 The runner calls models only through the platform's OpenAI-compatible
 endpoint, with its session token (REQ-BROWSER-006). Metering, routing and keys
 stay central.
+
+## 5. Contract and conformance suite
+
+`contracts/basamento/browser/v1` is the contract: `SessionSpec` as the params
+of a `browser.session` invocation, `SessionEvent` in each event's data, and
+`BrowserRunnerService` for `Describe` and `GetArtifacts`. Artifacts carry the
+millisecond range they cover, so a recording lines up with the events, and
+`SessionFailure` names why a session ended (`budget_exceeded`, `step_failed`,
+`error`). `Replay` carries a recorded action sequence to re-execute without a
+model, the deterministic lane `bdd-convention.md` §5 describes.
+
+`browser/conformance` is the suite every runner implementation must pass. A
+runner implements its `Runner` interface — the invocation methods plus
+`OpenArtifact` — and the suite drives it through the reference fixture apps in
+`browser/conformance/testdata/features` and checks the observable contract:
+
+- a scripted session reports progress events and one result per step;
+- its rrweb recording covers every action event;
+- input values stay masked unless their selector is unmasked;
+- a failed step carries a screenshot and a timestamp inside the recording;
+- a goal-driven session stops at its step budget and reports every action with
+  its target and a screenshot;
+- every model call reaches the platform endpoint with the session's own token.
+
+`browser/browsertest` is the simulated runner the suite and `internal/bdd` run
+against: test-only, deterministic, with a counter for event timestamps, the
+fixture apps served over loopback HTTP and a scripted platform endpoint. It is
+not the runner implementation, which lives in its own repository.

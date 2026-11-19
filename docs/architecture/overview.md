@@ -57,6 +57,8 @@ flowchart TD
   agent["agent"]
   api["api"]
   auth["auth"]
+  browser_browsertest["browser/browsertest"]
+  browser_conformance["browser/conformance"]
   cmd_kit["cmd/kit"]
   core["core"]
   expr["expr"]
@@ -82,6 +84,7 @@ flowchart TD
   api --> stream
   auth --> expr
   auth --> platform
+  browser_browsertest --> browser_conformance
   cmd_kit --> api
   cmd_kit --> internal_config
   expr --> core
@@ -121,6 +124,7 @@ flowchart TD
 | `stream` | Durable event log, deltas, snapshots, cursors. |
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
+| `browser/conformance` | The browser runner contract and its conformance suite, fixture apps and scripted endpoint; the test-only simulated runner is `browser/browsertest`. The runner itself lives in its own repository (ADR-0009). **Implemented** (WP-L9-01). |
 | `api` | Run routes, SSE native stream and AG-UI adapter, authentication and tenant wiring, error mapping. Connect services, the OpenAI-compatible endpoint and the MCP server land with their contracts. |
 | `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
 | `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). |

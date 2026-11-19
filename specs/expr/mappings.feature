@@ -158,7 +158,7 @@ Feature: JSON mappings
     Then evaluation fails with code "invalid_argument"
     And the error names the output limit 1048576
 
-  @REQ-EXPR-023 @id:EXPR-023-01 @security
+  @planned @wp:WP-L2-01 @REQ-EXPR-023 @id:EXPR-023-01 @security
   Scenario Outline: A mapping that calls, defines or takes a reserved name as a parameter is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"
@@ -184,7 +184,7 @@ Feature: JSON mappings
       | def f: modulemeta; f                     | modulemeta      |
       | get_search_list                          | get_search_list |
 
-  @REQ-EXPR-024 @id:EXPR-024-01 @security
+  @planned @wp:WP-L2-01 @REQ-EXPR-024 @id:EXPR-024-01 @security
   Scenario Outline: A mapping that uses a reserved variable is rejected
     When the mapping "<mapping>" is compiled
     Then compilation fails with code "invalid_argument"

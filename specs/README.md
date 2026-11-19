@@ -31,7 +31,7 @@ Capabilities:
 | [`streaming`](streaming/requirements.md) | Partly implemented (WP-L6-01 `stream/eventlog`, WP-L6-02 `stream`, WP-L6-03 `api`; WP-L6-04 planned). |
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
-| [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
+| [`browser`](browser/requirements.md) | Implemented (WP-L9-01, contract and conformance suite). |
 | [`secrets`](secrets/requirements.md) | Implemented (WP-L1-04). |
 | [`credentials`](credentials/requirements.md) | Planned (WP-L1-06). |
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |

@@ -1,4 +1,4 @@
-@planned @wp:WP-L9-01 @level:system
+@wp:WP-L9-01 @level:system
 Feature: Browser runner contract
   These scenarios form the conformance suite every browser runner
   implementation must pass. They run against reference fixture apps.

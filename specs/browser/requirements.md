@@ -1,6 +1,7 @@
 # Browser runner: browser use and recording
 
-Status: **Planned** (WP-L9-01). The browser runner is a separate service that
+Status: **Implemented** (WP-L9-01, `contracts/basamento/browser/v1` and
+`browser/conformance`). The browser runner is a separate service that
 drives real browsers for agents and records what happens. It implements
 `contracts/basamento/browser/v1` and the invocation contract. This repository
 owns the contract and its conformance suite, not the browser automation.

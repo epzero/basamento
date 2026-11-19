@@ -22,16 +22,18 @@ layers:
   tool:             [core, platform]
   agent:            [core, model, prompt, tool, runtime]
   auth:             [core, platform, expr]
+  browser/conformance: []
+  browser/browsertest: [browser/conformance]
   api:              [core, platform, stream, model, flow, runtime, agent, tool, auth]
   cmd/kit:          [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
   tools/gate:         [internal/gate]
   internal/gate:    []
-  internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
+  internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, browser/conformance, browser/browsertest, internal/config]
   internal/config:    [core]
 
 # Fakes: importable only from _test.go files (not checked by `go list` Imports)
 # and from the BDD harness.
-test_only: [core/coretest]
+test_only: [core/coretest, browser/browsertest]
 test_only_allowed_from: [internal/bdd]
 
 # Durable-execution vendors stay behind runtime implementations; flow code and
