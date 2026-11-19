@@ -325,9 +325,10 @@ it, in the `internal/bdd` package:
 - When a step names a principal, run and step, the driver attaches `Use` to
   the context; when a step does not name them, the driver attaches no `Use`,
   so `UseFrom(ctx)` returns empty strings.
-- A **failing `platform.Audit` wrapper** in `internal/bdd` implements `Record`
-  by returning an error, for `CRED-028-01`; `CRED-019-03` uses the same
-  wrapper to prove the failed resolution's error and log carry no value.
+- The counting `platform.Audit` wrapper doubles as the failing one: a step
+  sets its reject flag, so `Record` counts the call, passes nothing on and
+  returns an error, for `CRED-028-01`; `CRED-019-03` uses the same wrapper to
+  prove the failed resolution's error and log carry no value.
 - A **simulated external store** implements `credentials.Backend` in
   `internal/bdd`: it keeps records per tenant and exposes what it stored, so a
   scenario can assert ciphertext-only rows and that no SQL credential row
