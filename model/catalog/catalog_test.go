@@ -220,6 +220,21 @@ func TestRateRuleSeesTenant(t *testing.T) {
 	}
 }
 
+func TestFormulaDoesNotBypassRuleSelection(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{
+		Formula: "usage.input_tokens * 1",
+		Rules: []catalog.Rule{
+			{When: "usage.input_tokens > 1000000", Rates: catalog.Rates{"input": 560, "output": 2200}},
+		},
+	})
+	_, err := c.Estimate(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 500})
+	if got := core.CodeOf(err); got != core.CodeUnsupported {
+		t.Fatalf("code = %s, want %s (%v)", got, core.CodeUnsupported, err)
+	}
+}
+
 func TestOverrideRulesDoNotFallThrough(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))

@@ -50,9 +50,10 @@ type pinned struct {
 	params            json.RawMessage
 }
 
-// Price is one model's price in one layer. Formula, when set, is CEL over
-// params, usage and rates and wins over Rules. Rules are tried in order and
-// the first whose When holds applies; an empty When always holds.
+// Price is one model's price in one layer. Rules are tried in order and the
+// first whose When holds applies; an empty When always holds. A Formula, when
+// set, is CEL over params, usage and rates and sets the amount for the rule
+// that held; it does not replace rule selection.
 type Price struct {
 	Formula string `json:"formula,omitempty" yaml:"formula,omitempty"`
 	Rules   []Rule `json:"rules,omitempty" yaml:"rules,omitempty"`
