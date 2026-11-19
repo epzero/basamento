@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component
+@wp:WP-L1-01 @level:component
 Feature: Opening a SQL store
   The SQL store is chosen by URL: a SQLite file in the embedded profile,
   Postgres in the cloud profile. A wrong or unreachable URL fails fast with a
