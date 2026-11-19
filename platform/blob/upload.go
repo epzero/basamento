@@ -83,7 +83,8 @@ func (s *Store) signedProxiedUpload(tid core.TenantID, stageKey string, o platfo
 	sig := signUpload(s.signKey, string(tid), stageKey, exp, o.MaxSize, o.ContentType)
 	base := strings.TrimRight(s.baseURL, "/")
 	ct := url.QueryEscape(o.ContentType)
-	return fmt.Sprintf("%s/upload/%s/%s?exp=%d&max=%d&ct=%s&sig=%s", base, tid, stageKey, exp, o.MaxSize, ct, sig), nil
+	seg := url.PathEscape(string(tid))
+	return fmt.Sprintf("%s/upload/%s/%s?exp=%d&max=%d&ct=%s&sig=%s", base, seg, stageKey, exp, o.MaxSize, ct, sig), nil
 }
 
 // Commit implements platform.Blob. After the content blob is stored, it writes the
