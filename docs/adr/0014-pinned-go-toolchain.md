@@ -26,8 +26,8 @@ patch is at least **1.26.11**.
 | **CI install (pinned jobs)** | Every job that builds or tests except the nightly line job uses **`go-version-file: go.mod`** on the root module file, not `stable`. |
 | **CI install (line job)** | The nightly **line** job alone uses **`go-version`** set to the release line named by `go.mod` (for example `1.26`), **`check-latest: true`**, and **does not** use `go-version-file`. |
 | **Nightly line job behavior** | After `make tools`, runs `govulncheck ./...`. The workflow fails on any finding or on a Go install failure — no `continue-on-error` and no suppressed exit status. |
-| **Local** | Default **`GOTOOLCHAIN=auto`**: an older installed Go downloads the patch `go.mod` requires (`README.md`). |
-| **Patch bumps** | A security patch is a coordinated bump of every `go.mod` `go` line and the `README.md` minimum-Go line. CI reads the version from `go.mod`, so the bump touches no workflow file; it is the case **`Review tier of a bump`** treats as **medium**. |
+| **Local** | **`make gate`** exports **`GOTOOLCHAIN=go<patch>`** from the root `go.mod` when the environment has not set it, so local runs match CI's pinned patch (`README.md`). |
+| **Patch bumps** | A security patch is a coordinated bump of every `go.mod` `go` line, the `README.md` minimum-Go line, and the embedded Go minimums in `docs/architecture/runtime.md` and `runtime/temporal/embedded/BENCHMARKS.md` (requirements text only; leave recorded benchmark environments alone). CI reads the version from `go.mod`, so the bump touches no workflow file; it is the case **`Review tier of a bump`** treats as **medium**. |
 | **Review tier of a bump** | A change to a `go.mod` file whose only difference from the base is the **patch number** of the `go` directive (`go 1.26.N` → `go 1.26.M` with `M > N`, same release line; no `toolchain` line; no other line added, removed or changed) is **medium** tier. Every other change to a `go.mod` file stays **high** (dependency, minor-line move, downgrade, `toolchain` line, any other directive). The gate evaluates the rule on the base-to-head diff of each `go.mod` file, reading **`review.yaml` from the base branch** like every other tier rule, so a change cannot weaken its own review. A change that also touches any high-tier path is **high** as a whole. The test is **syntactic**: the gate does not check that the version exists (a missing version fails the build under `GOTOOLCHAIN=local`). |
 | **Same `go` line** | **`make gate`** fails if any tracked `go.mod` (there is no `go.work`) names a different `go` directive than the others, comparing lines parsed by the same code as the bump rule. |
 
@@ -65,6 +65,8 @@ the nightly line job together.
 | `go.mod` | `go 1.26.11`. |
 | `runtime/temporal/embedded/go.mod` | Same `go` line as the root module. |
 | `README.md` | Minimum Go version matches the root `go` directive. |
+| `docs/architecture/runtime.md` | Embedded profile Go minimum matches the root `go` directive. |
+| `runtime/temporal/embedded/BENCHMARKS.md` | Requirements Go minimum matches the root `go` directive (not the recorded measurement environment). |
 | `.github/workflows/gate.yml` | Every job: `GOTOOLCHAIN=local`. `go-version-file: go.mod`. |
 | `.github/workflows/nightly.yml` | Every job: `GOTOOLCHAIN=local`. **flake-hunt**, **slow-lanes** and **release-readiness**: `go-version-file: go.mod`. New **line** job: `go-version` on the release line (for example `1.26`) with `check-latest: true`, `govulncheck ./...`, hard fail. |
 | `.github/workflows/embedded.yml` | Every job: `GOTOOLCHAIN=local`; `go-version-file: go.mod`. |
