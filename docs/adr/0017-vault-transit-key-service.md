@@ -47,7 +47,7 @@ scheme; this ADR keeps it.
 
 - Cloud operators can target self-hosted Transit once the work package ships; until then a cloud deployment uses **`awskms` or `gcpkms`** (`localsecrets` is embedded-only per REQ-CONFIG-011).
 - **No layering change is expected**: the driver is standard-library `net/http` inside `platform/secrets` (or a subpackage importing only `core`). A vendor client library or an import of `platform/credentials` would need an ADR.
-- When the designer opens the Transit work package, it amends `specs/secrets/design.md` §1 so the open-decision clause points here and the interim refusal stays, and it writes the driver's design and scenarios.
+- Once this ADR has merged, the designer amends `specs/secrets/design.md` §1 so the clause "whether it stays is an open architecture decision" points here and the interim open-time refusal stays; when it opens the Transit work package it writes the driver's design and scenarios.
 - Spec edits are the designer's; this pull request changes architecture docs only.
 
 ## Revert
