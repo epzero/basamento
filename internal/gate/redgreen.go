@@ -86,10 +86,12 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	return activated, errs, nil
 }
 
-// buildBaseForRedGreen verifies the base worktree builds under GOTOOLCHAIN=auto so
+// buildBaseForRedGreen verifies the base worktree compiles under GOTOOLCHAIN=auto so
 // a newer go directive on the base ref fails closed instead of vacuous red→green.
+// It runs the same compile as each per-scenario check (go test -run '^$'), not go build:
+// on main, internal/bdd is test-only and go build ./internal/bdd/ refuses that package.
 func buildBaseForRedGreen(wt string) error {
-	cmd := exec.Command("go", "build", "./internal/bdd/")
+	cmd := exec.Command("go", "test", "-count=1", "-run", `^$`, "./internal/bdd/")
 	cmd.Dir = wt
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
 	if out, err := cmd.CombinedOutput(); err != nil {
