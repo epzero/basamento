@@ -10,6 +10,11 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// errUnavailable is the single constructor for retryable blob store outages.
+func errUnavailable(msg string) *core.Error {
+	return &core.Error{Code: core.CodeUnavailable, Message: msg, Retryable: true}
+}
+
 func mapError(err error) error {
 	if err == nil {
 		return nil
@@ -25,7 +30,7 @@ func mapError(err error) error {
 	case gcerrors.Canceled:
 		return core.NewError(core.CodeCancelled, "blob operation cancelled", nil)
 	case gcerrors.DeadlineExceeded:
-		return &core.Error{Code: core.CodeUnavailable, Message: "blob store unavailable", Retryable: true}
+		return errUnavailable("blob store unavailable")
 	default:
 		if errors.Is(err, os.ErrNotExist) {
 			return core.NewError(core.CodeNotFound, "blob not found", nil)
@@ -33,7 +38,7 @@ func mapError(err error) error {
 		if strings.Contains(err.Error(), "NoSuchKey") {
 			return core.NewError(core.CodeNotFound, "blob not found", nil)
 		}
-		return core.NewError(core.CodeUnavailable, "blob store error", nil)
+		return errUnavailable("blob store error")
 	}
 }
 
@@ -51,7 +56,7 @@ func mapOpenError(err error) error {
 	case gcerrors.PermissionDenied:
 		return core.NewError(core.CodePermissionDenied, "blob access denied", nil)
 	default:
-		return core.NewError(core.CodeUnavailable, "blob store unavailable", nil)
+		return errUnavailable("blob store unavailable")
 	}
 }
 

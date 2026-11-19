@@ -54,12 +54,31 @@ func TestPutWriterFailMidStreamUnavailable(t *testing.T) {
 			if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 				t.Fatalf("want unavailable, got %v (code %v)", err, core.CodeOf(err))
 			}
+			if !core.IsRetryable(err) {
+				t.Fatalf("want retryable unavailable, got %v", err)
+			}
 			if strings.Contains(err.Error(), "content does not match content key") {
 				t.Fatalf("writer failure misclassified as hash mismatch: %v", err)
 			}
 			assertPutLeftNoObjectOrMeta(t, st, ctx, key)
 		})
 	}
+}
+
+func TestPutWriterCloseFailsUnavailableRetryable(t *testing.T) {
+	t.Parallel()
+	body := []byte("hello")
+	key := ContentKeyOf(body)
+	st := openStoreFailWriterClose(t, gcerrors.Unknown)
+	ctx := core.WithTenant(context.Background(), "acme")
+	err := st.Put(ctx, key, strings.NewReader(string(body)), "text/plain")
+	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
+		t.Fatalf("want unavailable, got %v", err)
+	}
+	if !core.IsRetryable(err) {
+		t.Fatalf("want retryable, got %v", err)
+	}
+	assertPutLeftNoObjectOrMeta(t, st, ctx, key)
 }
 
 func TestPutReaderFailureStillInvalidArgument(t *testing.T) {

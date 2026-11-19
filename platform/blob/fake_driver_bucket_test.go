@@ -125,11 +125,12 @@ func (b *testBucket) NewTypedWriter(ctx context.Context, key, contentType string
 }
 
 type testWriter struct {
-	ctx    context.Context
-	bucket *testBucket
-	key    string
-	buf    bytes.Buffer
-	done   bool
+	ctx      context.Context
+	bucket   *testBucket
+	key      string
+	buf      bytes.Buffer
+	done     bool
+	closeErr error
 }
 
 func (w *testWriter) Write(p []byte) (int, error) {
@@ -144,6 +145,9 @@ func (w *testWriter) Close() error {
 		return nil
 	}
 	w.done = true
+	if w.closeErr != nil {
+		return w.closeErr
+	}
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
@@ -239,6 +243,25 @@ func openStoreFailWriteAt(t *testing.T, failAt int, code gcerrors.ErrorCode) *St
 	t.Helper()
 	drv := newTestBucket(failAt, code)
 	return openStoreWithTestBucket(t, drv)
+}
+
+func openStoreFailWriterClose(t *testing.T, code gcerrors.ErrorCode) *Store {
+	t.Helper()
+	drv := newTestBucket(0, code)
+	bkt := blob.NewBucket(&closeFailBucket{testBucket: drv, closeErr: &codedDriverErr{code: code, msg: "close failed"}})
+	st := &Store{bucket: bkt}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+type closeFailBucket struct {
+	*testBucket
+	closeErr error
+}
+
+func (b *closeFailBucket) NewTypedWriter(ctx context.Context, key, contentType string, _ *driver.WriterOptions) (driver.Writer, error) {
+	b.fireOp("NewTypedWriter", key)
+	return &testWriter{ctx: ctx, bucket: b.testBucket, key: key, closeErr: b.closeErr}, nil
 }
 
 func openStoreBlockWriteUntilCancel(t *testing.T, failAt int) *Store {
