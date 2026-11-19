@@ -46,11 +46,6 @@ type Telemetry interface {
 | Metrics & logs | held in-process / `slog` handler | OTLP batch export to `CollectorURL` (`REQ-TELEM-015`) |
 | Purge | deletes rows whose end time is older than the effective retention period: `Config.RetentionPeriod`, or 24 hours when it is zero (`REQ-TELEM-014`) | none |
 
-The effective retention period is the setup's: `New` calls `SetRetention` on a
-store that implements `RetentionApplier` (the shipped `SQLSpanStore` does), so
-`Config.RetentionPeriod` wins over the value the store was built with. A store
-that does not implement it owns its own window.
-
 ## Redaction
 
 Before any log record, span attribute or metric label is kept or handed to an
@@ -79,29 +74,6 @@ bounded queues and without blocking the caller (`REQ-TELEM-015`,
 without retrying it, and the observed span, log record or metric point
 completes without error (`REQ-TELEM-017`, `REQ-TELEM-019`).
 
-- **Bounded queues.** Each per-type queue holds at most
-  `exportQueueCap` (4096) signals. Past that bound the oldest pending signal of
-  that type is dropped, `Setup.DroppedExports` counts it, and recording still
-  returns without error. This is the design's bounded-queue decision; where
-  `REQ-TELEM-016`'s "record and return every signal" meets a stalled collector,
-  the bound wins and the drop is observable rather than memory growing without
-  limit.
-- **Delivery triggers.** The background exporter wakes when 512 signals are
-  pending, on `Flush`, `ExportOnce` and `Shutdown`, and on the first enqueue
-  after the oldest pending signal has waited `exportInterval` (one second) on
-  `Config.Clock`. The age check runs on enqueue and reads the injected clock,
-  never the wall clock: a test advances the fake clock, and a long-lived
-  process that records small volumes exports its backlog with its next signal,
-  or at shutdown when no further signal arrives.
-- **Shutdown.** `Shutdown(ctx)` stops new spans, log records and metric points
-  immediately, but a span started before the call and ended while it runs is
-  still recorded and delivered (`REQ-TELEM-022`). It repeats the drain until
-  nothing is in flight and no signal is pending. The context bounds each wait
-  and each request: when it expires, `Shutdown` refuses later recordings,
-  drops the remainder and returns `ctx.Err()`; an in-flight request is
-  cancelled and its goroutine exits on its own (`REQ-TELEM-017` permits the
-  drop).
-
 `Inject` and `Extract` serialize and restore W3C TraceContext across process or
 worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
 
@@ -123,11 +95,10 @@ worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
   the table has one shape. A change to that shape is a spec change of its own,
   and it must say how spans still inside the retention period are kept, since
   REQ-TELEM-012 returns them and REQ-TELEM-014 deletes only older ones.
-- **Default retention.** `New` applies the effective period to the span
-  store: when `Config.RetentionPeriod` is zero it keeps spans for 24 hours
+- **Default retention.** The span store, not configuration, applies the
+  default: when `Config.RetentionPeriod` is zero it keeps spans for 24 hours
   (`DefaultRetentionPeriod`, REQ-TELEM-014), and a negative period is refused
-  with `invalid_argument` by both `New` and the store constructor. Spans serve
-  debugging of
+  with `invalid_argument` when the store is built. Spans serve debugging of
   recent runs; a day covers that without letting a local database grow
   without bound. `specs/config` has no retention key; adding one is a change
   to that spec.
