@@ -355,6 +355,7 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^the stored keysets of tenants "([^"]*)" and "([^"]*)" name master key "([^"]*)" as the key that wrapped them$`, assertMastersTwo)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" is unchanged$`, assertStoredUnchanged)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" is replaced by the stored keyset of tenant "([^"]*)"$`, swapKeysets)
+	sc.Step(`^the stored keysets of tenants "([^"]*)" and "([^"]*)" are swapped$`, swapKeysets)
 	sc.Step(`^the stored keyset of tenant "([^"]*)" contains the bytes of none of its data keys$`, assertNoDataKeyLeaks)
 	sc.Step(`^one stored keyset names master key "([^"]*)" and the other names master key "([^"]*)"$`, assertSplitMasters)
 	sc.Step(`^encoded payloads "([^"]*)" and "([^"]*)" name different data keys$`, assertDifferentKeys)
@@ -374,6 +375,7 @@ func registerSecrets(sc *godog.ScenarioContext) {
 	sc.Step(`^(\d+) payloads are encoded and decoded for tenant "([^"]*)"$`, benchEncodeDecode)
 	sc.Step(`^the simulated key service received (\d+) unwrap request since the restart$`, assertUnwrapSinceRestart)
 	sc.Step(`^the first payload codec sent (\d+) unwrap request to the simulated key service for that decode$`, assertCodecUnwrap)
+	sc.Step(`^the payload codec sent (\d+) unwrap request to the simulated key service for that decode$`, assertCodecUnwrap)
 	sc.Step(`^the keyset of tenant "([^"]*)" holds (\d+) data keys$`, assertDataKeyCount)
 	sc.Step(`^encoded payload "([^"]*)" is tampered with: (.+)$`, tamperPayload)
 	sc.Step(`^decoding encoded payload "([^"]*)" for tenant "([^"]*)" has failed$`, decodePayloadMustFail)
@@ -543,6 +545,7 @@ func encodeNoTenant(ctx context.Context, name string) error {
 
 func decodePayload(ctx context.Context, name, tenant string) error {
 	sw := secretsW(ctx)
+	before := sw.sim.unwrapForCodec(sw.codec)
 	enc, ok := sw.encoded[name]
 	if !ok {
 		return fmt.Errorf("unknown encoded payload %s", name)
@@ -551,10 +554,10 @@ func decodePayload(ctx context.Context, name, tenant string) error {
 	sw.lastErr = err
 	sw.lastOp = "decode"
 	sw.lastDec = out
-	if err != nil {
-		return nil
+	if err == nil {
+		sw.recordDecoded(name, out)
 	}
-	sw.recordDecoded(name, out)
+	sw.lastCodecUnwraps = sw.sim.unwrapForCodec(sw.codec) - before
 	return nil
 }
 
