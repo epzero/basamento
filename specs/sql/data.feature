@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
+@wp:WP-L1-01 @level:component @profile:embedded @profile:cloud
 Feature: Transactions, constraints and values on both dialects
   Code is written once for SQLite and Postgres. Transactions, constraint
   violations, timestamps and text behave the same on both, including where

@@ -119,3 +119,111 @@ Feature: JSON mappings
     When the mapping "{prompt: .text" is compiled
     Then compilation fails with code "invalid_argument"
     And the error names the mapping and the position of the error
+
+  @REQ-EXPR-020 @id:EXPR-020-01
+  Scenario Outline: A mapping whose output exceeds its output limit fails
+    Given the mapping "<mapping>" with an output limit of 1024 bytes
+    When the mapping is evaluated on null
+    Then evaluation fails with code "invalid_argument"
+    And the error names the output limit 1024
+
+    Examples:
+      | mapping                                          |
+      | "x" * 1025                                       |
+      | "x" * 1023                                       |
+      | "x" * 1000000000                                 |
+      | ("x" * 1023) + "yy"                              |
+      | reduce range(30) as $i ("x"; . + .)              |
+      | [range(1032)]                                    |
+      | [range(100000)]                                  |
+      | [range(100001)] \| .[0]                          |
+
+  @REQ-EXPR-020 @id:EXPR-020-02
+  Scenario Outline: A mapping whose output is within its output limit succeeds
+    Given the mapping "<mapping>" with an output limit of 1024 bytes
+    When the mapping is evaluated on null
+    Then the result is written compactly in <length> bytes
+
+    Examples:
+      | mapping                                 | length |
+      | "x" * 1022                              | 1024   |
+      | ("x" * 1020) + "yy"                     | 1024   |
+      | [range(256)]                            | 915    |
+      | {a: ("x" * 500), b: ("y" * 500)}        | 1015   |
+
+  @REQ-EXPR-020 @id:EXPR-020-03
+  Scenario: The default output limit stops a value of 2 GiB
+    Given the mapping ""x" * 2147483647"
+    When the mapping is evaluated on null
+    Then evaluation fails with code "invalid_argument"
+    And the error names the output limit 1048576
+
+  @REQ-EXPR-023 @id:EXPR-023-01 @security
+  Scenario Outline: A mapping that calls, defines or takes a reserved name as a parameter is rejected
+    When the mapping "<mapping>" is compiled
+    Then compilation fails with code "invalid_argument"
+    And the error names "<name>" and says the name is reserved
+
+    Examples:
+      | mapping                                  | name            |
+      | def now: 1; now                          | now             |
+      | def halt: 1; .                           | halt            |
+      | def env: 1; env                          | env             |
+      | def f(env): env; f(1)                    | env             |
+      | def f(env): 1; f(2)                      | env             |
+      | def f: def g: now; g; f                  | now             |
+      | {entries: (def inputs: 1; inputs)}       | inputs          |
+      | def f(input): {"in": input}; f(1)        | input           |
+      | def f(input_filename): input_filename; f(1) | input_filename |
+      | def f(input_line_number): input_line_number; f(1) | input_line_number |
+      | def f(debug): debug; f(1)                | debug           |
+      | def f(stderr): stderr; f(1)              | stderr          |
+      | def h: halt_error; h                     | halt_error      |
+      | def f: localtime; f                      | localtime       |
+      | def f: strflocaltime("%H"); f            | strflocaltime   |
+      | def f: modulemeta; f                     | modulemeta      |
+      | get_search_list                          | get_search_list |
+
+  @REQ-EXPR-024 @id:EXPR-024-01 @security
+  Scenario Outline: A mapping that uses a reserved variable is rejected
+    When the mapping "<mapping>" is compiled
+    Then compilation fails with code "invalid_argument"
+    And the error names the reserved variable "<variable>"
+
+    Examples:
+      | mapping             | variable       |
+      | $ENV.HOME           | $ENV           |
+      | {$ENV}              | $ENV           |
+      | $__loc__.file       | $__loc__       |
+      | [$__prog_args]      | $__prog_args   |
+      | {$__prog_args}      | $__prog_args   |
+      | def f: $__loc__; f  | $__loc__       |
+      | [.a, $ENV]          | $ENV           |
+
+  @REQ-EXPR-025 @id:EXPR-025-01
+  Scenario Outline: Reserved names used as data are allowed
+    Given the mapping "<mapping>"
+    When the mapping is evaluated on <input>
+    Then the result is <result>
+
+    Examples:
+      | mapping          | input                       | result                      |
+      | .now             | {"now": "2026-11-16"}       | "2026-11-16"                |
+      | .input           | {"input": 5}                | 5                           |
+      | .env             | {"env": {"HOME": "/x"}}     | {"HOME": "/x"}              |
+      | {now}            | {"now": 1}                  | {"now": 1}                  |
+      | {"now": 1}       | null                        | {"now": 1}                  |
+      | "now"            | null                        | "now"                       |
+      | getpath(["env"]) | {"env": true}               | true                        |
+      | has("halt")      | {"halt": 1}                 | true                        |
+
+  @REQ-EXPR-026 @id:EXPR-026-01 @security
+  Scenario Outline: A mapping that imports or includes a module or data file is rejected
+    When the mapping "<mapping>" is compiled
+    Then compilation fails with code "invalid_argument"
+    And the error names "<name>"
+
+    Examples:
+      | mapping                  | name    |
+      | include "lib";           | include |
+      | import "lib" as $lib; .  | import  |

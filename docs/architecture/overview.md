@@ -48,7 +48,8 @@ Ports are selected by URL in configuration (see `platform/platform.go`).
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The
 module map below is generated from it (an arrow means "may import"; arrows
 implied by longer paths are omitted). Build tooling (`tools/gate`,
-`internal/gate`, `internal/bdd`) is not shown.
+`internal/gate`, `internal/bdd`) is not shown; other product layers under
+`internal/` appear when the graph names them.
 
 <!-- BEGIN GENERATED: modules (go tool gate docs -write) -->
 ```mermaid
@@ -61,6 +62,7 @@ flowchart TD
   expr["expr"]
   flow["flow"]
   flow_host["flow/host"]
+  internal_config["internal/config"]
   model["model"]
   model_node["model/node"]
   platform["platform"]
@@ -81,10 +83,12 @@ flowchart TD
   auth --> expr
   auth --> platform
   cmd_kit --> api
+  cmd_kit --> internal_config
   expr --> core
   flow --> expr
   flow_host --> flow
   flow_host --> runtime
+  internal_config --> core
   model --> expr
   model --> platform
   model_node --> model
@@ -117,6 +121,8 @@ flowchart TD
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
 | `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
+| `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
+| `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). |
 
 ### Security in the contracts
 
@@ -126,7 +132,8 @@ ADR-0012 §10, constitution §7–8).
 
 - **The tenant comes from the context, only.** Callers set it with
   `core.WithTenant` and read it with `core.TenantFrom`, which reports a nil
-  or empty context as tenantless. A port that needs a tenant fails closed
+  context, no id, or an id outside the tenant id grammar (`REQ-CORE-005`) as
+  tenantless. A port that needs a tenant fails closed
   with `invalid_argument` when there is none; nothing falls back to an empty
   or default tenant.
 - **Credentials.** The vault stores named secrets per tenant, reached only by

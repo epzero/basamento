@@ -1,6 +1,6 @@
 # Prompt: versioned templates, segments and untrusted input
 
-Status: **Planned** (WP-L3-05). Package: `prompt` (imports only `core`).
+Status: **Implemented** (WP-L3-05). Package: `prompt` (imports only `core`).
 Design: [`design.md`](design.md), `docs/architecture/overview.md` §3.
 
 A **prompt template** is stored under an id and a version and never changes
@@ -92,6 +92,9 @@ When prompt lint reports only warnings for a template, the prompt registry shall
 
 ### REQ-PROMPT-021 — Assembled prompts carry only their own delimiters
 When an assembled prompt is linted, prompt lint shall report the error `unpaired_delimiter` for every untrusted-content delimiter that is not one of the pairs the assembler wrapped a value in.
+
+### REQ-PROMPT-025 — Structure errors name their rule
+When a template breaks a structure rule, prompt lint shall report the error named for that rule: `empty_template_id`, `at_in_template_id`, `empty_template_version`, `at_in_template_version`, `duplicate_input`, `duplicate_segment`, `multiple_history` or `unknown_segment_kind`.
 
 ## History
 
