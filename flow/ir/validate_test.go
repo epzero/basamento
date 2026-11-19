@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/flow"
@@ -280,19 +279,19 @@ func TestValidateRequiresName(t *testing.T) {
 	requireInvalid(t, Validate(f), "name")
 }
 
-// Validation indexes edges once and walks cycles iteratively, so a chain's
-// cost is linear in its nodes and edges. Before that, the reachability walk
-// rescanned every edge per node and the cycle search recursed once per node.
-func TestValidateLongChainIsLinear(t *testing.T) {
-	const nodes = 50_000
+// longChain is a flow of n distinct task nodes in a line from START to FAIL.
+// Validation indexes edges once and walks cycles iteratively, so this shape
+// used to be the worst case: the reachability walk rescanned every edge per
+// node and the cycle search recursed once per node.
+func longChain(n int) *flow.IR {
 	f := &flow.IR{
 		Name:    "chain",
 		Version: 1,
 		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
-		Nodes:   make(map[string]flow.Node, nodes),
-		Edges:   make([]flow.Edge, 0, nodes+1),
+		Nodes:   make(map[string]flow.Node, n),
+		Edges:   make([]flow.Edge, 0, n+1),
 	}
-	ids := make([]string, nodes)
+	ids := make([]string, n)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("n%05d", i)
 		f.Nodes[ids[i]] = flow.Node{Kind: "task"}
@@ -302,12 +301,31 @@ func TestValidateLongChainIsLinear(t *testing.T) {
 		f.Edges = append(f.Edges, flow.Edge{From: ids[i], To: ids[i+1]})
 	}
 	f.Edges = append(f.Edges, flow.Edge{From: ids[len(ids)-1], To: Fail})
+	return f
+}
 
-	start := time.Now()
+// TestValidateLongChain keeps the shape that used to exhaust the goroutine
+// stack and the edge budget honest: it must validate with the accepted
+// verdict. The cost is measured by BenchmarkValidateLongChain, not here,
+// because a test may not read the wall clock.
+func TestValidateLongChain(t *testing.T) {
+	const nodes = 50_000
+	f := longChain(nodes)
 	if err := Validate(f); err != nil {
-		t.Fatal(err)
+		t.Fatalf("validating a %d-node chain: %v", nodes, err)
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("validating %d nodes took %s, want well under a second", nodes, elapsed)
+	if got := len(f.Nodes); got != nodes {
+		t.Fatalf("built %d nodes, want %d", got, nodes)
+	}
+}
+
+func BenchmarkValidateLongChain(b *testing.B) {
+	f := longChain(50_000)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := Validate(f); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
