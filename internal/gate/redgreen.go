@@ -66,6 +66,9 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	if _, statErr := os.Stat(filepath.Join(wt, "internal", "bdd")); statErr != nil {
 		return activated, nil, nil // no harness at base: every scenario is red
 	}
+	if err := buildBaseForRedGreen(wt); err != nil {
+		return nil, nil, err
+	}
 	if err := os.RemoveAll(filepath.Join(wt, "specs")); err != nil {
 		return nil, nil, err
 	}
@@ -75,12 +78,24 @@ func RedGreen(root, baseRef string) (activated []string, errs []string, err erro
 	for _, id := range activated {
 		cmd := exec.Command("go", "test", "./internal/bdd/", "-count=1", "-run", "TestFeatures")
 		cmd.Dir = wt
-		cmd.Env = append(os.Environ(), "BDD_TAGS=@id:"+id)
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto", "BDD_TAGS=@id:"+id)
 		if out, err := cmd.CombinedOutput(); err == nil {
 			errs = append(errs, fmt.Sprintf("%s passes against %s without this change: the scenario does not test the new behavior\n%s", id, baseRef, tail(out, 20)))
 		}
 	}
 	return activated, errs, nil
+}
+
+// buildBaseForRedGreen verifies the base worktree builds under GOTOOLCHAIN=auto so
+// a newer go directive on the base ref fails closed instead of vacuous red→green.
+func buildBaseForRedGreen(wt string) error {
+	cmd := exec.Command("go", "build", "./internal/bdd/")
+	cmd.Dir = wt
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("redgreen: base worktree did not build: %w\n%s", err, tail(out, 20))
+	}
+	return nil
 }
 
 func run(dir string, name string, args ...string) (string, error) {
