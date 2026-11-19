@@ -2,71 +2,45 @@ package steps
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/cucumber/godog"
 
 	"github.com/epzero/basamento/internal/bdd/blobmatrix"
+	"github.com/epzero/basamento/internal/bdd/modroot"
 )
 
 var (
 	blobPickleMatrixOnce sync.Once
 	blobPickleMatrixKeys map[string]string
+	blobPickleMatrixErr  error
 )
 
-func ensureBlobPickleMatrixKeys() {
+func ensureBlobPickleMatrixKeys() error {
 	blobPickleMatrixOnce.Do(func() {
-		root, err := moduleRootForBlobMatrix()
+		root, err := modroot.Find()
 		if err != nil {
+			blobPickleMatrixErr = err
 			return
 		}
-		keys, err := blobmatrix.PickleKeyMap(root)
-		if err != nil {
-			return
-		}
-		blobPickleMatrixKeys = keys
+		blobPickleMatrixKeys, blobPickleMatrixErr = blobmatrix.PickleKeyMap(root)
 	})
+	return blobPickleMatrixErr
 }
 
-func moduleRootForBlobMatrix() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
+func matrixIDFromGodogScenario(sc *godog.Scenario, backend string) (string, error) {
+	if backend != "s3" {
+		return "", nil
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no go.mod in parents of %s", dir)
-		}
-		dir = parent
+	if err := ensureBlobPickleMatrixKeys(); err != nil {
+		return "", fmt.Errorf("blob s3 matrix ids: %w", err)
 	}
-}
-
-func matrixIDFromGodogScenario(sc *godog.Scenario) string {
-	ensureBlobPickleMatrixKeys()
 	k := pickleKeyForGodog(sc)
-	if blobPickleMatrixKeys != nil {
-		if v, ok := blobPickleMatrixKeys[k]; ok {
-			return v
-		}
+	v, ok := blobPickleMatrixKeys[k]
+	if !ok {
+		return "", fmt.Errorf("blob s3 matrix ids: no entry for pickle %q", k)
 	}
-	var id string
-	for _, tag := range sc.Tags {
-		if strings.HasPrefix(tag.Name, "@id:") {
-			id = strings.TrimPrefix(tag.Name, "@id:")
-			break
-		}
-	}
-	if id == "" {
-		return sc.Name
-	}
-	return id
+	return v, nil
 }
 
 func pickleKeyForGodog(sc *godog.Scenario) string {

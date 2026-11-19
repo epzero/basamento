@@ -1,20 +1,20 @@
 package conformance_test
 
 import (
-	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
+
+	"github.com/epzero/basamento/internal/bdd/blobmatrix"
+	"github.com/epzero/basamento/internal/bdd/modroot"
 )
 
 // TestS3Matrix runs blob scenarios that are not @profile:embedded against the S3 simulator.
 func TestS3Matrix(t *testing.T) {
-	root, err := findModuleRoot()
+	root, err := modroot.Find()
 	if err != nil {
 		t.Fatal(err)
 	}
-	matrixIDs, err := blobMatrixPickleIDs(root)
+	matrixIDs, err := blobmatrix.PickleIDs(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,22 +35,5 @@ func TestS3Matrix(t *testing.T) {
 	}
 	if err := verifyS3MatrixOutput(text, len(matrixIDs), matrixIDs); err != nil {
 		t.Fatalf("%v\n%s", err, text)
-	}
-}
-
-func findModuleRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no go.mod")
-		}
-		dir = parent
 	}
 }
