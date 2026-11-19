@@ -132,14 +132,33 @@ func TestWhitespacePostgresURLUsesEmbeddedPath(t *testing.T) {
 	ResetSkipCounts()
 	t.Setenv("BDD_POSTGRES_URL", "   ")
 	t.Setenv("GATE_STRICT", "1")
-	err := InitPostgres(context.Background())
-	if err == nil {
-		t.Fatal("expected embedded start failure without supervisor")
+	if _, err := resolveSupervisorPath(); err != nil {
+		if PostgresCacheDir() == "" {
+			t.Setenv(BDDPostgresCacheDir, t.TempDir())
+		}
+		err = InitPostgres(context.Background())
+		if err == nil {
+			t.Fatal("expected embedded start failure without supervisor")
+		}
+		if strings.Contains(err.Error(), "url unavailable") {
+			t.Fatal("whitespace URL must count as unset, not URL path")
+		}
+		if !strings.Contains(err.Error(), "pg-prefetch") {
+			t.Fatalf("want prefetch hint, got %v", err)
+		}
+		return
 	}
-	if strings.Contains(err.Error(), "url unavailable") {
-		t.Fatal("whitespace URL must count as unset, not URL path")
+	if PostgresCacheDir() == "" {
+		t.Skip("BDD_POSTGRES_CACHE_DIR unset; cannot start embedded in gate")
 	}
-	if !strings.Contains(err.Error(), "pg-prefetch") {
-		t.Fatalf("want prefetch hint, got %v", err)
+	if err := InitPostgres(context.Background()); err != nil {
+		if strings.Contains(err.Error(), "url unavailable") {
+			t.Fatal("whitespace URL must count as unset, not URL path")
+		}
+		t.Fatalf("embedded postgres: %v", err)
+	}
+	defer func() { _ = ClosePostgres() }()
+	if got := PostgresServerSource(); got != string(PostgresServerEmbedded) {
+		t.Fatalf("postgres_server = %q, want embedded", got)
 	}
 }
