@@ -117,12 +117,6 @@ func (b *fakeBus) sequences(runID string) []uint64 {
 	return out
 }
 
-func (b *fakeBus) setDown(down bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.down = down
-}
-
 func (b *fakeBus) setFailAfter(n int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
