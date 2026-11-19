@@ -280,6 +280,7 @@ type postgresScannerContractRow struct {
 	construct     string
 	in            string
 	want          string
+	wantErr       bool
 	knownGap      string
 	gapReason     string
 	supported     bool
@@ -333,6 +334,114 @@ func TestRewritePostgresPlaceholderScannerContract(t *testing.T) {
 			supported: true,
 		},
 		{
+			construct: "dollar_quoted_tag_non_ascii_latin",
+			in:        `SELECT $é$?$é$ WHERE id = ?`,
+			want:      `SELECT $é$?$é$ WHERE id = $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_greek",
+			in:        `SELECT $Ω$?$Ω$, ?`,
+			want:      `SELECT $Ω$?$Ω$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_cjk",
+			in:        `SELECT $中$?$中$, ?`,
+			want:      `SELECT $中$?$中$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_mixed_ascii_nonascii_digit",
+			in:        `SELECT $a€1$?$a€1$, ?`,
+			want:      `SELECT $a€1$?$a€1$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_non_ascii_body_nested_different_tag",
+			in:        `SELECT $é$?$ê$?$é$, ?`,
+			want:      `SELECT $é$?$ê$?$é$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_non_ascii_at_eof",
+			in:        `SELECT $é$?`,
+			want:      `SELECT $é$?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_tag_after_bind",
+			in:        `SELECT ?, $a$ ?`,
+			want:      `SELECT $1, $a$ ?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_empty_tag_after_bind",
+			in:        `SELECT ?, $$ ?`,
+			want:      `SELECT $1, $$ ?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_closed_then_unclosed_non_ascii",
+			in:        `SELECT $t$?$t$, ?, $é$?`,
+			want:      `SELECT $t$?$t$, $1, $é$?`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_trailing_at_eof",
+			in:        `SELECT U&'a'`,
+			want:      `SELECT U&'a'`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_unterminated_quote_at_eof",
+			in:        `SELECT ?, U&'`,
+			want:      `SELECT $1, U&'`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_unterminated_with_content_at_eof",
+			in:        `SELECT ?, U&'a?`,
+			want:      `SELECT $1, U&'a?`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_prefix_without_quote_at_eof",
+			in:        `SELECT ?, U&`,
+			want:      `SELECT $1, U&`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_adjacent_literals",
+			in:        `SELECT U&'a'U&'b', ?`,
+			want:      `SELECT U&'a'U&'b', $1`,
+			supported: true,
+		},
+		{
+			construct: "reject_dollar_number_after_single_quoted",
+			in:        `SELECT 'x'$1, ?`,
+			wantErr:   true,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_uescape_operand_doubled_single_quote_literal",
+			in:        `SELECT U&'in\0003side?' UESCAPE '''', ?`,
+			want:      `SELECT U&'in\0003side?' UESCAPE '''', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_uescape_double_quote_escape_char",
+			in:        `SELECT U&'in\0003side?' UESCAPE '"', ?`,
+			want:      `SELECT U&'in\0003side?' UESCAPE '"', $1`,
+			supported: true,
+		},
+		{
+			construct: "crlf_line_endings_and_comment",
+			in:        "SELECT ?\r\nWHERE x = ? -- bind ?\r\nAND y = ?",
+			want:      "SELECT $1\r\nWHERE x = $2 -- bind ?\r\nAND y = $3",
+			supported: true,
+		},
+		{
 			construct: "dollar_quote_identifier_boundary",
 			in:        `SELECT foo$tag$?, ?`,
 			want:      `SELECT foo$tag$$1, $2`,
@@ -382,6 +491,12 @@ func TestRewritePostgresPlaceholderScannerContract(t *testing.T) {
 		t.Run(row.construct, func(t *testing.T) {
 			t.Parallel()
 			got, err := e.rewrite(row.in)
+			if row.wantErr {
+				if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+					t.Fatalf("got err %v want invalid_argument", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
