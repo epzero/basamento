@@ -27,7 +27,7 @@
 // '=', and '.'. Every Bus and KV method rejects a malformed subject or key
 // with code invalid_argument before touching storage.
 //
-// Status: contract only (WP-L1-*).
+// Status: Blob is implemented (WP-L1-02); other ports remain contract-only.
 package platform
 
 import (
