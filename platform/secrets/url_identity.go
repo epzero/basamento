@@ -20,7 +20,7 @@ func publicURLID(raw string) (string, error) {
 		return "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
 	}
 	if u.Host == "" && u.Path == "" {
-		return "", errInvalidArgument(fmt.Sprintf(msgUnsupportedScheme, scheme))
+		return "", errInvalidArgument(fmt.Sprintf(msgInvalidKeyURL, scheme))
 	}
 	u.User = nil
 	u.Fragment = ""
