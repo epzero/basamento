@@ -30,8 +30,7 @@ type World struct {
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
 	Machine     *machineWorld
-	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
-	Host any
+	Host        *hostWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -52,6 +51,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
 			Machine:     newMachineWorld(),
+			Host:        newHostWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -65,6 +65,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)
 	registerFlowMachine(sc)
+	registerFlowHost(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)

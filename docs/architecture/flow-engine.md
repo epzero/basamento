@@ -2,7 +2,7 @@
 
 Status: IR, compiler and Go builder in `flow/ir`, `flow/compile` and
 `flow/builder` (WP-L4-01, WP-L4-03); the machine in `flow/machine` (WP-L4-02);
-contracts in `flow/flow.go`; host **Planned** (WP-L4-04).
+the host in `flow/host` (WP-L4-04); contracts in `flow/flow.go`.
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
