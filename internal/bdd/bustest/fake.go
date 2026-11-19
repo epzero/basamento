@@ -291,7 +291,12 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 		if s.subject != subject || s.ended {
 			continue
 		}
-		if msg.Seq > s.replayThrough {
+		// The fake knows the sequence before delivery, so it reserves only for a
+		// message the subscription will actually deliver live. The store cannot
+		// know the sequence until the publish is acked: it reserves on every
+		// publish and confirms (or releases) at the ack. Same state, two shapes:
+		// do not "harmonize" them without keeping the below-after release.
+		if msg.Seq > s.replayThrough && msg.Seq > s.after {
 			s.reserve()
 		}
 	}
@@ -344,11 +349,14 @@ func (s *sub) reserve() {
 	s.liveAhead++
 }
 
+// confirm mirrors liveSubscription.confirm: a message at or below the replay
+// bound is replayed, one at or below after is skipped, and neither counts
+// toward live overflow (REQ-BUS-004).
 func (s *sub) confirm(seq uint64) {
 	if s.ended {
 		return
 	}
-	if seq <= s.replayThrough {
+	if seq <= s.replayThrough || seq <= s.after {
 		if s.liveAhead > 0 {
 			s.liveAhead--
 		}

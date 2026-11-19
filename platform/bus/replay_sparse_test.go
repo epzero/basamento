@@ -44,6 +44,40 @@ func TestStoreSparseReplayThenLive(t *testing.T) {
 	}
 }
 
+// TestStoreSparseAfterGapKeepsLiveSlot reproduces the round-5 probe: after=10
+// with LastSeq=5 starts the consumer at 11, so publishes 6..10 are skipped and
+// must release their slot. Live 11 is delivered (REQ-BUS-004, REQ-BUS-010).
+func TestStoreSparseAfterGapKeepsLiveSlot(t *testing.T) {
+	st, _, _ := openTestEmbeddedBuf(t, 4)
+	ctx := context.Background()
+	subject := "run.r1.gap"
+	for i := 0; i < 5; i++ {
+		if _, err := st.Publish(ctx, subject, []byte{byte('0' + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch, err := st.Subscribe(ctx, subject, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := st.Publish(ctx, subject, []byte{byte('a' + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	liveSeq, err := st.Publish(ctx, subject, []byte("live"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := <-ch
+	if !ok {
+		t.Fatalf("subscription ended with nothing pending, seq %d lost", liveSeq)
+	}
+	if m.Seq != liveSeq {
+		t.Fatalf("seq=%d want %d", m.Seq, liveSeq)
+	}
+}
+
 func TestStorePurgeThenLiveDelivered(t *testing.T) {
 	st, _, _ := openTestEmbeddedBuf(t, 4)
 	ctx := context.Background()

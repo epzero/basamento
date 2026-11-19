@@ -181,13 +181,18 @@ func (s *liveSubscription) reserve() {
 	s.liveAhead++
 }
 
+// confirm reconciles a reservation with the sequence the publish received.
+// A message at or below the replay bound is delivered by the replay path, and a
+// message at or below after is below the consumer's start (after+1) and skipped
+// entirely; neither is delivered live, so neither may count toward live
+// overflow. Their reservation is released here instead (REQ-BUS-004).
 func (s *liveSubscription) confirm(seq uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ended {
 		return
 	}
-	if seq <= s.replayThrough {
+	if seq <= s.replayThrough || seq <= s.after {
 		if s.liveAhead > 0 {
 			s.liveAhead--
 		}

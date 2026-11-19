@@ -48,6 +48,40 @@ func TestFakeSparseReplayThenLive(t *testing.T) {
 	}
 }
 
+// TestFakeSparseAfterGapKeepsLiveSlot mirrors the store: with after above LastSeq
+// (after=10, LastSeq=5) publishes 6..10 are skipped by the subscription and must
+// not consume buffer slots, so 11..14 fit and 15 ends the subscription instead
+// of a live message being lost (REQ-BUS-004, REQ-BUS-010).
+func TestFakeSparseAfterGapKeepsLiveSlot(t *testing.T) {
+	clk := coretest.NewFakeClock(time.Unix(0, 0))
+	f := NewFake(clk, bus.Options{SubBuffer: 4, MaxMessageSize: bus.DefaultMaxMessageSize})
+	ctx := context.Background()
+	subject := "run.r1.gap"
+	for i := 0; i < 5; i++ {
+		if _, err := f.Publish(ctx, subject, []byte{byte('0' + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch, err := f.Subscribe(ctx, subject, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := f.Publish(ctx, subject, []byte{byte('a' + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := f.Publish(ctx, subject, []byte{byte('l' + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.Publish(ctx, subject, []byte("overflow")); err != nil {
+		t.Fatal(err)
+	}
+	assertFakeRecvSeqs(t, ch, []uint64{11, 12, 13, 14})
+}
+
 func TestFakePurgeThenLiveDelivered(t *testing.T) {
 	clk := coretest.NewFakeClock(time.Unix(0, 0))
 	f := NewFake(clk, bus.Options{SubBuffer: 4, MaxMessageSize: bus.DefaultMaxMessageSize})
