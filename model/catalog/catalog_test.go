@@ -43,10 +43,6 @@ func chatDescriptor(id string) model.Descriptor {
 	}
 }
 
-func rates(r map[string]int64) catalog.Price {
-	return catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates(r)}}}
-}
-
 func TestLookupReturnsDescriptor(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
