@@ -40,6 +40,7 @@ const (
 // Config is the effective configuration of one kit process.
 type Config struct {
 	Profile  string
+	Auth     struct{ Mode string }
 	Listen   struct{ Addr string }
 	Data     struct{ Dir string }
 	Log      struct{ Level, Format string }
@@ -78,6 +79,12 @@ var settings = []setting{
 		defaultValue: staticDefault(ProfileEmbedded),
 		validate:     validateProfile,
 		apply:        func(c *Config, v string) { c.Profile = v },
+	},
+	{
+		key:          "auth.mode",
+		defaultValue: staticDefault("none"),
+		validate:     enumRule("auth.mode", "none", "local", "oidc"),
+		apply:        func(c *Config, v string) { c.Auth.Mode = v },
 	},
 	{
 		key:          "listen.addr",

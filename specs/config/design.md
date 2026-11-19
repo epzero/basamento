@@ -90,6 +90,7 @@ renders and what the environment mapping is derived from.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `profile` | string | `embedded` | one of `embedded`, `cloud` |
+| `auth.mode` | string | `none` | one of `none`, `local`, `oidc` |
 | `listen.addr` | host:port | `127.0.0.1:8080` | parses, port > 0 |
 | `data.dir` | path | `./.kit/data` | non-empty |
 | `log.level` | string | `info` | one of `debug`, `info`, `warn`, `error` |
@@ -99,6 +100,9 @@ renders and what the environment mapping is derived from.
 | `bus.url` | URL | profile-dependent | scheme per profile |
 | `secrets.url` | URL | profile-dependent | scheme per profile |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
+
+`auth.mode` selects the authentication mode (ADR-0008); in `none` the server
+refuses a non-loopback `listen.addr` (REQ-AUTH-001).
 
 The embedded profile defaults the four port URLs to
 `sqlite://$(data.dir)/kit.db`, `file://$(data.dir)/blobs`,

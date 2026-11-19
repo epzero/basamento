@@ -24,6 +24,8 @@ type World struct {
 	Bus     *busWorld
 	Secrets *secretsWorld
 	Config  *configWorld
+	Auth    *authWorld
+	Authz   *authzWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -39,6 +41,8 @@ func Initialize(sc *godog.ScenarioContext) {
 			Bus:     newBusWorld(),
 			Secrets: newSecretsWorld(),
 			Config:  newConfigWorld(),
+			Auth:    newAuthWorld(),
+			Authz:   newAuthzWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -49,6 +53,8 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSecrets(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
+	registerAuth(sc)
+	registerAuthz(sc)
 	registerOpeningSteps(sc)
 	registerSharedSteps(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
