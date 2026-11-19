@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-02 @level:component
+@wp:WP-L2-02 @level:component
 Feature: Compiling schemas and validating instances
   Gate payloads, model parameters and structured outputs are checked against
   schemas that people and LLMs write. A rejected instance must say exactly

@@ -8,6 +8,7 @@ the same change that first uses it.
 | **Flow** | A versioned definition (IR) of nodes and edges, stored as data and identified by its content hash. |
 | **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled, terminated. |
 | **Node** | One step of a flow: `set`, `task`, `model`, `agent`, `tool`, `map`, `parallel`, `subflow`, `gate`, `wait`. |
+| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (milli-points spent there). A guard's `while` condition narrows when the cycle exits but does not bound it. |
 | **Edge endpoint** | The two ends of an edge: a node, or one of the reserved endpoints `START` (the flow's entry, only an edge source) and `FAIL` (its failure exit, only an edge target). `START` and `FAIL` are not nodes. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
