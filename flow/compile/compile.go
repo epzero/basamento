@@ -23,21 +23,31 @@ type Compiled struct {
 	hash       string
 }
 
-// Compile validates f and type-checks its expressions.
+// Compile validates f, enforces the definition size limit and type-checks its
+// expressions.
+//
+// The order is the one specs/flow-engine/design.md §2.3 pins: ir.Validate
+// checks the counts, guard budgets and expression sizes first, the canonical
+// form is produced once and rejected above 1 MiB before it is hashed or its
+// expressions are type-checked, and only then does the type-checking run.
 //
 // On success the returned Compiled carries the same IR, its RFC 8785 canonical
 // JSON and the SHA-256 hash of those bytes. Errors are *core.Error with code
 // invalid_argument naming the node or edge and the expression at fault
-// (REQ-FLOW-003, REQ-FLOW-004, REQ-FLOW-040 to REQ-FLOW-043).
+// (REQ-FLOW-003, REQ-FLOW-004, REQ-FLOW-040 to REQ-FLOW-043, REQ-FLOW-045,
+// REQ-FLOW-046).
 func Compile(f *flow.IR) (*Compiled, error) {
 	if err := ir.Validate(f); err != nil {
 		return nil, err
 	}
-	if err := checkExpressions(f); err != nil {
-		return nil, err
-	}
 	canonical, err := ir.Canonical(f)
 	if err != nil {
+		return nil, err
+	}
+	if err := ir.CheckCanonicalSize(canonical); err != nil {
+		return nil, err
+	}
+	if err := checkExpressions(f); err != nil {
 		return nil, err
 	}
 	return &Compiled{definition: f, canonical: canonical, hash: ir.HashCanonical(canonical)}, nil

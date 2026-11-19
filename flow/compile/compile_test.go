@@ -249,6 +249,81 @@ func TestCompileJSONRejectsDuplicateNode(t *testing.T) {
 	requireInvalid(t, err, `duplicate node id "plan"`)
 }
 
+// longCondition returns a CEL condition of exactly n bytes that type-checks:
+// "true" joined by " || true", padded with trailing spaces. The size limit is a
+// property of the bytes, not of the parse tree.
+func longCondition(n int) string {
+	const unit = " || true"
+	s := "true"
+	for len(s)+len(unit) <= n {
+		s += unit
+	}
+	return s + strings.Repeat(" ", n-len(s))
+}
+
+func TestCompileAcceptsAConditionAtItsMaximum(t *testing.T) {
+	f := typedFlow()
+	f.Edges[1].When = longCondition(ir.MaxExpressionBytes)
+	c, err := Compile(f)
+	if err != nil {
+		t.Fatalf("a %d-byte condition did not compile: %v", ir.MaxExpressionBytes, err)
+	}
+	if got := c.IR().Edges[1].When; len(got) != ir.MaxExpressionBytes {
+		t.Fatalf("condition is %d bytes, want %d", len(got), ir.MaxExpressionBytes)
+	}
+}
+
+func TestCompileRejectsAConditionAboveItsMaximum(t *testing.T) {
+	f := typedFlow()
+	f.Edges[1].When = longCondition(ir.MaxExpressionBytes + 1)
+	requireInvalid(t, errOf(t, f), "expression size limit of 16384 bytes exceeded", `edge "plan" -> "check" when`)
+}
+
+func TestCompileAcceptsADefinitionAtItsMaximum(t *testing.T) {
+	f := typedFlow()
+	padDefinition(t, f, ir.MaxDefinitionBytes)
+	c, err := Compile(f)
+	if err != nil {
+		t.Fatalf("a definition at the size limit did not compile: %v", err)
+	}
+	if got := len(c.Canonical()); got != ir.MaxDefinitionBytes {
+		t.Fatalf("canonical definition is %d bytes, want %d", got, ir.MaxDefinitionBytes)
+	}
+}
+
+func TestCompileRejectsADefinitionAboveItsMaximum(t *testing.T) {
+	f := typedFlow()
+	padDefinition(t, f, ir.MaxDefinitionBytes+1)
+	requireInvalid(t, errOf(t, f), "definition size limit of 1048576 bytes exceeded", "1048577 bytes")
+}
+
+// padDefinition grows f's defaults until its canonical JSON is exactly size
+// bytes. A JSON string adds one canonical byte per character, so the loop
+// converges in two passes whatever the key's own overhead is.
+func padDefinition(t *testing.T, f *flow.IR, size int) {
+	t.Helper()
+	if f.Defaults == nil {
+		f.Defaults = map[string]json.RawMessage{"padding": nil}
+	}
+	pad := 0
+	for i := 0; i < 5; i++ {
+		f.Defaults["padding"] = json.RawMessage(`"` + strings.Repeat("a", pad) + `"`)
+		canonical, err := ir.Canonical(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		delta := size - len(canonical)
+		if delta == 0 {
+			return
+		}
+		if pad+delta < 0 {
+			t.Fatalf("cannot pad a definition to %d bytes", size)
+		}
+		pad += delta
+	}
+	t.Fatalf("could not pad the definition to %d bytes", size)
+}
+
 func errOf(t *testing.T, f *flow.IR) error {
 	t.Helper()
 	_, err := Compile(f)

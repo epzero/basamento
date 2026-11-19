@@ -49,6 +49,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerPrompt(sc)
 	registerBlob(sc)
 	registerFlowCompile(sc)
+	registerFlowLimits(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)

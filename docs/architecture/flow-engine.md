@@ -57,6 +57,11 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 - Type-checks every CEL expression against the state schema: edge `when`
   conditions, node `in` mappings, guard `while` conditions, and the `accept_if`
   of a `gate` and the `over` of a `map` in their node specs.
+- Enforces the compiler's limits, in the order `specs/flow-engine/design.md`
+  §2.2 and §2.3 state: at most 4,096 nodes and 16,384 edges, a guard budget
+  inside its range (`max_visits` ≤ 1,000,000, `cost_mpts` ≤ 1,000,000,000,
+  neither negative), each expression at most 16,384 bytes, and a canonical
+  definition at most 1 MiB (REQ-FLOW-045, REQ-FLOW-046).
 - Requires at least one guarded node on every cycle. A guard's `max_visits` or
   `cost_mpts` is the budget that bounds a cycle (REQ-FLOW-003); a `while`
   condition only chooses when the cycle leaves.

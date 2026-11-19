@@ -352,22 +352,21 @@ func longChain(n int) *flow.IR {
 }
 
 // TestValidateLongChain keeps the shape that used to exhaust the goroutine
-// stack and the edge budget honest: it must validate with the accepted
-// verdict. The cost is measured by BenchmarkValidateLongChain, not here,
-// because a test may not read the wall clock.
+// stack and the edge budget honest at the node maximum: it must validate with
+// the accepted verdict. The cost is measured by BenchmarkValidateLongChain, not
+// here, because a test may not read the wall clock.
 func TestValidateLongChain(t *testing.T) {
-	const nodes = 50_000
-	f := longChain(nodes)
+	f := longChain(MaxNodes)
 	if err := Validate(f); err != nil {
-		t.Fatalf("validating a %d-node chain: %v", nodes, err)
+		t.Fatalf("validating a %d-node chain: %v", MaxNodes, err)
 	}
-	if got := len(f.Nodes); got != nodes {
-		t.Fatalf("built %d nodes, want %d", got, nodes)
+	if got := len(f.Nodes); got != MaxNodes {
+		t.Fatalf("built %d nodes, want %d", got, MaxNodes)
 	}
 }
 
 func BenchmarkValidateLongChain(b *testing.B) {
-	f := longChain(50_000)
+	f := longChain(MaxNodes)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

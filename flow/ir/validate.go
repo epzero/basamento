@@ -26,12 +26,25 @@ var nodeKinds = map[string]bool{
 }
 
 // Validate checks everything the compiler can know from the definition alone:
-// the state schema and its reducers, node names, kinds and reserved names, edge
-// endpoints, exactly one edge from START, reachability and guarded cycles.
-// Expression typing is flow/compile's job.
+// the compiler's limits, the state schema and its reducers, node names, kinds
+// and reserved names, edge endpoints, exactly one edge from START,
+// reachability and guarded cycles. Expression typing is flow/compile's job.
+//
+// The limits come first, so an over-limit definition is rejected before any
+// graph work and never reaches the cycle search (specs/flow-engine/design.md
+// §2.3).
 func Validate(f *flow.IR) error {
 	if f == nil {
 		return invalid("flow: nil definition", nil)
+	}
+	if err := validateCounts(f); err != nil {
+		return err
+	}
+	if err := validateGuards(f); err != nil {
+		return err
+	}
+	if err := validateExpressionSizes(f); err != nil {
+		return err
 	}
 	if f.Name == "" {
 		return invalid("flow: name is required", nil)

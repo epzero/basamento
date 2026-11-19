@@ -5,7 +5,9 @@ Flows as data, a pure interpreter, CEL expressions (ADR-0003, `specs/flow-engine
 ### WP-L4-01 — IR and compiler
 Depends: WP-L2-01, WP-L2-02.
 Owns: `flow/ir`, `flow/compile`.
-Canonical IR, content hash, validation, cycle guards, CEL type-checking. Specs: `specs/flow-engine/compile.feature`.
+Canonical IR, content hash, validation, cycle guards, CEL type-checking, and
+the compiler's limits (guard budgets, expression and definition size).
+Specs: `specs/flow-engine/compile.feature`.
 
 ### WP-L4-02 — Flow machine
 Depends: WP-L4-01.

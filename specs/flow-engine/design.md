@@ -142,7 +142,9 @@ by REQ-FLOW-003 rather than by the range check. A **negative** value is
 contradictory and rejected wherever the guard appears, on a cycle or not. The
 error is `*core.Error` with code `invalid_argument` naming the node, the field
 and the maximum, for example
-`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`.
+`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`,
+and, for a negative value,
+`flow: node "repair": guard max_visits -1 is negative; the maximum is 1000000`.
 
 The check is per guard field. A node whose guard carries only `cost_mpts`
 bounds a cycle; its `max_visits` stays absent.
@@ -158,9 +160,16 @@ bounds a cycle; its `max_visits` stays absent.
 
 The limits are requirements, not implementation guidance: REQ-FLOW-046 makes
 each one a rejection with code `invalid_argument` naming the limit and its
-maximum, for example `flow: 4097 nodes is above the maximum 4096`. They are
-constants in `flow/ir`, not configuration, and apply to an IR built in Go as
-well as to one decoded from YAML or JSON.
+maximum, for example `flow: node count limit of 4096 nodes exceeded: 4097
+nodes`. An expression rejection also names where the expression sits, for
+example `flow: expression size limit of 16384 bytes exceeded: edge "verify" ->
+"repair" when is 16385 bytes`. They are constants in `flow/ir`, not
+configuration, and apply to an IR built in Go as well as to one decoded from
+YAML or JSON.
+
+The IR has no field for a `set` node's assignments yet (Open questions), so
+`flow/ir` measures the expressions that do exist: an edge `when`, a node `in`,
+a guard `while`, a gate's `accept_if` and a map's `over`.
 
 `core/schema`'s untrusted-JSON limits (WP-L2-02) bound the nesting depth and
 the number literals of one JSON value, not the size of a document; they do not

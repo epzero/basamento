@@ -32,13 +32,13 @@ Feature: Compiling flows
     When the flow is compiled
     Then compilation succeeds
 
-  @REQ-FLOW-045 @id:FLOW-045-01 @planned @wp:WP-L4-01
+  @REQ-FLOW-045 @id:FLOW-045-01 @wp:WP-L4-01
   Scenario: A cycle bounded at the guard maxima is accepted
     Given a flow where node "repair" routes back to node "verify" and only "repair" has a guard of 1000000 visits and 1000000000 milli-points
     When the flow is compiled
     Then compilation succeeds
 
-  @REQ-FLOW-045 @id:FLOW-045-02 @planned @wp:WP-L4-01
+  @REQ-FLOW-045 @id:FLOW-045-02 @wp:WP-L4-01
   Scenario Outline: A guard budget outside its range is rejected
     Given a flow where node "repair" routes back to node "verify" and only "repair" has a guard of <value> <unit>
     When the flow is compiled
@@ -51,7 +51,7 @@ Feature: Compiling flows
       | 1000001    | visits       | max_visits | 1000000    |
       | 1000000001 | milli-points | cost_mpts  | 1000000000 |
 
-  @REQ-FLOW-046 @id:FLOW-046-01 @planned @wp:WP-L4-01
+  @REQ-FLOW-046 @id:FLOW-046-01 @wp:WP-L4-01
   Scenario Outline: A definition at a size limit is accepted
     Given a flow whose <measure> is <maximum> <unit>
     When the flow is compiled
@@ -64,7 +64,7 @@ Feature: Compiling flows
       | expression size | 16384   | bytes |
       | definition size | 1048576 | bytes |
 
-  @REQ-FLOW-046 @id:FLOW-046-02 @planned @wp:WP-L4-01
+  @REQ-FLOW-046 @id:FLOW-046-02 @wp:WP-L4-01
   Scenario Outline: A definition over a size limit is rejected
     Given a flow whose <measure> is <value> <unit>
     When the flow is compiled
