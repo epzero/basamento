@@ -21,9 +21,11 @@
 // overhead (71 bytes), with an eight-byte deadline prefix on KV records. Open fails
 // with invalid_argument when max_payload cannot carry those headers and one byte.
 //
-// Subscriptions replay retained messages up to the last stream sequence at
-// Subscribe time with back-pressure; later live messages use the non-blocking
-// buffer and end the subscription on overflow (REQ-BUS-010).
+// Subscriptions replay retained messages with back-pressure (replay backlog
+// counted by retained messages, not stream sequence distance). Live publishes
+// reserve buffer space before JetStream ack; overflow is decided at publish
+// time from channel length, replay backlog and in-flight live count
+// (REQ-BUS-010).
 //
 // Subjects and KV keys are isolated per string; wildcards are rejected.
 // [Store.Close] ends every live subscription, releases the client connection and

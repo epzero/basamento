@@ -215,15 +215,17 @@ func (s *Store) Publish(ctx context.Context, subject string, data []byte) (uint6
 	if len(data) > s.publishLimit {
 		return 0, messageTooLarge()
 	}
+	reserved := s.reserveLive(subject)
 	ack, err := s.js.Publish(ctx, wireSubject(subject), data)
 	if err != nil {
+		s.releaseLive(reserved)
 		return 0, mapConnErr(err)
 	}
-	s.noteLivePublish(subject, ack.Sequence)
+	s.confirmLive(reserved, ack.Sequence)
 	return ack.Sequence, nil
 }
 
-func (s *Store) noteLivePublish(subject string, seq uint64) {
+func (s *Store) reserveLive(subject string) []*liveSubscription {
 	s.liveMu.Lock()
 	subs := make([]*liveSubscription, 0, len(s.live))
 	for l := range s.live {
@@ -233,7 +235,20 @@ func (s *Store) noteLivePublish(subject string, seq uint64) {
 	}
 	s.liveMu.Unlock()
 	for _, l := range subs {
-		l.noteLivePublish(seq)
+		l.reserve()
+	}
+	return subs
+}
+
+func (s *Store) confirmLive(subs []*liveSubscription, seq uint64) {
+	for _, l := range subs {
+		l.confirm(seq)
+	}
+}
+
+func (s *Store) releaseLive(subs []*liveSubscription) {
+	for _, l := range subs {
+		l.release()
 	}
 }
 
@@ -348,6 +363,11 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 	if err != nil {
 		live.end()
 		return nil, mapConnErr(err)
+	}
+	if info := cons.CachedInfo(); info != nil {
+		live.setReplayBacklog(info.NumPending)
+	} else {
+		live.setReplayBacklogDistance()
 	}
 	live.attach(cc)
 	go func() {

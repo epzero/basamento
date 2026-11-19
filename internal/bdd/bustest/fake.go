@@ -53,6 +53,8 @@ type sub struct {
 	after             uint64
 	replayThrough     uint64
 	replayPending     int
+	liveAhead         int
+	dropFrom          uint64
 	dropLive          bool
 	ch                chan platform.Message
 	cancel            context.CancelFunc
@@ -195,14 +197,8 @@ func (f *Fake) replaySend(subCtx context.Context, s *sub, msg platform.Message) 
 		f.mu.Lock()
 		if s.replayPending > 0 {
 			s.replayPending--
-			drop := s.dropLive && s.replayPending == 0
-			f.mu.Unlock()
-			if drop {
-				go f.terminateSub(s)
-			}
-		} else {
-			f.mu.Unlock()
 		}
+		f.mu.Unlock()
 	case <-subCtx.Done():
 	case <-s.done:
 	}
@@ -227,13 +223,13 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 			}
 			if msg.Seq > s.replayThrough {
 				f.mu.Lock()
-				s.noteLivePublish(msg.Seq)
-				drop := s.dropLive
-				f.mu.Unlock()
-				if drop {
-					f.terminateSub(s)
-					return true
+				if s.liveAhead > 0 {
+					s.liveAhead--
 				}
+				if s.replayPending > 0 {
+					s.replayPending = 0
+				}
+				f.mu.Unlock()
 			}
 			f.mu.Lock()
 			replayLeft := s.replayActive || s.replayPending > 0
@@ -291,6 +287,14 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 	msg := platform.Message{Subject: subject, Seq: seq, Data: append([]byte(nil), data...)}
 	f.retained[subject] = append(f.retained[subject], retainedMsg{seq: seq, data: msg.Data})
 	snap := append([]*sub(nil), f.subs...)
+	for _, s := range snap {
+		if s.subject != subject || s.ended {
+			continue
+		}
+		if msg.Seq > s.replayThrough {
+			s.reserve()
+		}
+	}
 	var terminate []*sub
 	for _, s := range snap {
 		if s.subject != subject {
@@ -300,22 +304,13 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 			continue
 		}
 		if msg.Seq > s.replayThrough {
-			s.noteLivePublish(msg.Seq)
+			s.confirm(msg.Seq)
 			if s.replayActive {
-				if !s.dropLive {
-					s.livePending = append(s.livePending, msg)
-					select {
-					case s.liveWake <- struct{}{}:
-					default:
-					}
+				s.livePending = append(s.livePending, msg)
+				select {
+				case s.liveWake <- struct{}{}:
+				default:
 				}
-				continue
-			}
-			if s.dropLive {
-				if s.replayPending > 0 {
-					continue
-				}
-				terminate = append(terminate, s)
 				continue
 			}
 		}
@@ -339,15 +334,29 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 }
 
 func (sub *sub) bufferOccupied() int {
-	return len(sub.ch) + sub.replayPending
+	return len(sub.ch) + sub.replayPending + sub.liveAhead
 }
 
-func (s *sub) noteLivePublish(seq uint64) {
-	if seq <= s.replayThrough {
+func (s *sub) reserve() {
+	if s.ended {
 		return
 	}
-	if s.bufferOccupied() >= cap(s.ch) {
+	s.liveAhead++
+}
+
+func (s *sub) confirm(seq uint64) {
+	if s.ended {
+		return
+	}
+	if seq <= s.replayThrough {
+		if s.liveAhead > 0 {
+			s.liveAhead--
+		}
+		return
+	}
+	if s.bufferOccupied() > cap(s.ch) && !s.dropLive {
 		s.dropLive = true
+		s.dropFrom = seq
 	}
 }
 
@@ -355,11 +364,13 @@ func (f *Fake) deliverLiveLocked(s *sub, msg platform.Message) bool {
 	if s.ended || msg.Seq <= s.after {
 		return false
 	}
-	if s.dropLive {
-		return true
+	if s.liveAhead > 0 {
+		s.liveAhead--
 	}
-	if msg.Seq > s.replayThrough && s.bufferOccupied() >= cap(s.ch) {
-		return true
+	if s.dropLive {
+		if s.dropFrom > 0 && msg.Seq >= s.dropFrom {
+			return true
+		}
 	}
 	select {
 	case s.ch <- msg:
@@ -464,12 +475,7 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		s.replaySettledOnce.Do(func() { close(s.replaySettled) })
 		f.mu.Lock()
 		s.replayActive = false
-		drop := s.dropLive
 		f.mu.Unlock()
-		if drop {
-			f.terminateSub(s)
-			return
-		}
 		for {
 			if f.flushLivePending(s, subCtx) {
 				return

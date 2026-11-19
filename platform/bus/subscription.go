@@ -10,35 +10,34 @@ import (
 )
 
 type liveSubscription struct {
-	subject       string
-	ch            chan platform.Message
-	replayThrough uint64
-	replayPending int
-	dropLive      bool
-	mu            sync.Mutex
-	ended         bool
-	senders       sync.WaitGroup
-	done          chan struct{}
-	cc            jetstream.ConsumeContext
-	cancel        context.CancelFunc
-	onEnd         func()
-	cancelOnce    sync.Once
+	subject         string
+	ch              chan platform.Message
+	after           uint64
+	replayThrough   uint64
+	replayPending   int
+	replayDelivered int
+	replayDone      bool
+	liveAhead       int
+	dropFrom        uint64
+	dropLive        bool
+	mu              sync.Mutex
+	ended           bool
+	senders         sync.WaitGroup
+	done            chan struct{}
+	cc              jetstream.ConsumeContext
+	cancel          context.CancelFunc
+	onEnd           func()
+	cancelOnce      sync.Once
 }
 
 func newLiveSubscription(subject string, buf int, after, replayThrough uint64, cancel context.CancelFunc, onEnd func()) *liveSubscription {
-	replayPending := 0
-	if replayThrough > after {
-		if replayThrough-after > uint64(^uint(0)>>1) {
-			replayPending = int(^uint(0) >> 1)
-		} else {
-			replayPending = int(replayThrough - after)
-		}
-	}
+	replayDone := replayThrough <= after
 	return &liveSubscription{
 		subject:       subject,
+		after:         after,
 		ch:            make(chan platform.Message, buf),
 		replayThrough: replayThrough,
-		replayPending: replayPending,
+		replayDone:    replayDone,
 		done:          make(chan struct{}),
 		cancel:        cancel,
 		onEnd:         onEnd,
@@ -55,6 +54,60 @@ func (s *liveSubscription) attach(cc jetstream.ConsumeContext) {
 		return
 	}
 	s.cc = cc
+}
+
+// setReplayBacklog sets replayPending from the consumer's retained backlog at Subscribe.
+func (s *liveSubscription) setReplayBacklog(numPending uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replayDone {
+		return
+	}
+	dist := s.replayThrough - s.after
+	n := numPending
+	if n > dist {
+		n = dist
+	}
+	rp := int(n)
+	if rp < s.replayDelivered {
+		rp = 0
+	} else {
+		rp -= s.replayDelivered
+	}
+	s.replayPending = rp
+}
+
+// setReplayBacklogDistance is the fallback when OrderedConsumer CachedInfo is nil
+// (normal Subscribe reads CachedInfo after Consume and does not call this).
+func (s *liveSubscription) setReplayBacklogDistance() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replayDone {
+		return
+	}
+	var dist uint64
+	if s.replayThrough > s.after {
+		dist = s.replayThrough - s.after
+		if dist > uint64(^uint(0)>>1) {
+			s.replayPending = int(^uint(0) >> 1)
+			return
+		}
+	}
+	rp := int(dist)
+	if rp < s.replayDelivered {
+		rp = 0
+	} else {
+		rp -= s.replayDelivered
+	}
+	s.replayPending = rp
+}
+
+func (s *liveSubscription) markReplayDoneLocked() {
+	if s.replayDone {
+		return
+	}
+	s.replayDone = true
+	s.replayPending = 0
 }
 
 // deliver routes replay with back-pressure and live without blocking the publisher.
@@ -78,13 +131,12 @@ func (s *liveSubscription) deliverReplay(ctx context.Context, msg platform.Messa
 	select {
 	case s.ch <- msg:
 		s.mu.Lock()
+		s.replayDelivered++
 		if s.replayPending > 0 {
 			s.replayPending--
-			if s.replayPending == 0 && s.dropLive {
-				s.mu.Unlock()
-				go s.terminate()
-				return
-			}
+		}
+		if msg.Seq >= s.replayThrough {
+			s.markReplayDoneLocked()
 		}
 		s.mu.Unlock()
 	case <-ctx.Done():
@@ -92,7 +144,7 @@ func (s *liveSubscription) deliverReplay(ctx context.Context, msg platform.Messa
 	}
 }
 
-// deliverLive drops the message when ctx is already done, then non-blocks or ends on overflow.
+// deliverLive ends the subscription on overflow (dropFrom or full buffer), never blocking the publisher.
 func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message) {
 	if ctx.Err() != nil {
 		return
@@ -102,12 +154,11 @@ func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message
 		s.mu.Unlock()
 		return
 	}
-	if s.dropLive {
-		s.mu.Unlock()
-		s.terminate()
-		return
+	if s.liveAhead > 0 {
+		s.liveAhead--
 	}
-	if s.occupied() >= cap(s.ch) {
+	s.markReplayDoneLocked()
+	if s.dropLive && s.dropFrom > 0 && msg.Seq >= s.dropFrom {
 		s.mu.Unlock()
 		s.terminate()
 		return
@@ -118,6 +169,44 @@ func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message
 	default:
 		s.mu.Unlock()
 		s.terminate()
+	}
+}
+
+func (s *liveSubscription) reserve() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		return
+	}
+	s.liveAhead++
+}
+
+func (s *liveSubscription) confirm(seq uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		return
+	}
+	if seq <= s.replayThrough {
+		if s.liveAhead > 0 {
+			s.liveAhead--
+		}
+		return
+	}
+	if s.occupiedLocked() > cap(s.ch) && !s.dropLive {
+		s.dropLive = true
+		s.dropFrom = seq
+	}
+}
+
+func (s *liveSubscription) release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ended {
+		return
+	}
+	if s.liveAhead > 0 {
+		s.liveAhead--
 	}
 }
 
@@ -156,25 +245,6 @@ func (s *liveSubscription) finish(cc jetstream.ConsumeContext) {
 
 func (s *liveSubscription) messages() <-chan platform.Message { return s.ch }
 
-func (s *liveSubscription) occupied() int {
-	return len(s.ch) + s.replayPending
-}
-
-// noteLivePublish drops the subscription when a new live message cannot share the buffer
-// with undelivered replay (REQ-BUS-010).
-func (s *liveSubscription) noteLivePublish(seq uint64) {
-	if seq <= s.replayThrough {
-		return
-	}
-	s.mu.Lock()
-	if s.ended {
-		s.mu.Unlock()
-		return
-	}
-	if s.occupied() >= cap(s.ch) {
-		s.dropLive = true
-		s.mu.Unlock()
-		return
-	}
-	s.mu.Unlock()
+func (s *liveSubscription) occupiedLocked() int {
+	return len(s.ch) + s.replayPending + s.liveAhead
 }
