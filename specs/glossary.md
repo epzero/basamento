@@ -8,7 +8,9 @@ the same change that first uses it.
 | **Flow** | A versioned definition (IR) of nodes and edges, stored as data and identified by its content hash. |
 | **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled, terminated. |
 | **Node** | One step of a flow: `set`, `task`, `model`, `agent`, `tool`, `map`, `parallel`, `subflow`, `gate`, `wait`. |
-| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (milli-points spent there). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (the run's settled milli-points, `run.cost`, when the node is about to start, not a per-node total). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Settled cost** | The milli-points a run has been charged so far: the machine's `Snapshot.Cost`, visible to CEL as `run.cost`, increased by the cost each finished node's recorded result carries. |
+| **Fan-out limit** | The most items one `map` node may fan out to in a run: `DefaultMaxFanout`, 10,000, lowered for a host with `WithMaxFanout`. A larger collection fails the run with `budget_exceeded` before any item starts. |
 | **Edge endpoint** | The two ends of an edge: a node, or one of the reserved endpoints `START` (the flow's entry, only an edge source) and `FAIL` (its failure exit, only an edge target). `START` and `FAIL` are not nodes. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
