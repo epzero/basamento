@@ -7,7 +7,7 @@ Decisions the implementer of WP-L1-04 follows. Package: `platform/secrets`
 
 | Part | What it is |
 | --- | --- |
-| Key service | Holds the master key and wraps and unwraps with it. Opened from a URL through `gocloud.dev/secrets`: `localsecrets://<base64 32-byte key>` (embedded; mapped onto gocloud's `localsecrets` keeper, whose own scheme is `base64key`), `awskms://`, `gcpkms://`. Any other scheme is refused (REQ-SECRET-019). Vault Transit is not a supported key service. |
+| Key service | Holds the master key and wraps and unwraps with it. Opened from a URL through `gocloud.dev/secrets`: `localsecrets://<base64 32-byte key>` (embedded; mapped onto gocloud's `localsecrets` keeper, whose own scheme is `base64key`), `awskms://`, `gcpkms://`, and `hashivault://` (Vault Transit), which ADR-0004 lists. Any other scheme is refused (REQ-SECRET-019). The gocloud version in use has no Vault Transit driver, so until a key service for it is added the store refuses `hashivault://` with `invalid_argument` as well. |
 | Secrets port | Implements `platform.Secrets` (`Encrypt`/`Decrypt` of small values) over the key service, and owns tenants' keysets: creation, wrapping, rotation, rewrap. |
 | Keyset store | Port declared by `platform/secrets` that persists one wrapped keyset record per tenant with compare-and-swap. This WP ships a file-backed store for the embedded profile; a SQL store can follow behind the same port without a spec change. |
 | Payload codec | Encodes and decodes the runtimes' payloads with the tenant's keyset. The tenant comes from the context (`ctx`), as for every repository call. |
