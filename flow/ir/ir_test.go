@@ -256,6 +256,34 @@ func TestDecodeRejectsJSONMergeKey(t *testing.T) {
 	}
 }
 
+// The merge-key check must not reject anchors and aliases, which are how a
+// document reuses one node definition without merging keys into another.
+func TestDecodeAcceptsYAMLAlias(t *testing.T) {
+	text := `
+name: x
+version: 1
+state:
+  schema: {type: object}
+nodes:
+  plan: &p {kind: task}
+  copy: *p
+edges:
+  - {from: START, to: plan}
+  - {from: plan, to: copy}
+  - {from: copy, to: FAIL}
+`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Nodes) != 2 {
+		t.Fatalf("decoded %d nodes, want 2: %+v", len(f.Nodes), f.Nodes)
+	}
+	if f.Nodes["copy"].Kind != "task" {
+		t.Fatalf("alias decoded to %+v", f.Nodes["copy"])
+	}
+}
+
 func TestDecodeAcceptsFlowStyleYAMLMapping(t *testing.T) {
 	text := `{name: x, version: 1, state: {schema: {type: object, properties: {tests: {type: object}}}},
 		nodes: {plan: {kind: task}}, edges: [{from: START, to: plan}, {from: plan, to: FAIL}]}`
