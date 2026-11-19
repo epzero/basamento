@@ -27,9 +27,6 @@ const minSignKeyLen = 32
 // stranded "<object>.<hex>.tmp" files with partial data; an operator may
 // remove them when no write is in flight.
 func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, error) {
-	if len(opts.SignKey) > 0 && len(opts.SignKey) < minSignKeyLen {
-		return nil, nil, core.NewError(core.CodeInvalidArgument, "blob SignKey must be at least 32 bytes", nil)
-	}
 	if raw == "" {
 		return nil, nil, unsupportedLocation(raw)
 	}
@@ -42,18 +39,25 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 	default:
 		return nil, nil, unsupportedLocation(raw)
 	}
+	embedded := u.Scheme == "file"
+	if embedded && len(opts.SignKey) > 0 && len(opts.SignKey) < minSignKeyLen {
+		return nil, nil, core.NewError(core.CodeInvalidArgument, "blob SignKey must be at least 32 bytes", nil)
+	}
 	bucket, err := openBucket(ctx, u)
 	if err != nil {
 		return nil, nil, err
 	}
-	embedded := u.Scheme == "file"
+	var signKey []byte
+	if embedded {
+		signKey = append([]byte(nil), opts.SignKey...)
+	}
 	st := &Store{
 		bucket:   bucket,
 		clock:    opts.clock(),
 		maxTTL:   opts.maxTTL(),
 		embedded: embedded,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
-		signKey:  append([]byte(nil), opts.SignKey...),
+		signKey:  signKey,
 	}
 	var handler http.Handler
 	if embedded {
