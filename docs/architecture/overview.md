@@ -121,7 +121,7 @@ flowchart TD
 | `stream` | Durable event log, deltas, snapshots, cursors. |
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
-| `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
+| `api` | Run routes, SSE native stream and AG-UI adapter, authentication and tenant wiring, error mapping. Connect services, the OpenAI-compatible endpoint and the MCP server land with their contracts. |
 | `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
 | `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). |
 

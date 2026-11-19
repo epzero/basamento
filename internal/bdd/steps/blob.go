@@ -395,6 +395,32 @@ func registerBlob(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	// One phrase advances the scenario clock for every domain. The optional
+	// "without the gate ... being resolved" clause is the flow host's way of
+	// saying no person answered; the recording host keeps its own clock, so
+	// advance it too when it is the one under test.
+	sc.Step(`^(-?\d.*?) pass(?:es)?(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
+		d, err := parseElapsed(elapsed)
+		if err != nil {
+			return err
+		}
+		world(ctx).Core.clock.Advance(d)
+		// A component server times its shutdown drain from the same frozen
+		// clock; firing its timer here is what "the seconds pass" means.
+		if c := world(ctx).Config; c != nil && c.after != nil {
+			select {
+			case c.after <- world(ctx).Core.clock.Now():
+			default:
+			}
+		}
+		h := world(ctx).Host
+		if h == nil || h.dc == nil {
+			return nil
+		}
+		h.dc.advance(d)
+		h.signal()
+		return h.settle()
+	})
 	sc.Step(`^the blob store is closed and opened again on the same location$`, func(ctx context.Context) error {
 		w := world(ctx).Blob
 		if w.store != nil {

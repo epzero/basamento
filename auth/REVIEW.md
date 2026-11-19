@@ -5,7 +5,9 @@ High risk: a mistake here leaks data across tenants or grants access.
 - Every repository call carries a tenant context; there is no query path that
   can omit it.
 - Authorization is checked once, in the interceptor, before any side effect;
-  denials return `permission_denied` and write an audit event.
+  denials return `permission_denied` and write an audit event. An unknown role
+  or action grants nothing, a tenant mismatch is `not_found`, and a denial
+  whose audit event cannot be written fails closed.
 - Token validation checks issuer keys, audience and expiry; clock skew
   allowances are explicit and small.
 - Secrets and password hashes never appear in logs, errors or responses.

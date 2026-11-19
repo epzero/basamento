@@ -3,6 +3,10 @@ package bus
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/epzero/basamento/core"
 )
@@ -21,32 +25,71 @@ func TestCallsUnavailableWhenDisconnected(t *testing.T) {
 		if string(core.CodeOf(err)) != string(core.CodeUnavailable) {
 			t.Fatalf("%s code %s", op, core.CodeOf(err))
 		}
-		if string(core.CodeOf(err)) == string(core.CodeTimeout) {
-			t.Fatalf("%s timed out", op)
-		}
 	}
-	if _, err := st.Publish(ctx, subject, []byte("x")); err != nil {
-		check(err, "Publish")
+	_, err := st.Publish(ctx, subject, []byte("x"))
+	check(err, "Publish")
+	_, err = st.LastSeq(ctx, subject)
+	check(err, "LastSeq")
+	err = st.Purge(ctx, subject)
+	check(err, "Purge")
+	_, err = st.Subscribe(ctx, subject, 0)
+	check(err, "Subscribe")
+	_, _, err = st.Get(ctx, key)
+	check(err, "Get")
+	_, err = st.Put(ctx, key, []byte("v"), 0)
+	check(err, "Put")
+	_, _, err = st.Get(ctx, key)
+	if err == nil {
+		t.Fatal("Put wrote while disconnected")
 	}
-	if _, err := st.LastSeq(ctx, subject); err != nil {
-		check(err, "LastSeq")
+	_, err = st.CompareAndSwap(ctx, key, []byte("v"), 0, 0)
+	check(err, "CompareAndSwap")
+	err = st.Delete(ctx, key)
+	check(err, "Delete")
+	if err := st.reconnectInProcess(ctx); err != nil {
+		t.Fatal(err)
 	}
-	if err := st.Purge(ctx, subject); err != nil {
-		check(err, "Purge")
+	_, _, err = st.Get(ctx, key)
+	if err == nil || string(core.CodeOf(err)) != string(core.CodeNotFound) {
+		t.Fatalf("Get after refused Put: %v", err)
 	}
-	if _, err := st.Subscribe(ctx, subject, 0); err != nil {
-		check(err, "Subscribe")
+}
+
+func (s *Store) reconnectInProcess(ctx context.Context) error {
+	if s.inprocess == nil {
+		return unavailable()
 	}
-	if _, _, err := st.Get(ctx, key); err != nil {
-		check(err, "Get")
+	nc, err := nats.Connect("", nats.InProcessServer(s.inprocess), nats.Timeout(2*time.Second))
+	if err != nil {
+		return mapConnErr(err)
 	}
-	if _, err := st.Put(ctx, key, []byte("v"), 0); err != nil {
-		check(err, "Put")
+	js, err := jetstream.New(nc)
+	if err != nil {
+		nc.Close()
+		return mapConnErr(err)
 	}
-	if _, err := st.CompareAndSwap(ctx, key, []byte("v"), 0, 0); err != nil {
-		check(err, "CompareAndSwap")
+	stream, err := js.Stream(ctx, streamName)
+	if err != nil {
+		nc.Close()
+		return mapConnErr(err)
 	}
-	if err := st.Delete(ctx, key); err != nil {
-		check(err, "Delete")
+	meta, err := js.KeyValue(ctx, metaBucket)
+	if err != nil {
+		nc.Close()
+		return mapConnErr(err)
 	}
+	data, err := js.KeyValue(ctx, dataBucket)
+	if err != nil {
+		nc.Close()
+		return mapConnErr(err)
+	}
+	if s.nc != nil {
+		s.nc.Close()
+	}
+	s.nc = nc
+	s.js = js
+	s.stream = stream
+	s.meta = meta
+	s.data = data
+	return nil
 }

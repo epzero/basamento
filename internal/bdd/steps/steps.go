@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -36,6 +37,11 @@ type World struct {
 	Host        *hostWorld
 	Local       *localWorld
 	Temporal    *temporalWorld
+	Eventlog    *eventlogWorld
+	Stream      *streamWorld
+	Auth        *authWorld
+	Authz       *authzWorld
+	API         *apiWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -52,6 +58,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Bus:         newBusWorld(),
 			Secrets:     newSecretsWorld(),
 			Config:      newConfigWorld(),
+			Credentials: newCredentialsWorld(),
 			Schema:      newSchemaWorld(),
 			Model:       newModelWorld(),
 			Catalog:     newCatalogWorld(),
@@ -62,6 +69,11 @@ func Initialize(sc *godog.ScenarioContext) {
 			Host:        newHostWorld(),
 			Local:       newLocalWorld(),
 			Temporal:    newTemporalWorld(),
+			Eventlog:    newEventlogWorld(),
+			Stream:      newStreamWorld(),
+			Auth:        newAuthWorld(),
+			Authz:       newAuthzWorld(),
+			API:         newAPIWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -69,12 +81,12 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
-	registerBus(sc)
 	registerSecrets(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
+	registerBus(sc)
 	registerSchema(sc)
 	registerModel(sc)
 	registerCatalog(sc)
@@ -86,10 +98,16 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerLocal(sc)
 	registerTemporal(sc)
 	registerEmbedded(sc)
+	registerEventlog(sc)
+	registerStreamLive(sc)
+	registerAuth(sc)
+	registerAuthz(sc)
+	registerAPI(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()
+		world(ctx).API.teardown()
 		return ctx, nil
 	})
 }
@@ -112,6 +130,12 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 			return nil
 		}
 	}
+	if w.Bus != nil && w.Bus.lastErr != nil {
+		if string(core.CodeOf(w.Bus.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Bus.lastErr), code)
+		}
+		return nil
+	}
 	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
 		return assertBlobCallCode(ctx, code)
 	}
@@ -124,9 +148,7 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	return fmt.Errorf("call succeeded, want %s", code)
 }
 
-// registerShared holds phrases used by more than one domain. The SQL store and
-// the Secrets port both report an open failure with the same phrase; one
-// handler reads whichever domain opened in the scenario.
+// registerShared holds phrases used by more than one domain.
 func registerShared(sc *godog.ScenarioContext) {
 	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)
@@ -145,4 +167,23 @@ func registerShared(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, assertPutOutcome)
+}
+
+// assertPutOutcome reads the phrase the credentials and the bus scenarios share.
+// The credentials store is the one under test only when a credentials scenario
+// opened it; otherwise the bus KV store is.
+func assertPutOutcome(ctx context.Context, tail string) error {
+	w := world(ctx)
+	if w.Credentials != nil && w.Credentials.store != nil {
+		if tail == "succeeds" {
+			if w.Credentials.putErr != nil {
+				return fmt.Errorf("put failed: %w", w.Credentials.putErr)
+			}
+			return nil
+		}
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(w.Credentials.putErr, code)
+	}
+	return matchPutOutcome(ctx, tail)
 }

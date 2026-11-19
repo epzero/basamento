@@ -28,7 +28,7 @@ Capabilities:
 | [`core`](core/requirements.md) | Implemented (ids). |
 | [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
 | [`runtime`](runtime/requirements.md) | Temporal and its embedded server implemented (WP-L5-02, WP-L5-03); local planned (WP-L5-01). |
-| [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
+| [`streaming`](streaming/requirements.md) | Partly implemented (WP-L6-01 `stream/eventlog`, WP-L6-02 `stream`, WP-L6-03 `api`; WP-L6-04 planned). |
 | [`models`](models/requirements.md) | Partly implemented (WP-L3-01, WP-L3-03, WP-L3-04, WP-L3-06); planned (WP-L3-02, workers). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
@@ -40,7 +40,7 @@ Capabilities:
 | [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
 | [`config`](config/requirements.md) | Implemented (WP-L1-05). |
 | [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |
-| [`schema`](schema/requirements.md) | Implemented (WP-L2-02). |
+| [`schema`](schema/requirements.md) | Planned (WP-L2-02). |
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
 | [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |
 | [`bus`](bus/requirements.md) | Implemented (WP-L1-03, `platform/bus`, BDD fake `internal/bdd/bustest`). |

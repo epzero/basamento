@@ -16,7 +16,7 @@ func waitInFlightReplaySend() {
 }
 
 func TestLiveSubscriptionEndWhileReplayBlocked(t *testing.T) {
-	live := newLiveSubscription(1, 10, func() {}, nil)
+	live := newLiveSubscription("run.r1.d", 1, 0, 10, func() {}, nil)
 	ctx := context.Background()
 	msg1 := platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("a")}
 	msg2 := platform.Message{Subject: "run.r1.d", Seq: 2, Data: []byte("b")}
@@ -44,7 +44,7 @@ func TestLiveSubscriptionEndWhileReplayBlocked(t *testing.T) {
 }
 
 func TestLiveSubscriptionOverflowWhileReplayBlocked(t *testing.T) {
-	live := newLiveSubscription(1, 10, func() {}, nil)
+	live := newLiveSubscription("run.r1.d", 1, 0, 10, func() {}, nil)
 	ctx := context.Background()
 	live.deliverReplay(ctx, platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("a")})
 	var wg sync.WaitGroup
@@ -66,7 +66,7 @@ func TestLiveSubscriptionOverflowWhileReplayBlocked(t *testing.T) {
 }
 
 func TestLiveSubscriptionEndIdempotentDeliverNoOp(t *testing.T) {
-	live := newLiveSubscription(2, 5, func() {}, nil)
+	live := newLiveSubscription("run.r1.d", 2, 0, 5, func() {}, nil)
 	ctx := context.Background()
 	live.end()
 	live.end()

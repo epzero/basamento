@@ -57,6 +57,7 @@ func TestLoadDefaultsAndEnvName(t *testing.T) {
 	}
 	cases := map[string]string{
 		"profile":          ProfileEmbedded,
+		"auth.mode":        "none",
 		"listen.addr":      "127.0.0.1:8080",
 		"data.dir":         "./.kit/data",
 		"log.level":        "info",

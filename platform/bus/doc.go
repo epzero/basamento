@@ -14,12 +14,12 @@
 //
 // [Options] carries [core.Clock] (KV logical expiry per REQ-BUS-018), optional
 // [Options.SubBuffer] and [Options.MaxMessageSize] (defaults in constants), and
-// [Options.Replicas] used only when this open creates JetStream assets.
+// [Options.Replicas] used when this open creates JetStream assets.
 //
-// Publish payloads are capped at [Options.MaxMessageSize]. KV values are capped at
-// [MaxKVValueBytes] (the message limit minus the eight-byte deadline header in
-// each encoded record). The cluster max_payload must be at least
-// MaxMessageSize plus that header or open fails with invalid_argument.
+// Effective publish and KV value caps follow specs/bus/design.md §5: the smaller
+// of the configured maximum and the server max_payload minus JetStream CAS header
+// overhead (71 bytes), with an eight-byte deadline prefix on KV records. Open fails
+// with invalid_argument when max_payload cannot carry those headers and one byte.
 //
 // Subscriptions replay retained messages up to the last stream sequence at
 // Subscribe time with back-pressure; later live messages use the non-blocking

@@ -1,6 +1,6 @@
 # Streaming: runs outlive connections
 
-Status: **Planned** (WP-L6-01, WP-L6-02, WP-L7-03). Decisions: ADR-0005,
+Status: **Partly implemented** (WP-L6-01, WP-L6-02 and the API surface of WP-L6-03; WP-L6-04 and WP-L7-03 are planned). Decisions: ADR-0005,
 ADR-0007. Specs: `specs/streaming`.
 
 ## 1. Two layers
@@ -32,6 +32,15 @@ Wire shapes: `contracts/basamento/stream/v1/stream.proto`, Go mirror in
    however long the message takes.
 4. It then streams live deltas from `dseq + 1`. Ordering by `dseq` means no
    gap and no duplicate (REQ-STRM-003).
+
+The Go implementation is `stream.Broker` (WP-L6-02). `Attach` replays through
+`stream/eventlog` under the run's lock, so a durable event cannot slip between
+the replay and the live stream; it then sends one `Snapshot` per message still
+in flight and follows the deltas. Deltas are numbered per message, kept for the
+message's lifetime, published on `run.<run_id>.deltas` and fanned out to the
+attachments of the server that owns them. `EnforceDetachPolicies` is the clock-
+driven loop that applies `on_detach`; `Heartbeat` is how a producer learns of a
+cancellation, which records the in-flight messages as interrupted.
 
 ## 4. Producers
 
@@ -82,6 +91,19 @@ for model calls.
 | child runs | `SUBAGENT_STARTED`, `_FINISHED`, `_ERROR` |
 | `gate.opened` | `RUN_FINISHED` with an interrupt outcome (a draft in AG-UI; `CUSTOM` until it is final) |
 | `reset`, `audio` | `CUSTOM` |
+
+The API (`package api`) serves the native stream as SSE at
+`GET /v1/runs/{id}/stream` and the AG-UI adapter at `GET /agui?run_id=…`. Both
+read the same attachment, so a client switches protocol without losing its
+cursor: the SSE id carries `{seq, open}`, which comes back in `Last-Event-ID`
+on reattach. The native events are named `durable`, `snapshot` and `delta`; a
+stream ends after a terminal `run.*` event.
+
+Run discovery is `GET /v1/runs` and `GET /v1/runs/{id}`, and cancellation is
+`POST /v1/runs/{id}/cancel`. The request's tenant comes from its authenticated
+principal, never from a request field; a run of another tenant is `not_found`,
+the same answer as a run that does not exist (REQ-AUTH-002). Errors are the
+platform codes with an HTTP status summary, and the body carries the code only.
 
 AG-UI is not the native format because its events carry no sequence number,
 so it has no cursor or reattach; it has no reset on retry and no media deltas;

@@ -1,4 +1,4 @@
-@planned @wp:WP-L6-02 @runtime:any @level:component
+@wp:WP-L6-02 @runtime:any @level:component
 Feature: Detach from and reattach to a running chat
   A run does not depend on any connection. Clients detach and reattach with a
   cursor and see every event once, including messages still being written.

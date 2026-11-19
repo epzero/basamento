@@ -17,6 +17,20 @@ const deadlineSize = 8
 
 var errKVRecordShort = errors.New("short kv record")
 
+// EncodeKVBucketsValue builds the KV bucket payload bytes for a logical value.
+func EncodeKVBucketsValue(value []byte, deadline time.Time) []byte {
+	return encodeKV(kvRecord{Deadline: deadline, Value: value})
+}
+
+// DecodeKVBucketValue decodes a KV bucket payload to the logical value.
+func DecodeKVBucketValue(b []byte) ([]byte, error) {
+	r, err := decodeKV(b)
+	if err != nil {
+		return nil, kvRecordCorrupt()
+	}
+	return r.Value, nil
+}
+
 // KVDeadlineFromTTL maps ttl at now to a stored KV deadline for callers outside
 // the store (for example bustest).
 func KVDeadlineFromTTL(now time.Time, ttl time.Duration) time.Time {

@@ -1,6 +1,10 @@
 # Auth: identity, tenancy and permissions
 
-Status: **Planned** (WP-L8-01, WP-L8-02; through the API in WP-L6-03 and WP-L9-01). Design: ADR-0008, `docs/architecture/auth.md`.
+Status: **Partially implemented**: the `none` and `oidc` authentication modes
+(WP-L8-01) and the in-app permission check (WP-L8-02). **Planned**: local
+accounts, the role-binding store and request wiring, and the requirements proved
+through the API in WP-L6-03 and WP-L9-01. Design: ADR-0008,
+`docs/architecture/auth.md`.
 
 ### REQ-AUTH-001 — No auth means loopback only
 While the auth mode is `none`, the server shall refuse to listen on any non-loopback address.
