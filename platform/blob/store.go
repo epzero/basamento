@@ -23,7 +23,6 @@ type Store struct {
 	signKey      []byte
 	putLocks     keyedMu
 	stageLocks   keyedMu // per (tenant, staging key); in-process only (see doc.go)
-	stageSeq     uint64
 	rand         io.Reader
 	lastSweep    time.Time
 	sweepRetryAt time.Time
