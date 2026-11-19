@@ -7,7 +7,7 @@
 //	gate docs [-write]       # generated diagrams, CODEOWNERS and specs/README.md statuses
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
-//	gate hygiene [-base <ref>] # test determinism and production isolation; with -base <ref> also spec/code separation
+//	gate hygiene [-base <ref>] # test determinism, production isolation and conflict markers; with -base <ref> also spec/code separation
 //	gate gomod                  # every tracked go.mod names the same go directive
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
