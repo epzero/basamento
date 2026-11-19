@@ -59,9 +59,7 @@ func TestPrintBDDSkipsFromPackageSubdirectory(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(sub); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(sub)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
