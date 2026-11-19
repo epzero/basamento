@@ -19,6 +19,14 @@ type bddReport struct {
 
 // WriteBDDReport persists the scenario run outcome before TestFeatures returns.
 func WriteBDDReport(failed bool) error {
+	root, err := moduleRoot()
+	if err != nil {
+		return err
+	}
+	return writeBDDReportAt(root, failed)
+}
+
+func writeBDDReportAt(root string, failed bool) error {
 	src := sqltest.PostgresServerSource()
 	outcome := "pass"
 	if failed {
@@ -32,10 +40,6 @@ func WriteBDDReport(failed bool) error {
 		Outcome:        outcome,
 		PostgresServer: src,
 		SkipRuns:       skips,
-	}
-	root, err := moduleRoot()
-	if err != nil {
-		return err
 	}
 	dir := filepath.Join(root, ".gate")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

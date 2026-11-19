@@ -12,17 +12,9 @@ import (
 
 func TestWriteBDDReportSecretFree(t *testing.T) {
 	sqltest.ResetSkipCounts()
-	root, err := moduleRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := t.TempDir()
 	dir := filepath.Join(root, ".gate")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(filepath.Join(dir, "bdd.json")) })
-
-	if err := WriteBDDReport(false); err != nil {
+	if err := writeBDDReportAt(root, false); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "bdd.json"))
