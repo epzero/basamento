@@ -70,6 +70,29 @@ func (w *flowWorld) failure(code string) (*core.Error, error) {
 }
 
 var edgeClause = regexp.MustCompile(`from "([^"]*)" to "([^"]*)"`)
+var guardCondition = regexp.MustCompile(`^a flow where node "([^"]*)" routes back to node "([^"]*)" and only "([^"]*)" has a guard whose condition is "([^"]*)"$`)
+var guardBudget = regexp.MustCompile(`^a flow where node "([^"]*)" routes back to node "([^"]*)" and only "([^"]*)" has a guard of (-?\d+) (visits|milli-points)$`)
+var guardBothBudgets = regexp.MustCompile(`^a flow where node "([^"]*)" routes back to node "([^"]*)" and only "([^"]*)" has a guard of (\d+) visits and (\d+) milli-points$`)
+
+// cycleFlow is the cycle every guard scenario describes — START -> to -> back
+// -> to — so the only thing a scenario varies is the guard on one of the nodes.
+func (w *flowWorld) cycleFlow(back, to string) {
+	w.ir = newIR("cycle")
+	w.addEdge(ir.Start, to, "")
+	w.addEdge(to, back, "")
+	w.addEdge(back, to, "")
+}
+
+// guard sets the guard on one node of the declared flow.
+func (w *flowWorld) guard(name string, guard *flow.Guard) error {
+	node, ok := w.ir.Nodes[name]
+	if !ok {
+		return fmt.Errorf("no node %q to guard", name)
+	}
+	node.Guard = guard
+	w.ir.Nodes[name] = node
+	return nil
+}
 
 func registerFlowCompile(sc *godog.ScenarioContext) {
 	sc.Step(`^a flow where node "([^"]*)" routes back to node "([^"]*)" and neither has a guard$`,
@@ -81,6 +104,30 @@ func registerFlowCompile(sc *godog.ScenarioContext) {
 			w.addEdge(back, to, "")
 			return nil
 		})
+
+	sc.Step(guardCondition.String(), func(ctx context.Context, back, to, guarded, condition string) error {
+		w := world(ctx).Flow
+		w.cycleFlow(back, to)
+		return w.guard(guarded, &flow.Guard{While: condition})
+	})
+
+	sc.Step(guardBudget.String(), func(ctx context.Context, back, to, guarded string, value int, unit string) error {
+		w := world(ctx).Flow
+		w.cycleFlow(back, to)
+		guard := &flow.Guard{}
+		if unit == "visits" {
+			guard.MaxVisits = value
+		} else {
+			guard.CostMpts = int64(value)
+		}
+		return w.guard(guarded, guard)
+	})
+
+	sc.Step(guardBothBudgets.String(), func(ctx context.Context, back, to, guarded string, visits, cost int) error {
+		w := world(ctx).Flow
+		w.cycleFlow(back, to)
+		return w.guard(guarded, &flow.Guard{MaxVisits: visits, CostMpts: int64(cost)})
+	})
 
 	sc.Step(`^a flow whose state schema declares "([^"]*)" as an integer$`,
 		func(ctx context.Context, key string) error {

@@ -230,8 +230,9 @@ func validateReachable(f *flow.IR) error {
 	return nil
 }
 
-// validateCycles requires at least one guarded node on every cycle
-// (REQ-FLOW-003). An empty guard bounds nothing, so it does not count.
+// validateCycles requires at least one bounded node on every cycle
+// (REQ-FLOW-003). An empty guard bounds nothing and a while condition only
+// chooses when the cycle leaves, so neither counts as a bound.
 func validateCycles(f *flow.IR) error {
 	adjacency := make(map[string][]string, len(f.Nodes))
 	for id := range f.Nodes {
@@ -271,10 +272,15 @@ func isCycle(component []string, adjacency map[string][]string) bool {
 	return false
 }
 
+// hasGuardedNode reports whether a node on the cycle carries a finite budget
+// the machine can enforce on every lap: max_visits or cost_mpts (REQ-FLOW-003).
+// A while condition is not one: it says when the cycle may leave and can hold
+// on every lap — {"while": "true"} is a valid predicate that bounds nothing
+// (specs/flow-engine/design.md §2.1).
 func hasGuardedNode(f *flow.IR, component []string) bool {
 	for _, id := range component {
 		guard := f.Nodes[id].Guard
-		if guard != nil && (guard.MaxVisits > 0 || guard.CostMpts > 0 || guard.While != "") {
+		if guard != nil && (guard.MaxVisits > 0 || guard.CostMpts > 0) {
 			return true
 		}
 	}

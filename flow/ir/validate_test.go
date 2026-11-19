@@ -122,6 +122,53 @@ func TestValidateAcceptsGuardedCycle(t *testing.T) {
 	}
 }
 
+// A condition chooses when the cycle may leave; it can hold on every lap, so
+// it is not a bound (REQ-FLOW-003, FLOW-003-02).
+func TestValidateRejectsCycleGuardedOnlyByCondition(t *testing.T) {
+	requireInvalid(t, Validate(guardedCycle(&flow.Guard{While: "true"})), `node "repair"`, "guard")
+}
+
+// FLOW-003-03: one visit budget is a bound.
+func TestValidateAcceptsCycleBoundedByVisits(t *testing.T) {
+	if err := Validate(guardedCycle(&flow.Guard{MaxVisits: 3})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// FLOW-003-04: so is one cost budget, with max_visits absent.
+func TestValidateAcceptsCycleBoundedByCost(t *testing.T) {
+	if err := Validate(guardedCycle(&flow.Guard{CostMpts: 5000})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A condition alongside a budget is allowed: it narrows the exit, the budget
+// does the bounding.
+func TestValidateAcceptsCycleBoundedByVisitsAndCondition(t *testing.T) {
+	if err := Validate(guardedCycle(&flow.Guard{MaxVisits: 3, While: "state.tests.failed > 0"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// guardedCycle is the verify <-> repair cycle of compile.feature with guard on
+// repair: the shape every guard test needs.
+func guardedCycle(guard *flow.Guard) *flow.IR {
+	return &flow.IR{
+		Name:    "cycle",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"verify": {Kind: "task"},
+			"repair": {Kind: "task", Guard: guard},
+		},
+		Edges: []flow.Edge{
+			{From: Start, To: "verify"},
+			{From: "verify", To: "repair"},
+			{From: "repair", To: "verify"},
+		},
+	}
+}
+
 func TestValidateRejectsSelfLoopWithoutGuard(t *testing.T) {
 	f := &flow.IR{
 		Name:    "loop",
