@@ -25,6 +25,7 @@ type World struct {
 	Credentials *credentialsWorld
 	Schema      *schemaWorld
 	Model       *modelWorld
+	Catalog     *catalogWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -33,11 +34,12 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			Expr:   &exprWorld{bindings: map[string]any{}},
-			Prompt: newPromptWorld(),
-			Schema: newSchemaWorld(),
-			Model:  newModelWorld(),
+			Core:    newCoreWorld(),
+			Expr:    &exprWorld{bindings: map[string]any{}},
+			Prompt:  newPromptWorld(),
+			Schema:  newSchemaWorld(),
+			Model:   newModelWorld(),
+			Catalog: newCatalogWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -48,6 +50,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCredentials(sc)
 	registerSchema(sc)
 	registerModel(sc)
+	registerCatalog(sc)
 	registerShared(sc)
 }
 
