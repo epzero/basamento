@@ -45,7 +45,7 @@ func OpenCloud(ctx context.Context, rawURL string, opts Options) (*Store, error)
 	}
 	nc, err := nats.Connect(rawURL, nopts...)
 	if err != nil {
-		return nil, mapConnErr(err)
+		return nil, unavailable()
 	}
 	st, err := connectAndOpen(ctx, nc, opts, nil)
 	if err != nil {
