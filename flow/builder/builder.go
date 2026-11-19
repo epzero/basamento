@@ -48,14 +48,15 @@ const (
 //
 // A Builder is not safe for concurrent use.
 type Builder struct {
-	name      string
-	version   int
-	schema    json.RawMessage
-	stateType reflect.Type
-	reducers  []reducerDecl
-	nodes     []nodeDecl
-	edges     []flow.Edge
-	entries   []string
+	name         string
+	version      int
+	schema       json.RawMessage
+	stateType    reflect.Type
+	stateTypeSet bool
+	reducers     []reducerDecl
+	nodes        []nodeDecl
+	edges        []flow.Edge
+	entries      []string
 }
 
 type reducerDecl struct {
@@ -64,12 +65,14 @@ type reducerDecl struct {
 }
 
 type nodeDecl struct {
-	name  string
-	kind  string
-	spec  json.RawMessage
-	in    string
-	out   string
-	guard *flow.Guard
+	name   string
+	kind   string
+	spec   json.RawMessage
+	in     string
+	hasIn  bool
+	out    string
+	hasOut bool
+	guard  *flow.Guard
 }
 
 // New starts a builder for the flow with the given name and version.
@@ -86,20 +89,24 @@ func (b *Builder) StateSchema(raw json.RawMessage) *Builder {
 		b.schema = clone(raw)
 	}
 	b.stateType = nil
+	b.stateTypeSet = false
 	return b
 }
 
 // StateType declares the flow's state as a Go type and generates its JSON
 // Schema with core/schema, replacing any state declared before (REQ-FLOW-021).
+// A nil type is rejected by Build.
 func (b *Builder) StateType(t reflect.Type) *Builder {
 	b.stateType = t
+	b.stateTypeSet = true
 	b.schema = nil
 	return b
 }
 
 // Reducer declares the reducer of a state key: replace, append, merge, sum or
-// merge_by(<field>). Build rejects a key the state schema does not declare
-// (REQ-FLOW-024); the reducer form is the compiler's check.
+// merge_by(<field>). Build rejects a key the state schema does not declare and
+// a key declared twice (REQ-FLOW-024); the reducer form is the compiler's
+// check.
 func (b *Builder) Reducer(key, reducer string) *Builder {
 	b.reducers = append(b.reducers, reducerDecl{key: key, reducer: reducer})
 	return b
@@ -115,7 +122,15 @@ func (b *Builder) Node(name string, kind Kind, spec json.RawMessage, opts ...Nod
 			opt(&cfg)
 		}
 	}
-	decl := nodeDecl{name: name, kind: string(kind), spec: clone(spec), in: cfg.in, out: cfg.out}
+	decl := nodeDecl{
+		name:   name,
+		kind:   string(kind),
+		spec:   clone(spec),
+		in:     cfg.in,
+		hasIn:  cfg.hasIn,
+		out:    cfg.out,
+		hasOut: cfg.hasOut,
+	}
 	if cfg.guard != nil {
 		guard := *cfg.guard
 		decl.guard = &guard
@@ -128,21 +143,30 @@ func (b *Builder) Node(name string, kind Kind, spec json.RawMessage, opts ...Nod
 type NodeOption func(*nodeConfig)
 
 type nodeConfig struct {
-	in    string
-	out   string
-	guard *flow.Guard
+	in     string
+	hasIn  bool
+	out    string
+	hasOut bool
+	guard  *flow.Guard
 }
 
 // In declares the node's mapping from state to its input, kept verbatim for
-// the compiler to type-check.
+// the compiler to type-check. Build rejects an explicitly empty mapping.
 func In(expr string) NodeOption {
-	return func(c *nodeConfig) { c.in = expr }
+	return func(c *nodeConfig) {
+		c.in = expr
+		c.hasIn = true
+	}
 }
 
 // Out declares the state key that receives the node's update. Build rejects a
-// key the state schema does not declare (REQ-FLOW-019).
+// key the state schema does not declare (REQ-FLOW-019) and an explicitly empty
+// key.
 func Out(key string) NodeOption {
-	return func(c *nodeConfig) { c.out = key }
+	return func(c *nodeConfig) {
+		c.out = key
+		c.hasOut = true
+	}
 }
 
 // Guard declares the node's guard, which bounds a cycle through it.
@@ -167,14 +191,17 @@ func (b *Builder) Entry(node string) *Builder {
 }
 
 // Build returns the flow's IR. It checks, in order and returning the first
-// failure: the state schema, reducer keys, duplicate node names, node outputs,
-// edge endpoints, marked entry nodes and the presence of an entry. Every
-// rejection is a *core.Error with code invalid_argument (REQ-FLOW-015 …
-// REQ-FLOW-019, REQ-FLOW-024, REQ-FLOW-026).
+// failure: the state schema, reducer keys (including duplicates), duplicate
+// node names, node inputs and outputs, edge endpoints, marked entry nodes and
+// the presence of an entry. Every rejection is a *core.Error with code
+// invalid_argument (REQ-FLOW-015 … REQ-FLOW-019, REQ-FLOW-024, REQ-FLOW-026).
 //
 // Build returns a new IR each call and reads no clock, randomness or instance
 // identity (REQ-FLOW-010, REQ-FLOW-011).
 func (b *Builder) Build() (*flow.IR, error) {
+	if b.stateTypeSet && b.stateType == nil {
+		return nil, b.errorf(nil, "state type is nil")
+	}
 	stateSchema, err := b.stateSchema()
 	if err != nil {
 		return nil, b.schemaError(err)
@@ -188,7 +215,13 @@ func (b *Builder) Build() (*flow.IR, error) {
 	}
 	keys := schemaKeys(canonicalSchema)
 
+	declaredReducers := make(map[string]bool, len(b.reducers))
 	for _, reducer := range b.reducers {
+		if declaredReducers[reducer.key] {
+			return nil, b.errorf(map[string]any{"reducer": reducer.key},
+				"duplicate reducer for state key %q", reducer.key)
+		}
+		declaredReducers[reducer.key] = true
 		if !keys[reducer.key] {
 			return nil, b.errorf(map[string]any{"reducer": reducer.key},
 				"reducer for state key %q: key is not in the state schema", reducer.key)
@@ -205,6 +238,14 @@ func (b *Builder) Build() (*flow.IR, error) {
 
 	nodes := make(map[string]flow.Node, len(b.nodes))
 	for _, node := range b.nodes {
+		if node.hasOut && node.out == "" {
+			return nil, b.errorf(map[string]any{"node": node.name},
+				"node %q: output key is empty", node.name)
+		}
+		if node.hasIn && node.in == "" {
+			return nil, b.errorf(map[string]any{"node": node.name},
+				"node %q: input mapping is empty", node.name)
+		}
 		if node.out != "" && !keys[node.out] {
 			return nil, b.errorf(map[string]any{"node": node.name, "key": node.out},
 				"node %q: output %q is not a state key", node.name, node.out)
@@ -262,7 +303,7 @@ func (b *Builder) Build() (*flow.IR, error) {
 }
 
 func (b *Builder) stateSchema() (json.RawMessage, error) {
-	if b.stateType != nil {
+	if b.stateTypeSet {
 		generated, err := schema.ForType(b.stateType)
 		if err != nil {
 			return nil, err

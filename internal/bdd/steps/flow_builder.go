@@ -689,15 +689,51 @@ func parseEdgeClauses(text string) ([]declaredEdge, error) {
 	return edges, nil
 }
 
+// splitClauses splits an edge list at top-level commas and " and " only, so a
+// condition such as "state.a > 0 and state.b > 0" stays in one clause.
 func splitClauses(text string) []string {
-	parts := strings.Split(strings.ReplaceAll(text, " and ", ","), ",")
-	clauses := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if clause := strings.TrimSpace(part); clause != "" {
-			clauses = append(clauses, clause)
+	var clauses []string
+	start := 0
+	var quote byte
+	escaped := false
+	for i := 0; i < len(text); {
+		c := text[i]
+		if quote != 0 {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == quote:
+				quote = 0
+			}
+			i++
+			continue
+		}
+		switch {
+		case c == '"' || c == '\'':
+			quote = c
+			i++
+		case c == ',':
+			addClause(&clauses, text[start:i])
+			i++
+			start = i
+		case strings.HasPrefix(text[i:], " and "):
+			addClause(&clauses, text[start:i])
+			i += len(" and ")
+			start = i
+		default:
+			i++
 		}
 	}
+	addClause(&clauses, text[start:])
 	return clauses
+}
+
+func addClause(clauses *[]string, text string) {
+	if clause := strings.TrimSpace(text); clause != "" {
+		*clauses = append(*clauses, clause)
+	}
 }
 
 func objectSchema(properties map[string]any) json.RawMessage {

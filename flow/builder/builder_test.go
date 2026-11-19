@@ -288,6 +288,59 @@ func TestReducerOnUnknownKeyRejected(t *testing.T) {
 	}
 }
 
+func TestDuplicateReducerRejectedWhateverTheOrder(t *testing.T) {
+	state := json.RawMessage(`{"type":"object","properties":{"a":{}}}`)
+	orders := [][2][2]string{
+		{{"a", "append"}, {"a", "sum"}},
+		{{"a", "sum"}, {"a", "append"}},
+	}
+	for _, order := range orders {
+		t.Run(order[0][1]+" then "+order[1][1], func(t *testing.T) {
+			platform := mustFailure(t, New("codegen", 3).
+				StateSchema(state).
+				Reducer(order[0][0], order[0][1]).
+				Reducer(order[1][0], order[1][1]).
+				Node("plan", KindAgent, nil).
+				Edge(Start, "plan", ""))
+			if want := `flow "codegen": duplicate reducer for state key "a"`; platform.Message != want {
+				t.Fatalf("message %q, want %q", platform.Message, want)
+			}
+			if got := platform.Details["reducer"]; got != "a" {
+				t.Fatalf("details reducer %v", got)
+			}
+		})
+	}
+}
+
+func TestNilStateTypeRejected(t *testing.T) {
+	platform := mustFailure(t, New("codegen", 3).
+		StateType(nil).
+		Node("plan", KindAgent, nil).
+		Edge(Start, "plan", ""))
+	if want := `flow "codegen": state type is nil`; platform.Message != want {
+		t.Fatalf("message %q, want %q", platform.Message, want)
+	}
+}
+
+func TestExplicitlyEmptyOutputRejected(t *testing.T) {
+	platform := mustFailure(t, New("codegen", 3).
+		StateSchema(json.RawMessage(`{"type":"object","properties":{"plan":{}}}`)).
+		Node("plan", KindAgent, nil, Out("")).
+		Edge(Start, "plan", ""))
+	if want := `flow "codegen": node "plan": output key is empty`; platform.Message != want {
+		t.Fatalf("message %q, want %q", platform.Message, want)
+	}
+}
+
+func TestExplicitlyEmptyInputRejected(t *testing.T) {
+	platform := mustFailure(t, New("codegen", 3).
+		Node("plan", KindAgent, nil, In("")).
+		Edge(Start, "plan", ""))
+	if want := `flow "codegen": node "plan": input mapping is empty`; platform.Message != want {
+		t.Fatalf("message %q, want %q", platform.Message, want)
+	}
+}
+
 func TestInvalidStateSchemaRejectedAtLocation(t *testing.T) {
 	platform := mustFailure(t, New("codegen", 3).
 		StateSchema(json.RawMessage(`{"type":"object","properties":{"tests":{"type":"count"}}}`)))
