@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/epzero/basamento/core/schema"
 	"github.com/epzero/basamento/flow"
@@ -178,6 +179,11 @@ func validateNodes(f *flow.IR) error {
 	for _, id := range sortedKeys(f.Nodes) {
 		if id == "" {
 			return invalid("flow: node id is required", nil)
+		}
+		// A node id reaches error messages and JSON Pointers, so a control
+		// character in one would corrupt both.
+		if strings.IndexFunc(id, unicode.IsControl) >= 0 {
+			return invalid(fmt.Sprintf("flow: node id %q contains a control character", id), map[string]any{"node": id})
 		}
 		if id == Start || id == Fail {
 			return invalid(fmt.Sprintf("flow: node %q is a reserved edge endpoint, not a node", id), map[string]any{"node": id})

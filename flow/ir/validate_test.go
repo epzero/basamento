@@ -40,6 +40,15 @@ func TestValidateRejectsReservedNodeNames(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsControlCharactersInNodeIDs(t *testing.T) {
+	for _, id := range []string{"plan\ncheck", "plan\tcheck", "plan\x00", "plan\x7f"} {
+		f := simpleFlow()
+		f.Nodes[id] = flow.Node{Kind: "task"}
+		f.Edges = append(f.Edges, flow.Edge{From: "plan", To: id})
+		requireInvalid(t, Validate(f), "node id", "control character")
+	}
+}
+
 func TestValidateRejectsEdgeIntoStart(t *testing.T) {
 	f := simpleFlow()
 	f.Edges = append(f.Edges, flow.Edge{From: "verify", To: Start})
