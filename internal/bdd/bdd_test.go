@@ -100,8 +100,8 @@ func TestFeatures(t *testing.T) {
 	}
 	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
 		failed = true
-		t.Fatalf("gate strict: %d skipped postgres runs", sqltest.SkipTotal())
 	}
+	enforceStrictNoPostgresSkips(t)
 
 	tags := scenarioTags()
 	for _, profile := range bddGateProfiles() {
@@ -112,8 +112,8 @@ func TestFeatures(t *testing.T) {
 	}
 	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
 		failed = true
-		t.Fatalf("gate strict: %d skipped postgres runs", sqltest.SkipTotal())
 	}
+	enforceStrictNoPostgresSkips(t)
 }
 
 func runSuite(t *testing.T, tags, profile string) {
