@@ -16,6 +16,7 @@
 //	gate spec queue           # human review queue, most critical first
 //	gate release-check        # P0 scenarios need human acceptance before a release
 //	gate redgreen -base <ref> # newly active scenarios must fail at base
+//	gate bdd-skips            # print gate: scenario runs skipped: … from .gate/bdd.json
 //
 // See docs/engineering/qa-gate.md and docs/engineering/agent-workflow.md.
 package main
@@ -119,6 +120,8 @@ func main() {
 		l, err := gate.ReadLedger(root)
 		must(err)
 		report("release-check", gate.ReleaseCheck(l))
+	case "bdd-skips":
+		must(gate.BDDSkipSummary(root))
 	case "redgreen":
 		fs := flag.NewFlagSet("redgreen", flag.ExitOnError)
 		base := fs.String("base", "", "git ref to compare against")
@@ -333,6 +336,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | bdd-skips | redgreen -base <ref>")
 	os.Exit(2)
 }
