@@ -211,4 +211,3 @@ func resolveSupervisorPath() (string, error) {
 	}
 	return "", fmt.Errorf("%s missing; run make pg-prefetch to build the supervisor", candidate)
 }
-

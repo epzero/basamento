@@ -12,5 +12,7 @@ type strictSkipFailer interface {
 // enforceStrictNoPostgresSkips fails when GATE_STRICT is set and Postgres scenario runs were skipped (ADR-0015).
 func enforceStrictNoPostgresSkips(tb strictSkipFailer) {
 	tb.Helper()
-	_ = sqltest.GateStrict()
+	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
+		tb.Fatalf("gate strict: %d skipped postgres runs", sqltest.SkipTotal())
+	}
 }

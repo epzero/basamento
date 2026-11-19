@@ -57,4 +57,3 @@ func SkipTotal() int {
 	}
 	return n
 }
-
