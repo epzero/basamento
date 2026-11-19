@@ -573,7 +573,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("resolved %q, want %q", value, want)
+				return fmt.Errorf("resolved value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})
@@ -622,7 +622,8 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return fmt.Errorf("no waiting resolution")
 		}
 		if string(w.waiting.result.value) != want {
-			return fmt.Errorf("waiting resolution returned %q, want %q", w.waiting.result.value, want)
+			return fmt.Errorf("waiting resolution returned %d bytes, want %d",
+				len(w.waiting.result.value), len(want))
 		}
 		return nil
 	})
@@ -678,7 +679,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return w.resolveErr
 		}
 		if string(w.lastValue) != want {
-			return fmt.Errorf("resolution returned %q, want %q", w.lastValue, want)
+			return fmt.Errorf("resolution returned %d bytes, want %d", len(w.lastValue), len(want))
 		}
 		return nil
 	})
@@ -691,7 +692,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return r.err
 		}
 		if string(r.value) != want {
-			return fmt.Errorf("resolution for %q returned %q, want %q", tenant, r.value, want)
+			return fmt.Errorf("resolution for %q returned %d bytes, want %d", tenant, len(r.value), len(want))
 		}
 		return nil
 	})
@@ -728,7 +729,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("decrypted %q, want %q", value, want)
+				return fmt.Errorf("decrypted value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})
@@ -798,7 +799,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("decrypted %q, want %q", value, want)
+				return fmt.Errorf("decrypted value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})
