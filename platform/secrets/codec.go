@@ -37,8 +37,8 @@ type Codec struct {
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
 // are previous keys still able to unwrap stored keysets. A nil store, an empty
-// keys slice, a nil KeyService, or duplicate MasterKeyID values are refused with
-// invalid_argument.
+// keys slice, a nil KeyService, a non-comparable KeyService value, or duplicate
+// MasterKeyID values are refused with invalid_argument.
 func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, error) {
 	if store == nil {
 		return nil, errInvalidArgument("keyset store is required")
@@ -48,8 +48,8 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 	}
 	seen := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
-		if k == nil {
-			return nil, errInvalidArgument("master key is required")
+		if err := checkKeyService(k); err != nil {
+			return nil, err
 		}
 		id := k.MasterKeyID()
 		if _, dup := seen[id]; dup {
@@ -62,9 +62,10 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 }
 
 // Close closes every master KeyService in the ring and any retired by a prior
-// master-key rotation. Rotation does not close replaced keys because in-flight
-// Encode, Decode, or RotateDataKey calls may still hold a snapshot of the ring;
-// those instances are moved to retired and closed here. A second Close is a no-op.
+// master-key rotation. Master-key rotation moves replaced keys to retired and
+// defers closing them here so calls that hold a snapshot of the ring can finish.
+// Close must not run concurrently with Encode, Decode, or RotateDataKey; stop
+// those callers first. A second Close is a no-op.
 func (c *Codec) Close() error {
 	c.keysMu.Lock()
 	defer c.keysMu.Unlock()
@@ -341,11 +342,20 @@ const maxCASRetries = 3
 
 // RotateMasterKey rewraps every stored keyset under keys[0] (the new master).
 // Replaced master keys are retired, not closed, until Codec.Close; see Close.
+// If the codec is already closed, or newMaster is nil or non-comparable, the
+// call is refused with invalid_argument and newMaster stays the caller's to close.
 func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error {
+	if err := checkKeyService(newMaster); err != nil {
+		return err
+	}
 	if err := canaryMaster(ctx, newMaster); err != nil {
 		return err
 	}
 	c.keysMu.Lock()
+	if c.shut {
+		c.keysMu.Unlock()
+		return errInvalidArgument("codec is closed")
+	}
 	c.prependMasterKeyLocked(newMaster)
 	newKeys := append([]KeyService(nil), c.keys...)
 	c.keysMu.Unlock()
@@ -375,6 +385,9 @@ func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error
 	return errConflict(msgKeysetRevisionConflict)
 }
 
+// prependMasterKeyLocked updates the ring and retired list. Call only with
+// keysMu held and only after verifying the codec is not shut (see RotateMasterKey).
+// Rotation failures do not roll the ring back; only RotateMasterKey reaches here.
 func (c *Codec) prependMasterKeyLocked(ks KeyService) {
 	filtered := c.retired[:0]
 	for _, r := range c.retired {
@@ -399,14 +412,24 @@ func (c *Codec) prependMasterKeyLocked(ks KeyService) {
 	c.keys = out
 }
 
-// sameKeyService reports whether a and b are the same KeyService instance.
+func checkKeyService(ks KeyService) error {
+	if ks == nil {
+		return errInvalidArgument("master key is required")
+	}
+	if !reflect.ValueOf(ks).Comparable() {
+		return errInvalidArgument("master key must be a comparable value; use a pointer type")
+	}
+	return nil
+}
+
+// sameKeyService reports whether a and b are the same KeyService value.
 func sameKeyService(a, b KeyService) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	ta := reflect.TypeOf(a)
-	tb := reflect.TypeOf(b)
-	if ta != tb || !ta.Comparable() {
+	va := reflect.ValueOf(a)
+	vb := reflect.ValueOf(b)
+	if va.Type() != vb.Type() || !va.Comparable() || !vb.Comparable() {
 		return false
 	}
 	return a == b

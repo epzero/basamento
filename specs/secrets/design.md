@@ -161,6 +161,11 @@ error — nothing has served a request yet — and becomes
   changing under it fails it with `conflict`, retryable; neither writes a
   partial record. A completed rotation clears the codec's cache, so the next
   encode or decode of each tenant loads the rewrapped record.
+- Master-key rotation retires replaced master keys without closing them;
+  `Codec.Close` closes the ring and every retired key once. Deferred close
+  lets calls that hold a snapshot of the ring finish. `Close` must not run
+  concurrently with `Encode`, `Decode`, or `RotateMasterKey`, or
+  `RotateDataKey`; stop those callers first.
 
 ### 2.5 Tenant ids
 
