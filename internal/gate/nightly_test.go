@@ -109,6 +109,10 @@ func TestClassifyNightlySchedules(t *testing.T) {
 		{name: "ok just inside 36h", runs: []NightlyRun{
 			run("completed", "success", nightlyAt(thirtyFiveH), urlOK),
 		}, want: NightlyOK},
+		{name: "unsorted picks latest completed by createdAt", runs: []NightlyRun{
+			run("completed", "success", nightlyAt(10*time.Hour), urlOld),
+			run("completed", "failure", nightlyAt(fiveH), urlOK),
+		}, want: NightlyFailed},
 	}
 
 	failedConclusions := []struct {
@@ -165,7 +169,7 @@ func TestFormatNightlyLine(t *testing.T) {
 		t.Fatalf("got %q\nwant %q", got, wantFailed)
 	}
 
-	wantStaleNone := "nightly: stale: no completed scheduled run"
+	wantStaleNone := "nightly: stale: no scheduled run"
 	if got := FormatNightlyLine(ClassifyNightlySchedules(nil, nightlyNow)); got != wantStaleNone {
 		t.Fatalf("got %q", got)
 	}
@@ -184,11 +188,27 @@ func TestFormatNightlyLine(t *testing.T) {
 
 func TestNightlyRunID(t *testing.T) {
 	t.Parallel()
-	if got := NightlyRunID("https://github.com/org/repo/actions/runs/12345678"); got != "12345678" {
-		t.Fatalf("got %q", got)
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{url: "https://github.com/org/repo/actions/runs/12345678", want: "12345678"},
+		{url: "https://example.com/no-id", want: ""},
+		{url: "https://github.com/org/repo/actions/runs/12;rm", want: ""},
+		{url: "https://github.com/org/repo/actions/runs/1%202", want: ""},
+		{url: "https://github.com/org/repo/actions/runs/1 2", want: ""},
+		{url: "https://github.com/org/repo/actions/runs/abc", want: ""},
+		{url: "https://github.com/org/repo/actions/runs/123/attempts/2", want: "123"},
+		{url: "https://github.com/org/repo/actions/runs/", want: ""},
 	}
-	if got := NightlyRunID("https://example.com/no-id"); got != "" {
-		t.Fatalf("got %q", got)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.url, func(t *testing.T) {
+			t.Parallel()
+			if got := NightlyRunID(tc.url); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -49,9 +49,11 @@ stop and say so: do not guess an account.
    `pipefail` applies only inside that subshell, not the lead's session.
 
    Exit **0** (ok): do nothing. Exit **1** (failed or stale): open one ticket
-   for the architect unless a ticket with the same title already exists
-   (`nightly failed: run <id>`, `nightly stale: run <id>`, or `nightly stale:
-   no scheduled run`). Hand-off: `design-needed`, state *Todo*, assign the
+   for the architect unless an **open** ticket titled `nightly failed: …` or
+   `nightly stale: …` already exists (dedupe on that prefix, not on the run
+   id, so one ongoing failure keeps one ticket). The title is `nightly failed:
+   run <id>`, `nightly stale: run <id>`, or `nightly stale: no scheduled run`.
+   Hand-off: `design-needed`, state *Todo*, assign the
    architect (`agent-workflow.md` §3); the comment quotes the one stdout line.
    Any other exit (`gh` failed or unusable input; stderr has `nightly: ...`):
    retry the pipeline once in the same wake; if it still fails, open one

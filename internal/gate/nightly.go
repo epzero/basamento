@@ -24,9 +24,11 @@ type NightlyRun struct {
 // NightlyStatus is the schedule health.
 type NightlyStatus string
 
-// NightlyOK: newest completed scheduled run succeeded within the stale window.
+// NightlyOK: newest completed scheduled run succeeded and was created within
+// the stale window (36 hours).
 // NightlyFailed: newest completed run did not conclude success.
-// NightlyStale: no completed scheduled run, or the newest completed run is too old.
+// NightlyStale: no scheduled run (no completed row), or the newest completed run
+// was created too long ago.
 const (
 	NightlyOK     NightlyStatus = "ok"
 	NightlyFailed NightlyStatus = "failed"
@@ -66,8 +68,8 @@ func ParseNightlyRuns(data []byte) ([]NightlyRun, error) {
 	return runs, nil
 }
 
-// ClassifyNightlySchedules picks the newest completed scheduled run from runs
-// (gh order: newest first; this function does not reorder) and classifies the
+// ClassifyNightlySchedules picks the completed scheduled run with the
+// greatest CreatedAt from runs, whatever their order, and classifies the
 // schedule at now. Only conclusion success counts as ok; only status
 // completed counts as finished.
 func ClassifyNightlySchedules(runs []NightlyRun, now time.Time) NightlyOutcome {
@@ -77,13 +79,14 @@ func ClassifyNightlySchedules(runs []NightlyRun, now time.Time) NightlyOutcome {
 		if !strings.EqualFold(r.Status, "completed") {
 			continue
 		}
-		latest = r
-		break
+		if latest == nil || r.CreatedAt.After(latest.CreatedAt) {
+			latest = r
+		}
 	}
 	if latest == nil {
 		return NightlyOutcome{
 			Status: NightlyStale,
-			Detail: "no completed scheduled run",
+			Detail: "no scheduled run",
 		}
 	}
 	age := now.Sub(latest.CreatedAt)
@@ -117,7 +120,8 @@ func nightlyRunDetail(r *NightlyRun) string {
 }
 
 // NightlyRunID returns the numeric Actions run id from a run URL, for ticket
-// deduplication titles.
+// titles. A URL whose run segment is empty or not all digits yields "" so the
+// caller falls back to unknown rather than carry arbitrary text into a title.
 func NightlyRunID(url string) string {
 	const marker = "/runs/"
 	i := strings.LastIndex(url, marker)
@@ -128,7 +132,7 @@ func NightlyRunID(url string) string {
 	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
 		rest = rest[:j]
 	}
-	if rest == "" {
+	if rest == "" || strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 		return ""
 	}
 	return rest
