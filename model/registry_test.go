@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -232,6 +233,41 @@ func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
 	got := drain(t, mustEvents(t, reg, run.Handle(), -5))
 	if len(got) != 2 {
 		t.Fatalf("got %d events, want 2", len(got))
+	}
+}
+
+func TestEventsMinInt64CursorReplaysFromStart(t *testing.T) {
+	reg := NewRegistry("test")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
+	run.Publish(Event{Kind: EventText, Text: "only"})
+	run.Succeed(Result{})
+	got := drain(t, mustEvents(t, reg, run.Handle(), math.MinInt64))
+	if len(got) != 1 || got[0].Text != "only" {
+		t.Fatalf("events = %+v, want one event from the start", got)
+	}
+}
+
+func TestEventsMaxInt64CursorWaitsForLaterEvents(t *testing.T) {
+	reg := NewRegistry("test")
+	run := mustBegin(t, reg, testCtx(t), "ref-1")
+	run.Publish(Event{Kind: EventText, Text: "first"})
+
+	ch := mustEvents(t, reg, run.Handle(), math.MaxInt64)
+	done := make(chan []Event, 1)
+	go func() {
+		done <- drain(t, ch)
+	}()
+
+	run.Publish(Event{Kind: EventText, Text: "second"})
+	run.Succeed(Result{})
+
+	select {
+	case got := <-done:
+		if len(got) != 0 {
+			t.Fatalf("events = %+v, want none (cursor beyond every seq)", got)
+		}
+	case <-testCtx(t).Done():
+		t.Fatal("timed out waiting on MaxInt64 cursor follower")
 	}
 }
 

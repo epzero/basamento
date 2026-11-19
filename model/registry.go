@@ -18,7 +18,8 @@ import (
 //
 // A Registry is safe for concurrent use. It never forgets an invocation, so a
 // retried Start with the same client ref in the same tenant returns the
-// original handle and its events and result stay readable.
+// original handle and its events and result stay readable. Bounding memory for
+// ended invocations is not part of this work package and is ticketed as EP0-140.
 type Registry struct {
 	provider string
 
@@ -39,10 +40,12 @@ func NewRegistry(provider string) *Registry {
 // Provider is the provider name the registry stamps on every handle.
 func (g *Registry) Provider() string { return g.provider }
 
-// Begin returns the run for clientRef, opening one when none exists. The
-// boolean reports whether the run already existed, which is how an adapter
-// keeps Start idempotent per client ref: it publishes nothing in that case.
-// clientRef must not be empty; adapters reject such a request before beginning.
+// Begin returns the run for clientRef, opening one when none exists within the
+// tenant of ctx. The boolean reports whether the run already existed, which is
+// how an adapter keeps Start idempotent per client ref in that tenant: it
+// publishes nothing in that case. It fails with invalid_argument when ctx
+// carries no tenant. Each run is keyed by (tenant, client ref). clientRef must
+// not be empty; adapters reject such a request before beginning.
 //
 // The run's context is detached from ctx's cancellation but keeps its values,
 // because an invocation outlives the request that started it (ADR-0005) and
@@ -70,8 +73,10 @@ func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool, err
 	return r, false, nil
 }
 
-// Events follows the invocation's output with Seq > after. The channel closes
-// when the invocation ends and every remaining event has been delivered.
+// Events follows the invocation's output with Seq > after. It requires the
+// tenant of ctx; a handle that belongs to another tenant, or to nobody, is
+// not_found like an unknown handle. The channel closes when the invocation
+// ends and every remaining event has been delivered.
 func (g *Registry) Events(ctx context.Context, h Handle, after int64) (<-chan Event, error) {
 	r, err := g.run(ctx, h)
 	if err != nil {
@@ -80,9 +85,11 @@ func (g *Registry) Events(ctx context.Context, h Handle, after int64) (<-chan Ev
 	return r.eventsAfter(ctx, after), nil
 }
 
-// Result waits for the invocation to end and returns its result. A failed or
-// cancelled invocation returns that state in the result, not an error; the
-// error is reserved for an unknown handle and for the caller's own context.
+// Result waits for the invocation to end and returns its result. It requires
+// the tenant of ctx; a handle that belongs to another tenant, or to nobody, is
+// not_found like an unknown handle. A failed or cancelled invocation returns
+// that state in the result, not an error; the error is reserved for an unknown
+// handle and for the caller's own context.
 func (g *Registry) Result(ctx context.Context, h Handle) (Result, error) {
 	r, err := g.run(ctx, h)
 	if err != nil {
@@ -92,7 +99,9 @@ func (g *Registry) Result(ctx context.Context, h Handle) (Result, error) {
 }
 
 // Cancel ends the invocation as cancelled and cancels the vendor call's
-// context. Cancelling an invocation that already ended is a no-op.
+// context. It requires the tenant of ctx; a handle that belongs to another
+// tenant, or to nobody, is not_found like an unknown handle. Cancelling an
+// invocation that already ended is a no-op.
 func (g *Registry) Cancel(ctx context.Context, h Handle) error {
 	r, err := g.run(ctx, h)
 	if err != nil {
@@ -102,8 +111,10 @@ func (g *Registry) Cancel(ctx context.Context, h Handle) error {
 	return nil
 }
 
-// Lookup resolves a client ref to its invocation. It returns (nil, nil) when
-// this adapter has no invocation for the ref.
+// Lookup resolves a client ref to its invocation within the tenant of ctx. It
+// requires that tenant; without one it fails with invalid_argument. A client
+// ref that belongs to another tenant, or to nobody, returns (nil, nil), the
+// same as an unknown ref in this tenant.
 func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error) {
 	tid, ok := core.TenantFrom(ctx)
 	if !ok {
@@ -252,13 +263,17 @@ func (r *Run) eventsAfter(ctx context.Context, after int64) <-chan Event {
 		for {
 			r.mu.Lock()
 			var batch []Event
-			start := int(next)
-			if start < 0 {
-				start = 0
+			n := int64(len(r.events))
+			idx := next
+			if idx < 0 {
+				idx = 0
+			}
+			if idx >= n {
+				idx = n
 			}
 			// Invariant: events[i].Seq == i+1 (Publish is the only writer).
-			if start < len(r.events) {
-				batch = append([]Event(nil), r.events[start:]...)
+			if idx < n {
+				batch = append([]Event(nil), r.events[int(idx):]...)
 			}
 			ended, changed := r.ended, r.changed
 			r.mu.Unlock()

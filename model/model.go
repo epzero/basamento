@@ -104,7 +104,8 @@ type Request struct {
 	ClientRef    string                `json:"client_ref"`
 }
 
-// Handle identifies a started invocation.
+// Handle identifies a started invocation. It is valid only for the tenant
+// that started the invocation.
 type Handle struct {
 	Provider  string `json:"provider"`
 	ID        string `json:"id"` // vendor id, or an adapter-local id for streamed calls
@@ -171,7 +172,8 @@ type Result struct {
 	Error    json.RawMessage `json:"error,omitempty"`
 }
 
-// Invoker is implemented by every provider adapter.
+// Invoker is implemented by every provider adapter. Every call uses the tenant
+// of ctx; handles are valid only for the tenant that started the invocation.
 type Invoker interface {
 	Describe(ctx context.Context) ([]Descriptor, error)
 	// Start begins an invocation and returns at once. It is idempotent per ClientRef.

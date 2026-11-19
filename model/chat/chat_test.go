@@ -19,6 +19,10 @@ func testCtx(t *testing.T) context.Context {
 	return core.WithTenant(context.Background(), "acme")
 }
 
+func tenantCtx(tenant string) context.Context {
+	return core.WithTenant(context.Background(), core.TenantID(tenant))
+}
+
 func TestChatRequiresTenantOnStart(t *testing.T) {
 	adapter, err := New(chatConfig(&fakeChat{chunks: []*schema.Message{{Role: schema.Assistant, Content: "hi"}}}))
 	if err != nil {
@@ -28,6 +32,79 @@ func TestChatRequiresTenantOnStart(t *testing.T) {
 	req := model.Request{Model: "sim-chat", Op: model.CapChat, Messages: data, ClientRef: "r"}
 	if _, err := adapter.Start(context.Background(), req); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("code = %q, want invalid_argument", core.CodeOf(err))
+	}
+}
+
+func TestChatTenantIsolation(t *testing.T) {
+	f := &fakeChat{chunks: []*schema.Message{
+		{Role: schema.Assistant, Content: "tenant-msg"},
+	}}
+	a := newAdapter(t, f)
+	req := model.Request{
+		Model: "sim-chat", Op: model.CapChat, ClientRef: "shared",
+		Messages: messages(t, &schema.Message{Role: schema.User, Content: "hi"}),
+	}
+	ctxA := tenantCtx("tenant-a")
+	ctxB := tenantCtx("tenant-b")
+	hA, err := a.Start(ctxA, req)
+	if err != nil {
+		t.Fatalf("start A: %v", err)
+	}
+
+	if _, err := a.Events(ctxB, hA, 0); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("cross-tenant events code = %q, want not_found", core.CodeOf(err))
+	}
+	if _, err := a.Result(ctxB, hA); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("cross-tenant result code = %q, want not_found", core.CodeOf(err))
+	}
+	if err := a.Cancel(ctxB, hA); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("cross-tenant cancel code = %q, want not_found", core.CodeOf(err))
+	}
+
+	hB, err := a.Start(ctxB, req)
+	if err != nil {
+		t.Fatalf("start B: %v", err)
+	}
+
+	eventsA, err := a.Events(ctxA, hA, 0)
+	if err != nil {
+		t.Fatalf("events A: %v", err)
+	}
+	var batchA []model.Event
+	for e := range eventsA {
+		batchA = append(batchA, e)
+	}
+	eventsB, err := a.Events(ctxB, hB, 0)
+	if err != nil {
+		t.Fatalf("events B: %v", err)
+	}
+	var batchB []model.Event
+	for e := range eventsB {
+		batchB = append(batchB, e)
+	}
+	if len(batchA) == 0 || len(batchB) == 0 {
+		t.Fatalf("expected events on both tenants: A=%d B=%d", len(batchA), len(batchB))
+	}
+
+	resA, err := a.Result(ctxA, hA)
+	if err != nil {
+		t.Fatalf("result A: %v", err)
+	}
+	if resA.State != model.StateSucceeded {
+		t.Fatalf("tenant A state = %q, want succeeded (not cancelled cross-tenant)", resA.State)
+	}
+	resB, err := a.Result(ctxB, hB)
+	if err != nil {
+		t.Fatalf("result B: %v", err)
+	}
+	if resB.State != model.StateSucceeded {
+		t.Fatalf("tenant B state = %q, want succeeded", resB.State)
+	}
+	f.mu.Lock()
+	streams := f.streams
+	f.mu.Unlock()
+	if streams != 2 {
+		t.Fatalf("vendor streams = %d, want 2 (one call per tenant)", streams)
 	}
 }
 
