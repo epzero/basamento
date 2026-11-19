@@ -33,10 +33,10 @@ Capabilities:
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`secrets`](secrets/requirements.md) | Implemented (WP-L1-04). |
-| [`credentials`](credentials/requirements.md) | Planned (WP-L1-06). |
+| [`credentials`](credentials/requirements.md) | Implemented (WP-L1-06). |
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
-| [`prompt`](prompt/requirements.md) | In progress (WP-L3-05). |
+| [`prompt`](prompt/requirements.md) | Implemented (WP-L3-05). |
 | [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
 | [`config`](config/requirements.md) | Planned (WP-L1-05). |
 | [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |

@@ -50,8 +50,63 @@ set it.
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
 the **line** job above, and a flake hunt (repeated runs that look for
 nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
-No automatic reader for nightly **line** failures yet (tracked **EP0-95**);
-the **release-readiness** job uses `continue-on-error` and is informational only (P0 backlog is expected); **line** is the blocking nightly signal.
+The **release-readiness** job uses `continue-on-error` and is informational
+only (P0 backlog is expected); **line** is the blocking nightly signal.
+
+## Who reads the nightly
+
+The scheduled **nightly** workflow runs what must not stay silent:
+**line** (`govulncheck` on the newest patch of the pinned Go minor,
+`ADR-0014`), the flake hunt, the slow lanes and the release-readiness
+summary.
+
+The reviewer lead reads the schedule on every wake (first step of
+`.agents/skills/lead-reviewer/SKILL.md`). `pipefail` applies only inside the
+subshell below so a failing `gh` is not hidden and the lead's shell is unchanged:
+
+```bash
+( set -o pipefail
+  gh run list --workflow nightly.yml --event schedule --limit 5 \
+    --json conclusion,status,createdAt,url | go tool gate nightly
+)
+```
+
+`go tool gate nightly` classifies the newest **completed** scheduled run
+(ignoring runs still queued or in progress). **Stdout** is one summary line;
+unusable input prints `nightly: ...` on **stderr** and exits **2**.
+
+| Exit | State | Meaning | Lead action |
+| --- | --- | --- | --- |
+| 0 | **ok** | Newest completed run concluded `success` and was created within the last **36 hours** | None |
+| 1 | **failed** | Newest completed run concluded anything other than `success` | Ticket for the architect (below) |
+| 1 | **stale** | No completed run (`nightly: stale: no scheduled run` when the list is empty or only queued/in-progress), or the newest completed one was created more than **36 hours** ago | Ticket for the architect (below) |
+| 2 | — | Empty or invalid JSON, or `gh` failed before a classified outcome | Retry once; then ticket `nightly reader: cannot read the schedule` |
+
+Example stdout line:
+
+`nightly: failed: run 44516903074 https://github.com/epzero/basamento/actions/runs/44516903074 created 2026-11-19T11:40:22Z`
+
+On exit **1**, the reviewer lead opens one ticket for the architect unless an
+**open** ticket titled `nightly failed: …` or `nightly stale: …` already
+exists — dedupe on that **prefix**, not on the run id, so one ongoing failure
+keeps one ticket; the exact stdout line goes in the body. The title is
+`nightly failed: run <id>`, `nightly stale: run <id>`, or `nightly stale: no
+scheduled run`. Hand-off: `design-needed`, state *Todo*, assign the architect
+(`agent-workflow.md` §3).
+The architect triages the failure and opens a developer ticket for the fix or
+answers it on the ticket. On any other exit, retry once in the same wake; if
+it still fails, one architect ticket titled `nightly reader: cannot read the
+schedule` (dedupe while an **open** ticket has that title; stderr in the body).
+
+**Cost of this choice:** a failure that happens in a quiet period is seen at
+the next wake, not when the workflow finishes. Because only **completed** runs
+count, while a long run or re-run is in flight the reader reports on the
+previous completed run (it can say **ok** while a re-run of a failed workflow
+is still running, after the failure was ticketed on first sight). It says
+**stale** when the newest completed run is older than 36 hours even if a newer
+run is still unfinished; a run still queued or running about 12 hours after it
+was created is itself worth the architect's look (the next run is due 24 hours
+after the previous one, and the reader says stale at 36 hours).
 
 ## Conflict markers
 
