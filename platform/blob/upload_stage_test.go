@@ -463,7 +463,7 @@ func openEmbeddedStore(t *testing.T) (*Store, string) {
 	st, _, err := Open(context.Background(), raw, Options{
 		Clock:      coretest.NewFakeClock(time.Unix(1700000000, 0)),
 		BaseURL:    "http://blob.test/blob",
-		SignKey:    []byte("test-signing-key-32-bytes-long"),
+		SignKey:    []byte("test-signing-key-32-bytes-long!!"),
 		RandReader: coretest.SeededRand(1),
 	})
 	if err != nil {

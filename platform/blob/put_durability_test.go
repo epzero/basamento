@@ -223,8 +223,8 @@ func openTwoFileStores(t *testing.T) (s1, s2 *Store, dir string) {
 		t.Fatal(err)
 	}
 	clk := coretest.NewFakeClock(time.Unix(1700000000, 0))
-	s1 = &Store{bucket: b, clock: clk}
-	s2 = &Store{bucket: b, clock: clk}
+	s1 = &Store{bucket: wrapBucket(b), clock: clk}
+	s2 = &Store{bucket: wrapBucket(b), clock: clk}
 	return s1, s2, dir
 }
 

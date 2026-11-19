@@ -133,7 +133,7 @@ func (s *Store) Commit(ctx context.Context, stagingKey string) (string, error) {
 		return "", mapError(err)
 	}
 	defer func() { _ = r.Close() }()
-	objCT := serveContentType("", r.ContentType())
+	objCT := serveContentType(r.ContentType())
 	if objCT != meta.ContentType {
 		if err := s.spendFailedCommit(ctx, tid, stagingKey, stagePath); err != nil {
 			return "", mapError(err)
