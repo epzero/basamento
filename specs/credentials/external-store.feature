@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-06 @level:component
+@wp:WP-L1-06 @level:component
 Feature: External credential stores
   The store writes encrypted rows through a backing port. The SQL store is the
   embedded backend; an external secret manager implements the same port and

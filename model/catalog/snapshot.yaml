@@ -1,0 +1,9 @@
+# The price snapshot shipped with the binary: per model id, its ordered rate
+# rules or its own CEL formula, as docs/architecture/model-layer.md §7
+# describes. A deployment or tenant override replaces an entry; nothing fetches
+# prices at run time.
+#
+# Entries are added by the snapshot generation step, reviewed like a golden
+# file. Until then this layer is empty and a model without a deployment or
+# tenant entry has no price (REQ-MODEL-073).
+{}

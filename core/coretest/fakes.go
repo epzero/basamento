@@ -12,8 +12,14 @@ import (
 
 // FakeClock is a manually advanced clock.
 type FakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu      sync.Mutex
+	now     time.Time
+	waiters []clockWaiter
+}
+
+type clockWaiter struct {
+	at time.Time
+	ch chan time.Time
 }
 
 // NewFakeClock starts at t.
@@ -26,11 +32,37 @@ func (c *FakeClock) Now() time.Time {
 	return c.now
 }
 
-// Advance moves the clock forward by d.
+// Advance moves the clock forward by d. It wakes every waiter whose deadline
+// has been reached, in deadline order, so a runtime waiting on a timer proceeds
+// without sleeping.
 func (c *FakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.now = c.now.Add(d)
+	kept := c.waiters[:0]
+	for _, w := range c.waiters {
+		if w.at.After(c.now) {
+			kept = append(kept, w)
+			continue
+		}
+		w.ch <- c.now
+	}
+	c.waiters = kept
+}
+
+// After returns a channel that receives the clock reading once Advance has
+// reached Now()+d. It is the deterministic counterpart of time.After for a
+// runtime under test: no goroutine sleeps.
+func (c *FakeClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	if d <= 0 {
+		ch <- c.now
+		return ch
+	}
+	c.waiters = append(c.waiters, clockWaiter{at: c.now.Add(d), ch: ch})
+	return ch
 }
 
 // SeqIds issues predictable ids "<kind>_<n>" for assertions in tests.

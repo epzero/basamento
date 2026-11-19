@@ -1,4 +1,4 @@
-@planned @wp:WP-L4-02 @runtime:any @level:component
+@wp:WP-L4-02 @runtime:any @level:component
 Feature: Routing and merging in the flow machine
 
   @REQ-FLOW-001 @id:FLOW-001-01
