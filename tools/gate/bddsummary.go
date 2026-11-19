@@ -1,4 +1,4 @@
-package gate
+package main
 
 import (
 	"encoding/json"
@@ -15,8 +15,7 @@ type bddSkipReport struct {
 	SkipRuns       map[string]int `json:"skip_runs"`
 }
 
-// BDDSkipSummary prints the gate summary line from .gate/bdd.json (ADR-0015).
-func BDDSkipSummary(root string) error {
+func printBDDSkips(root string) error {
 	path := filepath.Join(root, ".gate", "bdd.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -41,7 +40,7 @@ func BDDSkipSummary(root string) error {
 		for _, r := range reasons {
 			parts = append(parts, fmt.Sprintf("%s: %d", r, rep.SkipRuns[r]))
 		}
-		line += " " + "(" + strings.Join(parts, ", ") + ")"
+		line += " (" + strings.Join(parts, ", ") + ")"
 	}
 	fmt.Println(line)
 	return nil

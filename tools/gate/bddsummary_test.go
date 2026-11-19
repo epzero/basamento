@@ -1,4 +1,4 @@
-package gate
+package main
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestBDDSkipSummaryBranches(t *testing.T) {
+func TestPrintBDDSkipsBranches(t *testing.T) {
 	dir := t.TempDir()
 	gateDir := filepath.Join(dir, ".gate")
 	if err := os.MkdirAll(gateDir, 0o755); err != nil {
@@ -25,15 +25,11 @@ func TestBDDSkipSummaryBranches(t *testing.T) {
 	}{
 		{`{"outcome":"pass","skip_runs":{}}`, "gate: scenario runs skipped: 0\n"},
 		{`{"outcome":"pass","skip_runs":{"postgres-unavailable":3}}`, "gate: scenario runs skipped: 3 (postgres-unavailable: 3)\n"},
-		{`{"outcome":"pass","skip_runs":{"postgres-unavailable":1,"postgres-unavailable":2}}`, ""},
 	}
 	for _, tc := range cases {
-		if tc.want == "" {
-			continue
-		}
 		write(tc.json)
-		out := captureStdout(t, func() {
-			if err := BDDSkipSummary(dir); err != nil {
+		out := captureToolStdout(t, func() {
+			if err := printBDDSkips(dir); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -43,7 +39,7 @@ func TestBDDSkipSummaryBranches(t *testing.T) {
 	}
 }
 
-func captureStdout(t *testing.T, fn func()) string {
+func captureToolStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {

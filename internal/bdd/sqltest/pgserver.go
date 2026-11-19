@@ -2,9 +2,7 @@ package sqltest
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -132,16 +130,12 @@ func startEmbedded(ctx context.Context) (string, *embeddedpostgres.EmbeddedPostg
 	if err != nil {
 		return "", nil, err
 	}
-	password, err := randomPassword()
-	if err != nil {
-		return "", nil, err
-	}
 	cache := PostgresCacheDir()
 	provider := embeddedpostgres.DownloadProvider{CacheDir: cache, Offline: GateStrict()}
 	cfg := embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.V16).
 		Port(0).
-		Password(password).
+		Password(processPostgresPassword()).
 		Storage(embeddedpostgres.Storage{CacheDir: cache}).
 		Provider(provider).
 		Supervisor(supervisor)
@@ -164,12 +158,8 @@ func normalizePostgresScheme(raw string) string {
 	return raw
 }
 
-func randomPassword() (string, error) {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+func processPostgresPassword() string {
+	return fmt.Sprintf("bddpw_%d", os.Getpid())
 }
 
 // PostgresFailed reports whether resolution tried and failed (URL or embedded).
