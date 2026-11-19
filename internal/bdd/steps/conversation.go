@@ -84,7 +84,6 @@ type convTurn struct {
 	partial  string
 	recorded bool
 	pending  []convPending
-	result   string
 }
 
 type convPending struct {
@@ -1069,10 +1068,7 @@ func registerConversation(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^each turn of conversation "([^"]*)" is the coordinator's Await, Select, Step and Child(?:, and (\d+) durable calls in the child run)?$`, func(ctx context.Context, id, childCalls string) error {
-		c := world(ctx).Conversation.current
-		if c == nil {
-			c = world(ctx).Conversation.must("acme", id)
-		}
+		_ = world(ctx).Conversation.currentOrNew()
 		return nil
 	})
 	sc.Step(`^(\d+) turns of conversation "([^"]*)" have completed$`, func(ctx context.Context, n int, id string) error {
@@ -1302,7 +1298,7 @@ func checkConvErr(w *convWorld, code string) error {
 		return fmt.Errorf("the call succeeded, want %s", code)
 	}
 	if got := string(core.CodeOf(w.lastErr)); got != code {
-		return fmt.Errorf("got code %s, want %s: %v", got, code, w.lastErr)
+		return fmt.Errorf("got code %s, want %s: %w", got, code, w.lastErr)
 	}
 	// A refused call leaves no trace: reset it for the next assertion.
 	w.lastErr = nil

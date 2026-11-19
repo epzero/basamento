@@ -351,10 +351,7 @@ func (r *Record) CancelConversation() {
 // new turn; the coordinator never starts one while a turn runs.
 func (r *Record) History() []MessageRecord {
 	out := make([]MessageRecord, 0, len(r.Messages))
-	for _, m := range r.Messages {
-		out = append(out, m)
-	}
-	return out
+	return append(out, r.Messages...)
 }
 
 // LastTurn returns the most recently ended turn.
