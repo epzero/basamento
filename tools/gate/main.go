@@ -104,6 +104,12 @@ func main() {
 		errs, err := gate.CheckSameGoModLine(root)
 		must(err)
 		report("gomod", errs)
+	case "module-roots":
+		roots, err := gate.ModuleRoots(root)
+		must(err)
+		for _, r := range roots {
+			fmt.Println(r)
+		}
 	case "spec":
 		if len(os.Args) < 3 {
 			usage()
@@ -327,6 +333,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
 	os.Exit(2)
 }

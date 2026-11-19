@@ -33,7 +33,11 @@ jobs:
           make tools
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: govulncheck
-        run: govulncheck ./...
+        run: |
+          set -e
+          while IFS= read -r dir; do
+            (cd "$dir" && govulncheck ./...)
+          done < <(go tool gate module-roots)
 
   flake-hunt:
     # Repeated runs look for nondeterminism; a flaky scenario is quarantined
@@ -72,4 +76,4 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go tool gate release-check || true
+      - run: go tool gate release-check

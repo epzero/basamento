@@ -7,7 +7,7 @@ with `make tools`, which pins their versions in the `Makefile`.
 
 | Gate | Checks | Blocks | Where |
 | --- | --- | --- | --- |
-| **G1 Static** | `gofmt`, `go vet`, `golangci-lint`, `govulncheck`, `CGO_ENABLED=0 go build`, `gate layering` (package graph against `layering.yaml`), `gate gomod` (every tracked `go.mod` names the same `go 1.M.P` line, `ADR-0014`), `go-licenses` (no forbidden or restricted licenses), `buf lint`, `buf breaking` against the base (after publication) | yes | `make gate` |
+| **G1 Static** | `gofmt`, `go vet`, `golangci-lint`, `govulncheck` in every module root (`make vuln` / nightly **line** job, `ADR-0014`), `CGO_ENABLED=0 go build`, `gate layering` (package graph against `layering.yaml`), `gate gomod` (every tracked `go.mod` names the same `go 1.M.P` line, `ADR-0014`), `go-licenses` (no forbidden or restricted licenses), `buf lint`, `buf breaking` against the base (after publication) | yes | `make gate` |
 | **G2 Spec integrity** | `gate spec lint` (format, tags, ids that match their primary requirement, traceability, no scenario on a retired requirement, expired quarantine); `gate spec lock` (approved at current text, valid identities, author ≠ reviewer, tier floors and notes, no human rejection, every human decision names a person); `gate docs` (generated module and roadmap diagrams are current) | yes | `make gate` |
 | **G3 Behavior** | `go test -race ./...` including the BDD suite in strict mode; runtime and port conformance suites across the matrix (SQLite + Postgres, local + temporal-embedded, fileblob + S3-compatible) as they land; replay determinism over recorded histories; fuzz and property tests for the flow machine and CEL | yes | `make gate` (+ CI matrix) |
 | **G4 Red→green** | `gate redgreen -base <base>`: newly active scenarios fail at base and pass at head | yes | `make gate BASE=<ref>`: CI sets the base, agents and the lead use `BASE=main` |
@@ -23,11 +23,15 @@ Go: the root and embedded `go.mod` files name the same minimum patch
 (`ADR-0014`); CI sets `GOTOOLCHAIN=local` and installs Go with
 `go-version-file: go.mod` (except the nightly **line** job, which uses
 `check-latest` on the release line read from `go.mod` and runs
-`govulncheck ./...`).
+`govulncheck ./...` in every module). Locally, `make gate` exports
+`GOTOOLCHAIN=go<patch>` from the root `go.mod` unless the environment already
+set it.
 
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
 the **line** job above, and a flake hunt (repeated runs that look for
 nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
+No automatic reader for nightly **line** failures yet (tracked **EP0-95**);
+the **release-readiness** job is informational only until that lands.
 
 ## Gate report
 
