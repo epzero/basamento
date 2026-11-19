@@ -76,6 +76,9 @@ If an encoded payload names a data key absent from the payload codec's cached ke
 ### REQ-SECRET-023 — Keysets bound to their tenant
 If the stored keyset of a tenant is not the one that was wrapped for that tenant, then the payload codec shall fail with code `internal` and the message `keyset of the tenant cannot be unwrapped`, and return no payload.
 
+### REQ-SECRET-024 — Rejected payloads do not unwrap keysets
+If an encoded payload is rejected because it cannot be decrypted, then the payload codec shall ask the key service to unwrap the tenant's keyset at most once, and not at all while that keyset is already loaded.
+
 ## Key service and values
 
 ### REQ-SECRET-019 — Key service URL

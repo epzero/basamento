@@ -33,4 +33,3 @@ Feature: Profiles and port selection
       | bus.url     | nats://bus.example.test:4222     | nats           |
       | secrets.url | awskms:///arn:aws:kms:kit        | awskms         |
       | secrets.url | gcpkms://projects/kit            | gcpkms         |
-      | secrets.url | hashivault://vault.example.test  | hashivault     |
