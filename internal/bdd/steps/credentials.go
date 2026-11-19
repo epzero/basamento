@@ -17,7 +17,6 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/credentials"
-	"github.com/epzero/basamento/platform/secrets"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -132,14 +131,31 @@ func (s *bddValueSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte,
 	return s.open(ciphertext)
 }
 
+// valueFrameV1 separates the value domain from the keyset domain in this
+// simulated Secrets port. WP-L1-04 keeps its own copy unexported, so the steps
+// carry the frame they need instead of reaching into production code.
+const valueFrameV1 = "basamento.value.v1"
+
+func frameValue(plaintext []byte) []byte {
+	inner := append([]byte(valueFrameV1), 0)
+	return append(inner, plaintext...)
+}
+
+func parseValueFrame(inner []byte) ([]byte, error) {
+	if len(inner) < len(valueFrameV1)+1 || string(inner[:len(valueFrameV1)]) != valueFrameV1 ||
+		inner[len(valueFrameV1)] != 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
+	}
+	return append([]byte(nil), inner[len(valueFrameV1)+1:]...), nil
+}
+
 func (s *bddValueSecrets) seal(plaintext []byte) ([]byte, error) {
-	inner := secrets.FrameValuePlaintext(plaintext)
 	gcm, err := s.gcm()
 	if err != nil {
 		return nil, err
 	}
 	nonce := s.reg.nextNonce(gcm.NonceSize())
-	return gcm.Seal(nonce, nonce, inner, nil), nil
+	return gcm.Seal(nonce, nonce, frameValue(plaintext), nil), nil
 }
 
 func (s *bddValueSecrets) open(ciphertext []byte) ([]byte, error) {
@@ -155,7 +171,7 @@ func (s *bddValueSecrets) open(ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
 	}
-	return secrets.ParseValuePlaintext(inner)
+	return parseValueFrame(inner)
 }
 
 func (s *bddValueSecrets) gcm() (cipher.AEAD, error) {

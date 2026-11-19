@@ -95,7 +95,7 @@ func TestFileStoreCorruptFailsClosed(t *testing.T) {
 	if _, err := s.CreateIfAbsent(context.Background(), "acme", rec); err != nil {
 		t.Fatal(err)
 	}
-	p, err := storePath(dir, "acme")
+	p, err := storePath(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestFileStoreHostileTenantIDs(t *testing.T) {
 	if _, err := s.CreateIfAbsent(context.Background(), "acme", rec); err != nil {
 		t.Fatal(err)
 	}
-	p, err := storePath(dir, "acme")
+	p, err := storePath(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,13 +135,7 @@ func TestFileStoreHostileTenantIDs(t *testing.T) {
 	}
 }
 
-func storePath(dir, tenant string) (string, error) {
-	s, err := secrets.NewFileStore(dir)
-	if err != nil {
-		return "", err
-	}
-	_ = s
-	// Hash naming matches production: only way to locate without exporting path().
+func storePath(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err

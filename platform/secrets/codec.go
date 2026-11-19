@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -34,10 +33,26 @@ type Codec struct {
 }
 
 // NewCodec returns a payload codec. keys[0] is the current master key; the rest
-// are previous keys still able to unwrap stored keysets.
+// are previous keys still able to unwrap stored keysets. A nil store, an empty
+// keys slice, a nil KeyService, or duplicate MasterKeyID values are refused with
+// invalid_argument.
 func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, error) {
+	if store == nil {
+		return nil, errInvalidArgument("keyset store is required")
+	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("master key is required")
+		return nil, errInvalidArgument("master key is required")
+	}
+	seen := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k == nil {
+			return nil, errInvalidArgument("master key is required")
+		}
+		id := k.MasterKeyID()
+		if _, dup := seen[id]; dup {
+			return nil, errInvalidArgument("duplicate master key id in codec configuration")
+		}
+		seen[id] = struct{}{}
 	}
 	o := applyOptions(opts)
 	return &Codec{store: store, keys: keys, cache: map[string]cacheEntry{}, opts: o}, nil
@@ -456,24 +471,39 @@ func (c *Codec) keysetReadOnly(ctx context.Context, tenant string) (*keyset.Hand
 	return c.unwrapAndCache(ctx, tenant, rec)
 }
 
+type keyServiceOpener func(context.Context, string) (KeyService, error)
+
 // OpenCodec opens a payload codec with the current master key url and optional
-// previous master key urls (design §2).
+// previous master key urls (design §2). Duplicate master ids across those urls
+// are refused with invalid_argument.
 func OpenCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, opts ...Option) (*Codec, error) {
-	o := applyOptions(opts)
-	cur, err := OpenKeyService(ctx, currentURL, WithLogger(o.logger))
+	return openCodec(ctx, store, currentURL, prevURLs, OpenKeyService, opts...)
+}
+
+func openCodec(ctx context.Context, store KeysetStore, currentURL string, prevURLs []string, open keyServiceOpener, opts ...Option) (*Codec, error) {
+	cur, err := open(ctx, currentURL)
 	if err != nil {
 		return nil, err
 	}
 	keys := []KeyService{cur}
 	for _, u := range prevURLs {
-		ks, err := OpenKeyService(ctx, u, WithLogger(o.logger))
+		ks, err := open(ctx, u)
 		if err != nil {
-			for _, opened := range keys {
-				_ = opened.Close()
-			}
+			closeKeyServices(keys)
 			return nil, err
 		}
 		keys = append(keys, ks)
 	}
-	return NewCodec(store, keys, opts...)
+	c, err := NewCodec(store, keys, opts...)
+	if err != nil {
+		closeKeyServices(keys)
+		return nil, err
+	}
+	return c, nil
+}
+
+func closeKeyServices(keys []KeyService) {
+	for _, k := range keys {
+		_ = k.Close()
+	}
 }

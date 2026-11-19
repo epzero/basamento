@@ -13,9 +13,9 @@ func TestValueFrameRejectsKeysetPlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ParseValuePlaintext(fr)
+	_, err = parseValuePlaintext(fr)
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("ParseValuePlaintext(keyset frame): err=%v", err)
+		t.Fatalf("parseValuePlaintext(keyset frame): err=%v", err)
 	}
 	if !strings.Contains(err.Error(), msgValueCannotDecrypt) {
 		t.Fatalf("message: %v", err)
@@ -30,7 +30,7 @@ func TestKeysetFrameRejectsValueDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := framed[len(frameKeysetV1)+1:]
-	attack := FrameValuePlaintext(append([]byte{'x'}, body...))
+	attack := frameValuePlaintext(append([]byte{'x'}, body...))
 	_, err = ParseBoundPlaintext("acme", attack)
 	if err == nil || core.CodeOf(err) != core.CodeInternal {
 		t.Fatalf("err=%v", err)
