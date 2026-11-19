@@ -156,14 +156,14 @@ func TestModuleRootsCoverEveryGoMod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	errs, err := VulnScopeErrors(root, roots)
+	errs, err := vulnScopeErrors(root, roots)
 	if err != nil || len(errs) != 0 {
 		t.Fatalf("ModuleRoots should cover every go.mod: %v %v", errs, err)
 	}
 	if len(roots) != 2 {
 		t.Fatalf("want 2 module roots, got %v", roots)
 	}
-	errs, err = VulnScopeErrors(root, []string{"."})
+	errs, err = vulnScopeErrors(root, []string{"."})
 	if err != nil || len(errs) != 1 {
 		t.Fatalf("want missing embedded root error: %v %v", errs, err)
 	}

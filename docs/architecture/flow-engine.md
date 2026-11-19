@@ -52,19 +52,23 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 ## 2. Compiler
 
-- Validates the state schema, reducer keys and reducer forms, node names and
-  kinds, and edge references.
+- Validates the state schema and its reducer keys and forms, the node names
+  and kinds, the edge references and the node specs.
 - Type-checks every CEL expression against the state schema: edge `when`
   conditions, node `in` mappings, guard `while` conditions, and the `accept_if`
   of a `gate` and the `over` of a `map` in their node specs.
-- Requires at least one guarded node on every cycle, which bounds it.
+- Requires at least one guarded node on every cycle. A guard's `max_visits` or
+  `cost_mpts` is the budget that bounds a cycle (REQ-FLOW-003); a `while`
+  condition only chooses when the cycle leaves.
 - Rejects unknown node kinds.
 - Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
   those names; a node named `START` or `FAIL`, an edge into `START`, an edge
   out of `FAIL`, or a flow without exactly one edge from `START` is rejected.
 - Rejects nodes unreachable from `START`.
-- Error messages name the node or edge and the expression (REQ-FLOW-003/004),
-  and all rejections use code `invalid_argument`.
+- Error messages name the node or edge and what is wrong: the expression that
+  does not type-check (REQ-FLOW-004), or the node on the cycle and the
+  missing guard (REQ-FLOW-003), and all rejections use code
+  `invalid_argument`.
 
 ## 3. Machine
 
