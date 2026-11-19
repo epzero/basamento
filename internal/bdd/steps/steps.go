@@ -17,16 +17,17 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core    *coreWorld
-	SQL     *sqlWorld
-	Prompt  *promptWorld
-	Blob    *blobWorld
-	Secrets *secretsWorld
-	Expr    *exprWorld
-	Schema  *schemaWorld
-	Flow    *flowWorld
-	Machine *machineWorld
-	Host    *hostWorld
+	Core     *coreWorld
+	SQL      *sqlWorld
+	Prompt   *promptWorld
+	Blob     *blobWorld
+	Secrets  *secretsWorld
+	Expr     *exprWorld
+	Schema   *schemaWorld
+	Flow     *flowWorld
+	Machine  *machineWorld
+	Host     *hostWorld
+	Temporal *temporalWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -35,16 +36,17 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:    newCoreWorld(),
-			SQL:     newSQLWorld(),
-			Prompt:  newPromptWorld(),
-			Blob:    newBlobWorld(),
-			Secrets: newSecretsWorld(),
-			Expr:    &exprWorld{bindings: map[string]any{}},
-			Schema:  newSchemaWorld(),
-			Flow:    newFlowWorld(),
-			Machine: newMachineWorld(),
-			Host:    newHostWorld(),
+			Core:     newCoreWorld(),
+			SQL:      newSQLWorld(),
+			Prompt:   newPromptWorld(),
+			Blob:     newBlobWorld(),
+			Secrets:  newSecretsWorld(),
+			Expr:     &exprWorld{bindings: map[string]any{}},
+			Schema:   newSchemaWorld(),
+			Flow:     newFlowWorld(),
+			Machine:  newMachineWorld(),
+			Host:     newHostWorld(),
+			Temporal: newTemporalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -58,6 +60,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
+	registerTemporal(sc)
 	registerSharedSteps(sc)
 }
 
