@@ -25,6 +25,17 @@ type secretStringer struct{ secret string }
 
 func (s secretStringer) String() string { return "token=" + s.secret }
 
+// stringerCredential has an exported sensitive field and a value-receiver
+// String method: field redaction must win over the text form.
+type stringerCredential struct{ Password string }
+
+func (s stringerCredential) String() string { return "password=" + s.Password }
+
+// errorCredential is an error with an exported sensitive field.
+type errorCredential struct{ Secret string }
+
+func (e errorCredential) Error() string { return "secret=" + e.Secret }
+
 func TestRedactorReplacesCredentialValues(t *testing.T) {
 	r := redactor{sources: []SecretsSource{NewStaticSecrets("sk-live-7f3a9c1b")}}
 	cases := []string{
@@ -129,6 +140,34 @@ func TestRedactorCanonicalisesNonStringValues(t *testing.T) {
 	for key, value := range got {
 		if text, ok := value.(string); ok && text == "hunter2" {
 			t.Errorf("%s still carries the credential", key)
+		}
+	}
+}
+
+func TestRedactorDoesNotLetStringerBypassFieldRedaction(t *testing.T) {
+	r := redactor{sources: []SecretsSource{NewStaticSecrets()}}
+	got := r.Map(map[string]any{
+		"stringer": stringerCredential{Password: "S3cretField"},
+		"error":    errorCredential{Secret: "S3cretField"},
+	})
+
+	stringer, ok := got["stringer"].(map[string]any)
+	if !ok {
+		t.Fatalf("Stringer struct was not canonicalised: %T", got["stringer"])
+	}
+	if stringer["Password"] != Redacted {
+		t.Errorf("Stringer Password = %v, want redacted", stringer["Password"])
+	}
+	errValue, ok := got["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("Error struct was not canonicalised: %T", got["error"])
+	}
+	if errValue["Secret"] != Redacted {
+		t.Errorf("Error Secret = %v, want redacted", errValue["Secret"])
+	}
+	for key, value := range got {
+		if text, ok := value.(string); ok && text == "S3cretField" {
+			t.Errorf("%s still carries the field value", key)
 		}
 	}
 }

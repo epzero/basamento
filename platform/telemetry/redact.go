@@ -147,9 +147,21 @@ func (r redactor) valueAt(key string, v any, depth int) any {
 	case []byte:
 		return r.String(string(x))
 	case error:
-		return r.String(x.Error())
+		if nilValue(v) {
+			return nil
+		}
+		if opaqueTextValue(v) {
+			return r.String(x.Error())
+		}
+		return r.reflectValueAt(v, depth+1)
 	case fmt.Stringer:
-		return r.String(x.String())
+		if nilValue(v) {
+			return nil
+		}
+		if opaqueTextValue(v) {
+			return r.String(x.String())
+		}
+		return r.reflectValueAt(v, depth+1)
 	case map[string]any:
 		return r.mapAt(x, depth+1)
 	case []any:
@@ -176,6 +188,42 @@ func (r redactor) mapAt(m map[string]any, depth int) map[string]any {
 		out[k] = r.valueAt(k, v, depth+1)
 	}
 	return out
+}
+
+// opaqueTextValue reports whether v must be rendered through its Error or
+// String method instead of reflection. A struct with an exported or
+// sensitive-named field is not opaque: reflection must see that field's name,
+// or a Stringer would bypass field-name redaction. time.Time and similar
+// structs with only unexported fields keep their text form.
+func opaqueTextValue(v any) bool {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return true
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return true
+	}
+	typ := rv.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if field.PkgPath == "" || sensitiveKey(field.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func nilValue(v any) bool {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 func (r redactor) reflectValueAt(v any, depth int) any {
@@ -222,7 +270,11 @@ func (r redactor) reflectValueAt(v any, depth int) any {
 		for i := 0; i < rv.NumField(); i++ {
 			field := typ.Field(i)
 			if field.PkgPath != "" {
-				// Unexported: never hand the raw value to an exporter.
+				// Unexported: never hand the raw value to an exporter. A
+				// sensitive name cannot be read safely, so redact the struct.
+				if sensitiveKey(field.Name) {
+					return Redacted
+				}
 				continue
 			}
 			out[field.Name] = r.valueAt(field.Name, rv.Field(i).Interface(), depth+1)

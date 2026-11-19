@@ -63,7 +63,11 @@ func (c *testCollector) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 	}
 	if slow != nil {
-		<-slow
+		select {
+		case <-slow:
+		case <-r.Context().Done():
+			return
+		}
 	}
 	body, _ := io.ReadAll(r.Body)
 	if fail {
@@ -201,9 +205,7 @@ func newCloudTestSetup(t *testing.T, clock *coretest.FakeClock, collector *testC
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = setup.Shutdown(ctx)
+		_ = setup.Shutdown(context.WithoutCancel(t.Context()))
 	})
 	return setup
 }
@@ -532,6 +534,8 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		slog.Any("error", errors.New("failed with sk-live-7f3a9c1b")),
 		slog.Any("credentials", credentials{Name: "ana", Password: "hunter2"}),
 		slog.Any("raw", []byte("sk-live-7f3a9c1b")),
+		slog.Any("stringerField", stringerCredential{Password: "S3cretField"}),
+		slog.Any("errorField", errorCredential{Secret: "S3cretField"}),
 	)
 	if err := setup.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
@@ -543,7 +547,7 @@ func TestRedactionCoversErrorsStructsAndBytesBeforeExport(t *testing.T) {
 		t.Fatal("collector received no OTLP batch")
 	}
 	for _, body := range collector.bodies {
-		for _, secret := range []string{"sk-live-7f3a9c1b", "hunter2"} {
+		for _, secret := range []string{"sk-live-7f3a9c1b", "hunter2", "S3cretField"} {
 			if bytes.Contains(body, []byte(secret)) {
 				t.Fatalf("an exported OTLP batch contains %q", secret)
 			}
