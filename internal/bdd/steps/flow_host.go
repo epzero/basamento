@@ -1113,7 +1113,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?: without the gate "([^"]*)" being resolved)?$`,
+	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass without the gate "([^"]*)" being resolved$`,
 		func(ctx context.Context, count int, unit, gate string) error {
 			var duration time.Duration
 			switch strings.TrimSuffix(unit, "s") {
