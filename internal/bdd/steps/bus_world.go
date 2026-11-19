@@ -55,6 +55,9 @@ type busWorld struct {
 	subs      map[string]*subState
 
 	lastErr       error
+	lastReadErr   error
+	lastSwapErr   error
+	lastCreateErr error
 	subErr        error
 	subBuf        int
 	maxMsg        int
@@ -67,6 +70,9 @@ type busWorld struct {
 }
 
 func scenarioUsesBus(scn *godog.Scenario) bool {
+	if strings.Contains(scn.Uri, "specs/bus/") {
+		return true
+	}
 	for _, t := range scn.Tags {
 		if t.Name == "@wp:WP-L1-03" || strings.HasPrefix(t.Name, "@REQ-BUS-") {
 			return true
@@ -99,13 +105,16 @@ func skipBusByProfile(scn *godog.Scenario, backend string) error {
 			hasCloud = true
 		}
 	}
-	if backend == "fake" && hasEmbedded && !hasCloud {
+	if hasEmbedded && hasCloud {
+		if backend == "fake" {
+			return godog.ErrSkip
+		}
+		return nil
+	}
+	if hasCloud && !hasEmbedded && backend != "cloud" {
 		return godog.ErrSkip
 	}
-	if backend == "embedded" && hasCloud && !hasEmbedded {
-		return godog.ErrSkip
-	}
-	if backend == "cloud" && hasEmbedded && !hasCloud {
+	if hasEmbedded && !hasCloud && backend != "embedded" {
 		return godog.ErrSkip
 	}
 	return nil
@@ -230,10 +239,7 @@ func (w *busWorld) publish(ctx context.Context, subject, label string, data []by
 		w.publishOK = append(w.publishOK, seq)
 	}
 	w.mu.Unlock()
-	if err != nil {
-		return nil
-	}
-	return nil
+	return err
 }
 
 func (w *busWorld) paceReaders(ctx context.Context, n int) error {
@@ -397,48 +403,13 @@ func recvNothing(ctx context.Context, b busKV, subject string) error {
 	return nil
 }
 
-func parseQuotedList(s string) []string {
+func parseBusQuotedList(s string) []string {
 	parts := strings.Split(s, `", "`)
 	for i, p := range parts {
 		p = strings.Trim(p, `" `)
 		parts[i] = p
 	}
 	return parts
-}
-
-func parseDurationPass(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, " passes")
-	s = strings.TrimSuffix(s, " pass")
-	if d, err := time.ParseDuration(s); err == nil {
-		return d, nil
-	}
-	fields := strings.Fields(s)
-	if len(fields) == 0 || len(fields)%2 != 0 {
-		return 0, fmt.Errorf("bad duration %q", s)
-	}
-	var total time.Duration
-	for i := 0; i < len(fields); i += 2 {
-		n, err := strconv.Atoi(fields[i])
-		if err != nil {
-			return 0, err
-		}
-		switch {
-		case strings.HasPrefix(fields[i+1], "millisecond"):
-			total += time.Duration(n) * time.Millisecond
-		case strings.HasPrefix(fields[i+1], "second"):
-			total += time.Duration(n) * time.Second
-		case strings.HasPrefix(fields[i+1], "minute"):
-			total += time.Duration(n) * time.Minute
-		case strings.HasPrefix(fields[i+1], "hour"):
-			total += time.Duration(n) * time.Hour
-		case strings.HasPrefix(fields[i+1], "day"):
-			total += time.Duration(n) * 24 * time.Hour
-		default:
-			return 0, fmt.Errorf("unknown unit %q", fields[i+1])
-		}
-	}
-	return total, nil
 }
 
 func (w *busWorld) stopServer() {

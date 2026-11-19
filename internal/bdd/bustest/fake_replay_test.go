@@ -110,7 +110,7 @@ func TestFakePublishNotBlockedBySlowReplay(t *testing.T) {
 
 func TestFakeLiveQueuedInReplayOrder(t *testing.T) {
 	clk := coretest.NewFakeClock(time.Unix(0, 0))
-	f := NewFake(clk, bus.Options{SubBuffer: 1, MaxMessageSize: bus.DefaultMaxMessageSize})
+	f := NewFake(clk, bus.Options{SubBuffer: 3, MaxMessageSize: bus.DefaultMaxMessageSize})
 	subject := "run.r1.order"
 	ctx := context.Background()
 	for _, label := range []string{"r1", "r2"} {

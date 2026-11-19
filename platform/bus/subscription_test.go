@@ -52,7 +52,7 @@ func TestLiveSubscriptionEndOnce(t *testing.T) {
 				cancels++
 				cancel()
 			}
-			live := newLiveSubscription(2, 0, subCancel, nil)
+			live := newLiveSubscription("run.r1.d", 2, 0, 0, subCancel, nil)
 			cc := newStubConsume()
 			msg := platform.Message{Subject: "run.r1.d", Seq: 2, Data: []byte("x")}
 			live.attach(cc)
@@ -77,7 +77,7 @@ func TestLiveSubscriptionEndOnce(t *testing.T) {
 
 func TestLiveEndBeforeAttach(t *testing.T) {
 	cc := newStubConsume()
-	live := newLiveSubscription(2, 0, func() {}, nil)
+	live := newLiveSubscription("run.r1.d", 2, 0, 0, func() {}, nil)
 	live.end()
 	live.attach(cc)
 	if cc.stopCount() != 1 {
@@ -88,7 +88,7 @@ func TestLiveEndBeforeAttach(t *testing.T) {
 func TestDeliverLiveIgnoresCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	live := newLiveSubscription(4, 0, func() {}, nil)
+	live := newLiveSubscription("run.r1.d", 4, 0, 0, func() {}, nil)
 	live.deliver(ctx, platform.Message{Subject: "run.r1.d", Seq: 1, Data: []byte("x")})
 	select {
 	case _, ok := <-live.messages():

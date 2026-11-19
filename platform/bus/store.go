@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -21,6 +22,9 @@ const (
 	metaPF     = "pf."
 )
 
+// KVDataBucket is the JetStream KV bucket for application keys.
+const KVDataBucket = dataBucket
+
 // Store implements platform.Bus and platform.KV over one JetStream deployment.
 type Store struct {
 	clock        core.Clock
@@ -31,9 +35,11 @@ type Store struct {
 	data         jetstream.KeyValue
 	subBuf       int
 	publishLimit int
+	kvValueLimit int
 
-	closeSrv func()
-	stopOnce sync.Once
+	closeSrv  func()
+	inprocess *server.Server
+	stopOnce  sync.Once
 
 	closed atomic.Bool
 	liveMu sync.Mutex
@@ -68,18 +74,31 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv func()) (*Store, error) {
+func checkCallCtx(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
-		return nil, mapConnErr(err)
+		return mapConnErr(err)
+	}
+	return nil
+}
+
+func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv func()) (*Store, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return nil, err
 	}
 	opts = opts.withDefaults()
 	if err := nc.FlushTimeout(2 * time.Second); err != nil {
 		nc.Close()
-		return nil, mapConnErr(err)
+		return nil, unavailable()
 	}
 	if nc.Status() != nats.CONNECTED {
 		nc.Close()
 		return nil, unavailable()
+	}
+	if mp := int(nc.MaxPayload()); mp > 0 {
+		if clusterMaxPayloadTooSmall(mp) {
+			nc.Close()
+			return nil, clusterPayloadTooSmall()
+		}
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -91,17 +110,7 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		nc.Close()
 		return nil, err
 	}
-	limit := opts.MaxMessageSize
-	minPayload := opts.MaxMessageSize + deadlineSize
-	if mp := nc.MaxPayload(); mp > 0 {
-		if int(mp) < minPayload {
-			nc.Close()
-			return nil, clusterPayloadTooSmall()
-		}
-		if int(mp) < limit {
-			limit = int(mp)
-		}
-	}
+	lim := LimitsFor(opts.MaxMessageSize, int(nc.MaxPayload()))
 	if closeSrv == nil {
 		closeSrv = func() {}
 	}
@@ -113,7 +122,8 @@ func connectAndOpen(ctx context.Context, nc *nats.Conn, opts Options, closeSrv f
 		meta:         assets.meta,
 		data:         assets.data,
 		subBuf:       opts.SubBuffer,
-		publishLimit: limit,
+		publishLimit: lim.MaxPublish,
+		kvValueLimit: lim.MaxKVValue,
 		closeSrv:     closeSrv,
 	}, nil
 }
@@ -186,8 +196,16 @@ func uint64Bytes(v uint64) []byte {
 	return b
 }
 
+// InProcessServer returns the embedded NATS server for in-process clients, or nil on cloud.
+func (s *Store) InProcessServer() *server.Server {
+	return s.inprocess
+}
+
 // Publish implements platform.Bus.
 func (s *Store) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := s.ready(); err != nil {
 		return 0, err
 	}
@@ -201,11 +219,29 @@ func (s *Store) Publish(ctx context.Context, subject string, data []byte) (uint6
 	if err != nil {
 		return 0, mapConnErr(err)
 	}
+	s.noteLivePublish(subject, ack.Sequence)
 	return ack.Sequence, nil
+}
+
+func (s *Store) noteLivePublish(subject string, seq uint64) {
+	s.liveMu.Lock()
+	subs := make([]*liveSubscription, 0, len(s.live))
+	for l := range s.live {
+		if l.subject == subject {
+			subs = append(subs, l)
+		}
+	}
+	s.liveMu.Unlock()
+	for _, l := range subs {
+		l.noteLivePublish(seq)
+	}
 }
 
 // LastSeq implements platform.Bus.
 func (s *Store) LastSeq(ctx context.Context, subject string) (uint64, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := s.ready(); err != nil {
 		return 0, err
 	}
@@ -215,8 +251,23 @@ func (s *Store) LastSeq(ctx context.Context, subject string) (uint64, error) {
 	return lastSeqForSubject(ctx, s.stream, s.meta, subject)
 }
 
+// purgeThrough raises the purge floor and purges stream messages up through through.
+func (s *Store) purgeThrough(ctx context.Context, subject string, through uint64) error {
+	if through == 0 {
+		return nil
+	}
+	if err := raisePurgeFloor(ctx, s.meta, subject, through); err != nil {
+		return err
+	}
+	wire := wireSubject(subject)
+	return mapConnErr(s.stream.Purge(ctx, jetstream.WithPurgeSubject(wire), jetstream.WithPurgeSequence(through+1)))
+}
+
 // Purge implements platform.Bus.
 func (s *Store) Purge(ctx context.Context, subject string) error {
+	if err := checkCallCtx(ctx); err != nil {
+		return err
+	}
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -227,22 +278,14 @@ func (s *Store) Purge(ctx context.Context, subject string) error {
 	if err != nil {
 		return err
 	}
-	if L == 0 {
-		return nil
-	}
-	// Floor-first: see raisePurgeFloor.
-	if err := raisePurgeFloor(ctx, s.meta, subject, L); err != nil {
-		return err
-	}
-	wire := wireSubject(subject)
-	if err := s.stream.Purge(ctx, jetstream.WithPurgeSubject(wire), jetstream.WithPurgeSequence(L+1)); err != nil {
-		return mapConnErr(err)
-	}
-	return nil
+	return s.purgeThrough(ctx, subject, L)
 }
 
 // Subscribe implements platform.Bus.
 func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-chan platform.Message, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
@@ -256,7 +299,7 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 		cancel()
 		return nil, err
 	}
-	live = newLiveSubscription(s.subBuf, replayThrough, cancel, func() { s.unregisterLive(live) })
+	live = newLiveSubscription(subject, s.subBuf, after, replayThrough, cancel, func() { s.unregisterLive(live) })
 	if err := s.tryRegisterLive(live); err != nil {
 		cancel()
 		return nil, err
@@ -316,6 +359,9 @@ func (s *Store) Subscribe(ctx context.Context, subject string, after uint64) (<-
 
 // Get implements platform.KV.
 func (s *Store) Get(ctx context.Context, key string) ([]byte, uint64, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return nil, 0, err
+	}
 	if err := s.ready(); err != nil {
 		return nil, 0, err
 	}
@@ -341,13 +387,16 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 
 // Put implements platform.KV.
 func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := s.ready(); err != nil {
 		return 0, err
 	}
 	if !ValidKey(key) {
 		return 0, invalidKey()
 	}
-	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+	if err := checkKVValueLen(value, s.kvValueLimit); err != nil {
 		return 0, err
 	}
 	if ttl < 0 {
@@ -363,13 +412,16 @@ func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Dura
 
 // CompareAndSwap implements platform.KV.
 func (s *Store) CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error) {
+	if err := checkCallCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := s.ready(); err != nil {
 		return 0, err
 	}
 	if !ValidKey(key) {
 		return 0, invalidKey()
 	}
-	if err := checkKVValueLen(value, s.publishLimit); err != nil {
+	if err := checkKVValueLen(value, s.kvValueLimit); err != nil {
 		return 0, err
 	}
 	if ttl < 0 {
@@ -444,6 +496,9 @@ func (s *Store) kvCreate(ctx context.Context, key string, enc []byte) (uint64, e
 
 // Delete implements platform.KV.
 func (s *Store) Delete(ctx context.Context, key string) error {
+	if err := checkCallCtx(ctx); err != nil {
+		return err
+	}
 	if err := s.ready(); err != nil {
 		return err
 	}

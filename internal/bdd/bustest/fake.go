@@ -4,6 +4,7 @@ package bustest
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -15,11 +16,14 @@ import (
 // Fake implements platform.Bus and platform.KV with the same semantics as the
 // JetStream-backed store.
 type Fake struct {
-	clock   core.Clock
-	mu      sync.Mutex
-	pubMu   sync.Mutex
-	bufSize int
-	maxSize int
+	clock        core.Clock
+	mu           sync.Mutex
+	pubMu        sync.Mutex
+	bufSize      int
+	maxSize      int
+	kvValueLimit int
+
+	nextReplayGate chan struct{}
 
 	stopped bool
 
@@ -45,20 +49,24 @@ type kvEntry struct {
 }
 
 type sub struct {
-	subject       string
-	after         uint64
-	replayThrough uint64
-	ch            chan platform.Message
-	cancel        context.CancelFunc
-	replaying     bool
-	livePending   []platform.Message
-	liveWake      chan struct{}
-	livePhase     bool
-	ended         bool
-	chClosed      bool
-	senders       sync.WaitGroup
-	done          chan struct{}
-	teardownOnce  sync.Once
+	subject           string
+	after             uint64
+	replayThrough     uint64
+	replayPending     int
+	dropLive          bool
+	ch                chan platform.Message
+	cancel            context.CancelFunc
+	replayActive      bool
+	livePending       []platform.Message
+	liveWake          chan struct{}
+	ended             bool
+	chClosed          bool
+	senders           sync.WaitGroup
+	done              chan struct{}
+	teardownOnce      sync.Once
+	replaySettled     chan struct{}
+	replaySettledOnce sync.Once
+	replayGate        chan struct{}
 }
 
 // NewFake builds a fake bus and KV. Limits follow bus.Options when nonzero.
@@ -69,13 +77,15 @@ func NewFake(clock core.Clock, opts bus.Options) *Fake {
 	if opts.MaxMessageSize <= 0 {
 		opts.MaxMessageSize = bus.DefaultMaxMessageSize
 	}
+	lim := bus.LimitsFor(opts.MaxMessageSize, int(bus.EmbeddedServerMaxPayload(opts.MaxMessageSize)))
 	return &Fake{
-		clock:      clock,
-		bufSize:    opts.SubBuffer,
-		maxSize:    opts.MaxMessageSize,
-		retained:   map[string][]retainedMsg{},
-		purgeFloor: map[string]uint64{},
-		kv:         map[string]kvEntry{},
+		clock:        clock,
+		bufSize:      opts.SubBuffer,
+		maxSize:      lim.MaxPublish,
+		kvValueLimit: lim.MaxKVValue,
+		retained:     map[string][]retainedMsg{},
+		purgeFloor:   map[string]uint64{},
+		kv:           map[string]kvEntry{},
 	}
 }
 
@@ -127,7 +137,7 @@ func (f *Fake) checkTTL(ttl time.Duration) error {
 }
 
 func (f *Fake) checkKVValue(value []byte) error {
-	if len(value) > bus.MaxKVValueBytes(f.maxSize) {
+	if len(value) > f.kvValueLimit {
 		return core.NewError(core.CodeInvalidArgument, "kv value too large", nil)
 	}
 	return nil
@@ -182,6 +192,17 @@ func (f *Fake) replaySend(subCtx context.Context, s *sub, msg platform.Message) 
 	defer s.senders.Done()
 	select {
 	case s.ch <- msg:
+		f.mu.Lock()
+		if s.replayPending > 0 {
+			s.replayPending--
+			drop := s.dropLive && s.replayPending == 0
+			f.mu.Unlock()
+			if drop {
+				go f.terminateSub(s)
+			}
+		} else {
+			f.mu.Unlock()
+		}
 	case <-subCtx.Done():
 	case <-s.done:
 	}
@@ -192,7 +213,6 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 		f.mu.Lock()
 		pending := s.livePending
 		s.livePending = nil
-		liveOnly := s.livePhase
 		f.mu.Unlock()
 		for _, msg := range pending {
 			if msg.Seq <= s.after {
@@ -205,14 +225,30 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 			if stopped || closed {
 				return true
 			}
-			if liveOnly {
-				if f.deliverLiveLocked(s, msg) {
+			if msg.Seq > s.replayThrough {
+				f.mu.Lock()
+				s.noteLivePublish(msg.Seq)
+				drop := s.dropLive
+				f.mu.Unlock()
+				if drop {
 					f.terminateSub(s)
 					return true
 				}
+			}
+			f.mu.Lock()
+			blocking := s.replayActive || s.replayPending > 0 || len(s.ch) > 0
+			f.mu.Unlock()
+			if blocking {
+				f.replaySend(subCtx, s, msg)
 				continue
 			}
-			f.replaySend(subCtx, s, msg)
+			f.mu.Lock()
+			overflow := f.deliverLiveLocked(s, msg)
+			f.mu.Unlock()
+			if overflow {
+				f.terminateSub(s)
+				return true
+			}
 		}
 		f.mu.Lock()
 		if len(s.livePending) == 0 {
@@ -223,9 +259,21 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 	}
 }
 
+func (f *Fake) callCtx(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return core.NewError(core.CodeTimeout, "timeout", nil)
+		}
+		return core.NewError(core.CodeCancelled, "cancelled", nil)
+	}
+	return nil
+}
+
 // Publish stores a message and delivers it to active subscribers of the subject.
 func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return 0, err
+	}
 	f.pubMu.Lock()
 	defer f.pubMu.Unlock()
 	if err := f.unavailable(); err != nil {
@@ -251,7 +299,14 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 		if s.ended {
 			continue
 		}
-		if !s.livePhase {
+		if msg.Seq > s.replayThrough {
+			s.noteLivePublish(msg.Seq)
+			if s.dropLive {
+				terminate = append(terminate, s)
+				continue
+			}
+		}
+		if s.replayActive {
 			s.livePending = append(s.livePending, msg)
 			select {
 			case s.liveWake <- struct{}{}:
@@ -270,9 +325,28 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 	return seq, nil
 }
 
+func (sub *sub) bufferOccupied() int {
+	return len(sub.ch) + sub.replayPending
+}
+
+func (s *sub) noteLivePublish(seq uint64) {
+	if seq <= s.replayThrough {
+		return
+	}
+	if s.bufferOccupied() >= cap(s.ch) {
+		s.dropLive = true
+	}
+}
+
 func (f *Fake) deliverLiveLocked(s *sub, msg platform.Message) bool {
 	if s.ended || msg.Seq <= s.after {
 		return false
+	}
+	if s.dropLive {
+		return true
+	}
+	if msg.Seq > s.replayThrough && s.bufferOccupied() >= cap(s.ch) {
+		return true
 	}
 	select {
 	case s.ch <- msg:
@@ -302,6 +376,9 @@ func (f *Fake) endAllSubs() {
 
 // Subscribe opens a subject subscription after the given bus sequence.
 func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-chan platform.Message, error) {
+	if err := f.callCtx(ctx); err != nil {
+		return nil, err
+	}
 	if err := f.unavailable(); err != nil {
 		return nil, err
 	}
@@ -315,6 +392,8 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		return nil, core.NewError(core.CodeNotFound, "purged", map[string]any{"purged_through": floor})
 	}
 	replayThrough := f.lastSeqLocked(subject)
+	replayGate := f.nextReplayGate
+	f.nextReplayGate = nil
 	subCtx, cancel := context.WithCancel(ctx)
 	s := &sub{
 		subject:       subject,
@@ -324,6 +403,8 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		cancel:        cancel,
 		done:          make(chan struct{}),
 		liveWake:      make(chan struct{}, 1),
+		replaySettled: make(chan struct{}),
+		replayGate:    replayGate,
 	}
 	var replay []retainedMsg
 	for _, m := range f.retained[subject] {
@@ -331,10 +412,13 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			replay = append(replay, m)
 		}
 	}
+	for _, m := range replay {
+		if m.seq <= replayThrough {
+			s.replayPending++
+		}
+	}
 	if len(replay) > 0 {
-		s.replaying = true
-	} else {
-		s.livePhase = true
+		s.replayActive = true
 	}
 	f.subs = append(f.subs, s)
 	f.mu.Unlock()
@@ -343,6 +427,9 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			<-subCtx.Done()
 			f.terminateSub(s)
 		}()
+		if s.replayGate != nil {
+			<-s.replayGate
+		}
 		for _, m := range replay {
 			f.mu.Lock()
 			ended := s.ended
@@ -361,6 +448,15 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 				f.replaySend(subCtx, s, msg)
 			}
 		}
+		s.replaySettledOnce.Do(func() { close(s.replaySettled) })
+		f.mu.Lock()
+		s.replayActive = false
+		drop := s.dropLive
+		f.mu.Unlock()
+		if drop {
+			f.terminateSub(s)
+			return
+		}
 		for {
 			if f.flushLivePending(s, subCtx) {
 				return
@@ -369,9 +465,6 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			if s.ended {
 				f.mu.Unlock()
 				return
-			}
-			if !s.livePhase && len(s.livePending) == 0 && len(s.ch) == 0 {
-				s.livePhase = true
 			}
 			if len(s.livePending) > 0 {
 				f.mu.Unlock()
@@ -392,7 +485,9 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 
 // LastSeq returns the highest bus sequence assigned on the subject.
 func (f *Fake) LastSeq(ctx context.Context, subject string) (uint64, error) {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := f.unavailable(); err != nil {
 		return 0, err
 	}
@@ -406,7 +501,9 @@ func (f *Fake) LastSeq(ctx context.Context, subject string) (uint64, error) {
 
 // Purge drops retained messages up to the current last sequence on the subject.
 func (f *Fake) Purge(ctx context.Context, subject string) error {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return err
+	}
 	if err := f.unavailable(); err != nil {
 		return err
 	}
@@ -449,7 +546,9 @@ func entryExpired(clock core.Clock, e kvEntry) bool {
 
 // Get reads the latest value and revision of a KV key.
 func (f *Fake) Get(ctx context.Context, key string) ([]byte, uint64, error) {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return nil, 0, err
+	}
 	if err := f.unavailable(); err != nil {
 		return nil, 0, err
 	}
@@ -462,12 +561,18 @@ func (f *Fake) Get(ctx context.Context, key string) ([]byte, uint64, error) {
 	if !ok {
 		return nil, 0, core.NewError(core.CodeNotFound, "key absent", nil)
 	}
-	return append([]byte(nil), e.value...), e.rev, nil
+	val, err := bus.DecodeKVBucketValue(e.value)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append([]byte(nil), val...), e.rev, nil
 }
 
 // Put stores or overwrites a KV entry.
 func (f *Fake) Put(ctx context.Context, key string, value []byte, ttl time.Duration) (uint64, error) {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := f.unavailable(); err != nil {
 		return 0, err
 	}
@@ -485,13 +590,16 @@ func (f *Fake) Put(ctx context.Context, key string, value []byte, ttl time.Durat
 	f.kvRevSeq++
 	rev := f.kvRevSeq
 	deadline := bus.KVDeadlineFromTTL(f.clock.Now(), ttl)
-	f.kv[key] = kvEntry{value: append([]byte(nil), value...), rev: rev, deadline: deadline}
+	wire := bus.EncodeKVBucketsValue(append([]byte(nil), value...), deadline)
+	f.kv[key] = kvEntry{value: wire, rev: rev, deadline: deadline}
 	return rev, nil
 }
 
 // CompareAndSwap updates a key when revision is zero (create) or matches.
 func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, revision uint64, ttl time.Duration) (uint64, error) {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return 0, err
+	}
 	if err := f.unavailable(); err != nil {
 		return 0, err
 	}
@@ -508,26 +616,33 @@ func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, rev
 	defer f.mu.Unlock()
 	deadline := bus.KVDeadlineFromTTL(f.clock.Now(), ttl)
 	if revision == 0 {
-		if _, ok := f.kvGetLocked(key); ok {
-			return 0, core.NewError(core.CodeConflict, "key exists", nil)
-		}
 		raw, present := f.kv[key]
 		if present && !entryExpired(f.clock, raw) {
+			if _, err := bus.DecodeKVBucketValue(raw.value); err != nil {
+				return 0, err
+			}
 			return 0, core.NewError(core.CodeConflict, "key exists", nil)
 		}
 		if present && entryExpired(f.clock, raw) {
 			f.kvRevSeq++
 			rev := f.kvRevSeq
-			f.kv[key] = kvEntry{value: append([]byte(nil), value...), rev: rev, deadline: deadline}
+			wire := bus.EncodeKVBucketsValue(append([]byte(nil), value...), deadline)
+			f.kv[key] = kvEntry{value: wire, rev: rev, deadline: deadline}
 			return rev, nil
 		}
 		f.kvRevSeq++
 		rev := f.kvRevSeq
-		f.kv[key] = kvEntry{value: append([]byte(nil), value...), rev: rev, deadline: deadline}
+		wire := bus.EncodeKVBucketsValue(append([]byte(nil), value...), deadline)
+		f.kv[key] = kvEntry{value: wire, rev: rev, deadline: deadline}
 		return rev, nil
 	}
 	cur, ok := f.kvGetLocked(key)
 	raw, present := f.kv[key]
+	if present {
+		if _, err := bus.DecodeKVBucketValue(raw.value); err != nil {
+			return 0, err
+		}
+	}
 	if !ok {
 		if present && raw.rev == revision && entryExpired(f.clock, raw) {
 			return 0, core.NewError(core.CodeConflict, "entry expired", nil)
@@ -539,13 +654,16 @@ func (f *Fake) CompareAndSwap(ctx context.Context, key string, value []byte, rev
 	}
 	f.kvRevSeq++
 	rev := f.kvRevSeq
-	f.kv[key] = kvEntry{value: append([]byte(nil), value...), rev: rev, deadline: deadline}
+	wire := bus.EncodeKVBucketsValue(append([]byte(nil), value...), deadline)
+	f.kv[key] = kvEntry{value: wire, rev: rev, deadline: deadline}
 	return rev, nil
 }
 
 // Delete removes a KV key.
 func (f *Fake) Delete(ctx context.Context, key string) error {
-	_ = ctx
+	if err := f.callCtx(ctx); err != nil {
+		return err
+	}
 	if err := f.unavailable(); err != nil {
 		return err
 	}

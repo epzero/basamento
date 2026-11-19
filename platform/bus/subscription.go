@@ -10,8 +10,11 @@ import (
 )
 
 type liveSubscription struct {
+	subject       string
 	ch            chan platform.Message
 	replayThrough uint64
+	replayPending int
+	dropLive      bool
 	mu            sync.Mutex
 	ended         bool
 	senders       sync.WaitGroup
@@ -22,10 +25,20 @@ type liveSubscription struct {
 	cancelOnce    sync.Once
 }
 
-func newLiveSubscription(buf int, replayThrough uint64, cancel context.CancelFunc, onEnd func()) *liveSubscription {
+func newLiveSubscription(subject string, buf int, after, replayThrough uint64, cancel context.CancelFunc, onEnd func()) *liveSubscription {
+	replayPending := 0
+	if replayThrough > after {
+		if replayThrough-after > uint64(^uint(0)>>1) {
+			replayPending = int(^uint(0) >> 1)
+		} else {
+			replayPending = int(replayThrough - after)
+		}
+	}
 	return &liveSubscription{
+		subject:       subject,
 		ch:            make(chan platform.Message, buf),
 		replayThrough: replayThrough,
+		replayPending: replayPending,
 		done:          make(chan struct{}),
 		cancel:        cancel,
 		onEnd:         onEnd,
@@ -64,6 +77,16 @@ func (s *liveSubscription) deliverReplay(ctx context.Context, msg platform.Messa
 	defer s.senders.Done()
 	select {
 	case s.ch <- msg:
+		s.mu.Lock()
+		if s.replayPending > 0 {
+			s.replayPending--
+			if s.replayPending == 0 && s.dropLive {
+				s.mu.Unlock()
+				go s.terminate()
+				return
+			}
+		}
+		s.mu.Unlock()
 	case <-ctx.Done():
 	case <-s.done:
 	}
@@ -77,6 +100,16 @@ func (s *liveSubscription) deliverLive(ctx context.Context, msg platform.Message
 	s.mu.Lock()
 	if s.ended {
 		s.mu.Unlock()
+		return
+	}
+	if s.dropLive {
+		s.mu.Unlock()
+		s.terminate()
+		return
+	}
+	if s.occupied() >= cap(s.ch) {
+		s.mu.Unlock()
+		s.terminate()
 		return
 	}
 	select {
@@ -122,3 +155,26 @@ func (s *liveSubscription) finish(cc jetstream.ConsumeContext) {
 }
 
 func (s *liveSubscription) messages() <-chan platform.Message { return s.ch }
+
+func (s *liveSubscription) occupied() int {
+	return len(s.ch) + s.replayPending
+}
+
+// noteLivePublish drops the subscription when a new live message cannot share the buffer
+// with undelivered replay (REQ-BUS-010).
+func (s *liveSubscription) noteLivePublish(seq uint64) {
+	if seq <= s.replayThrough {
+		return
+	}
+	s.mu.Lock()
+	if s.ended {
+		s.mu.Unlock()
+		return
+	}
+	if s.occupied() >= cap(s.ch) {
+		s.dropLive = true
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+}

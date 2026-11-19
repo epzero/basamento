@@ -22,6 +22,8 @@ func TestKVCorruptRecord(t *testing.T) {
 	assertCodeMsg(t, err, core.CodeInternal, wantMsg)
 	_, err = st.CompareAndSwap(ctx, key, []byte("y"), 0, 0)
 	assertCodeMsg(t, err, core.CodeInternal, wantMsg)
+	_, err = st.CompareAndSwap(ctx, key, []byte("new"), 0, 0)
+	assertCodeMsg(t, err, core.CodeInternal, wantMsg)
 	if _, err := st.Put(ctx, key, []byte("ok"), 0); err != nil {
 		t.Fatal(err)
 	}
