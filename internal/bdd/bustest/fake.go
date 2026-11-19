@@ -23,6 +23,8 @@ type Fake struct {
 	maxSize      int
 	kvValueLimit int
 
+	nextReplayGate chan struct{}
+
 	stopped bool
 
 	streamSeq  uint64
@@ -47,21 +49,24 @@ type kvEntry struct {
 }
 
 type sub struct {
-	subject       string
-	after         uint64
-	replayThrough uint64
-	replayPending int
-	dropLive      bool
-	ch            chan platform.Message
-	cancel        context.CancelFunc
-	replayActive  bool
-	livePending   []platform.Message
-	liveWake      chan struct{}
-	ended         bool
-	chClosed      bool
-	senders       sync.WaitGroup
-	done          chan struct{}
-	teardownOnce  sync.Once
+	subject           string
+	after             uint64
+	replayThrough     uint64
+	replayPending     int
+	dropLive          bool
+	ch                chan platform.Message
+	cancel            context.CancelFunc
+	replayActive      bool
+	livePending       []platform.Message
+	liveWake          chan struct{}
+	ended             bool
+	chClosed          bool
+	senders           sync.WaitGroup
+	done              chan struct{}
+	teardownOnce      sync.Once
+	replaySettled     chan struct{}
+	replaySettledOnce sync.Once
+	replayGate        chan struct{}
 }
 
 // NewFake builds a fake bus and KV. Limits follow bus.Options when nonzero.
@@ -226,7 +231,8 @@ func (f *Fake) flushLivePending(s *sub, subCtx context.Context) (ended bool) {
 				drop := s.dropLive
 				f.mu.Unlock()
 				if drop {
-					continue
+					f.terminateSub(s)
+					return true
 				}
 			}
 			f.mu.Lock()
@@ -296,6 +302,7 @@ func (f *Fake) Publish(ctx context.Context, subject string, data []byte) (uint64
 		if msg.Seq > s.replayThrough {
 			s.noteLivePublish(msg.Seq)
 			if s.dropLive {
+				terminate = append(terminate, s)
 				continue
 			}
 		}
@@ -385,6 +392,8 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		return nil, core.NewError(core.CodeNotFound, "purged", map[string]any{"purged_through": floor})
 	}
 	replayThrough := f.lastSeqLocked(subject)
+	replayGate := f.nextReplayGate
+	f.nextReplayGate = nil
 	subCtx, cancel := context.WithCancel(ctx)
 	s := &sub{
 		subject:       subject,
@@ -394,6 +403,8 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 		cancel:        cancel,
 		done:          make(chan struct{}),
 		liveWake:      make(chan struct{}, 1),
+		replaySettled: make(chan struct{}),
+		replayGate:    replayGate,
 	}
 	var replay []retainedMsg
 	for _, m := range f.retained[subject] {
@@ -416,6 +427,9 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 			<-subCtx.Done()
 			f.terminateSub(s)
 		}()
+		if s.replayGate != nil {
+			<-s.replayGate
+		}
 		for _, m := range replay {
 			f.mu.Lock()
 			ended := s.ended
@@ -434,9 +448,15 @@ func (f *Fake) Subscribe(ctx context.Context, subject string, after uint64) (<-c
 				f.replaySend(subCtx, s, msg)
 			}
 		}
+		s.replaySettledOnce.Do(func() { close(s.replaySettled) })
 		f.mu.Lock()
 		s.replayActive = false
+		drop := s.dropLive
 		f.mu.Unlock()
+		if drop {
+			f.terminateSub(s)
+			return
+		}
 		for {
 			if f.flushLivePending(s, subCtx) {
 				return

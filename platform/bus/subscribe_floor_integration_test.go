@@ -2,11 +2,36 @@ package bus
 
 import (
 	"context"
-	"runtime"
 	"testing"
 
 	"github.com/epzero/basamento/core"
+	"github.com/nats-io/nats.go/jetstream"
 )
+
+type metaGetSpy struct {
+	jetstream.KeyValue
+	inner   jetstream.KeyValue
+	st      *Store
+	subject string
+	gets    int
+}
+
+func (m *metaGetSpy) Get(ctx context.Context, key string) (jetstream.KeyValueEntry, error) {
+	floorKey := metaKey(metaPF, m.subject)
+	if key == floorKey {
+		m.gets++
+		if m.gets == 2 {
+			L, err := lastSeqForSubject(ctx, m.st.stream, m.inner, m.subject)
+			if err != nil {
+				return nil, err
+			}
+			if err := raisePurgeFloor(ctx, m.inner, m.subject, L); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return m.KeyValue.Get(ctx, key)
+}
 
 func TestSubscribeRejectsRaisedFloorAfterConsumer(t *testing.T) {
 	st, _, _ := openTestEmbedded(t)
@@ -17,35 +42,17 @@ func TestSubscribeRejectsRaisedFloorAfterConsumer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var gotErr error
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, err := st.Subscribe(ctx, subject, 1)
-		gotErr = err
-	}()
-	purged := false
-	for i := 0; i < 500_000; i++ {
-		if err := st.Purge(ctx, subject); err != nil {
-			t.Fatal(err)
-		}
-		purged = true
-		runtime.Gosched()
-		select {
-		case <-done:
-			goto check
-		default:
-		}
-	}
-	<-done
-check:
-	if !purged {
-		t.Fatal("no purge attempt")
-	}
-	if gotErr == nil {
+	realMeta := st.meta
+	spy := &metaGetSpy{KeyValue: realMeta, inner: realMeta, st: st, subject: subject}
+	st.meta = spy
+	_, err := st.Subscribe(ctx, subject, 1)
+	if err == nil {
 		t.Fatal("expected purged")
 	}
-	if string(core.CodeOf(gotErr)) != string(core.CodeNotFound) {
-		t.Fatalf("got %v", gotErr)
+	if string(core.CodeOf(err)) != string(core.CodeNotFound) {
+		t.Fatalf("got %v", err)
+	}
+	if spy.gets != 2 {
+		t.Fatalf("floor Get calls %d want 2", spy.gets)
 	}
 }
