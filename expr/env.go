@@ -2,6 +2,7 @@ package expr
 
 import (
 	"fmt"
+	"strings"
 
 	_ "time/tzdata"
 
@@ -101,9 +102,11 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 // schema document is normalized first: parseSchema names the element type of a
 // root array, but st.schema still holds the array, so building from it would
 // register an empty object type (design.md §2). objectSchemaForBuild follows
-// that array's items, or a $ref chain, to the document with the properties.
+// that array's items, or a $ref chain, to the document with the properties and
+// reports the schema path it reached, which names the type as mapSchema named
+// it.
 func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
-	doc, defName, err := objectSchemaForBuild(st.schema, st)
+	doc, defName, path, err := objectSchemaForBuild(st.schema, st, st.path)
 	if err != nil {
 		return nil, exprErr(fmt.Sprintf("schema %q: %s", st.typeName, err.Error()), map[string]any{"variable": st.typeName})
 	}
@@ -114,14 +117,18 @@ func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObj
 	if defName != "" {
 		visiting[defName] = true
 	}
-	return e.buildObjectType(doc, st.typeName, st, adapter, visiting)
+	return e.buildObjectType(doc, path, st, adapter, visiting)
 }
 
-// buildObjectType registers the object type for doc. visiting holds the $defs
-// names that are being built by an enclosing call: a reference back to one of
-// them maps to dyn at that point (design.md §2), so recursive definitions
-// terminate instead of expanding without end.
-func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
+// buildObjectType registers the object type for the object schema doc, which
+// sits at the schema path path: the type is named the way mapSchemaVisit names
+// it, so a field typed with that name finds this type, and its own fields take
+// the path below it. visiting holds the $defs names that are being built by an
+// enclosing call: a reference back to one of them maps to dyn at that point
+// (design.md §2), so recursive definitions terminate instead of expanding
+// without end.
+func (e *Env) buildObjectType(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
+	typeName := "expr.obj." + sanitizeTypeName(path)
 	if obj := e.objects[typeName]; obj != nil {
 		return obj, nil
 	}
@@ -140,12 +147,13 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		if !ok {
 			continue
 		}
-		t, _, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
+		fieldPath := path + "." + pname
+		t, _, err := st.mapSchemaVisit(pm, fieldPath, visiting)
 		if err != nil {
 			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
-		if err := e.registerNestedObjects(pm, typeName+"."+pname, st, adapter, visiting); err != nil {
+		if err := e.registerNestedObjects(pm, fieldPath, st, adapter, visiting); err != nil {
 			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 	}
@@ -174,33 +182,31 @@ func cloneVisiting(visiting map[string]bool) map[string]bool {
 // types and reads one of its fields.
 func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) error {
 	if ref, ok := doc["$ref"].(string); ok {
-		resolved, names, err := defRefChain(ref, st.defs)
-		if err != nil {
-			return err
+		// Follow the chain one hop at a time, as mapSchemaVisit does: a
+		// definition that refers back to itself stops at dyn there instead of
+		// being rejected (design.md §2).
+		if !strings.HasPrefix(ref, "#/$defs/") {
+			return fmt.Errorf("external reference %q", ref)
 		}
-		defName := names[len(names)-1]
-		if visiting[defName] {
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		if visiting[name] {
 			return nil
 		}
-		next := cloneVisiting(visiting)
-		for _, name := range names {
-			next[name] = true
+		def, ok := st.defs[name]
+		if !ok {
+			return fmt.Errorf("missing definition for reference %q", ref)
 		}
-		return e.registerNestedObjects(resolved, path, st, adapter, next)
+		next := cloneVisiting(visiting)
+		next[name] = true
+		return e.registerNestedObjects(def, path, st, adapter, next)
 	}
 	switch typ, _ := doc["type"].(string); typ {
 	case "object":
-		if props, ok := doc["properties"].(map[string]any); ok {
-			for _, pname := range sortedStringKeys(props) {
-				pm, ok := props[pname].(map[string]any)
-				if !ok {
-					continue
-				}
-				if err := e.registerNestedObjects(pm, path+"."+pname, st, adapter, visiting); err != nil {
-					return err
-				}
-			}
-			_, err := e.buildObjectType(doc, "expr.obj."+sanitizeTypeName(path), st, adapter, visiting)
+		if _, ok := doc["properties"].(map[string]any); ok {
+			// buildObjectType walks these properties itself and registers the
+			// objects nested in them under the names mapSchemaVisit computes,
+			// so walking them here too would repeat that work at every level.
+			_, err := e.buildObjectType(doc, path, st, adapter, visiting)
 			return err
 		}
 		if ap, ok := doc["additionalProperties"].(map[string]any); ok {
@@ -216,19 +222,24 @@ func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaT
 
 // objectSchemaForBuild follows $ref chains and array items to the schema
 // document that declares an object type, and returns the $defs name it came
-// from so callers can track recursion.
-func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, string, error) {
+// from so callers can track recursion, along with the schema path the document
+// sits at: a $ref keeps the path of the place it is written and each array hop
+// adds "[]", as mapSchemaVisit names them.
+func objectSchemaForBuild(pm map[string]any, st *schemaType, path string) (map[string]any, string, string, error) {
 	seen := map[string]bool{}
 	doc, defName := pm, ""
 	for {
 		if ref, ok := doc["$ref"].(string); ok {
-			resolved, names, err := defRefChain(ref, st.defs)
+			resolved, names, cycle, err := defRefChain(ref, st.defs)
 			if err != nil {
-				return nil, "", err
+				return nil, "", "", err
+			}
+			if cycle != "" {
+				return nil, "", "", fmt.Errorf("cyclic reference %q", "#/$defs/"+cycle)
 			}
 			for _, name := range names {
 				if seen[name] {
-					return nil, "", fmt.Errorf("cyclic reference %q", ref)
+					return nil, "", "", fmt.Errorf("cyclic reference %q", ref)
 				}
 				seen[name] = true
 			}
@@ -238,11 +249,12 @@ func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, st
 		if typ, _ := doc["type"].(string); typ == "array" {
 			items, ok := doc["items"].(map[string]any)
 			if !ok {
-				return doc, defName, nil
+				return doc, defName, path, nil
 			}
 			doc = items
+			path += "[]"
 			continue
 		}
-		return doc, defName, nil
+		return doc, defName, path, nil
 	}
 }
