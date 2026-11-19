@@ -34,8 +34,8 @@ func (s *Store) StartUpload(ctx context.Context, o platform.UploadOptions) (plat
 	if err != nil {
 		return platform.Upload{}, core.NewError(core.CodeUnavailable, "upload unavailable", nil)
 	}
-	expires := s.clock.Now().Add(o.TTL).Truncate(time.Second)
-	meta := slotMeta{Max: o.MaxSize, ContentType: o.ContentType, Expires: expires.Unix()}
+	expires := s.clock.Now().Add(o.TTL)
+	meta := slotMeta{Max: o.MaxSize, ContentType: o.ContentType, Expires: expires.UnixNano()}
 	mp, err := slotMetaPath(tid, stageKey)
 	if err != nil {
 		return platform.Upload{}, err
@@ -49,7 +49,7 @@ func (s *Store) StartUpload(ctx context.Context, o platform.UploadOptions) (plat
 	}
 	uploadURL, err := s.uploadURL(ctx, tid, stageKey, o, expires)
 	if err != nil {
-		_ = s.bucket.Delete(ctx, mp)
+		_ = s.bucket.Delete(context.WithoutCancel(ctx), mp)
 		return platform.Upload{}, err
 	}
 	return platform.Upload{URL: uploadURL, StagingKey: stageKey, Expires: expires}, nil
@@ -68,6 +68,8 @@ func (s *Store) uploadURL(ctx context.Context, tid core.TenantID, stageKey strin
 	}
 	opts := &blob.SignedURLOptions{Method: http.MethodPut, Expiry: o.TTL, ContentType: o.ContentType}
 	u, err := s.bucket.SignedURL(ctx, sp, opts)
+	// When the driver cannot bind Content-Type on the presigned PUT, sign without it;
+	// Commit still enforces the bound type (REQ-BLOB-034).
 	if err != nil && o.ContentType != "" && gcerrors.Code(err) == gcerrors.Unimplemented {
 		opts.ContentType = ""
 		u, err = s.bucket.SignedURL(ctx, sp, opts)
@@ -78,8 +80,16 @@ func (s *Store) uploadURL(ctx context.Context, tid core.TenantID, stageKey strin
 	return u, nil
 }
 
+func uploadURLExpUnix(expires time.Time) int64 {
+	sec := expires.Unix()
+	if expires.Nanosecond() > 0 {
+		sec++
+	}
+	return sec
+}
+
 func (s *Store) signedProxiedUpload(tid core.TenantID, stageKey string, o platform.UploadOptions, expires time.Time) (string, error) {
-	exp := expires.Unix()
+	exp := uploadURLExpUnix(expires)
 	sig := signUpload(s.signKey, string(tid), stageKey, exp, o.MaxSize, o.ContentType)
 	base := strings.TrimRight(s.baseURL, "/")
 	ct := url.QueryEscape(o.ContentType)
@@ -229,11 +239,12 @@ func (s *Store) spendFailedCommit(ctx context.Context, tid core.TenantID, stageK
 	if err != nil {
 		return err
 	}
+	if err := s.bucket.Delete(context.WithoutCancel(ctx), stagePath); err != nil && !isNotFoundBucketErr(err) {
+		return mapError(err)
+	}
 	if err := s.bucket.WriteAll(ctx, cp, nil, nil); err != nil {
 		return mapError(err)
 	}
-	// Best-effort: slot is spent once the record exists (same as finishSuccessfulCommit).
-	_ = s.bucket.Delete(ctx, stagePath)
 	return nil
 }
 

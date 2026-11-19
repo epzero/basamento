@@ -147,10 +147,10 @@ func TestCommitRetryAfterCommitRecordWriteFails(t *testing.T) {
 	}
 }
 
-func TestSpendFailedCommitWritesRecordBeforeDelete(t *testing.T) {
+func TestSpendFailedCommitDeletesStageBeforeRecord(t *testing.T) {
 	t.Parallel()
 	st, inner, _ := openFileStore(t)
-	f := &commitFinishFaultBucket{inner: inner, failDeleteStage: true}
+	f := &commitFinishFaultBucket{inner: inner, failWriteCommit: true}
 	st.bucket = f
 	ctx := core.WithTenant(context.Background(), "acme")
 	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 1024, ContentType: "text/plain", TTL: time.Hour})
@@ -159,16 +159,21 @@ func TestSpendFailedCommitWritesRecordBeforeDelete(t *testing.T) {
 	}
 	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
 	_, err = st.Commit(ctx, up.StagingKey)
-	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("want invalid_argument got %v", err)
-	}
-	_, err = st.Commit(ctx, up.StagingKey)
-	if err == nil || core.CodeOf(err) != core.CodeNotFound {
-		t.Fatalf("slot should be spent: %v", err)
+	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
+		t.Fatalf("want unavailable when commit record write fails got %v", err)
 	}
 	cp, _ := commitRecordPath("acme", up.StagingKey)
 	ok, _ := inner.Exists(ctx, cp)
-	if !ok {
-		t.Fatal("commit record should exist")
+	if ok {
+		t.Fatal("commit record must not exist when write fails after staged delete")
+	}
+	stagePath, _ := stageObjectPath("acme", up.StagingKey)
+	ok, _ = inner.Exists(ctx, stagePath)
+	if ok {
+		t.Fatal("staged object should be gone before spending")
+	}
+	_, err = st.Commit(ctx, up.StagingKey)
+	if err == nil || core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("retry commit should be not_found: %v", err)
 	}
 }

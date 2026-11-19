@@ -175,7 +175,7 @@ func TestSpendFailedCommitSurfacesStoreError(t *testing.T) {
 	}
 	_ = writeStagedObjectForTest(ctx, st, "acme", up.StagingKey, []byte("hello"), "text/markdown")
 	_, err = st.Commit(ctx, up.StagingKey)
-	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+	if err == nil || core.CodeOf(err) != core.CodeUnavailable {
 		t.Fatalf("spend with delete fault: got %v", err)
 	}
 	f.failDeleteStage = false
