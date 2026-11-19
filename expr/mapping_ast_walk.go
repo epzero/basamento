@@ -140,7 +140,7 @@ func checkBannedName(name string) (string, bool) {
 	if name == "" {
 		return "", false
 	}
-	if bannedNames[name] {
+	if bannedNames[name] || outputLimitReservedName(name) {
 		return strings.TrimPrefix(name, "$"), true
 	}
 	return "", false
