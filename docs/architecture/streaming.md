@@ -1,6 +1,6 @@
 # Streaming: runs outlive connections
 
-Status: **Planned** (WP-L6-01, WP-L6-02, WP-L7-03). Decisions: ADR-0005,
+Status: **Partly implemented** (WP-L6-01; WP-L6-02 and WP-L7-03 are planned). Decisions: ADR-0005,
 ADR-0007. Specs: `specs/streaming`.
 
 ## 1. Two layers
