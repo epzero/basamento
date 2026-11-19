@@ -120,6 +120,13 @@ func TestPurgeSequenceBoundKeepsLaterPublish(t *testing.T) {
 	if err := st.purgeThrough(ctx, subject, L); err != nil {
 		t.Fatal(err)
 	}
+	raw, err := st.stream.GetMsg(ctx, late)
+	if err != nil {
+		t.Fatalf("message m2 (seq %d) missing after purgeThrough(%d): %v", late, L, err)
+	}
+	if string(raw.Data) != "m2" {
+		t.Fatalf("message m2 (seq %d) data %q after purge", late, raw.Data)
+	}
 	ch, err := st.Subscribe(ctx, subject, L)
 	if err != nil {
 		t.Fatal(err)
