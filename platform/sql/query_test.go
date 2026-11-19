@@ -240,6 +240,168 @@ func TestRewritePlaceholdersPostgres(t *testing.T) {
 	}
 }
 
+// Regression probes for U&'…' using the standard single-quote rule (not escape rules).
+// Only a backslash inside U&' distinguishes the two; doubled-quote continuations match
+// both rules and belong in the scanner contract table, not here.
+func TestRewritePostgresPlaceholderUescapeProbes(t *testing.T) {
+	t.Parallel()
+	e := &Execer{dialect: dialectPostgres}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "uescape_backslash_not_escape_string",
+			in:   `SELECT U&'\' UESCAPE '!' AS s, ?`,
+			want: `SELECT U&'\' UESCAPE '!' AS s, $1`,
+		},
+		{
+			name: "uescape_backslash_after_content_hides_trailing_placeholders",
+			in:   `SELECT U&'\' AS s, ?, ?`,
+			want: `SELECT U&'\' AS s, $1, $2`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := e.rewrite(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+type postgresScannerContractRow struct {
+	construct     string
+	in            string
+	want          string
+	knownGap      string
+	gapReason     string
+	supported     bool
+	outOfContract bool
+}
+
+func TestRewritePostgresPlaceholderScannerContract(t *testing.T) {
+	t.Parallel()
+	e := &Execer{dialect: dialectPostgres}
+	rows := []postgresScannerContractRow{
+		{
+			construct: "standard_single_quoted",
+			in:        `SELECT '?' AS q, ?`,
+			want:      `SELECT '?' AS q, $1`,
+			supported: true,
+		},
+		{
+			construct: "escape_string_e",
+			in:        `SELECT E'\\?' AS q, ?`,
+			want:      `SELECT E'\\?' AS q, $1`,
+			supported: true,
+		},
+		{
+			construct: "byte_string_b",
+			in:        `SELECT B'??', ?`,
+			want:      `SELECT B'??', $1`,
+			supported: true,
+		},
+		{
+			construct: "hex_string_x",
+			in:        `SELECT X'AB?', ?`,
+			want:      `SELECT X'AB?', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_doubled_quote",
+			in:        `SELECT U&'''?''', ?`,
+			want:      `SELECT U&'''?''', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_lower",
+			in:        `SELECT u&'a', ?`,
+			want:      `SELECT u&'a', $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag",
+			in:        `SELECT $tag$? literal$tag$, ?`,
+			want:      `SELECT $tag$? literal$tag$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quote_identifier_boundary",
+			in:        `SELECT foo$tag$?, ?`,
+			want:      `SELECT foo$tag$$1, $2`,
+			supported: true,
+		},
+		{
+			construct: "double_quoted_identifier",
+			in:        `SELECT "?" FROM t WHERE id = ?`,
+			want:      `SELECT "?" FROM t WHERE id = $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_identifier_u_amp_double_quoted",
+			in:        `SELECT U&"foo", ?`,
+			want:      `SELECT U&"foo", $1`,
+			supported: true,
+		},
+		{
+			construct: "line_comment",
+			in:        "SELECT ? -- bind ?\nFROM t WHERE x = ?",
+			want:      "SELECT $1 -- bind ?\nFROM t WHERE x = $2",
+			supported: true,
+		},
+		{
+			construct: "nested_block_comment",
+			in:        "SELECT /* /* ? */ ? */ 1 WHERE x = ?",
+			want:      "SELECT /* /* ? */ ? */ 1 WHERE x = $1",
+			supported: true,
+		},
+		{
+			construct: "standard_conforming_strings_off",
+			in:        `SELECT 'x\' AS s, ?`,
+			knownGap:  `SELECT 'x\' AS s, $1`,
+			gapReason: "plain '…' strings always use standard_conforming_strings=on rules; backslash does not escape the closing quote",
+			supported: false,
+		},
+		{
+			construct:     "jsonb_exists_operator",
+			in:            `SELECT col ? 'key'`,
+			knownGap:      `SELECT col $1 'key'`,
+			gapReason:     "jsonb ? operator is out of contract; use jsonb_exists instead",
+			supported:     false,
+			outOfContract: true,
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.construct, func(t *testing.T) {
+			t.Parallel()
+			got, err := e.rewrite(row.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := row.want
+			if !row.supported {
+				want = row.knownGap
+			}
+			if got != want {
+				t.Fatalf("got %q want %q", got, want)
+			}
+			if row.gapReason != "" && row.supported {
+				t.Fatal("gapReason set on supported row")
+			}
+			if !row.supported && row.knownGap == "" {
+				t.Fatal("unsupported row missing knownGap")
+			}
+		})
+	}
+}
+
 func TestTextOrderClauseRejectsInvalidIdent(t *testing.T) {
 	_, err := TextOrderClause("postgres", `key"; DROP TABLE items;--`)
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {

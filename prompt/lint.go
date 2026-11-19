@@ -51,36 +51,31 @@ func stripVars(text string) string {
 	return varRef.ReplaceAllString(text, "")
 }
 
-// LintAssembled checks delimiter pairing on an assembled prompt.
+// LintAssembled checks delimiter pairing on an assembled prompt. It reports
+// one unpaired_delimiter finding for each untrusted-content delimiter that is
+// not part of a pair the assembler recorded.
 func LintAssembled(a *Assembled) []Finding {
 	if a == nil {
 		return []Finding{{Rule: "assembled_required", Severity: "error"}}
 	}
 	var out []Finding
 	for _, p := range a.Parts {
-		if partHasUnpairedDelimiters(p) {
+		for i := 0; i < unpairedDelimiterCount(p); i++ {
 			out = append(out, Finding{Rule: "unpaired_delimiter", Severity: "error", Segment: p.Name})
 		}
 	}
 	return out
 }
 
-func partHasUnpairedDelimiters(p AssembledPart) bool {
+func unpairedDelimiterCount(p AssembledPart) int {
 	if p.Kind != KindHistory {
-		return lintTextWithRecords(p.Text, p.Wrapped)
+		return countUnpairedDelimiters(p.Text, p.Wrapped)
 	}
+	n := 0
 	for _, h := range p.History {
-		if lintTextWithRecords(h.Role, nil) {
-			return true
-		}
-		if lintTextWithRecords(h.Text, h.Wrapped) {
-			return true
-		}
 		combined := h.Role + h.Text
 		recs := shiftDelimiterRecords(h.Wrapped, len(h.Role))
-		if lintTextWithRecords(combined, recs) {
-			return true
-		}
+		n += countUnpairedDelimiters(combined, recs)
 	}
-	return false
+	return n
 }

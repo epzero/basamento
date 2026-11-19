@@ -155,9 +155,10 @@ scenarios:
             - REQ-TELEM-012
         tier: P2
         author: claude-code:spec-author:df280e
-        reviewer: antigravity:spec-reviewer:ae7fd7
-        approved_at: "2026-11-17"
-        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        reviewer: opencode:spec-reviewer:d32a60
+        approved_at: "2026-11-19"
+        note: 'Round 2 of EP0-89: retention design settled — the span store applies the 24-hour default when the configured period is zero and refuses a negative one at construction; the span table has one shape outside the migration set, and a later shape change is a spec change of its own that must keep spans inside retention (REQ-TELEM-012/014). NewSQLSpanStore behaviour is unreviewed until the WP-L1-07 implementation, which also needs unit tests for the 24-hour default and the negative-period refusal.'
+        ref: https://github.com/epzero/basamento/pull/70
         human:
             status: pending
     TELEM-012-02:
@@ -166,9 +167,10 @@ scenarios:
             - REQ-TELEM-012
         tier: P2
         author: claude-code:spec-author:df280e
-        reviewer: antigravity:spec-reviewer:ae7fd7
-        approved_at: "2026-11-17"
-        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        reviewer: opencode:spec-reviewer:d32a60
+        approved_at: "2026-11-19"
+        note: 'Round 2 of EP0-89: retention design settled — the span store applies the 24-hour default when the configured period is zero and refuses a negative one at construction; the span table has one shape outside the migration set, and a later shape change is a spec change of its own that must keep spans inside retention (REQ-TELEM-012/014). NewSQLSpanStore behaviour is unreviewed until the WP-L1-07 implementation, which also needs unit tests for the 24-hour default and the negative-period refusal.'
+        ref: https://github.com/epzero/basamento/pull/70
         human:
             status: pending
     TELEM-012-03:
@@ -177,9 +179,10 @@ scenarios:
             - REQ-TELEM-012
         tier: P2
         author: claude-code:spec-author:df280e
-        reviewer: antigravity:spec-reviewer:ae7fd7
-        approved_at: "2026-11-17"
-        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        reviewer: opencode:spec-reviewer:d32a60
+        approved_at: "2026-11-19"
+        note: 'Round 2 of EP0-89: retention design settled — the span store applies the 24-hour default when the configured period is zero and refuses a negative one at construction; the span table has one shape outside the migration set, and a later shape change is a spec change of its own that must keep spans inside retention (REQ-TELEM-012/014). NewSQLSpanStore behaviour is unreviewed until the WP-L1-07 implementation, which also needs unit tests for the 24-hour default and the negative-period refusal.'
+        ref: https://github.com/epzero/basamento/pull/70
         human:
             status: pending
     TELEM-013-01:
@@ -202,9 +205,10 @@ scenarios:
             - REQ-TELEM-014
         tier: P2
         author: claude-code:spec-author:df280e
-        reviewer: antigravity:spec-reviewer:ae7fd7
-        approved_at: "2026-11-17"
-        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        reviewer: opencode:spec-reviewer:d32a60
+        approved_at: "2026-11-19"
+        note: 'Round 2 of EP0-89: retention design settled — the span store applies the 24-hour default when the configured period is zero and refuses a negative one at construction; the span table has one shape outside the migration set, and a later shape change is a spec change of its own that must keep spans inside retention (REQ-TELEM-012/014). NewSQLSpanStore behaviour is unreviewed until the WP-L1-07 implementation, which also needs unit tests for the 24-hour default and the negative-period refusal.'
+        ref: https://github.com/epzero/basamento/pull/70
         human:
             status: pending
     TELEM-014-02:
@@ -213,9 +217,10 @@ scenarios:
             - REQ-TELEM-014
         tier: P2
         author: claude-code:spec-author:df280e
-        reviewer: antigravity:spec-reviewer:ae7fd7
-        approved_at: "2026-11-17"
-        note: 'New telemetry behavior: one setup, clock timestamps, log correlation, embedded span store, non-blocking OTLP export, trace propagation, and shutdown.'
+        reviewer: opencode:spec-reviewer:d32a60
+        approved_at: "2026-11-19"
+        note: 'Round 2 of EP0-89: retention design settled — the span store applies the 24-hour default when the configured period is zero and refuses a negative one at construction; the span table has one shape outside the migration set, and a later shape change is a spec change of its own that must keep spans inside retention (REQ-TELEM-012/014). NewSQLSpanStore behaviour is unreviewed until the WP-L1-07 implementation, which also needs unit tests for the 24-hour default and the negative-period refusal.'
+        ref: https://github.com/epzero/basamento/pull/70
         human:
             status: pending
     TELEM-015-01:

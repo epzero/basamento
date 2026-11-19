@@ -43,6 +43,15 @@ Feature: Limits, invalid arguments, an unreachable server, corrupt records and c
       | lock.     | 0s  |
       | lock.r1   | -1s |
 
+  @REQ-BUS-012 @id:BUS-012-03
+  Scenario Outline: A key with an empty dot-separated token is refused
+    When entry "<key>" is put with value "v" and TTL "0s"
+    Then the put fails with code "invalid_argument"
+
+    Examples:
+      | key      |
+      | lock..r1 |
+
   @REQ-BUS-013 @id:BUS-013-01
   Scenario: Calls fail with unavailable while the bus server is down
     Given the bus server is stopped
@@ -93,3 +102,43 @@ Feature: Limits, invalid arguments, an unreachable server, corrupt records and c
       | Get                      |
       | CompareAndSwap           |
       | Delete                   |
+
+  @REQ-BUS-029 @security @id:BUS-029-01
+  Scenario Outline: A cloud URL with credentials over plain nats is accepted only on loopback
+    When the cloud bus opens on "<url>"
+    Then the open <result>
+
+    Examples:
+      | url                                           | result                                                                  |
+      | nats://kit-s3cret@10.0.0.1:4222               | fails with code "invalid_argument" without "kit-s3cret" or "10.0.0.1"   |
+      | nats://kit:pw@10.0.0.1:4222                   | fails with code "invalid_argument" without "pw" or "10.0.0.1"           |
+      | nats://kit-s3cret@nats.example.test:4222      | fails with code "invalid_argument" without "kit-s3cret" or "example.test" |
+      | nats://127.0.0.1:1                            | fails with code "unavailable"                                           |
+      | nats://[::1]:1                                | fails with code "unavailable"                                           |
+      | nats://localhost:1                            | fails with code "unavailable"                                           |
+      | nats://10.0.0.1:1                             | fails with code "unavailable"                                           |
+
+  @REQ-BUS-032 @id:BUS-032-01
+  Scenario Outline: A KV value at the bound is put, one byte over is refused
+    Given the maximum message size is 1024 bytes
+    When entry "cursor.r1" is put with a value of <size> bytes
+    Then the put <result>
+    And reading entry "cursor.r1" <stored>
+
+    Examples:
+      | size | result                             | stored                      |
+      | 1016 | succeeds                           | returns 1016 bytes          |
+      | 1017 | fails with code "invalid_argument" | fails with code "not_found" |
+
+  @REQ-BUS-032 @id:BUS-032-02
+  Scenario Outline: A KV value at the bound is swapped, one byte over is refused
+    Given the maximum message size is 1024 bytes
+    And entry "cursor.r1" is put with value "seed"
+    When entry "cursor.r1" is swapped at revision 1 to a value of <size> bytes
+    Then the swap <result>
+    And reading entry "cursor.r1" <stored>
+
+    Examples:
+      | size | result                             | stored                        |
+      | 1016 | succeeds                           | returns 1016 bytes            |
+      | 1017 | fails with code "invalid_argument" | returns the 4 bytes of "seed" |

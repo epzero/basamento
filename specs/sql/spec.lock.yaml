@@ -36,14 +36,15 @@ scenarios:
         human:
             status: pending
     SQL-002-02:
-        hash: sha256:88b4c74a1acc1177ba2ff72f2f8fbcd56309b78874e577d18fdab5a4bbdc7ddb
+        hash: sha256:4ddf4947613531febcd71c6e1d8c1d172976a51ba076ba69c36cd316a20a420b
         reqs:
             - REQ-SQL-002
-        tier: P2
-        author: claude-code:spec-author:e3cb04
-        reviewer: antigravity:spec-reviewer:2159e5
-        approved_at: "2026-11-18"
-        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        tier: P1
+        author: claude-code:spec-author:ep0082
+        reviewer: opencode:spec-reviewer:d8feef
+        approved_at: "2026-11-19"
+        note: 'SQL-023-01: narrowed to the busy refusal the store''s WAL connections actually produce; SQLITE_LOCKED mapping moves to TestSQLiteLockedMapping. SQL-002-02: dropped the data-directory assertion a postgresql:// URL cannot exercise; the rejection is the property. Both change approved text, so P1.'
+        ref: https://github.com/epzero/basamento/pull/68
         human:
             status: pending
     SQL-003-01:
@@ -372,14 +373,15 @@ scenarios:
         human:
             status: pending
     SQL-023-01:
-        hash: sha256:e960f387ed29ef3ae2536e1cb5d99d0a356f21ba05d6f892c74f41b48873d77c
+        hash: sha256:1c447f1ad229325ebdc7f84083a637f81cf816987d0059a7fa39c52fb5688dfc
         reqs:
             - REQ-SQL-023
-        tier: P2
-        author: claude-code:spec-author:e3cb04
-        reviewer: antigravity:spec-reviewer:2159e5
-        approved_at: "2026-11-18"
-        note: New SQL store URL handling, constraint validation, and retryable database failure mapping.
+        tier: P1
+        author: claude-code:spec-author:ep0082
+        reviewer: opencode:spec-reviewer:d8feef
+        approved_at: "2026-11-19"
+        note: 'SQL-023-01: narrowed to the busy refusal the store''s WAL connections actually produce; SQLITE_LOCKED mapping moves to TestSQLiteLockedMapping. SQL-002-02: dropped the data-directory assertion a postgresql:// URL cannot exercise; the rejection is the property. Both change approved text, so P1.'
+        ref: https://github.com/epzero/basamento/pull/68
         human:
             status: pending
     SQL-023-02:
