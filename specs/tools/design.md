@@ -93,6 +93,14 @@ type Outcome struct {
 func RunStep(ctx context.Context, set *Set, call Call, now func() time.Time) (Outcome, error)
 ```
 
+The composition root builds a `Layer` and passes its `Step` method as
+`agent.Options.RunTool`; `RunStep` keeps the signature above for a caller with
+no blob store. The layer's dependencies are a `Clock` (`Now` and `After`), a
+`platform.Blob` for oversized results, a `platform.Credentials` for MCP
+servers, and a `*slog.Logger` for panic values and driver failures. `After`
+comes from the injected clock so a timeout fires on the fake clock in the
+gate, never on wall time.
+
 ## 3. Decisions
 
 **Step key and result (REQ-TOOL-003).** The key is
@@ -137,10 +145,10 @@ true, Code: core.CodePermissionDenied}` without running the tool.
   server name has any character outside `[A-Za-z0-9]` replaced by `_`. A tool
   name that collides with one already in the caller's `Set` is rejected with
   `conflict` when the server's tools are listed.
-- Tool list: cached until the server's session sends a "list changed"
-  notification (or re-read on every model turn when notifications are not
-  supported); when notified, the tools are read again before they are
-  offered (REQ-TOOL-016).
+- Tool list: re-read before every offer, so a server that changed its tools is
+  seen by the next model turn (REQ-TOOL-016). This is the "re-read on every
+  model turn" option below; a cache keyed on the SDK's notification would race
+  the gate's clock.
 - **Unreachable (REQ-TOOL-014):** no session, or the connection fails before
   the call is sent. **Dropped mid-call (REQ-TOOL-015):** the connection fails
   after the call was sent. Both are `unavailable`; neither is retried: a call
@@ -191,7 +199,8 @@ type SandboxResult struct {
 - Time (REQ-TOOL-019) and output (REQ-TOOL-020) limits are enforced by the
   layer around the driver as well as by the driver, so the caller always sees
   the same outcome: `timeout` at the limit on the fake clock, the first
-  `MaxOutput` bytes and `Truncated`.
+  `MaxOutput` bytes and `Truncated`. `Layer.RunSandbox(ctx, driver, spec,
+  command)` is the entry point; it takes its timers from the layer's `Clock`.
 - Non-zero exit (REQ-TOOL-021): a command that finishes with a non-zero exit
   status returns a normal `Outcome{Failed: false}` whose `Result` carries
   `ExitStatus` and the captured output (`Content`), because a non-zero command

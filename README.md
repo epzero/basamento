@@ -9,8 +9,9 @@ pure-Go binary** that embeds everything for self-hosting, and swaps to cloud
 services for SaaS.
 
 > Status: **foundation stage.** Contracts, conventions, specs and the gate are in
-> place; `core` identifiers are implemented. Everything else is specified and
-> planned in [`docs/roadmap/`](docs/roadmap/README.md).
+> place; `core` identifiers and JSON Schema (`core/schema`, WP-L2-02) are
+> implemented. Everything else is specified and planned in
+> [`docs/roadmap/`](docs/roadmap/README.md).
 
 ## How this repository works
 
@@ -44,7 +45,7 @@ go tool gate spec trace       # requirement → scenario matrix
 
 | Path | Contents |
 | --- | --- |
-| `core/` | ids, clock, errors (implemented); `core/coretest` test-only fakes |
+| `core/` | ids, clock, errors, JSON Schema (implemented); `core/coretest` test-only fakes |
 | `platform/`, `expr/`, `model/`, `prompt/`, `flow/`, `runtime/`, `stream/`, `agent/`, `tool/`, `auth/`, `api/` | Ports and contracts per layer (see `layering.yaml`) |
 | `contracts/` | Protobuf contracts (stream, invocation, browser runner), linted with buf |
 | `cmd/kit` | The product binary: `serve` and `config validate` |
