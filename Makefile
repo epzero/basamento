@@ -6,6 +6,12 @@ GO   ?= go
 BASE ?=
 GATE := $(GO) tool gate
 
+# Local runs use the patch from go.mod unless GOTOOLCHAIN is already set (ADR-0014).
+GO_PATCH := $(shell sed -n 's/^go \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$$/\1/p' go.mod 2>/dev/null)
+ifneq ($(GO_PATCH),)
+export GOTOOLCHAIN ?= go$(GO_PATCH)
+endif
+
 # The versions of the optional tools, pinned here once for people, agents and CI.
 BUF_VERSION           := v1.75.0
 GOVULNCHECK_VERSION   := v1.9.0
@@ -19,7 +25,7 @@ define tool
 	else echo "gate: skip $(1) (not installed)"; fi
 endef
 
-.PHONY: gate tools static spec test bdd redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene release-check
+.PHONY: gate tools static spec test bdd redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check
 
 # Built from source with this project's Go: a prebuilt golangci-lint cannot
 # type-check a standard library newer than the Go it was built with.
@@ -32,7 +38,7 @@ tools: ## install the pinned optional tools into $(go env GOPATH)/bin
 gate: static spec test redgreen ## everything the PR gate runs
 	@echo "gate: all checks passed"
 
-static: fmt vet build layering hygiene lint vuln licenses buf ## G1
+static: fmt vet build layering hygiene gomod lint vuln licenses buf ## G1
 
 fmt:
 	@out="$$(git ls-files -co --exclude-standard '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -49,11 +55,14 @@ layering:
 hygiene:
 	$(GATE) hygiene $(if $(BASE),-base '$(BASE)')
 
+gomod:
+	$(GATE) gomod
+
 lint:
 	$(call tool,golangci-lint,golangci-lint run ./...)
 
 vuln:
-	$(call tool,govulncheck,govulncheck ./...)
+	$(call tool,govulncheck,set -e; roots="$$($(GATE) module-roots)" || exit 1; [ -n "$$roots" ] || { echo "gate: no module roots"; exit 1; }; for dir in $$roots; do (cd "$$dir" && govulncheck ./...) || exit 1; done)
 
 # Dependencies must stay compatible with Apache-2.0 (no GPL, AGPL, SSPL, ...).
 licenses:

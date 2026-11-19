@@ -64,7 +64,8 @@ of their own before the log itself:
    the tenant or name another tenant (REQ-STRM-022, REQ-STRM-025). `core`
    provides `core.TenantID`, `core.WithTenant(ctx, id)` and
    `core.TenantFrom(ctx) (core.TenantID, bool)`;
-   an empty id counts as no tenant. The helper
+   an empty or otherwise invalid id counts as no tenant (REQ-CORE-005,
+   REQ-CORE-006). The helper
    lands first, in its own contract pull request (`feat(core)`), before this
    work package.
 

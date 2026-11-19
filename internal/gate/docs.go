@@ -93,6 +93,7 @@ func Docs(root string, write bool) ([]string, error) {
 		if err := yaml.Unmarshal(raw, &rules); err != nil {
 			return nil, fmt.Errorf("review.yaml: %w", err)
 		}
+		stale = append(stale, rules.GoModPatchBumpConsistency()...)
 		if rules.HighOwner != "" {
 			path, want := filepath.Join(root, ".github", "CODEOWNERS"), rules.CodeOwners()
 			if have, _ := os.ReadFile(path); string(have) != want {

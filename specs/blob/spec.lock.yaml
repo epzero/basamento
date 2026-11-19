@@ -317,6 +317,32 @@ scenarios:
             by: human:epzero
             at: "2026-11-17"
             note: https://github.com/epzero/basamento/pull/3
+    BLOB-016-03:
+        hash: sha256:09ea18f00a371f3fac232a0f89c4320cdec52f077173c56a2cd8a5bf7a10de3f
+        reqs:
+            - REQ-BLOB-010
+            - REQ-BLOB-016
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
+        human:
+            status: pending
+    BLOB-016-04:
+        hash: sha256:ee5753cba0ce6e2d03f36cf177cd164d652ea13da4982c10178d81dd337b3a95
+        reqs:
+            - REQ-BLOB-010
+            - REQ-BLOB-016
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
+        human:
+            status: pending
     BLOB-017-01:
         hash: sha256:976f21ffc7f46b9a3a6eb136a1cfa76cfae20cd8df1965234bbd9683fe43884b
         reqs:
@@ -896,5 +922,54 @@ scenarios:
         approved_at: "2026-11-18"
         note: New upload URL, replay, boundary-size, open-slot miss, existing-content preservation, and embedded staging-sweep behavior.
         ref: https://github.com/epzero/basamento/pull/32
+        human:
+            status: pending
+    BLOB-044-01:
+        hash: sha256:9a3abbcac80c5fabd1f968b7c49b2b7a9caab31abedeb56e157d22cb5946c636
+        reqs:
+            - REQ-BLOB-044
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
+        human:
+            status: pending
+    BLOB-045-01:
+        hash: sha256:3da73c371350dc5faa58e35603535223a1b9f26e8eeb3518d5ee9e9dd592853f
+        reqs:
+            - REQ-BLOB-045
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
+        human:
+            status: pending
+    BLOB-045-02:
+        hash: sha256:6b0e913ba64681a7bf3bd7c328403be48ae0eaae6c6d1fde2031d28c62f86df2
+        reqs:
+            - REQ-BLOB-045
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
+        human:
+            status: pending
+    BLOB-046-01:
+        hash: sha256:8332db37ca8d4b49b09e0fd6719be3f56d35f4ff9a4b8fda7df7ebb8b3d02211
+        reqs:
+            - REQ-BLOB-046
+            - REQ-BLOB-047
+        tier: P0
+        author: claude-code:spec-author:448763
+        reviewer: opencode:spec-reviewer:f947fd
+        approved_at: "2026-11-19"
+        note: 'Round 2: REQ-BLOB-044 is @security (protective response headers), REQ-BLOB-045 is @security (32-byte signing-key minimum, embedded profile), 016-03/04 pin tenant escaping and tenant binding on served URLs, 046-01 pins the write-failure classes and the retryable unavailable marker; all four are release-blocking contracts'
+        ref: https://github.com/epzero/basamento/pull/65
         human:
             status: pending

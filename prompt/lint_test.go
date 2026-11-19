@@ -33,7 +33,9 @@ func TestLintAssembledHistoryRoleInModelText(t *testing.T) {
 		}},
 	}
 	findings := LintAssembled(a)
-	if len(findings) != 1 || findings[0].Rule != "unpaired_delimiter" {
+	// The role carries one close and one open; the unrecorded entry text
+	// carries its own open and close.
+	if len(findings) != 4 || findings[0].Rule != "unpaired_delimiter" {
 		t.Fatalf("got %+v", findings)
 	}
 }
