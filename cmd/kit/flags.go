@@ -13,6 +13,7 @@ import (
 // operator typed are read (design §3).
 var settingFlags = []string{
 	"profile",
+	"auth.mode",
 	"listen.addr",
 	"data.dir",
 	"log.level",

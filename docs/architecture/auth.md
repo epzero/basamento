@@ -1,6 +1,9 @@
 # Auth
 
-Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
+Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
+records (WP-L8-01, `auth/authn`). **Planned**: local accounts (argon2id
+passwords, passkeys, cookie sessions), request wiring in the API, and
+authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
 
@@ -9,6 +12,24 @@ Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth
 | `none` | Single user on their own machine | Listens on loopback only; refuses any other address (REQ-AUTH-001). |
 | `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. |
 | `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. We only validate JWTs (issuer keys via JWKS, audience, expiry) and map organization roles from claims (REQ-AUTH-003). Logto runs as a separate service; it is never part of the embedded binary. |
+
+`auth/authn` implements the modes and the `auth.mode` setting selects one.
+`kit serve` refuses a non-loopback `listen.addr` in `none` mode before it opens
+a port or binds the listener; only an IP loopback address or `localhost` is
+accepted (REQ-AUTH-001).
+
+OIDC verification requires the issuer, the audience, a non-expired `exp` and a
+signature by one of the issuer's keys. A `JWKS` key set is cached and refreshed
+when a token names an unknown key id, so issuer key rotation needs no restart.
+Clock skew is an explicit, small leeway, zero by default. The token's `tenant`
+claim (name configurable) must satisfy the tenant grammar when present; a token
+without it is tenantless and cannot read tenant data.
+
+Local-mode bearer tokens are opaque 256-bit secrets. Only their SHA-256 hash is
+stored; verification compares hashes in constant time and enforces a fixed
+expiry. A token carries its tenant and scopes, and rotating it means minting a
+new one and replacing the stored record. Every rejection is
+`unauthenticated` with a message that carries no credential or claim detail.
 
 ## 2. Authorization
 

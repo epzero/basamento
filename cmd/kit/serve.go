@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
 	"github.com/epzero/basamento/platform/blob"
@@ -53,6 +54,19 @@ func runServe(args []string) {
 		for _, e := range errs {
 			fmt.Fprintln(os.Stderr, e)
 		}
+		os.Exit(1)
+	}
+
+	// Refuse an unsafe listener before opening ports or binding: in none mode
+	// there is no caller identity, so a non-loopback address would expose every
+	// tenant (REQ-AUTH-001).
+	mode, err := authn.ParseMode(result.Config.Auth.Mode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := authn.ValidateListen(mode, result.Config.Listen.Addr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 

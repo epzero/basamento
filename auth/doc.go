@@ -6,5 +6,7 @@
 // repositories require a tenant context; Postgres row-level security adds a
 // second line in SaaS.
 //
-// Status: planned (WP-L8-*).
+// Status: the none and oidc modes and the local bearer-token records are
+// implemented in auth/authn (WP-L8-01); local accounts (passwords, passkeys,
+// sessions), request wiring in the API, and authorization are planned.
 package auth
