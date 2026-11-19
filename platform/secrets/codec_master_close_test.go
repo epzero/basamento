@@ -34,6 +34,33 @@ func TestRotateMasterKeyRetiresDifferentInstanceSameID(t *testing.T) {
 	}
 }
 
+func TestRotateMasterKeyRollbackDoesNotDoubleClose(t *testing.T) {
+	t.Parallel()
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	var nA, nAprime atomic.Int32
+	a := &closeCountKey{budgetKey: budgetKey{id: "mk"}, closes: &nA}
+	aPrime := &closeCountKey{budgetKey: budgetKey{id: "mk"}, closes: &nAprime}
+	c, err := NewCodec(store, []KeyService{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RotateMasterKey(context.Background(), aPrime); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RotateMasterKey(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if nA.Load() != 0 || nAprime.Load() != 0 {
+		t.Fatalf("closes during rotation a=%d aprime=%d", nA.Load(), nAprime.Load())
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if nA.Load() != 1 || nAprime.Load() != 1 {
+		t.Fatalf("closes after Close a=%d aprime=%d", nA.Load(), nAprime.Load())
+	}
+}
+
 func TestRotateMasterKeyOntoSameInstanceInRing(t *testing.T) {
 	t.Parallel()
 	store := &memKeysetStore{data: map[string]StoredKeyset{}}

@@ -64,8 +64,7 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 // Close closes every master KeyService in the ring and any retired by a prior
 // master-key rotation. Rotation does not close replaced keys because in-flight
 // Encode, Decode, or RotateDataKey calls may still hold a snapshot of the ring;
-// those instances are moved to retired and closed here. A second Close does not
-// close keys again; a second Close is a no-op.
+// those instances are moved to retired and closed here. A second Close is a no-op.
 func (c *Codec) Close() error {
 	c.keysMu.Lock()
 	defer c.keysMu.Unlock()
@@ -377,6 +376,14 @@ func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error
 }
 
 func (c *Codec) prependMasterKeyLocked(ks KeyService) {
+	filtered := c.retired[:0]
+	for _, r := range c.retired {
+		if !sameKeyService(r, ks) {
+			filtered = append(filtered, r)
+		}
+	}
+	c.retired = filtered
+
 	id := ks.MasterKeyID()
 	out := []KeyService{ks}
 	for _, k := range c.keys {
