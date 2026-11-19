@@ -64,8 +64,10 @@ func NewCodec(store KeysetStore, keys []KeyService, opts ...Option) (*Codec, err
 // Close closes every master KeyService in the ring and any retired by a prior
 // master-key rotation. Master-key rotation moves replaced keys to retired and
 // defers closing them here so calls that hold a snapshot of the ring can finish.
-// Close must not run concurrently with Encode, Decode, or RotateDataKey; stop
-// those callers first. A second Close is a no-op.
+// Close must not run concurrently with Encode, Decode, RotateMasterKey or
+// RotateDataKey (stop those callers first); if it does, nothing is closed twice
+// and no key leaks, but the racing call may fail with an error from the closed
+// key. A second Close is a no-op.
 func (c *Codec) Close() error {
 	c.keysMu.Lock()
 	defer c.keysMu.Unlock()

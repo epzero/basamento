@@ -164,8 +164,9 @@ error — nothing has served a request yet — and becomes
 - Master-key rotation retires replaced master keys without closing them;
   `Codec.Close` closes the ring and every retired key once. Deferred close
   lets calls that hold a snapshot of the ring finish. `Close` must not run
-  concurrently with `Encode`, `Decode`, or `RotateMasterKey`, or
-  `RotateDataKey`; stop those callers first.
+  concurrently with `Encode`, `Decode`, `RotateMasterKey` or `RotateDataKey`
+  (stop those callers first); if it does, nothing is closed twice and no key
+  leaks, but the racing call may fail with an error from the closed key.
 
 ### 2.5 Tenant ids
 

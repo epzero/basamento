@@ -20,6 +20,8 @@
 //
 // Master-key rotation retires replaced KeyService values without closing them;
 // Codec.Close closes the ring and every retired key once. Deferred close lets
-// calls that hold a snapshot of the ring finish; Close itself must not run
-// concurrently with Encode, Decode, or RotateDataKey (stop those callers first).
+// calls that hold a snapshot of the ring finish. Close must not run concurrently
+// with Encode, Decode, RotateMasterKey or RotateDataKey (stop those callers
+// first); if it does, nothing is closed twice and no key leaks, but the racing
+// call may fail with an error from the closed key.
 package secrets
