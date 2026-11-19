@@ -255,6 +255,23 @@ func TestStringOptionOnPointerAdmitsNull(t *testing.T) {
 		[]string{`{"v":null}`, `{"v":"0"}`}, []string{`{"v":0}`})
 }
 
+func TestStringOptionOnNamedPointerKeepsItsOwnEncoding(t *testing.T) {
+	type namedPointer *int
+	value := 3
+	sample := struct {
+		V namedPointer `json:"v,string"`
+	}{V: namedPointer(&value)}
+	b, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"v":3}` {
+		t.Fatalf("marshal %s", b)
+	}
+	validateGenerated(t, sample,
+		[]string{string(b), `{"v":null}`}, []string{`{"v":"3"}`})
+}
+
 func TestStringOptionKeepsOwnEncoding(t *testing.T) {
 	sample := struct {
 		V testTextString `json:"v,string"`

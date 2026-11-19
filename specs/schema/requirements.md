@@ -1,6 +1,6 @@
 # Schema: JSON Schema and canonical JSON
 
-Status: **Implemented (WP-L2-02); encoding/json encodings planned (EP0-126)** (`core/schema`). Design: [`design.md`](design.md);
+Status: **Implemented (WP-L2-02, EP0-126)** (`core/schema`). Design: [`design.md`](design.md);
 users: ADR-0003 and `docs/architecture/flow-engine.md` (state and gate schemas,
 the IR content hash), ADR-0006 and `docs/architecture/model-layer.md`
 (parameter schemas, structured output). Type-checking CEL against a schema

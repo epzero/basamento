@@ -581,7 +581,7 @@ func registerSchema(sc *godog.ScenarioContext) {
 	sc.Step(`^the instance is (accepted|rejected)$`, func(ctx context.Context, verdict string) error {
 		err := schemaCtx(ctx).lastErr
 		if verdict == "accepted" && err != nil {
-			return err
+			return fmt.Errorf("accepted: %w", err)
 		}
 		if verdict == "rejected" && !instanceRejected(err) {
 			return fmt.Errorf("accepted")
