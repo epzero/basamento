@@ -45,9 +45,7 @@ func newEmbeddedTestSetup(t *testing.T, clock core.Clock) *Setup {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = setup.Shutdown(ctx)
+		_ = setup.Shutdown(context.WithoutCancel(t.Context()))
 	})
 	return setup
 }
