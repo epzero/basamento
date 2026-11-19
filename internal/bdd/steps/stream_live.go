@@ -271,7 +271,7 @@ func receivesSnapshot(ctx context.Context, user string, first int) error {
 	if first > len(w.chunks) {
 		return fmt.Errorf("the scripted model has only %d deltas", len(w.chunks))
 	}
-	want := textOf(w.chunks[:first]...)
+	want := joinText(w.chunks[:first]...)
 	for _, f := range c.frames[c.mark:] {
 		if f.Snapshot == nil {
 			continue
@@ -438,7 +438,7 @@ func messageInterrupted(ctx context.Context) error {
 	if interrupted, _ := data["interrupted"].(bool); !interrupted {
 		return fmt.Errorf("the message is not marked interrupted")
 	}
-	want := textOf(w.chunks[:w.sent]...)
+	want := joinText(w.chunks[:w.sent]...)
 	if got, _ := data["text"].(string); got != want {
 		return fmt.Errorf("partial text %q, want %q", got, want)
 	}

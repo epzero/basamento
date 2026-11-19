@@ -651,6 +651,9 @@ func readReturnsNothing(ctx context.Context) error {
 }
 
 func readFailsWithCode(ctx context.Context, code string) error {
+	if c := world(ctx).Conversation; c != nil && c.lastErr != nil {
+		return checkConvErr(c, code)
+	}
 	if w := world(ctx).Eventlog; w != nil && w.log != nil {
 		if w.lastReadErr == nil {
 			return fmt.Errorf("read succeeded, want %s", code)

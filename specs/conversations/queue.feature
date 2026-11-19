@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-03 @runtime:any @level:component
+@wp:WP-L7-03 @runtime:any @level:component
 Feature: Queuing messages sent during a turn
 
   Background:

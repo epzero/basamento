@@ -1,11 +1,11 @@
 # Model layer
 
 Status: the invocation contract and adapters in `model` and `model/chat`
-(WP-L3-01), the catalog and price table in `model/catalog` (WP-L3-06), the
-model node in `model/node` (WP-L3-03) and the manifest-driven providers and
-router in `model/providers` (WP-L3-04) are implemented; structured output and
-middleware (WP-L3-02) are **Planned**. Decision: ADR-0006. Specs:
-`specs/models`.
+(WP-L3-01), structured output and the call middleware in `model/structured`
+and `model/middleware` (WP-L3-02), the catalog and price table in
+`model/catalog` (WP-L3-06), the model node in `model/node` (WP-L3-03) and the
+manifest-driven providers and router in `model/providers` (WP-L3-04) are
+implemented. Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
 
@@ -106,10 +106,22 @@ invocation and settles by the provider's final state (REQ-MODEL-009).
 
 ## 5. Chat specifics
 
-- **Structured output** uses one attempt budget across native schema → JSON mode →
-  forced tool call → local JSON repair.
-- **Middleware order:** call log ∘ recording ∘ fallback ∘ metering ∘ retry
-  (jitter, Retry-After) ∘ timeouts (first chunk, idle, total).
+- **Structured output** (`model/structured`) uses one attempt budget across
+  native schema → JSON mode → forced tool call → local JSON repair. The ladder
+  moves forward only on an answer that misses the output schema; a retryable
+  provider error retries the same rung. The local repair runs in process after
+  the last supported rung: it strips prose and code fences and fixes JSON
+  syntax, never a field, so a missing field is not fabricated.
+- **Middleware order** (`model/middleware`): call log ∘ recording ∘ fallback ∘
+  metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk,
+  idle, total). Every attempt of one call, across rungs and retries, spends one
+  budget of 3 unless the call sets another; waits double from one second plus
+  up to half of it from the call's seeded randomness, and a longer Retry-After
+  wins. Streaming defaults are 30 seconds without a first event, 60 seconds
+  without one in progress and 10 minutes per attempt, with no call total
+  timeout unless the call sets one. Metering records every attempt that reached
+  the provider; the call log records one entry per attempt without message
+  text or secrets.
 - **External services** (the browser runner, a product's own backend) reach
   models through the API's OpenAI-compatible endpoint with scoped tokens, so
   keys, routing and metering stay central.

@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-01 @runtime:any @level:component
+@wp:WP-L7-01 @runtime:any @level:component
 Feature: Caps on steps, cost, tokens and time
 
   Background:

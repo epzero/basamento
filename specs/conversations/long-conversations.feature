@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-03 @runtime:any @level:component
+@wp:WP-L7-03 @runtime:any @level:component
 Feature: A long conversation keeps working
   The coordinator's durable history is bounded: on a runtime that supports
   continuing as new, it continues as new whenever the durable calls it has made

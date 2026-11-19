@@ -18,30 +18,32 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core        *coreWorld
-	Expr        *exprWorld
-	SQL         *sqlWorld
-	Prompt      *promptWorld
-	Blob        *blobWorld
-	Bus         *busWorld
-	Secrets     *secretsWorld
-	Config      *configWorld
-	Credentials *credentialsWorld
-	Schema      *schemaWorld
-	Model       *modelWorld
-	Catalog     *catalogWorld
-	Node        *nodeWorld
-	Providers   *providerWorld
-	Flow        *flowWorld
-	Machine     *machineWorld
-	Host        *hostWorld
-	Local       *localWorld
-	Temporal    *temporalWorld
-	Eventlog    *eventlogWorld
-	Stream      *streamWorld
-	Auth        *authWorld
-	Authz       *authzWorld
-	API         *apiWorld
+	Core         *coreWorld
+	Expr         *exprWorld
+	SQL          *sqlWorld
+	Prompt       *promptWorld
+	Blob         *blobWorld
+	Bus          *busWorld
+	Secrets      *secretsWorld
+	Config       *configWorld
+	Credentials  *credentialsWorld
+	Schema       *schemaWorld
+	Model        *modelWorld
+	Catalog      *catalogWorld
+	Node         *nodeWorld
+	Providers    *providerWorld
+	Agent        *agentWorld
+	Conversation *convWorld
+	Flow         *flowWorld
+	Machine      *machineWorld
+	Host         *hostWorld
+	Local        *localWorld
+	Temporal     *temporalWorld
+	Eventlog     *eventlogWorld
+	Stream       *streamWorld
+	Auth         *authWorld
+	Authz        *authzWorld
+	API          *apiWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -50,30 +52,32 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:        newCoreWorld(),
-			Expr:        &exprWorld{bindings: map[string]any{}},
-			SQL:         newSQLWorld(),
-			Prompt:      newPromptWorld(),
-			Blob:        newBlobWorld(),
-			Bus:         newBusWorld(),
-			Secrets:     newSecretsWorld(),
-			Config:      newConfigWorld(),
-			Credentials: newCredentialsWorld(),
-			Schema:      newSchemaWorld(),
-			Model:       newModelWorld(),
-			Catalog:     newCatalogWorld(),
-			Node:        newNodeWorld(),
-			Providers:   &providerWorld{},
-			Flow:        newFlowWorld(),
-			Machine:     newMachineWorld(),
-			Host:        newHostWorld(),
-			Local:       newLocalWorld(),
-			Temporal:    newTemporalWorld(),
-			Eventlog:    newEventlogWorld(),
-			Stream:      newStreamWorld(),
-			Auth:        newAuthWorld(),
-			Authz:       newAuthzWorld(),
-			API:         newAPIWorld(),
+			Core:         newCoreWorld(),
+			Expr:         &exprWorld{bindings: map[string]any{}},
+			SQL:          newSQLWorld(),
+			Prompt:       newPromptWorld(),
+			Blob:         newBlobWorld(),
+			Bus:          newBusWorld(),
+			Secrets:      newSecretsWorld(),
+			Config:       newConfigWorld(),
+			Credentials:  newCredentialsWorld(),
+			Schema:       newSchemaWorld(),
+			Model:        newModelWorld(),
+			Catalog:      newCatalogWorld(),
+			Node:         newNodeWorld(),
+			Providers:    &providerWorld{},
+			Agent:        newAgentWorld(),
+			Conversation: newConvWorld(),
+			Flow:         newFlowWorld(),
+			Machine:      newMachineWorld(),
+			Host:         newHostWorld(),
+			Local:        newLocalWorld(),
+			Temporal:     newTemporalWorld(),
+			Eventlog:     newEventlogWorld(),
+			Stream:       newStreamWorld(),
+			Auth:         newAuthWorld(),
+			Authz:        newAuthzWorld(),
+			API:          newAPIWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -92,6 +96,10 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCatalog(sc)
 	registerNode(sc)
 	registerProviders(sc)
+	registerAgent(sc)
+	registerConversation(sc)
+	registerMiddleware(sc)
+	registerMiddlewareCalls(sc)
 	registerFlowCompile(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
@@ -148,7 +156,11 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	return fmt.Errorf("call succeeded, want %s", code)
 }
 
-// registerShared holds phrases used by more than one domain.
+// registerShared holds phrases used by more than one domain. The SQL store and
+// the Secrets port both report an open failure with the same phrase; one
+// handler reads whichever domain opened in the scenario. The clock step is
+// shared by the flow host and the model middleware: both worlds advance, and
+// the one that is active settles.
 func registerShared(sc *godog.ScenarioContext) {
 	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		w := world(ctx)

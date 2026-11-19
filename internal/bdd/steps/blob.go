@@ -399,7 +399,7 @@ func registerBlob(sc *godog.ScenarioContext) {
 	// "without the gate ... being resolved" clause is the flow host's way of
 	// saying no person answered; the recording host keeps its own clock, so
 	// advance it too when it is the one under test.
-	sc.Step(`^(-?\d.*?) pass(?:es)?(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
+	sc.Step(`^(-?\d+(?:\.\d+)? (?:milliseconds?|seconds?|minutes?|hours?|days?)(?: \d+(?:\.\d+)? (?:milliseconds?|seconds?|minutes?|hours?|days?))*) pass(?:es)?(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
 		d, err := parseElapsed(elapsed)
 		if err != nil {
 			return err
@@ -414,12 +414,18 @@ func registerBlob(sc *godog.ScenarioContext) {
 			}
 		}
 		h := world(ctx).Host
-		if h == nil || h.dc == nil {
+		if h != nil && h.dc != nil {
+			world(ctx).Core.clock.Advance(d)
+			h.dc.advance(d)
+			h.signal()
+			return h.settle()
+		}
+		if m := world(ctx).Model; m != nil && m.call != nil {
+			m.call.rt.Advance(d)
 			return nil
 		}
-		h.dc.advance(d)
-		h.signal()
-		return h.settle()
+		world(ctx).Core.clock.Advance(d)
+		return nil
 	})
 	sc.Step(`^the blob store is closed and opened again on the same location$`, func(ctx context.Context) error {
 		w := world(ctx).Blob
