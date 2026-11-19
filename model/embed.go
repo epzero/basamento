@@ -26,7 +26,6 @@ type EmbeddingConfig struct {
 // the vectors, one per input text in order (the "single" protocol of
 // docs/architecture/model-layer.md §1). It publishes no events.
 type Embedding struct {
-	provider    string
 	descriptors []Descriptor
 	embedder    einoEmbedding.Embedder
 	runs        *Registry
@@ -48,7 +47,6 @@ func NewEmbedding(cfg EmbeddingConfig) (*Embedding, error) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the embed capability", nil)
 	}
 	return &Embedding{
-		provider:    cfg.Provider,
 		descriptors: cfg.Descriptors,
 		embedder:    cfg.Embedder,
 		runs:        NewRegistry(cfg.Provider),
@@ -112,6 +110,18 @@ func (e *Embedding) Lookup(ctx context.Context, clientRef string) (*Handle, erro
 }
 
 func (e *Embedding) execute(run *Run, texts []string) {
+	defer func() {
+		if p := recover(); p != nil {
+			// Deliberately converts a panic at the invocation boundary;
+			// run.Fail is a no-op after the run ended.
+			var cause error
+			if e, ok := p.(error); ok {
+				cause = e
+			}
+			run.Fail(&core.Error{Code: core.CodeInternal, Message: "vendor call panicked", Cause: cause})
+		}
+	}()
+
 	vectors, err := e.embedder.EmbedStrings(run.Context(), texts)
 	if err != nil {
 		run.Fail(MapError(err))
@@ -124,6 +134,11 @@ func (e *Embedding) execute(run *Run, texts []string) {
 	}
 	out := make([][]float32, len(vectors))
 	for i, v := range vectors {
+		if len(v) == 0 {
+			run.Fail(core.NewError(core.CodeVendor,
+				fmt.Sprintf("embedding vector %d is empty", i), nil))
+			return
+		}
 		out[i] = vector32(v)
 	}
 	run.Succeed(Result{Vectors: out})
