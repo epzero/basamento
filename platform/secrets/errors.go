@@ -14,6 +14,7 @@ const (
 	msgTenantRequired         = "tenant is required"
 	msgTenantNoKeyset         = "tenant has no keyset"
 	msgKeysetCannotUnwrap     = "keyset of the tenant cannot be unwrapped"
+	msgKeysetCannotWrap       = "keyset of the tenant cannot be wrapped"
 	msgValueCannotDecrypt     = "value cannot be decrypted"
 	msgKeyServiceRefused      = "key service refused the request"
 	msgKeysetRevisionConflict = "keyset was changed by another writer"
@@ -48,21 +49,29 @@ const (
 	opDecryptValue
 )
 
+// classifyCtxErr maps context cancellation or deadline errors; ok when handled.
+func classifyCtxErr(ctx context.Context, err error) (error, bool) {
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: ctx.Err()}, true
+		}
+		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: ctx.Err(), Retryable: true}, true
+	}
+	if errors.Is(err, context.Canceled) {
+		return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: err}, true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: err, Retryable: true}, true
+	}
+	return nil, false
+}
+
 func classifyKeeperErr(ctx context.Context, err error, scheme string, op keeperOp) error {
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: ctx.Err()}
-		}
-		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: ctx.Err(), Retryable: true}
-	}
-	if errors.Is(err, context.Canceled) {
-		return &core.Error{Code: core.CodeCancelled, Message: "cancelled", Cause: err}
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return &core.Error{Code: core.CodeTimeout, Message: "timeout", Cause: err, Retryable: true}
+	if c, ok := classifyCtxErr(ctx, err); ok {
+		return c
 	}
 	if scheme == "localsecrets" {
 		return classifyLocalKeeperErr(op, err)
@@ -108,10 +117,16 @@ func classifyLocalKeeperErr(op keeperOp, err error) error {
 func classifyCloudKeeperErr(code gcerrors.ErrorCode, scheme string, op keeperOp) error {
 	switch code {
 	case gcerrors.InvalidArgument, gcerrors.FailedPrecondition:
-		if op == opDecryptValue {
+		switch op {
+		case opDecryptValue:
 			return errInvalidArgument(msgValueCannotDecrypt)
+		case opUnwrapKeyset:
+			return errInternal(msgKeysetCannotUnwrap)
+		case opWrapKeyset:
+			return errInternal(msgKeysetCannotWrap)
+		default:
+			return errInternal(msgKeyServiceRefused)
 		}
-		return errInternal(msgKeysetCannotUnwrap)
 	case gcerrors.PermissionDenied, gcerrors.NotFound, gcerrors.Unimplemented, gcerrors.AlreadyExists:
 		if op == opUnwrapKeyset {
 			return errInternal(msgKeysetCannotUnwrap)

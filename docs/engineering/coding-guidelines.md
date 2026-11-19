@@ -93,7 +93,19 @@ check every change against this page. Tools enforce what they can
     and restricted licenses such as GPL and AGPL;
   - be pure Go (the binary is built with `CGO_ENABLED=0`).
 - Pin exact versions. Heavy dependencies (servers, SDKs with large trees) live
-  in their own module, as `runtime/temporal/embedded` does.
+  in their own module, as `runtime/temporal/embedded` does (454 modules on
+  `go list -m all`). Platform port libraries stay in the root module: SDKs such
+  as `gocloud.dev` and Tink, and embedded servers whose trees stay small.
+  `github.com/nats-io/nats-server/v2` adds about ten pure-Go modules (44 total
+  modules on this root module versus 24 on `main` without bus); `platform/bus`,
+  the BDD harness and kit use it in one code path (profiles table in
+  `docs/architecture/overview.md` section 2).
+- The embedded Temporal module is the one exception to "no local copies": the
+  root and the server disagree on the `go.opentelemetry.io/otel/log` API
+  (v1.47.0 against v0.20.0), and one module graph cannot hold both.
+  `third_party/otel-log` is upstream v1.47.0 plus the four helpers the server
+  uses, wired with a `replace` in the root `go.mod`; its `README.md` carries
+  the removal condition. Do not extend it beyond compatibility helpers.
 - A port vendor library (cloud SDKs, SQL drivers, NATS, gocloud, Temporal, Tink
   and the like) must not be imported from `internal/config`; add its import-path
   prefix to that layer's `deny_external` in the same change (ADR-0016). The

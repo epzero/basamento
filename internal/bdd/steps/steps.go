@@ -22,7 +22,9 @@ type World struct {
 	SQL         *sqlWorld
 	Prompt      *promptWorld
 	Blob        *blobWorld
+	Bus         *busWorld
 	Secrets     *secretsWorld
+	Config      *configWorld
 	Credentials *credentialsWorld
 	Schema      *schemaWorld
 	Model       *modelWorld
@@ -33,6 +35,7 @@ type World struct {
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
+	Temporal    *temporalWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -41,20 +44,24 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:      newCoreWorld(),
-			Expr:      &exprWorld{bindings: map[string]any{}},
-			SQL:       newSQLWorld(),
-			Prompt:    newPromptWorld(),
-			Blob:      newBlobWorld(),
-			Schema:    newSchemaWorld(),
-			Model:     newModelWorld(),
-			Catalog:   newCatalogWorld(),
-			Node:      newNodeWorld(),
-			Providers: &providerWorld{},
-			Flow:      newFlowWorld(),
-			Machine:   newMachineWorld(),
-			Host:      newHostWorld(),
-			Local:     newLocalWorld(),
+			Core:        newCoreWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Blob:        newBlobWorld(),
+			Bus:         newBusWorld(),
+			Secrets:     newSecretsWorld(),
+			Config:      newConfigWorld(),
+			Schema:      newSchemaWorld(),
+			Model:       newModelWorld(),
+			Catalog:     newCatalogWorld(),
+			Node:        newNodeWorld(),
+			Providers:   &providerWorld{},
+			Flow:        newFlowWorld(),
+			Machine:     newMachineWorld(),
+			Host:        newHostWorld(),
+			Local:       newLocalWorld(),
+			Temporal:    newTemporalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -62,7 +69,11 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerBus(sc)
 	registerSecrets(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
+	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerSchema(sc)
 	registerModel(sc)
@@ -73,8 +84,14 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
 	registerLocal(sc)
+	registerTemporal(sc)
+	registerEmbedded(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
@@ -97,6 +114,12 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	}
 	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
 		return assertBlobCallCode(ctx, code)
+	}
+	if w.Secrets != nil && (w.Secrets.lastErr != nil) {
+		if string(core.CodeOf(w.Secrets.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Secrets.lastErr), code)
+		}
+		return nil
 	}
 	return fmt.Errorf("call succeeded, want %s", code)
 }

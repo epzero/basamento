@@ -1,8 +1,9 @@
-// Package temporal is the Temporal Runtime: the generic FlowHost workflow, step
-// activities, a payload codec that stores large payloads in blob storage and
-// encrypts them, and (in a separate Go module, to keep server dependencies out
-// of library consumers) the embedded server modeled on temporalio/cli's
-// internal/devserver with file-backed SQLite.
+// Package temporal is the Temporal runtime: the generic FlowHost runs as one
+// workflow, each Step as an activity, gates as synchronous updates, timers and
+// child workflows through the same DurableContext, and Checkpoint as
+// ContinueAsNew. A payload codec encrypts every history payload for the run's
+// tenant and stores payloads over a threshold in blob storage. The embedded
+// server lives in a separate Go module, runtime/temporal/embedded.
 //
-// Status: planned (WP-L5-02, WP-L5-03).
+// Status: implemented (WP-L5-02); the embedded server is WP-L5-03.
 package temporal

@@ -18,6 +18,9 @@ GOVULNCHECK_VERSION   := v1.9.0
 GO_LICENSES_VERSION   := v2.0.1
 GOLANGCI_LINT_VERSION := v2.15.0
 
+# Kept in a variable: a literal comma would split the arguments of $(call tool).
+LICENSES_CHECK := GOROOT=$$($(GO) env GOROOT) go-licenses check ./... --disallowed_types=forbidden,restricted --ignore github.com/cactus/go-statsd-client/statsd
+
 # $(call tool,<binary>,<command>)
 define tool
 	@if command -v $(1) >/dev/null 2>&1; then $(2); \
@@ -62,8 +65,11 @@ vuln:
 	$(call tool,govulncheck,set -e; roots="$$($(GATE) module-roots)" || exit 1; [ -n "$$roots" ] || { echo "gate: no module roots"; exit 1; }; for dir in $$roots; do (cd "$$dir" && govulncheck ./...) || exit 1; done)
 
 # Dependencies must stay compatible with Apache-2.0 (no GPL, AGPL, SSPL, ...).
+# go-statsd-client/statsd (MIT, via the embedded Temporal server) keeps its
+# license file in a parent module path; .github/workflows/embedded.yml ignores
+# the same package.
 licenses:
-	$(call tool,go-licenses,GOROOT=$$($(GO) env GOROOT) go-licenses check ./... --disallowed_types=forbidden,restricted)
+	$(call tool,go-licenses,$(LICENSES_CHECK))
 
 buf:
 	$(call tool,buf,cd contracts && buf lint)

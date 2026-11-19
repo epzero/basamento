@@ -23,12 +23,14 @@
 // A malformed subject is empty, has whitespace, a wildcard token ('*' or '>'),
 // or is not one or more dot-separated tokens of letters, digits, '-', and '_'
 // with no empty token. A malformed key is empty, has whitespace or a wildcard,
-// starts or ends with '.', or is not made of letters, digits, '-', '_', '/',
+// starts or ends with '.', contains an empty dot-separated token, exceeds the
+// bus key length bound, or is not made of ASCII letters, digits, '-', '_', '/',
 // '=', and '.'. Every Bus and KV method rejects a malformed subject or key
 // with code invalid_argument before touching storage.
 //
-// Status: Blob (WP-L1-02), Credentials (WP-L1-06), Secrets (WP-L1-04), SQL
-// (WP-L1-01) and Audit are implemented; other ports remain contract-only.
+// Status: Blob (WP-L1-02), Bus and KV (WP-L1-03), Secrets (WP-L1-04), SQL
+// (WP-L1-01), Credentials (WP-L1-06) and Audit are implemented; other ports
+// remain contract-only.
 package platform
 
 import (

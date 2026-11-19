@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/epzero/basamento/core"
+	"gocloud.dev/gcerrors"
 	"gocloud.dev/secrets"
 	"gocloud.dev/secrets/localsecrets"
 )
@@ -20,8 +20,7 @@ type keeperKeyService struct {
 }
 
 // OpenKeyService opens a production master key from url (current or previous).
-func OpenKeyService(ctx context.Context, raw string, opts ...Option) (KeyService, error) {
-	_ = applyOptions(opts)
+func OpenKeyService(ctx context.Context, raw string) (KeyService, error) {
 	return newKeeperService(ctx, raw)
 }
 
@@ -60,7 +59,7 @@ func (k *keeperKeyService) Unwrap(ctx context.Context, tenant string, ciphertext
 }
 
 func (k *keeperKeyService) encryptValue(ctx context.Context, plaintext []byte) ([]byte, error) {
-	inner := FrameValuePlaintext(plaintext)
+	inner := frameValuePlaintext(plaintext)
 	ct, err := k.keeper.Encrypt(ctx, inner)
 	if err != nil {
 		return nil, classifyKeeperErr(ctx, err, k.scheme, opEncryptValue)
@@ -73,7 +72,7 @@ func (k *keeperKeyService) decryptValue(ctx context.Context, ciphertext []byte) 
 	if err != nil {
 		return nil, classifyKeeperErr(ctx, err, k.scheme, opDecryptValue)
 	}
-	return ParseValuePlaintext(inner)
+	return parseValuePlaintext(inner)
 }
 
 func masterKeyID(raw, scheme string, localKey []byte) (string, error) {
@@ -128,9 +127,14 @@ func openKeeper(ctx context.Context, raw string) (*secrets.Keeper, string, strin
 }
 
 func classifyOpenKeeperErr(ctx context.Context, err error, scheme string) error {
-	c := classifyKeeperErr(ctx, err, scheme, opWrapKeyset)
-	if core.CodeOf(c) == core.CodeUnavailable {
+	if err == nil {
+		return nil
+	}
+	if c, ok := classifyCtxErr(ctx, err); ok {
 		return c
+	}
+	if errorCode(err) == gcerrors.ResourceExhausted {
+		return errUnavailableRetry(scheme)
 	}
 	return errInvalidArgument(fmt.Sprintf(msgInvalidKeyURL, scheme))
 }

@@ -1,4 +1,4 @@
-@planned @wp:WP-L5-03 @level:system
+@wp:WP-L5-03 @level:system
 Feature: Embedded profile
 
   @REQ-RT-003 @profile:embedded @runtime:temporal @id:RT-003-01

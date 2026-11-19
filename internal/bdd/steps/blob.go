@@ -395,24 +395,6 @@ func registerBlob(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	// One phrase advances the scenario clock for every domain. The optional
-	// "without the gate ... being resolved" clause is the flow host's way of
-	// saying no person answered; the recording host keeps its own clock, so
-	// advance it too when it is the one under test.
-	sc.Step(`^(-?\d.*?) pass(?: without the gate "[^"]*" being resolved)?$`, func(ctx context.Context, elapsed string) error {
-		d, err := parseElapsed(elapsed)
-		if err != nil {
-			return err
-		}
-		world(ctx).Core.clock.Advance(d)
-		h := world(ctx).Host
-		if h == nil || h.dc == nil {
-			return nil
-		}
-		h.dc.advance(d)
-		h.signal()
-		return h.settle()
-	})
 	sc.Step(`^the blob store is closed and opened again on the same location$`, func(ctx context.Context) error {
 		w := world(ctx).Blob
 		if w.store != nil {
@@ -779,6 +761,8 @@ func parsePositiveDuration(s string) (time.Duration, error) {
 		}
 		unit := parts[i+1]
 		switch {
+		case strings.HasPrefix(unit, "millisecond"):
+			total += time.Duration(n) * time.Millisecond
 		case strings.HasPrefix(unit, "second"):
 			total += time.Duration(n) * time.Second
 		case strings.HasPrefix(unit, "minute"):

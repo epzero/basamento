@@ -13,7 +13,7 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 
 | Package | Role | Owned by |
 | --- | --- | --- |
-| `internal/config` | load, validate, effective report, schema of known keys | WP-L1-05 |
+| `internal/config` | load, validate, effective report, schema of known keys, and the port-agnostic serve lifecycle (`serve.go`) | WP-L1-05 |
 | `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
@@ -74,6 +74,12 @@ name a URL selects (REQ-CONFIG-011, REQ-CONFIG-012), and lets `cmd/kit`
 import the implementations and their constructors. `cmd/kit` may already
 import `platform` and `runtime`; with the row in place it also imports
 `internal/config`.
+
+`serve.go` holds the part of `kit serve` that does not know a port: it opens
+the ports it is given in order, binds the listener, prints the ready line and
+drains requests on shutdown. `cmd/kit` supplies the openers; the component
+suite supplies fakes and a timer, so `CONFIG-023-01` and `CONFIG-024-01` drive
+the same code as the binary without a sleep.
 
 ## 2. Keys, types and defaults
 

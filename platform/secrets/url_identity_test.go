@@ -40,7 +40,10 @@ func TestPublicURLIDInvalid(t *testing.T) {
 		t.Fatal("echoed raw url")
 	}
 	_, err = publicURLID("awskms://")
-	if err == nil {
-		t.Fatal("empty host and path")
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), `invalid key service URL for scheme "awskms"`) {
+		t.Fatalf("message %q", err.Error())
 	}
 }

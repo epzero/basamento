@@ -91,54 +91,41 @@ func TestBDDGateProfiles(t *testing.T) {
 
 // TestFeatures runs every scenario under specs/ in strict mode: undefined or
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
+// BDD_BUS_BACKEND selects the bus implementation: fake (default), embedded, or cloud.
 func TestFeatures(t *testing.T) {
 	tags := scenarioTags()
 	configured := sqltest.PostgresConfigured()
+	backends := []string{"fake", "embedded", "cloud"}
+	if one := os.Getenv("BDD_BUS_BACKEND"); one != "" {
+		backends = []string{one}
+	}
 	for _, profile := range bddGateProfiles(configured) {
-		runSuite(t, tags, profile)
+		for _, backend := range backends {
+			runSuite(t, tags, profile, backend)
+		}
 	}
 	if !configured {
 		t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
 	}
 }
 
-func runSuite(t *testing.T, tags, profile string) {
-	name := "basamento"
-	if profile != "" {
-		name = "basamento-" + profile
-	}
-	if profile != "" {
-		t.Run(profile, func(t *testing.T) {
-			t.Setenv("BDD_SQL_PROFILE", profile)
-			suite := godog.TestSuite{
-				Name:                name,
-				ScenarioInitializer: steps.Initialize,
-				Options: &godog.Options{
-					Format:   "pretty",
-					Paths:    scenarioPaths(),
-					Tags:     tags,
-					Strict:   true,
-					TestingT: t,
-				},
-			}
-			if code := suite.Run(); code != 0 {
-				t.Fatalf("godog exited with status %d", code)
-			}
-		})
-		return
-	}
-	suite := godog.TestSuite{
-		Name:                name,
-		ScenarioInitializer: steps.Initialize,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    scenarioPaths(),
-			Tags:     tags,
-			Strict:   true,
-			TestingT: t,
-		},
-	}
-	if code := suite.Run(); code != 0 {
-		t.Fatalf("godog exited with status %d", code)
-	}
+func runSuite(t *testing.T, tags, profile, backend string) {
+	t.Run(profile+"/bus-backend="+backend, func(t *testing.T) {
+		t.Setenv("BDD_SQL_PROFILE", profile)
+		t.Setenv("BDD_BUS_BACKEND", backend)
+		suite := godog.TestSuite{
+			Name:                "basamento-" + profile + "-" + backend,
+			ScenarioInitializer: steps.Initialize,
+			Options: &godog.Options{
+				Format:   "pretty",
+				Paths:    scenarioPaths(),
+				Tags:     tags,
+				Strict:   true,
+				TestingT: t,
+			},
+		}
+		if code := suite.Run(); code != 0 {
+			t.Fatalf("godog exited with status %d", code)
+		}
+	})
 }
