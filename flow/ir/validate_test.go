@@ -225,6 +225,55 @@ func TestValidateAcceptsKnownReducers(t *testing.T) {
 	}
 }
 
+// The reducer check reads the state schema the way the compiler does: through
+// local $ref and allOf, and a boolean true schema admits every object, so its
+// keys cannot be missing from it.
+func TestValidateResolvesReducerKeysThroughTheSchema(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema string
+		key    string
+	}{
+		{
+			name:   "local $ref root",
+			schema: `{"$defs":{"s":{"type":"object","properties":{"messages":{"type":"array"}}}},"$ref":"#/$defs/s"}`,
+			key:    "messages",
+		},
+		{
+			name:   "allOf composition",
+			schema: `{"type":"object","properties":{"tests":{"type":"object"}},"allOf":[{"type":"object","properties":{"files":{"type":"array"}}}]}`,
+			key:    "files",
+		},
+		{
+			name:   "allOf through a $ref",
+			schema: `{"$defs":{"s":{"type":"object","properties":{"attempts":{"type":"integer"}}}},"type":"object","allOf":[{"$ref":"#/$defs/s"}]}`,
+			key:    "attempts",
+		},
+		{
+			name:   "boolean true schema",
+			schema: `true`,
+			key:    "anything",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := simpleFlow()
+			f.State.Schema = json.RawMessage(test.schema)
+			f.State.Reducers = map[string]string{test.key: "append"}
+			if err := Validate(f); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestValidateStillRejectsAReducerKeyTheSchemaLacks(t *testing.T) {
+	f := simpleFlow()
+	f.State.Schema = json.RawMessage(`{"$defs":{"s":{"type":"object","properties":{"messages":{"type":"array"}}}},"$ref":"#/$defs/s"}`)
+	f.State.Reducers = map[string]string{"notes": "append"}
+	requireInvalid(t, Validate(f), `"notes"`, "reducer")
+}
+
 func TestValidateRequiresName(t *testing.T) {
 	f := simpleFlow()
 	f.Name = ""

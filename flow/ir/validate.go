@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/epzero/basamento/core/schema"
@@ -54,19 +55,9 @@ func validateState(f *flow.IR) error {
 	if _, err := schema.Compile(f.State.Schema); err != nil {
 		return withLocation(err, "flow: state schema: ")
 	}
-	properties := map[string]bool{}
-	if len(f.State.Schema) > 0 {
-		var doc map[string]any
-		if err := json.Unmarshal(f.State.Schema, &doc); err == nil {
-			if props, ok := doc["properties"].(map[string]any); ok {
-				for key := range props {
-					properties[key] = true
-				}
-			}
-		}
-	}
+	properties, everyObject := stateProperties(f.State.Schema)
 	for _, key := range sortedKeys(f.State.Reducers) {
-		if !properties[key] {
+		if !everyObject && !properties[key] {
 			return invalid(fmt.Sprintf("flow: state reducer %q: key is not in the state schema", key), map[string]any{"reducer": key})
 		}
 		if !validReducer(f.State.Reducers[key]) {
@@ -74,6 +65,85 @@ func validateState(f *flow.IR) error {
 		}
 	}
 	return nil
+}
+
+// stateProperties returns the property names the state schema declares and
+// whether it admits every object. Local $ref and allOf composition are
+// resolved, so a schema split across $defs is read the way core/schema reads
+// it; a boolean true schema admits every object, so every reducer key is in it.
+func stateProperties(raw json.RawMessage) (map[string]bool, bool) {
+	var doc any
+	if len(raw) == 0 || json.Unmarshal(raw, &doc) != nil {
+		return map[string]bool{}, false
+	}
+	walk := &propertyWalk{root: doc, seen: map[string]bool{}, properties: map[string]bool{}}
+	walk.collect(doc)
+	return walk.properties, walk.everyObject
+}
+
+type propertyWalk struct {
+	root        any
+	seen        map[string]bool // $refs already followed, so a cycle terminates
+	properties  map[string]bool
+	everyObject bool
+}
+
+func (w *propertyWalk) collect(node any) {
+	switch n := node.(type) {
+	case bool:
+		w.everyObject = w.everyObject || n
+	case map[string]any:
+		// Draft 2020-12 applies $ref alongside its siblings, so both the
+		// target and this node's own keywords are read.
+		if ref, ok := n["$ref"].(string); ok && !w.seen[ref] {
+			w.seen[ref] = true
+			if target, ok := resolveLocalRef(w.root, ref); ok {
+				w.collect(target)
+			}
+		}
+		if props, ok := n["properties"].(map[string]any); ok {
+			for key := range props {
+				w.properties[key] = true
+			}
+		}
+		if all, ok := n["allOf"].([]any); ok {
+			for _, sub := range all {
+				w.collect(sub)
+			}
+		}
+	}
+}
+
+// resolveLocalRef follows a JSON Pointer into the same document. Refs outside
+// it are rejected by core/schema's closed set before this runs.
+func resolveLocalRef(root any, ref string) (any, bool) {
+	if ref == "" || ref == "#" {
+		return root, true
+	}
+	if !strings.HasPrefix(ref, "#/") {
+		return nil, false
+	}
+	current := root
+	for _, token := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
+		token = strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~")
+		switch node := current.(type) {
+		case map[string]any:
+			next, ok := node[token]
+			if !ok {
+				return nil, false
+			}
+			current = next
+		case []any:
+			index, err := strconv.Atoi(token)
+			if err != nil || index < 0 || index >= len(node) {
+				return nil, false
+			}
+			current = node[index]
+		default:
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 // validReducer accepts the reducer forms declared by ADR-0003: replace, append,
