@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestContentlessStreamFails(t *testing.T) {
+	const vendorOnly = "sensitive vendor refusal text"
 	cases := []struct {
 		name   string
 		chunks []*schema.Message
@@ -18,6 +20,20 @@ func TestContentlessStreamFails(t *testing.T) {
 		{name: "no chunks", chunks: nil},
 		{name: "role only", chunks: []*schema.Message{{Role: schema.Assistant}}},
 		{name: "empty content", chunks: []*schema.Message{{Role: schema.Assistant, Content: ""}}},
+		{
+			name: "extra only",
+			chunks: []*schema.Message{{
+				Role:  schema.Assistant,
+				Extra: map[string]any{"refusal": vendorOnly},
+			}},
+		},
+		{
+			name: "response meta only",
+			chunks: []*schema.Message{{
+				Role:         schema.Assistant,
+				ResponseMeta: &schema.ResponseMeta{FinishReason: "content_filter"},
+			}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +52,13 @@ func TestContentlessStreamFails(t *testing.T) {
 			_ = json.Unmarshal(res.Error, &failure)
 			if failure.Code != core.CodeVendor {
 				t.Fatalf("code = %q", failure.Code)
+			}
+			want := "chat stream produced no usable output"
+			if failure.Message != want {
+				t.Fatalf("message = %q, want %q", failure.Message, want)
+			}
+			if strings.Contains(failure.Message, vendorOnly) {
+				t.Fatalf("error echoed vendor text")
 			}
 		})
 	}

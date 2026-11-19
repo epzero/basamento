@@ -44,7 +44,12 @@ adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
 eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
 values, so the contract itself stays free of the dependency. The chat adapter
 caps one vendor stream at 8 MiB of payload and 262144 chunks; exceeding either
-limit ends the invocation with `vendor_error`. A vendor panic inside the
+limit ends the invocation with `vendor_error`. Payload includes multimodal
+assistant output (text, reasoning, tool-call fields, and media part URLs,
+base64, file ids, and mime types). A stream that ends with only vendor metadata
+(`Extra`, `ResponseMeta` such as a content filter or refusal finish reason) and
+no assistant content is `vendor_error` with a fixed message; provider adapters
+map refusals to text or typed errors before that check. A vendor panic inside the
 adapter's execute goroutine is converted to `internal` at that boundary without
 crashing the process. Unmapped `Request.Params` keys (for example `tier` for
 pricing) are ignored; the adapter maps `temperature`, `top_p`, `max_tokens` and
