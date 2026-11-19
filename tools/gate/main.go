@@ -7,6 +7,7 @@
 //	gate docs [-write]       # generated diagrams match layering.yaml and the roadmap
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
+//	gate gomod                  # every tracked go.mod names the same go directive
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
 //	gate spec trace [-json]   # requirement → scenario matrix
@@ -50,7 +51,7 @@ func main() {
 		must(fs.Parse(os.Args[3:]))
 		files, err := gate.ChangedFiles(root, *base, *head)
 		must(err)
-		plan, err := gate.PlanReview(root, *base, files)
+		plan, err := gate.PlanReview(root, *base, *head, files)
 		must(err)
 		if *asJSON {
 			enc := json.NewEncoder(os.Stdout)
@@ -99,6 +100,16 @@ func main() {
 		errs, err := gate.Layering(root)
 		must(err)
 		report("layering", errs)
+	case "gomod":
+		errs, err := gate.CheckSameGoModLine(root)
+		must(err)
+		report("gomod", errs)
+	case "module-roots":
+		roots, err := gate.ModuleRoots(root)
+		must(err)
+		for _, r := range roots {
+			fmt.Println(r)
+		}
 	case "spec":
 		if len(os.Args) < 3 {
 			usage()
@@ -322,6 +333,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
 	os.Exit(2)
 }

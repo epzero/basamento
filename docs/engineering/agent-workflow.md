@@ -259,15 +259,16 @@ from the owner; the **risk** of a change says which do.
 
 **The reviewer sets the risk, not the author.** The author opens the pull
 request with the label `risk: TBD`. The reviewer replaces it with what
-`go tool gate review plan` computes from the paths the change touches
-(`code-review.md` §2), as `risk: low`, `risk: medium` or `risk: high`, and
+`go tool gate review plan` computes from the paths the change touches and the
+content rule for `go.mod` (`code-review.md` §2), as `risk: low`, `risk:
+medium` or `risk: high`, and
 writes it in the description. The reviewer may raise it above what the tool
 says, never lower it.
 
 | Risk | What lets it in |
 | --- | --- |
 | Low, medium | The reviewer's approval. The author then merges. |
-| High (CI, the gate, contracts, auth, secrets, money, runtimes, `go.mod`, and rule files: constitution, ADRs, `AGENTS.md`, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent definitions) | The owner's `approve` in the tracker, then the reviewer's approval on GitHub with a link to it. The author then merges. |
+| High (CI, the gate, contracts, auth, secrets, money, runtimes, `go.mod` **except** a patch-only `go` bump (medium, `ADR-0014`), and rule files: constitution, ADRs, `AGENTS.md`, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent definitions) | The owner's `approve` in the tracker, then the reviewer's approval on GitHub with a link to it. The author then merges. |
 
 **The owner** is asked, and answers, only in the tracker, and leaves no name
 in the repository or on GitHub. The reviewer's approval on a high-risk pull
@@ -429,8 +430,10 @@ its author approved.
   by new commits; on high-risk paths the approval of the reviewer or the
   architect; resolved threads; a green `gate` in the merge queue; squash
   only; no force-push to `main`. `CODEOWNERS` is generated from the high
-  tier of `review.yaml` (`go tool gate docs -write`), so it covers exactly
-  what the review plan calls high.
+  tier of `review.yaml` (`go tool gate docs -write`), so it covers the
+  high-tier paths of `review.yaml`. `go.mod` stays owned there even when a
+  patch-only `go` bump rates medium in the review plan; the reviewer's
+  approval alone satisfies what `CODEOWNERS` requires (`ADR-0014`).
 - **A merge that breaks `main`** is reverted with a pull request of its own
   and marked `escaped` (`code-review.md` §7).
 

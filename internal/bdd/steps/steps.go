@@ -20,6 +20,7 @@ type World struct {
 	Core   *coreWorld
 	SQL    *sqlWorld
 	Prompt *promptWorld
+	Blob   *blobWorld
 	Bus    *busWorld
 }
 
@@ -32,11 +33,13 @@ func Initialize(sc *godog.ScenarioContext) {
 			Core:   newCoreWorld(),
 			SQL:    newSQLWorld(),
 			Prompt: newPromptWorld(),
+			Blob:   newBlobWorld(),
 		}), nil
 	})
 	registerCore(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
+	registerBlob(sc)
 	registerBus(sc)
 	registerSharedSteps(sc)
 }
@@ -58,6 +61,9 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 			}
 			return nil
 		}
+	}
+	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
+		return assertBlobCallCode(ctx, code)
 	}
 	if w.Bus != nil && w.Bus.lastErr != nil {
 		if string(core.CodeOf(w.Bus.lastErr)) != code {
