@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-04 @level:component
+@wp:WP-L1-04 @level:component
 Feature: Data keys and master keys
   Each tenant has a keyset of data keys, one of them primary. The keyset is
   stored only wrapped by the master key, which never leaves the key service.
