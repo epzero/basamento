@@ -44,9 +44,11 @@ adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
 eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
 values, so the contract itself stays free of the dependency. The chat adapter
 caps one vendor stream at 8 MiB of payload and 262144 chunks; exceeding either
-limit ends the invocation with `vendor_error`. Payload includes assistant text and reasoning, tool-call string fields, legacy
-multimodal URLs, and assistant-generated part text plus URL, base64, file id,
-and MIME type where the walker counts them. A stream that ends with only vendor metadata
+limit ends the invocation with `vendor_error`. The payload counts assistant text
+and reasoning, every string of a tool call, the text and the URL or URI of legacy
+multi-content parts, and the text, reasoning, URL, base64 data, file id and MIME
+type of assistant-generated parts; Extra and ResponseMeta are metadata and are not
+counted. A stream that ends with only vendor metadata
 (`Extra`, `ResponseMeta` such as a content filter or refusal finish reason) and
 no assistant content is `vendor_error` with a fixed message; provider adapters
 map refusals to text or typed errors before that check. A vendor panic inside the

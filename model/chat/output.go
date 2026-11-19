@@ -5,11 +5,10 @@ import (
 )
 
 // chunkPayloadBytes counts bytes one stream chunk contributes toward the
-// adapter's payload cap: assistant text and reasoning, every tool-call string
-// field, legacy MultiContent text and media URLs, and assistant-generated part
-// text plus URL, base64, file id, and MIME type. Extra and ResponseMeta are not
-// counted: they carry vendor metadata (request ids, finish reasons, logprobs),
-// not model output.
+// adapter's payload cap: assistant text and reasoning, every string of a tool
+// call, the text and URL or URI of legacy multi-content parts, and the text,
+// reasoning, URL, base64 data, file id and MIME type of assistant-generated
+// parts. Extra and ResponseMeta are metadata and are not counted.
 func chunkPayloadBytes(chunk *schema.Message) int {
 	if chunk == nil {
 		return 0
