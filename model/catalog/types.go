@@ -20,7 +20,9 @@ type Request struct {
 
 // Quote pins the price entry, the model's formula, the start time, the tenant
 // and the parameters that applied when the call started. Retain it and pass it
-// to Settle; later price changes do not reprice the call (REQ-MODEL-078).
+// to Settle; later price changes do not reprice the call (REQ-MODEL-078). A
+// quote is in-memory call state only: it is not serializable and must come
+// from Start.
 type Quote struct {
 	// Model is the id the quote was taken for.
 	Model string

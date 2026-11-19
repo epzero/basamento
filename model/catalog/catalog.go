@@ -197,6 +197,9 @@ func (c *Catalog) Settle(q Quote, usage model.Usage) (Charge, error) {
 	if q.Model == "" {
 		return Charge{}, core.NewError(core.CodeInvalidArgument, "quote has no model", nil)
 	}
+	if !q.pinned.entry.valid() {
+		return Charge{}, core.NewError(core.CodeInvalidArgument, "quote was not produced by Start", nil)
+	}
 	if err := validateUsage(usage); err != nil {
 		return Charge{}, err
 	}

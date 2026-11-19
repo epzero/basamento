@@ -330,6 +330,42 @@ func TestDefaultTokenFormula(t *testing.T) {
 	}
 }
 
+func TestSettleRejectsQuoteNotFromStart(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1 + usage.output_tokens * 8"})
+	usage := model.Usage{InputTokens: 1000, OutputTokens: 500}
+	_, err := c.Settle(catalog.Quote{Model: "sim-chat"}, usage)
+	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+		t.Fatalf("synthetic quote: code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	}
+
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 500})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	b, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var roundTripped catalog.Quote
+	if err := json.Unmarshal(b, &roundTripped); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	_, err = c.Settle(roundTripped, usage)
+	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
+		t.Fatalf("round-tripped quote: code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	}
+
+	charge, err := c.Settle(q, usage)
+	if err != nil {
+		t.Fatalf("Settle from Start: %v", err)
+	}
+	if charge.MilliPoints != 5000 {
+		t.Fatalf("charge = %d, want 5000", charge.MilliPoints)
+	}
+}
+
 func TestMissingInputRateRefusedAtUse(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
