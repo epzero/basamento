@@ -35,19 +35,19 @@ When a value of a Go type is encoded with `encoding/json`, the schema validator 
 ## Bytes, raw JSON and types with their own encoding
 
 ### REQ-SCHEMA-038 — Byte slices are base64 strings
-When a schema is generated from a Go struct type, the schema generator shall give a field of type `[]byte`, or of a named type whose underlying type is `[]byte` and which implements neither `encoding.TextMarshaler` nor `json.Marshaler`, the schema of a nullable string with `contentEncoding` `"base64"`, admitting `null` and any string and nothing else.
+When a schema is generated from a Go struct type, the schema generator shall give a field of type `[]byte`, or of a named type whose underlying type is `[]byte` and whose method set and whose pointer's method set include neither `encoding.TextMarshaler` nor `json.Marshaler`, the schema of a nullable string with `contentEncoding` `"base64"`, admitting `null` and any string and nothing else.
 
 ### REQ-SCHEMA-039 — Raw JSON admits any value
 When a schema is generated from a Go struct type, the schema generator shall give a field of type `json.RawMessage` a schema that admits every JSON value, including `null`.
 
 ### REQ-SCHEMA-040 — Fixed byte arrays are integer arrays
-When a schema is generated from a Go struct type, the schema generator shall give a field whose type is an array of bytes which implements neither `encoding.TextMarshaler` nor `json.Marshaler` the schema of an array of exactly its length in integers, admitting neither `null` nor strings.
+When a schema is generated from a Go struct type, the schema generator shall give a field whose type is an array of bytes whose method set and whose pointer's method set include neither `encoding.TextMarshaler` nor `json.Marshaler` the schema of an array of exactly its length in integers, admitting neither `null` nor strings.
 
 ### REQ-SCHEMA-041 — Text encoding is a string
 When a schema is generated from a Go type, the schema generator shall describe as a string every value whose type's method set includes `encoding.TextMarshaler` and does not include `json.Marshaler`, wherever that type appears: as a struct field, an array or slice element, a map value, or the type itself.
 
 ### REQ-SCHEMA-042 — JSON encoding admits any value
-When a schema is generated from a Go type, the schema generator shall describe as a schema that admits every JSON value every value whose type's method set includes `json.Marshaler`, except the types of `REQ-SCHEMA-039`, `REQ-SCHEMA-043` and `REQ-SCHEMA-044`, wherever that type appears.
+When a schema is generated from a Go type, the schema generator shall describe as a schema that admits every JSON value every value whose type's method set includes `json.Marshaler`, except the types of `REQ-SCHEMA-039`, `REQ-SCHEMA-043` and `REQ-SCHEMA-044`, wherever that type appears: as a struct field, an array or slice element, a map value, or the type itself.
 
 ### REQ-SCHEMA-043 — time.Time is a string
 When a schema is generated from a Go type, the schema generator shall describe `time.Time` as a string.
@@ -56,15 +56,15 @@ When a schema is generated from a Go type, the schema generator shall describe `
 When a schema is generated from a Go type, the schema generator shall describe `json.Number` as a number.
 
 ### REQ-SCHEMA-045 — An encoding that only the pointer has
-If a type's method set includes neither `encoding.TextMarshaler` nor `json.Marshaler` but the method set of the pointer to that type includes one of them, then the schema generator shall describe every value of that type, wherever it appears, as a schema that admits every JSON value.
+If a type's method set includes neither `encoding.TextMarshaler` nor `json.Marshaler` but the method set of the pointer to that type includes one of them, then the schema generator shall describe every value of that type as a schema that admits every JSON value, wherever it appears: as a struct field, an array or slice element, a map value, or the type itself.
 
 ## The string tag option
 
 ### REQ-SCHEMA-046 — The string option on numbers and booleans
-When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is an integer, floating-point or boolean type, the schema generator shall give the property the schema of a string that holds exactly the JSON literal `encoding/json` writes for a value of that type.
+When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is an integer, floating-point or boolean type, or is `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the JSON literal `encoding/json` writes for a value of that type, admitting `null` as well when the field is a pointer.
 
 ### REQ-SCHEMA-047 — The string option on strings
-When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is a string type, the schema generator shall give the property the schema of a string that holds exactly the quoted JSON string `encoding/json` writes for the field's value.
+When a struct field's `json` tag has the `string` option and the field's type, after following pointers, is a string type other than `json.Number`, the schema generator shall give the property the schema of a string that holds exactly the quoted JSON string `encoding/json` writes for the field's value, admitting `null` as well when the field is a pointer.
 
 ## Map keys
 

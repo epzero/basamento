@@ -26,12 +26,13 @@ what it accepts keeps the scenarios green.
 
 `encoding/json` writes a `[]byte` as a base64 string and a nil `[]byte` as
 `null`. The generator gives `[]byte`, and any named type whose underlying type
-is `[]byte` and which implements neither `encoding.TextMarshaler` nor
-`json.Marshaler`, the schema `{"type": ["null", "string"], "contentEncoding":
-"base64"}` (REQ-SCHEMA-038). `contentEncoding` is an annotation in draft
-2020-12, so validation checks the JSON type only and accepts any string; the
-base64 form of the content is what `encoding/json` writes (REQ-SCHEMA-008).
-A named byte slice with its own encoding takes the rule below instead.
+is `[]byte` and whose method set and whose pointer's method set include neither
+`encoding.TextMarshaler` nor `json.Marshaler`, the schema `{"type": ["null",
+"string"], "contentEncoding": "base64"}` (REQ-SCHEMA-038). `contentEncoding` is
+an annotation in draft 2020-12, so validation checks the JSON type only and
+accepts any string; the base64 form of the content is what `encoding/json`
+writes (REQ-SCHEMA-008). A named byte slice with an encoding in either method
+set takes the rule below instead.
 
 `json.RawMessage` is a `[]byte` with its own encoding, so it gets its own
 entry in the generator's type schemas: a schema that admits every JSON value
@@ -47,8 +48,8 @@ excluding `null` (REQ-SCHEMA-040).
 
 `encoding/json` asks a type how to encode itself before it looks at the type's
 structure. The generator follows the same order, and its answer wins wherever
-the type appears: a struct field, an array or slice element, a map value, a
-map key, or the whole type.
+the type appears: a struct field, an array or slice element, a map value, or
+the whole type.
 
 1. `json.RawMessage` admits every value (REQ-SCHEMA-039).
 2. `time.Time` is a string (REQ-SCHEMA-043).
@@ -66,7 +67,8 @@ map key, or the whole type.
 Promoted methods count, because they are in the method set: an embedded
 `Stamp` makes the embedding struct a `TextMarshaler`, exactly as
 `encoding/json` sees it, and a named byte slice or byte array that implements
-an interface takes this rule instead of REQ-SCHEMA-038 or REQ-SCHEMA-040.
+an interface in its own method set or in its pointer's method set takes this
+rule instead of REQ-SCHEMA-038 or REQ-SCHEMA-040.
 `json.Marshaler` is checked before `encoding.TextMarshaler`, as
 `encoding/json` does, and either is checked before the `string` tag option: a
 field of a type with its own encoding keeps that encoding when tagged
@@ -124,9 +126,11 @@ not reject gets the schema of a `map[string]V`: `null` or an object whose
 values use the element schema (REQ-SCHEMA-048). A key type with none of these
 — a float, a struct without `MarshalText`, an interface — is rejected with
 `invalid_argument`, naming the field and the key type (REQ-SCHEMA-049), as
-`encoding/json` refuses to marshal it too. The kind is checked before the
-interface because `encoding/json` does: a named string type with `MarshalText`
-is written as its raw string, not as its text.
+`encoding/json` refuses to marshal it too. The string kind is checked before
+the interface because `encoding/json` does: a named string type with
+`MarshalText` is written as its raw string, not as its text. For an integer
+kind the interface wins: a named integer type with `MarshalText` is written as
+its text, not with `strconv.FormatInt`.
 
 ## Interfaces the implementer follows
 
@@ -178,7 +182,11 @@ with underlying type `[]byte`, or a type that carries its own encoding, such
 as `TextStamp`, is therefore declared in the step driver and looked up by its
 name in the field tables. A scenario places such a type in a holder with one
 step, as a field named `v`, as an embedded field, or as the whole type, so the
-same behavior is proved in every position.
+same behavior is proved in every position. `TimeStamp` and `Numbered` are
+aliases of `time.Time` and `json.Number`, so they carry those types' encoding.
+The driver's `Binary`, `UUID`, `TextStamp` and `JSONStamp` declare their
+methods on the value receiver, so a value carries the encoding as well as its
+address and the embedded rows hold.
 
 ## Instances and numbers
 

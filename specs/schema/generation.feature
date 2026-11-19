@@ -182,18 +182,23 @@ Feature: Generating schemas from Go types
       | name "a", tags "x" and "y", extra a=1, seed 9  |
 
   @REQ-SCHEMA-003 @id:SCHEMA-003-02
-  Scenario Outline: A field of composite type with omitempty is not required
+  Scenario Outline: A composite or pointer field is required only by its tag
     Given a Go struct type "Doc" with fields:
-      | field | type      | json tag    |
-      | V     | <go type> | v,omitempty |
+      | field | type      | json tag |
+      | V     | <go type> | <tag>    |
     When a schema is generated from "Doc"
-    Then the schema accepts the instance {}
+    Then the schema <verdict> the instance {}
 
     Examples:
-      | go type        |
-      | []string       |
-      | map[string]int |
-      | []byte         |
+      | go type        | tag         | verdict |
+      | []string       | v           | rejects |
+      | map[string]int | v           | rejects |
+      | []byte         | v           | rejects |
+      | *int           | v           | rejects |
+      | []string       | v,omitempty | accepts |
+      | map[string]int | v,omitempty | accepts |
+      | []byte         | v,omitempty | accepts |
+      | *int           | v,omitempty | accepts |
 
   @REQ-SCHEMA-038 @REQ-SCHEMA-008 @id:SCHEMA-038-02
   Scenario Outline: A byte slice with its own encoding is not a base64 string
@@ -202,12 +207,13 @@ Feature: Generating schemas from Go types
     And a value of "Doc" that is the zero value
     When the value is encoded with encoding/json
     Then the schema generated from "Doc" accepts the encoded value
+    And the schema rejects the instance <wrong> with a violation at "<location>" of keyword "type"
 
     Examples:
-      | position          |
-      | a field named "v" |
-      | an embedded field |
-      | the whole type    |
+      | position          | wrong       | location |
+      | a field named "v" | {"v": null} | /v       |
+      | an embedded field | null        |          |
+      | the whole type    | null        |          |
 
   @REQ-SCHEMA-040 @REQ-SCHEMA-008 @id:SCHEMA-040-02
   Scenario Outline: A byte array with its own encoding is not an integer array
@@ -284,6 +290,7 @@ Feature: Generating schemas from Go types
     And a value of "Doc" that is the zero value
     When the address of the value is encoded with encoding/json
     Then the schema generated from "Doc" accepts the encoded value
+    And the schema accepts the instance {"v": [1]}
 
   @REQ-SCHEMA-046 @id:SCHEMA-046-01
   Scenario Outline: A string-option number or boolean is a string
