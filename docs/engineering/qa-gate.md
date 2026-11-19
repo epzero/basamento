@@ -31,7 +31,7 @@ Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
 the **line** job above, and a flake hunt (repeated runs that look for
 nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
 No automatic reader for nightly **line** failures yet (tracked **EP0-95**);
-the **release-readiness** job is informational only until that lands.
+the **release-readiness** job uses `continue-on-error` and is informational only (P0 backlog is expected); **line** is the blocking nightly signal.
 
 ## Gate report
 

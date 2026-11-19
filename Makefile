@@ -59,7 +59,7 @@ lint:
 	$(call tool,golangci-lint,golangci-lint run ./...)
 
 vuln:
-	$(call tool,govulncheck,set -e; $(GATE) module-roots | while IFS= read -r dir; do (cd "$$dir" && govulncheck ./...) || exit 1; done)
+	$(call tool,govulncheck,set -e; roots="$$($(GATE) module-roots)" || exit 1; [ -n "$$roots" ] || { echo "gate: no module roots"; exit 1; }; for dir in $$roots; do (cd "$$dir" && govulncheck ./...) || exit 1; done)
 
 # Dependencies must stay compatible with Apache-2.0 (no GPL, AGPL, SSPL, ...).
 licenses:

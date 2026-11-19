@@ -35,9 +35,11 @@ jobs:
       - name: govulncheck
         run: |
           set -e
-          while IFS= read -r dir; do
+          roots="$(go tool gate module-roots)"
+          test -n "$roots"
+          for dir in $roots; do
             (cd "$dir" && govulncheck ./...)
-          done < <(go tool gate module-roots)
+          done
 
   flake-hunt:
     # Repeated runs look for nondeterminism; a flaky scenario is quarantined
@@ -76,4 +78,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go tool gate release-check
+      # Informational: pending P0 acceptances are expected; the blocking nightly signal is line (EP0-95 tracks a reader).
+      - name: release-check
+        continue-on-error: true
+        run: go tool gate release-check
