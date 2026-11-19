@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -117,4 +118,19 @@ func openCodecWithKeys(ctx context.Context, store KeysetStore, keys []KeyService
 		return nil, err
 	}
 	return c, nil
+}
+
+func TestOpenCodecRejectsDuplicateMasterURL(t *testing.T) {
+	t.Parallel()
+	store := &memKeysetStore{data: map[string]StoredKeyset{}}
+	raw := testLocalSecretsURL(3)
+	_, err := OpenCodec(context.Background(), store, raw, []string{raw})
+	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("OpenCodec duplicate master: %v", err)
+	}
+}
+
+func testLocalSecretsURL(seed int) string {
+	key := bytesFromTestSeed(seed, 32)
+	return "localsecrets://" + base64.StdEncoding.EncodeToString(key)
 }

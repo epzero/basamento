@@ -22,8 +22,7 @@ type keeperKeyService struct {
 }
 
 // OpenKeyService opens a production master key from url (current or previous).
-func OpenKeyService(ctx context.Context, raw string, opts ...Option) (KeyService, error) {
-	_ = applyOptions(opts)
+func OpenKeyService(ctx context.Context, raw string) (KeyService, error) {
 	return newKeeperService(ctx, raw)
 }
 
