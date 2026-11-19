@@ -43,9 +43,6 @@ func (s *Store) tenantOK(ctx context.Context) (core.TenantID, error) {
 	if !ok {
 		return "", core.NewError(core.CodeInvalidArgument, "tenant required", nil)
 	}
-	if err := validateTenantSegment(string(tid)); err != nil {
-		return "", err
-	}
 	return tid, nil
 }
 

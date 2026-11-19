@@ -1,6 +1,7 @@
 package blob
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"path"
@@ -43,7 +44,7 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if err := validateTenantSegment(tenant); err != nil {
+	if _, ok := core.TenantFrom(core.WithTenant(context.Background(), core.TenantID(tenant))); !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}

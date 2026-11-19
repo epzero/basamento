@@ -8,10 +8,10 @@ import (
 
 func TestTenantCollisionRejected(t *testing.T) {
 	t.Parallel()
-	if err := ValidateTenant("acme"); err != nil {
+	if _, err := FrameBoundPlaintext("acme", []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateTenant("acme\x00evil"); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+	if _, err := FrameBoundPlaintext("acme\x00evil", []byte("x")); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("nul tenant err=%v", err)
 	}
 }

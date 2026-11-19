@@ -76,11 +76,7 @@ func (c *Codec) tenant(ctx context.Context) (string, error) {
 	if !ok {
 		return "", errInvalidArgument(msgTenantRequired)
 	}
-	t := string(id)
-	if err := ValidateTenant(t); err != nil {
-		return "", err
-	}
-	return t, nil
+	return string(id), nil
 }
 
 func (c *Codec) snapshotKeys() []KeyService {
@@ -345,9 +341,6 @@ func (c *Codec) RotateMasterKey(ctx context.Context, newMaster KeyService) error
 		}
 		changed := false
 		for _, tenant := range tenants {
-			if err := ValidateTenant(tenant); err != nil {
-				return err
-			}
 			done, err := c.rewrapTenant(ctx, tenant, newMaster, newKeys)
 			if err != nil {
 				return err
@@ -371,6 +364,9 @@ func (c *Codec) prependMasterKeyLocked(ks KeyService) {
 	out := []KeyService{ks}
 	for _, k := range c.keys {
 		if k.MasterKeyID() == id {
+			if err := k.Close(); err != nil {
+				slog.Error("close dropped master key", "master_key_id", id, "err", err)
+			}
 			continue
 		}
 		out = append(out, k)
