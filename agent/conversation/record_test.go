@@ -199,6 +199,10 @@ func TestRecordWithQueueSurvivesMarshalling(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := rec.Accept(Message{ID: "m4", Text: "Make it rhyme", Mode: ModeSteer}); err != nil {
+		t.Fatal(err)
+	}
+	rec.Steer("m4", "Make it rhyme")
 	rec.DurableCall()
 	rec.Checkpointed()
 
@@ -210,8 +214,11 @@ func TestRecordWithQueueSurvivesMarshalling(t *testing.T) {
 	if err := json.Unmarshal(raw, &resumed); err != nil {
 		t.Fatal(err)
 	}
-	if resumed.Running != 1 || len(resumed.Queue) != 2 || len(resumed.Handled) != 3 || resumed.Continued != 1 {
-		t.Fatalf("resumed record = %+v, want the running turn, two queued messages, three handled ids and one continuation", resumed)
+	if resumed.Running != 1 || len(resumed.Queue) != 2 || len(resumed.Handled) != 4 || resumed.Continued != 1 {
+		t.Fatalf("resumed record = %+v, want the running turn, two queued messages, four handled ids and one continuation", resumed)
+	}
+	if len(resumed.Messages) != 2 || resumed.Messages[1].Text != "Make it rhyme" || resumed.Messages[1].Role != RoleUser {
+		t.Fatalf("messages = %+v, want the steering message kept", resumed.Messages)
 	}
 	if _, err := resumed.Accept(Message{ID: "m2", Text: "Then translate it"}); err != nil {
 		t.Fatalf("redelivered queued message: %v", err)
