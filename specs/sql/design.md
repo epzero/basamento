@@ -92,11 +92,30 @@ that the sample repository sets to violate the named constraint (`not-null` or
 `check`) when requested by a scenario.
 
 Steps about a database failure trigger real dialect failures from `internal/bdd`
-with no test hooks in production code (for example WAL snapshot or lock
-contention on SQLite for `busy` and `locked`; conflicting transactions,
-test-schema SQLSTATE triggers, or closing a local proxy to the database on
-Postgres for `serialization failure`, `deadlock`, `out of resources`, and
-`unreachable`).
+with no test hooks in production code.
+
+A `busy` step opens a second connection to the same SQLite file and begins an
+immediate transaction on it to hold the write lock. It then runs
+`PRAGMA busy_timeout=0` through the store's own `Execer`: the SQLite store
+keeps exactly one connection (`SetMaxOpenConns(1)`), and the pragma applies to
+that connection, so the store's next write fails at once with `SQLITE_BUSY`
+instead of waiting out the DSN's `busy_timeout`. The step uses only the store's
+public port, and nothing waits on a timeout, so the scenario is deterministic
+and fast.
+
+`SQLITE_LOCKED` is not reachable through the store's connections. Its
+shared-cache form needs a shared-cache connection the store never opens, and
+the driver waits on `sqlite3_unlock_notify` instead of returning it. The plain
+`SQLITE_LOCKED` code needs a statement on a connection that still has a cursor
+open on the table it touches, which the store's queries never do, and in WAL
+mode an exclusive lock behaves like an immediate one and still yields
+`SQLITE_BUSY`. The mapper's handling of `SQLITE_LOCKED` is therefore covered by
+a unit test that drives it with a real driver error
+(`TestSQLiteLockedMapping`), not by a scenario.
+
+Postgres refusals come from conflicting transactions, test-schema SQLSTATE
+triggers, or closing a local proxy to the database, for `serialization failure`,
+`deadlock`, `out of resources`, and `unreachable`.
 
 Scenarios tagged with both `@profile:embedded` and `@profile:cloud` run once
 per dialect. The component driver always runs the SQLite pass, on a fresh file

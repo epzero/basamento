@@ -102,6 +102,42 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    EXPR-003-05:
+        hash: sha256:2aa4ba1f5d6e367b504a7f9a28c12ad92fdbed907d847f0604185a90be131967
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
+    EXPR-003-06:
+        hash: sha256:8c784a2888d335c871e2f35c5a24ba4269435963433dcd01eb9acb07341ac47a
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
+    EXPR-003-07:
+        hash: sha256:cb0bef5c56cb8f6c1b8e1c60409026dcd917c9c35da3a4f8e524bc4a2854d40e
+        reqs:
+            - REQ-EXPR-003
+        tier: P2
+        author: claude-code:spec-author:b28bd3
+        reviewer: opencode:spec-reviewer:5d2145
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object type keeps the fields of its properties as the value type of a map with additionalProperties, inline, through $ref, or with additionalProperties beside properties; composed from the existing map(string, T(S)) and object rows, so no approved text changed and the plain map of EXPR-003-01 for a non-object S and the map of objects of EXPR-012-04 stay true.'
+        ref: https://github.com/epzero/basamento/pull/87
+        human:
+            status: pending
     EXPR-004-01:
         hash: sha256:96a64b6531a0c82447a5cb17daf5bae4dd77561a9f6f65ec5e2abbdc9856a821
         reqs:
@@ -270,6 +306,42 @@ scenarios:
         approved_at: "2026-11-17"
         human:
             status: pending
+    EXPR-012-02:
+        hash: sha256:540033939c30ae9113d7d8664995d3304159b64d105ef6bc3cca247167edf81e
+        reqs:
+            - REQ-EXPR-012
+        tier: P2
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object nested in an object, an array or a map is returned as nested JSON, in place and in key order.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-012-03:
+        hash: sha256:3fbc426ca55abf666d68e33a8c751fdce7cf3e665c6e567023d54446b766c2ee
+        reqs:
+            - REQ-EXPR-012
+        tier: P2
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object nested in an object, an array or a map is returned as nested JSON, in place and in key order.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-012-04:
+        hash: sha256:c8b16448a3714af47073f5c5fa316f2454c87376a18d95405205100e8740b854
+        reqs:
+            - REQ-EXPR-012
+        tier: P2
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'New behavior: an object nested in an object, an array or a map is returned as nested JSON, in place and in key order.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
     EXPR-013-01:
         hash: sha256:55d9d4f39f5b2a5bd367db0066c0f9098ab2ea61e354bb448e3def7d2eaf3228
         reqs:
@@ -376,5 +448,173 @@ scenarios:
         author: claude-code:spec-author:9e0fec
         reviewer: antigravity:spec-reviewer:88cf63
         approved_at: "2026-11-17"
+        human:
+            status: pending
+    EXPR-020-01:
+        hash: sha256:7f92694bfb37e8c305e30c17fbf578a001c08672c3e98dd5aa99437579e25033
+        reqs:
+            - REQ-EXPR-020
+        tier: P1
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Agreed bound: a deterministic output limit on RFC 8785 bytes, default 1 MiB (the bus limit), measured by bounded operators and at each yield; the design admits that memory beyond the limit is not bounded by it.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-020-02:
+        hash: sha256:5cc3f1ceec9fd11cfd87bf553be4df76d74d48dd3a194e7294e36c6990914565
+        reqs:
+            - REQ-EXPR-020
+        tier: P1
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Agreed bound: a deterministic output limit on RFC 8785 bytes, default 1 MiB (the bus limit), measured by bounded operators and at each yield; the design admits that memory beyond the limit is not bounded by it.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-020-03:
+        hash: sha256:e16ddb36a1fa01844566de8e7a4a5b37bd48e641fe9a365841019c6a48e8e0e7
+        reqs:
+            - REQ-EXPR-020
+        tier: P1
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Agreed bound: a deterministic output limit on RFC 8785 bytes, default 1 MiB (the bus limit), measured by bounded operators and at each yield; the design admits that memory beyond the limit is not bounded by it.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-01:
+        hash: sha256:b7928799966ecea0bd14b471ace93c0385840ce31b71dd08926e66f455c37a42
+        reqs:
+            - REQ-EXPR-021
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Determinism (Constitution Art. 3): map iteration orders keys by kind and value, so comprehensions and the first error of an evaluation never depend on Go map order; same class as the accepted EXPR-006-01 and EXPR-016-01.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-02:
+        hash: sha256:8babee0592cf786288975eadcb3a46c72d23ab0ef5669fe87ffd635ebcd82d72
+        reqs:
+            - REQ-EXPR-021
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Determinism (Constitution Art. 3): map iteration orders keys by kind and value, so comprehensions and the first error of an evaluation never depend on Go map order; same class as the accepted EXPR-006-01 and EXPR-016-01.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-03:
+        hash: sha256:4725e22008b3b0fffe6fce8d38409c9e3c1c49b009586b1ea1ec77aa0d3b9e54
+        reqs:
+            - REQ-EXPR-021
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Determinism (Constitution Art. 3): map iteration orders keys by kind and value, so comprehensions and the first error of an evaluation never depend on Go map order; same class as the accepted EXPR-006-01 and EXPR-016-01.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-04:
+        hash: sha256:f418d9a95d18e21e58f163db4a0d113b25e368c03a13f73bb47280333904f2b1
+        reqs:
+            - REQ-EXPR-021
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Determinism (Constitution Art. 3): map iteration orders keys by kind and value, so comprehensions and the first error of an evaluation never depend on Go map order; same class as the accepted EXPR-006-01 and EXPR-016-01.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-021-05:
+        hash: sha256:597e3c230f42631796cd19380d445c3cca043c69689346bc83fbdd6259090c58
+        reqs:
+            - REQ-EXPR-021
+        tier: P1
+        author: claude-code:spec-author:b58551
+        reviewer: opencode:spec-reviewer:55941c
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: map key identity for == and [key] is CEL numeric equality across int, uint and double, symmetric in both directions, and a numeric key never equals a string key. Verified against cel-go v0.33.4: stock is asymmetric (int/uint lookups miss double entries) and operand-order-dependent, so this deliberately goes beyond its accessor; iteration order (EXPR-021-01..04) is unchanged.'
+        ref: https://github.com/epzero/basamento/pull/84
+        human:
+            status: pending
+    EXPR-022-01:
+        hash: sha256:ae3c9fc45a96a51fd4e3b89ced86a23dc173b09ece1b47dbf322b0c3bc1fab0e
+        reqs:
+            - REQ-EXPR-022
+        tier: P1
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: a map key of no order fails iteration with the cause unordered key instead of being skipped in Go order, while a non-iterating access keeps every entry; verified against cel-go v0.33.4.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-022-02:
+        hash: sha256:87e280a9373699e1eff4465de2b6e6089abdb7651414078d998c53835b010af8
+        reqs:
+            - REQ-EXPR-022
+        tier: P1
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:49180d
+        approved_at: "2026-11-19"
+        note: 'Agreed behavior: a map key of no order fails iteration with the cause unordered key instead of being skipped in Go order, while a non-iterating access keeps every entry; verified against cel-go v0.33.4.'
+        ref: https://github.com/epzero/basamento/pull/46
+        human:
+            status: pending
+    EXPR-023-01:
+        hash: sha256:153a83b47998ad12a04e395e5c4985a77a9d33623977e94945432f6dbf4bd055
+        reqs:
+            - REQ-EXPR-023
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: cursor:spec-reviewer:891d18
+        approved_at: "2026-11-19"
+        note: 'Arbitrated fix: halt and env parameter rows match REQ-EXPR-023 and design.md; full outline checked against requirement list and sibling EXPR-024–026.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-024-01:
+        hash: sha256:45f23123beb5777c55c2aa9b8784c0ff16cef1bf5e20e37059ca6928baab438a
+        reqs:
+            - REQ-EXPR-024
+        tier: P0
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'Security: $ENV, $__loc__ and $__prog_args expose the process environment, source paths and arguments, and using them would break replay determinism; refusing them is the guard that keeps a mapping pure.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-025-01:
+        hash: sha256:5e8786d98517130a3c3317c57446a7680a50b417c8e3267e125d16984bcea004
+        reqs:
+            - REQ-EXPR-025
+        tier: P2
+        author: claude-code:spec-author:9e0fec
+        reviewer: opencode:spec-reviewer:1c319d
+        approved_at: "2026-11-18"
+        note: 'New behavior: provider fields named like reserved builtins stay readable as data; no approved scenario text changed, so no tier above P2.'
+        ref: https://github.com/epzero/basamento/pull/51
+        human:
+            status: pending
+    EXPR-026-01:
+        hash: sha256:60ca3ca4fa0fe3b281a697270d9b8d6f891c7475f02ae69af21fc5ef515903ed
+        reqs:
+            - REQ-EXPR-026
+        tier: P0
+        author: claude-code:spec-author:48b52f
+        reviewer: opencode:spec-reviewer:1cc967
+        approved_at: "2026-11-18"
+        note: 'Security: a mapping that includes a module or imports a data file reads the host filesystem, and module contents would make evaluation depend on files not bound as variables; refusing both at compile time keeps a mapping closed over its inputs and replay-deterministic. Covers the include and data-import forms; the plain module import is already approved in EXPR-015-01.'
+        ref: https://github.com/epzero/basamento/pull/51
         human:
             status: pending
