@@ -111,9 +111,18 @@ func TestClassifyNightlySchedules(t *testing.T) {
 		}, want: NightlyOK},
 	}
 
-	failedConclusions := []string{
-		"", "failure", "cancelled", "timed_out", "skipped", "neutral",
-		"action_required", "startup_failure",
+	failedConclusions := []struct {
+		name       string
+		conclusion string
+	}{
+		{name: "failed empty conclusion", conclusion: ""},
+		{name: "failed failure", conclusion: "failure"},
+		{name: "failed cancelled", conclusion: "cancelled"},
+		{name: "failed timed_out", conclusion: "timed_out"},
+		{name: "failed skipped", conclusion: "skipped"},
+		{name: "failed neutral", conclusion: "neutral"},
+		{name: "failed action_required", conclusion: "action_required"},
+		{name: "failed startup_failure", conclusion: "startup_failure"},
 	}
 	for _, c := range failedConclusions {
 		c := c
@@ -122,8 +131,8 @@ func TestClassifyNightlySchedules(t *testing.T) {
 			runs []NightlyRun
 			want NightlyStatus
 		}{
-			name: "failed " + c,
-			runs: []NightlyRun{run("completed", c, nightlyAt(fiveH), urlOK)},
+			name: c.name,
+			runs: []NightlyRun{run("completed", c.conclusion, nightlyAt(fiveH), urlOK)},
 			want: NightlyFailed,
 		})
 	}

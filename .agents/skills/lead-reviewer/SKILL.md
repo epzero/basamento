@@ -40,10 +40,13 @@ stop and say so: do not guess an account.
    reads the nightly") — always, before anything else:
 
    ```bash
-   set -o pipefail
-   gh run list --workflow nightly.yml --event schedule --limit 5 \
-     --json conclusion,status,createdAt,url | go tool gate nightly
+   ( set -o pipefail
+     gh run list --workflow nightly.yml --event schedule --limit 5 \
+       --json conclusion,status,createdAt,url | go tool gate nightly
+   )
    ```
+
+   `pipefail` applies only inside that subshell, not the lead's session.
 
    Exit **0** (ok): do nothing. Exit **1** (failed or stale): open one ticket
    for the architect unless a ticket with the same title already exists

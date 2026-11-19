@@ -41,13 +41,14 @@ The scheduled **nightly** workflow runs what must not stay silent:
 summary.
 
 The reviewer lead reads the schedule on every wake (first step of
-`.agents/skills/lead-reviewer/SKILL.md`), with `set -o pipefail` so a failing
-`gh` is not hidden:
+`.agents/skills/lead-reviewer/SKILL.md`). `pipefail` applies only inside the
+subshell below so a failing `gh` is not hidden and the lead's shell is unchanged:
 
 ```bash
-set -o pipefail
-gh run list --workflow nightly.yml --event schedule --limit 5 \
-  --json conclusion,status,createdAt,url | go tool gate nightly
+( set -o pipefail
+  gh run list --workflow nightly.yml --event schedule --limit 5 \
+    --json conclusion,status,createdAt,url | go tool gate nightly
+)
 ```
 
 `go tool gate nightly` classifies the newest **completed** scheduled run
@@ -80,8 +81,9 @@ count, while a long run or re-run is in flight the reader reports on the
 previous completed run (it can say **ok** while a re-run of a failed workflow
 is still running, after the failure was ticketed on first sight). It says
 **stale** when the newest completed run is older than 36 hours even if a newer
-run is still unfinished; a run that stays unfinished for more than about 12
-hours after that creation time is worth the architect's look too.
+run is still unfinished; a run still queued or running about 12 hours after it
+was created is itself worth the architect's look (the next run is due 24 hours
+after the previous one, and the reader says stale at 36 hours).
 
 ## Conflict markers
 
