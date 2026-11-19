@@ -6,8 +6,11 @@ package steps
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cucumber/godog"
+
+	"github.com/epzero/basamento/core"
 )
 
 type worldKey struct{}
@@ -16,6 +19,9 @@ type worldKey struct{}
 type World struct {
 	Core   *coreWorld
 	Schema *schemaWorld
+	SQL    *sqlWorld
+	Prompt *promptWorld
+	Blob   *blobWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -23,8 +29,42 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 // Initialize registers hooks and every domain's steps.
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		return context.WithValue(ctx, worldKey{}, &World{Core: newCoreWorld(), Schema: newSchemaWorld()}), nil
+		return context.WithValue(ctx, worldKey{}, &World{
+			Core:   newCoreWorld(),
+			Schema: newSchemaWorld(),
+			SQL:    newSQLWorld(),
+			Prompt: newPromptWorld(),
+			Blob:   newBlobWorld(),
+		}), nil
 	})
 	registerCore(sc)
 	registerSchema(sc)
+	registerSQL(sc)
+	registerPrompt(sc)
+	registerBlob(sc)
+	registerSharedSteps(sc)
+}
+
+func registerSharedSteps(sc *godog.ScenarioContext) {
+	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+}
+
+func assertCallFailsWithCode(ctx context.Context, code string) error {
+	w := world(ctx)
+	if w.SQL != nil {
+		err := w.SQL.lastErr
+		if err == nil {
+			err = w.SQL.lastTxErr
+		}
+		if err != nil {
+			if string(core.CodeOf(err)) != code {
+				return fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
+			}
+			return nil
+		}
+	}
+	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
+		return assertBlobCallCode(ctx, code)
+	}
+	return fmt.Errorf("call succeeded, want %s", code)
 }
