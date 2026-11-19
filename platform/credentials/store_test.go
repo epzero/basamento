@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +292,24 @@ func assertNoDriverText(t *testing.T, err error) {
 	}
 	if !bytes.Contains([]byte(err.Error()), []byte("sql: ")) {
 		t.Fatalf("error not mapped by platform/sql: %v", err)
+	}
+}
+
+func TestFailLogsCauseCode(t *testing.T) {
+	ts := newTestStore(t)
+	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-4f9a2c")
+	ts.audit.err = errors.New("audit down")
+	var buf bytes.Buffer
+	store := New(NewSQLBackend(ts.sql), ts.audit, ts.secrets, ts.clock,
+		WithLogger(slog.New(slog.NewJSONHandler(&buf, nil))))
+	_, err := store.Resolve(tenantCtx("acme"), "cred://vendor/missing")
+	wantCode(t, err, core.CodeUnavailable)
+	logged := buf.String()
+	if !strings.Contains(logged, `"reason":"not_found"`) {
+		t.Fatalf("log lacks the cause code: %s", logged)
+	}
+	if strings.Contains(logged, "sk-live") {
+		t.Fatalf("log leaks a value: %s", logged)
 	}
 }
 

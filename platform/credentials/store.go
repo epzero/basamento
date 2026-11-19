@@ -169,7 +169,8 @@ func (s *Store) Names(ctx context.Context) ([]string, error) {
 }
 
 // fail audits a failed resolution and then returns the failure. An audit write
-// failure replaces the failure with unavailable and no value is returned.
+// failure replaces the failure with unavailable and no value is returned; the
+// failure log keeps the cause's code as the event's reason.
 func (s *Store) fail(ctx context.Context, tenant core.TenantID, ref string, cause error) error {
 	if err := s.record(ctx, tenant, ref, "failed", string(core.CodeOf(cause))); err != nil {
 		return err
@@ -194,6 +195,7 @@ func (s *Store) record(ctx context.Context, tenant core.TenantID, ref, outcome, 
 		s.opts.loggerOrDefault().ErrorContext(ctx, "credential audit write failed",
 			slog.String("action", event.Action),
 			slog.String("outcome", event.Outcome),
+			slog.String("reason", event.Reason),
 			slog.String("error", err.Error()))
 		return &core.Error{Code: core.CodeUnavailable, Message: "audit store unavailable", Retryable: true}
 	}
