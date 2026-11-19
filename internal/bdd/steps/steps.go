@@ -86,6 +86,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerAuth(sc)
 	registerSharedSteps(sc)
 	registerShared(sc)
+	registerBlobUploads(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		world(ctx).Config.teardown()
 		return ctx, nil
