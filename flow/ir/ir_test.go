@@ -360,6 +360,48 @@ edges: [{from: START, to: plan}, {from: plan, to: FAIL}]
 	}
 }
 
+// A trailing document-start marker leaves an empty document behind; it carries
+// no definition, so it is not a second one and the stream is drained to EOF.
+func TestDecodeAcceptsATrailingDocumentStartMarker(t *testing.T) {
+	for _, tail := range []string{"---", "---\n", "---\n---", "---\n---\n", "---\n# only a comment\n"} {
+		text := "name: x\nversion: 1\nstate: {schema: {type: object}}\n" +
+			"nodes: {plan: {kind: task}}\nedges: [{from: START, to: plan}, {from: plan, to: FAIL}]\n" + tail
+		f, err := Decode([]byte(text))
+		if err != nil {
+			t.Fatalf("trailing %q: %v", tail, err)
+		}
+		if f.Name != "x" || len(f.Nodes) != 1 {
+			t.Fatalf("trailing %q: decoded %+v", tail, f)
+		}
+	}
+}
+
+// A second document with content is still rejected, and so is one the YAML
+// parser cannot read: the first is a second definition, the other is a broken
+// stream, and the error says which.
+func TestDecodeRejectsAMalformedSecondDocument(t *testing.T) {
+	text := `
+name: first
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}, {from: plan, to: FAIL}]
+---
+name: [unclosed
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "more than one document") || !strings.Contains(msg, "invalid YAML") {
+		t.Fatalf("message %q blames the document count, not the parse error", msg)
+	}
+}
+
 func TestDecodeRejectsNonObjectTopLevel(t *testing.T) {
 	for _, text := range []string{"null", `[{"name":"x"}]`, `"x"`, "42", "true"} {
 		_, err := Decode([]byte(text))

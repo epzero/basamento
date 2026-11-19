@@ -142,10 +142,22 @@ func yamlToJSON(data []byte) ([]byte, error) {
 	}
 	// A decoder over the stream, not yaml.Unmarshal: Unmarshal silently keeps
 	// only the first document, so a corrected definition appended after a
-	// stale one would be dropped and the stale one hashed instead.
-	var extra yaml.Node
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return nil, multipleDocumentsErr()
+	// stale one would be dropped and the stale one hashed instead. A trailing
+	// document-start marker leaves an empty document behind, which carries no
+	// definition and is accepted; the stream is drained either way, so
+	// "a: 1\n---\n---" ends the same as "a: 1\n---".
+	for {
+		var extra yaml.Node
+		err := dec.Decode(&extra)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, invalid("flow: invalid YAML: "+err.Error(), nil)
+		}
+		if !emptyDocument(&extra) {
+			return nil, multipleDocumentsErr()
+		}
 	}
 	if err := checkYAMLDuplicateKeys(doc.Content[0], ""); err != nil {
 		return nil, err
@@ -166,6 +178,22 @@ func yamlToJSON(data []byte) ([]byte, error) {
 // first hashed and pinned as if it were the whole input (REQ-FLOW-005).
 func multipleDocumentsErr() *core.Error {
 	return invalid("flow: more than one document in the definition", nil)
+}
+
+// emptyDocument reports whether a decoded document carries nothing. go-yaml
+// materializes a document with no content — a trailing document-start marker,
+// or a document holding only a comment — as one null scalar with an empty
+// value, so that is what "empty" means here; an explicit null, a scalar, a
+// mapping or a sequence is content.
+func emptyDocument(doc *yaml.Node) bool {
+	if len(doc.Content) == 0 {
+		return true
+	}
+	if len(doc.Content) > 1 {
+		return false
+	}
+	node := doc.Content[0]
+	return node.Kind == yaml.ScalarNode && node.Tag == "!!null" && node.Value == ""
 }
 
 func checkYAMLDuplicateKeys(n *yaml.Node, path string) error {
