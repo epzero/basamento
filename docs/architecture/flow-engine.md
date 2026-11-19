@@ -1,8 +1,8 @@
 # Flow engine
 
 Status: IR, compiler and Go builder in `flow/ir`, `flow/compile` and
-`flow/builder` (WP-L4-01, WP-L4-03); contracts
-in `flow/flow.go`; machine and host **Planned** (WP-L4-02, WP-L4-04).
+`flow/builder` (WP-L4-01, WP-L4-03); the machine in `flow/machine` (WP-L4-02);
+contracts in `flow/flow.go`; host **Planned** (WP-L4-04).
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -87,13 +87,27 @@ node's input must be, per kind, is the machine's (WP-L4-02) and the host's
 
 ## 3. Machine
 
+`flow/machine` implements `flow.Machine` over one compiled definition: `New`
+validates the IR and compiles its expressions, then `Start` and `Apply` run it.
+
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
   snapshot and commands. No I/O and no clock.
 - **Supersteps**: every ready node runs. Updates merge through reducers **in
   node-id order** at the barrier, so the result does not depend on completion
-  order (REQ-FLOW-002).
+  order (REQ-FLOW-002). A map node's attempts merge in attempt order after the
+  node id. Steps stay sorted in the snapshot, so two runs that differ only in
+  completion order have identical snapshots.
 - **Edges**: the first edge whose `when` holds, in declaration order;
-  otherwise the default edge (REQ-FLOW-001).
+  otherwise the default edge (REQ-FLOW-001). A node with no outgoing edge ends
+  its branch; reaching the reserved `FAIL` endpoint fails the run.
+- **Node kinds**: `set` nodes and routing are evaluated in the machine with no
+  command (REQ-FLOW-036). A `parallel` node starts every node named by its
+  outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
+  array and starts the node named by `spec.node` once per element, carrying the
+  element as input and the one-based index as the attempt. Every other kind
+  becomes a `run_node`, `await_gate` or `start_timer` command for the host.
+- **Guards**: a `while` that does not hold skips the node and ends its branch;
+  a visit or cost bound that is reached fails the run with `budget_exceeded`.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
   (`cost_mpts`). Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.

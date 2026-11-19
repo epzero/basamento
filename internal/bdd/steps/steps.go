@@ -28,6 +28,7 @@ type World struct {
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
+	Machine     *machineWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -45,6 +46,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
+			Machine:     newMachineWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -56,6 +58,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowCompile(sc)
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)
+	registerFlowMachine(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
