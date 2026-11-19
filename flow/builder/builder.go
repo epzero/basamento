@@ -105,8 +105,8 @@ func (b *Builder) StateType(t reflect.Type) *Builder {
 }
 
 // Reducer declares the reducer of a state key: replace, append, merge, sum or
-// merge_by(<field>). Build rejects a key the state schema does not declare and
-// a key declared twice (REQ-FLOW-024); the reducer form is the compiler's
+// merge_by(<field>). Build rejects a key the state schema does not declare
+// (REQ-FLOW-024) and a key declared twice; the reducer form is the compiler's
 // check.
 func (b *Builder) Reducer(key, reducer string) *Builder {
 	b.reducers = append(b.reducers, reducerDecl{key: key, reducer: reducer})
@@ -184,8 +184,8 @@ func (b *Builder) Edge(from, to, when string) *Builder {
 }
 
 // Entry marks a node as the entry node, the same as an edge from Start with no
-// condition. Marking the same node again is a no-op. Build rejects more than
-// one entry target (REQ-FLOW-018).
+// condition (REQ-FLOW-014). Marking the same node again is a no-op. Build
+// rejects more than one entry target (REQ-FLOW-018).
 func (b *Builder) Entry(node string) *Builder {
 	for _, marked := range b.entries {
 		if marked == node {
@@ -211,6 +211,9 @@ func (b *Builder) Entry(node string) *Builder {
 // Build returns a new IR each call and reads no clock, randomness or instance
 // identity (REQ-FLOW-010, REQ-FLOW-011).
 func (b *Builder) Build() (*flow.IR, error) {
+	if b == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "flow builder: nil builder", nil)
+	}
 	if b.stateTypeSet && b.stateType == nil {
 		return nil, b.errorf(nil, "state type is nil")
 	}

@@ -530,6 +530,18 @@ func TestDuplicateReducerRejectedWhateverTheOrder(t *testing.T) {
 	}
 }
 
+func TestNilBuilderRejected(t *testing.T) {
+	var b *Builder
+	_, err := b.Build()
+	var platform *core.Error
+	if !errors.As(err, &platform) {
+		t.Fatalf("error is %T, want *core.Error", err)
+	}
+	if platform.Code != core.CodeInvalidArgument {
+		t.Fatalf("code %s, want %s", platform.Code, core.CodeInvalidArgument)
+	}
+}
+
 func TestNilStateTypeRejected(t *testing.T) {
 	platform := mustFailure(t, New("codegen", 3).
 		StateType(nil).

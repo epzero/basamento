@@ -73,8 +73,12 @@ func newBuilderWorld() *builderWorld { return &builderWorld{} }
 func builderCtx(ctx context.Context) *builderWorld { return world(ctx).FlowBuilder }
 
 var (
-	declaredNodeRE = regexp.MustCompile(`"([^"]*)"\s+of kind "([^"]*)"(?:\s+given the node spec (\{[^}]*\}))?`)
-	reducerRE      = regexp.MustCompile(`"([^"]*)" as "([^"]*)"`)
+	// declaredNodeHeadRE matches node name and kind. Specs after "given the node
+	// spec" are parsed with balanced braces: the old \{[^}]*\} pattern stopped at
+	// the first "}", so nested JSON was silently truncated (step grammar: use
+	// balanced object literals only).
+	declaredNodeHeadRE = regexp.MustCompile(`"([^"]*)"\s+of kind "([^"]*)"`)
+	reducerRE          = regexp.MustCompile(`"([^"]*)" as "([^"]*)"`)
 )
 
 func unquoteName(name string) string {
@@ -577,17 +581,11 @@ func registerFlowBuilder(sc *godog.ScenarioContext) {
 // flow. The markers keep the three lists apart without a grammar.
 func (w *builderWorld) declare(rest string) error {
 	nodesText, reducersText, edgesText := splitDeclarations(rest)
-	nodes := declaredNodeRE.FindAllStringSubmatch(nodesText, -1)
-	for _, match := range nodes {
-		declared := declaredNode{name: match[1], kind: match[2]}
-		if match[3] != "" {
-			declared.spec = json.RawMessage(match[3])
-		}
-		w.current.nodes = append(w.current.nodes, declared)
+	nodes, err := parseDeclaredNodes(nodesText)
+	if err != nil {
+		return fmt.Errorf("declare nodes: %w", err)
 	}
-	if len(nodes) == 0 {
-		return fmt.Errorf("no node in %q", rest)
-	}
+	w.current.nodes = append(w.current.nodes, nodes...)
 	for _, match := range reducerRE.FindAllStringSubmatch(reducersText, -1) {
 		w.current.reducers = append(w.current.reducers, declaredReducer{key: match[1], reducer: match[2]})
 	}
@@ -599,6 +597,105 @@ func (w *builderWorld) declare(rest string) error {
 		w.current.edges = append(w.current.edges, edges...)
 	}
 	return nil
+}
+
+func parseDeclaredNodes(text string) ([]declaredNode, error) {
+	matches := declaredNodeHeadRE.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no node in %q", text)
+	}
+	nodes := make([]declaredNode, 0, len(matches))
+	for i, loc := range matches {
+		name := text[loc[2]:loc[3]]
+		kind := text[loc[4]:loc[5]]
+		tailStart := loc[1]
+		tailEnd := len(text)
+		if i+1 < len(matches) {
+			tailEnd = matches[i+1][0]
+		}
+		tail := strings.TrimSpace(text[tailStart:tailEnd])
+		spec, err := parseNodeTail(tail)
+		if err != nil {
+			return nil, fmt.Errorf("node %q of kind %q: %w", name, kind, err)
+		}
+		nodes = append(nodes, declaredNode{name: name, kind: kind, spec: spec})
+	}
+	return nodes, nil
+}
+
+func parseNodeTail(tail string) (json.RawMessage, error) {
+	const prefix = "given the node spec "
+	tail = strings.TrimSpace(tail)
+	if tail == "" {
+		return nil, nil
+	}
+	if nodeListContinuation(tail) {
+		return nil, nil
+	}
+	if !strings.HasPrefix(tail, prefix) {
+		return nil, fmt.Errorf("unexpected clause %q after node", tail)
+	}
+	rest := strings.TrimSpace(tail[len(prefix):])
+	if !strings.HasPrefix(rest, "{") {
+		return nil, fmt.Errorf("node spec must be a JSON object, got %q", rest)
+	}
+	end, ok := balancedJSONObjectEnd(rest)
+	if !ok {
+		return nil, fmt.Errorf("node spec has unbalanced braces in %q", rest)
+	}
+	spec := json.RawMessage(rest[:end])
+	extra := strings.TrimSpace(rest[end:])
+	if extra != "" && !nodeListContinuation(extra) {
+		return nil, fmt.Errorf("nested or trailing text after the node spec %q (step grammar supports one JSON object per spec)", extra)
+	}
+	return spec, nil
+}
+
+// nodeListContinuation is text between two node heads in a step phrase (and node, comma, and).
+func nodeListContinuation(s string) bool {
+	switch strings.TrimSpace(s) {
+	case "", "and", "and node", ",":
+		return true
+	default:
+		return false
+	}
+}
+
+func balancedJSONObjectEnd(s string) (int, bool) {
+	if s == "" || s[0] != '{' {
+		return 0, false
+	}
+	depth := 0
+	inString := false
+	escape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escape = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func splitDeclarations(rest string) (nodes, reducers, edges string) {
