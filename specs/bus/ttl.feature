@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
+@wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: KV entries that expire after a TTL
   A holder keeps a lock or a presence entry by renewing it before its TTL
   passes. Expiry follows the injected clock, so it is exact and repeatable;

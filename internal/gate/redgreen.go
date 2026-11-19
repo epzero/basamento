@@ -35,6 +35,9 @@ func Activated(base, head *Spec) []string {
 // head's specs) — proof that the scenario tests something — while the regular
 // BDD run proves it passes at head. A base without a BDD harness counts as red.
 func RedGreen(root, baseRef string) (activated []string, errs []string, err error) {
+	if err := checkBaseRef(root, baseRef); err != nil {
+		return nil, nil, err
+	}
 	head, err := Load(root)
 	if err != nil {
 		return nil, nil, err

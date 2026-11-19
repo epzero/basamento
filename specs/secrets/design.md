@@ -89,19 +89,29 @@ done with the master key, and the keeper's own code says why it failed.
 | Context cancelled | `cancelled` | `cancelled` |
 | Deadline exceeded | `timeout`, retryable | `timeout`, retryable |
 | `InvalidArgument`, `FailedPrecondition` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `keyset of the tenant cannot be wrapped`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
-| `PermissionDenied`, `Unauthenticated`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
+| `PermissionDenied`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
 | Any other code | `unavailable`, retryable, the message is the scheme only | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
 
 A cloud keeper that cannot be reached therefore fails a value decrypt with
 `unavailable`, retryable, never with `invalid_argument`. `localsecrets` holds
 the key in the process and has no unreachable state, so none of its failures
-is `unavailable`. `Unauthenticated` sits with `PermissionDenied`: expired
-credentials are a configuration fault, not an outage, so the failure is
-`internal` and not retryable. Opening a cloud key service URL goes through the
-same classification: a cancelled context or an exceeded deadline keeps
-`cancelled` or `timeout`, an outage keeps `unavailable`, and any other failure
-is a configuration error and becomes `invalid_argument` with `invalid key
-service URL for scheme "<scheme>"`.
+is `unavailable`. The table names only codes `gocloud.dev/gcerrors` has: there
+is no `Unauthenticated` code in it, and no keeper returns one, so a credentials
+failure is not a class of its own. An access-denied answer from the Google KMS
+API arrives as `PermissionDenied` and keeps its row; the AWS driver maps only a
+disabled key and an invalid grant token to `PermissionDenied`, while its
+access-denied answer, `AccessDeniedException`, is not in the driver's table and
+so arrives as `Unknown` and is retried as an outage like a credentials failure.
+A credentials failure the driver instead reports as a plain error — no
+credentials at all, or an expired session token the SDK cannot refresh — is
+classified `Unknown` and so falls under "any other code": a cloud keeper treats
+it as a retryable `unavailable` whose message is the scheme only. It is not a
+configuration fault and is not reported as `internal`. Opening a cloud key
+service URL uses its own one-off classification: a cancelled context or an
+exceeded deadline keeps `cancelled` or `timeout`, an outage keeps
+`unavailable`, and any other failure of the open itself is a configuration
+error — nothing has served a request yet — and becomes
+`invalid_argument` with `invalid key service URL for scheme "<scheme>"`.
 
 ### 2.3 The keyset cache and what it costs
 

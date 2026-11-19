@@ -1113,7 +1113,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(.+) pass(?: without the gate "([^"]*)" being resolved)?$`,
+	sc.Step(`^(.+) pass(?:es| without the gate "([^"]*)" being resolved)?$`,
 		func(ctx context.Context, elapsed, gate string) error {
 			duration, err := parseElapsed(elapsed)
 			if err != nil {
@@ -1122,6 +1122,14 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			w := world(ctx)
 			if w.Core != nil && w.Core.clock != nil {
 				w.Core.clock.Advance(duration)
+			}
+			// A component server times its shutdown drain from the same frozen
+			// clock; firing its timer here is what "the seconds pass" means.
+			if w.Config != nil && w.Config.after != nil {
+				select {
+				case w.Config.after <- w.Core.clock.Now():
+				default:
+				}
 			}
 			if w.Host != nil && w.Host.dc != nil {
 				w.Host.dc.advance(duration)

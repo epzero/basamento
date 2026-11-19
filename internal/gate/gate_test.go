@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,6 +399,84 @@ func TestReapprovalKeepsDecisions(t *testing.T) {
 	e.Human = Human{Status: "accepted"}
 	if errs := CheckLock(s, l); !hasErr(errs, "needs `by: human:<login>`") {
 		t.Errorf("an acceptance without a person must fail the lock: %v", errs)
+	}
+}
+
+func TestBaseRefsAreNotGitOptionsAndMustResolveToACommit(t *testing.T) {
+	root := gitRepo(t)
+	for _, base := range []string{"-x", "--all", "-"} {
+		if _, err := ChangedFiles(root, base, ""); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("ChangedFiles must refuse %q before git reads it as an option: %v", base, err)
+		}
+		if _, err := PlanReview(root, base, nil); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("PlanReview must refuse %q before git reads it as an option: %v", base, err)
+		}
+		if _, _, err := RedGreen(root, base); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("RedGreen must refuse %q before git reads it as an option: %v", base, err)
+		}
+	}
+	for _, fn := range []func(string) error{
+		func(base string) error { _, err := ChangedFiles(root, base, ""); return err },
+		func(base string) error { _, err := PlanReview(root, base, nil); return err },
+		func(base string) error { _, _, err := RedGreen(root, base); return err },
+	} {
+		// A revision-set negation exits 0 in rev-parse and prints ^<sha>; if
+		// it passed, `git show ^main:review.yaml` would print nothing and
+		// PlanReview would silently fall back to the default tier.
+		for _, base := range []string{"origin/nope", "^main", "^HEAD", "^main^{commit}"} {
+			if err := fn(base); err == nil || !strings.Contains(err.Error(), "does not name a commit") {
+				t.Errorf("base %q must be refused as not naming a commit: %v", base, err)
+			}
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "review.yaml"), []byte("default: medium\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := git(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{"main", sha} {
+		if _, err := PlanReview(root, base, []string{"a.go"}); err != nil {
+			t.Errorf("review plan still accepts %q: %v", base, err)
+		}
+	}
+}
+
+func TestRemoteGitTimeoutErrorSaysWhatToCheck(t *testing.T) {
+	repo := gitRepo(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	_, err := gitRemoteContext(ctx, repo, "fetch", "origin")
+	if err == nil {
+		t.Fatal("an unreachable remote must fail instead of hanging")
+	}
+	for _, want := range []string{"timed out after", "git remote -v", "network", "credentials"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the timeout error must say what to check (%q): %v", want, err)
+		}
+	}
+}
+
+func TestHeadRefIsNotAGitOption(t *testing.T) {
+	root := gitRepo(t)
+	for _, head := range []string{"--all", "-x", "--upload-pack=sh"} {
+		if _, err := ChangedFiles(root, "main", head); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("ChangedFiles must refuse head %q before git reads it as an option: %v", head, err)
+		}
+	}
+}
+
+func TestNewSessionRefsAreNotGitOptions(t *testing.T) {
+	repo := gitRepo(t)
+	for _, r := range []NewSessionRequest{
+		{Harness: "codex", Role: RoleImplementer, Issue: "WP-L1-08", Base: "--no-checkout"},
+		{Harness: "codex", Role: RoleImplementer, Issue: "WP-L1-08", Branch: "--upload-pack=sh"},
+	} {
+		if _, err := NewSession(repo, r); err == nil || !strings.Contains(err.Error(), "begins with '-'") {
+			t.Errorf("NewSession must refuse %+v before git reads it as an option: %v", r, err)
+		}
 	}
 }
 

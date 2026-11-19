@@ -46,7 +46,7 @@ func registerCore(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		world(ctx).Core.clock = coretest.NewFakeClock(t)
+		world(ctx).Core.clock.Set(t)
 		world(ctx).Core.ids = nil
 		return nil
 	})

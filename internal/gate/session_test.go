@@ -1,11 +1,14 @@
 package gate
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func gitRepo(t *testing.T) string {
@@ -239,6 +242,150 @@ func TestReleaseAfterASquashMerge(t *testing.T) {
 	mustGit(t, repo, "fetch", "-q", "--prune")
 	if _, err := ReleaseSession(repo, id.Instance, "main", false); err != nil {
 		t.Fatalf("a branch whose remote is gone after a merge is released: %v", err)
+	}
+}
+
+func TestSessionFileIsReplacedNotTruncated(t *testing.T) {
+	repo := gitRepo(t)
+	s := Session{Identity: "opencode:implementer:abc123", Branch: "EP0-51-abc123", Worktree: repo, Created: "2026-01-01T00:00:00Z"}
+	if err := writeSession(s); err != nil {
+		t.Fatal(err)
+	}
+	p, err := sessionPath(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A crash in the middle of a rewrite must leave the previous hand-off in
+	// place; replacing the file by rename is what guarantees it.
+	s.Status, s.Note = "code-review-requested", strings.Repeat("n", 1<<20)
+	if err := writeSession(s); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("the session file was written in place; it must be replaced atomically")
+	}
+	if got := after.Mode().Perm(); got != 0o600 {
+		t.Fatalf("the session file is %o; it must stay 0600 so a rewrite cannot widen it past umask 077", got)
+	}
+	got, err := readSession(repo)
+	if err != nil || got.Status != s.Status || got.Note != s.Note {
+		t.Fatalf("the replacement holds the new hand-off: %+v, %v", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Fatalf("a temporary file was left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestIssueLockSerialisesWriters(t *testing.T) {
+	repo := gitRepo(t)
+	path, err := issueLockPath(repo, "WP-L1-04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := acquireFileLock(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert the primitive directly: a second exclusive attempt fails while
+	// the first holds the lock. (A goroutine that has not yet attempted would
+	// let a check of the acquired channel pass trivially.)
+	second, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := tryLock(second); ok || err != nil {
+		t.Fatalf("two writers must not hold the per-issue lock at once: ok=%v err=%v", ok, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	if _, err := acquireFileLock(ctx, path); !errors.Is(err, errLockContended) {
+		t.Fatalf("a waiter on a held lock must report contention: %v", err)
+	}
+
+	first.release()
+	if ok, err := tryLock(second); !ok || err != nil {
+		t.Fatalf("the lock must be free after release: ok=%v err=%v", ok, err)
+	}
+	_ = second.Close()
+	third, err := acquireFileLock(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third.release()
+}
+
+func TestIssueLockWaitOutlastsTheWorstCaseHold(t *testing.T) {
+	// A reused worktree may check the remote and then fetch, two calls each
+	// bounded by a remote timeout plus its wait delay. The waiter's budget
+	// must leave room for local work on top, or a healthy slow call fails it.
+	worstHold := 2 * (gitRemoteTimeout + gitWaitDelay)
+	if issueLockWait < worstHold+10*time.Second {
+		t.Fatalf("issueLockWait = %s; want at least %s (worst-case hold plus margin)", issueLockWait, worstHold+10*time.Second)
+	}
+}
+
+func TestLockFailuresThatAreNotContentionAreReportedAsThemselves(t *testing.T) {
+	repo := gitRepo(t)
+	p, err := issueLockPath(repo, "WP-L1-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(p, 0o755); err != nil { // a directory where the lock file goes
+		t.Fatal(err)
+	}
+	_, err = acquireIssueLock(repo, "WP-L1-09")
+	if err == nil {
+		t.Fatal("a lock file that cannot be opened must fail")
+	}
+	if strings.Contains(err.Error(), "may still be running") {
+		t.Fatalf("a non-contention failure was reported as contention: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot lock") {
+		t.Fatalf("the error must say the lock could not be taken: %v", err)
+	}
+}
+
+func TestNewSessionsForOneIssueShareOneWorktree(t *testing.T) {
+	repo := gitRepo(t)
+	type result struct {
+		session Session
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			s, err := NewSession(repo, NewSessionRequest{Harness: "opencode", Role: RoleImplementer, Issue: "WP-L1-04"})
+			results <- result{s, err}
+		}()
+	}
+	close(start)
+	a, b := <-results, <-results
+	if a.err != nil || b.err != nil {
+		t.Fatalf("both sessions must start: %v, %v", a.err, b.err)
+	}
+	if a.session.Worktree != b.session.Worktree || a.session.Branch != b.session.Branch {
+		t.Fatalf("one issue has one worktree and branch: %+v, %+v", a.session, b.session)
 	}
 }
 

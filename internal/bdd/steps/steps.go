@@ -21,7 +21,9 @@ type World struct {
 	SQL      *sqlWorld
 	Prompt   *promptWorld
 	Blob     *blobWorld
+	Bus      *busWorld
 	Secrets  *secretsWorld
+	Config   *configWorld
 	Expr     *exprWorld
 	Schema   *schemaWorld
 	Flow     *flowWorld
@@ -40,7 +42,9 @@ func Initialize(sc *godog.ScenarioContext) {
 			SQL:      newSQLWorld(),
 			Prompt:   newPromptWorld(),
 			Blob:     newBlobWorld(),
+			Bus:      newBusWorld(),
 			Secrets:  newSecretsWorld(),
+			Config:   newConfigWorld(),
 			Expr:     &exprWorld{bindings: map[string]any{}},
 			Schema:   newSchemaWorld(),
 			Flow:     newFlowWorld(),
@@ -53,7 +57,10 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerBus(sc)
 	registerSecrets(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
 	registerOpeningSteps(sc)
 	registerExpr(sc)
 	registerSchema(sc)
@@ -62,6 +69,10 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowHost(sc)
 	registerTemporal(sc)
 	registerSharedSteps(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
