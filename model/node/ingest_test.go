@@ -12,6 +12,7 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/catalog"
+	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/blob"
 )
 
@@ -50,6 +51,14 @@ func (m *memBlob) Delete(context.Context, string) error { return nil }
 
 func (m *memBlob) SignedURL(context.Context, string, time.Duration) (string, error) {
 	return "", nil
+}
+
+func (m *memBlob) StartUpload(context.Context, platform.UploadOptions) (platform.Upload, error) {
+	return platform.Upload{}, core.NewError(core.CodeUnavailable, "memBlob has no uploads", nil)
+}
+
+func (m *memBlob) Commit(context.Context, string) (string, error) {
+	return "", core.NewError(core.CodeUnavailable, "memBlob has no uploads", nil)
 }
 
 func testCatalog(t *testing.T) *catalog.Catalog {

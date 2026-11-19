@@ -272,6 +272,14 @@ func (m *memBlob) SignedURL(context.Context, string, time.Duration) (string, err
 	return "", nil
 }
 
+func (m *memBlob) StartUpload(context.Context, platform.UploadOptions) (platform.Upload, error) {
+	return platform.Upload{}, core.NewError(core.CodeUnavailable, "memBlob has no uploads", nil)
+}
+
+func (m *memBlob) Commit(context.Context, string) (string, error) {
+	return "", core.NewError(core.CodeUnavailable, "memBlob has no uploads", nil)
+}
+
 var _ platform.Blob = (*memBlob)(nil)
 
 // routerInvoker carries a router descriptor; the router scenarios do not call
