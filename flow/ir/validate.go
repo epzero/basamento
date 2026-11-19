@@ -69,7 +69,7 @@ func validateState(f *flow.IR) error {
 	if _, err := schema.Compile(f.State.Schema); err != nil {
 		return withLocation(err, "flow: state schema: ")
 	}
-	properties, everyObject := stateProperties(f.State.Schema)
+	properties, everyObject := StateProperties(f.State.Schema)
 	for _, key := range sortedKeys(f.State.Reducers) {
 		if !everyObject && !properties[key] {
 			return invalid(fmt.Sprintf("flow: state reducer %q: key is not in the state schema", key), map[string]any{"reducer": key})
@@ -81,11 +81,11 @@ func validateState(f *flow.IR) error {
 	return nil
 }
 
-// stateProperties returns the property names the state schema declares and
+// StateProperties returns the property names the state schema declares and
 // whether it admits every object. Local $ref and allOf composition are
 // resolved, so a schema split across $defs is read the way core/schema reads
 // it; a boolean true schema admits every object, so every reducer key is in it.
-func stateProperties(raw json.RawMessage) (map[string]bool, bool) {
+func StateProperties(raw json.RawMessage) (map[string]bool, bool) {
 	var doc any
 	if len(raw) == 0 || json.Unmarshal(raw, &doc) != nil {
 		return map[string]bool{}, false

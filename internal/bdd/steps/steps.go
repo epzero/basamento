@@ -26,6 +26,7 @@ type World struct {
 	Secrets     *secretsWorld
 	Credentials *credentialsWorld
 	Flow        *flowWorld
+	FlowBuilder *builderWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -34,13 +35,14 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			Schema: newSchemaWorld(),
-			Expr:   &exprWorld{bindings: map[string]any{}},
-			SQL:    newSQLWorld(),
-			Prompt: newPromptWorld(),
-			Blob:   newBlobWorld(),
-			Flow:   newFlowWorld(),
+			Core:        newCoreWorld(),
+			Schema:      newSchemaWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Blob:        newBlobWorld(),
+			Flow:        newFlowWorld(),
+			FlowBuilder: newBuilderWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -51,6 +53,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlob(sc)
 	registerFlowCompile(sc)
 	registerFlowLimits(sc)
+	registerFlowBuilder(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
