@@ -26,6 +26,20 @@ func TestBeginRejectsEmptyClientRef(t *testing.T) {
 	}
 }
 
+func TestRegistryEmptyProviderHandleResolves(t *testing.T) {
+	reg := NewRegistry("alpha")
+	run := mustBegin(t, reg, testCtx(t), "ref-empty-prov")
+	h := run.Handle()
+	h.Provider = ""
+	if _, err := reg.Events(testCtx(t), h, 0); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	run.Succeed(Result{})
+	if _, err := reg.Result(testCtx(t), h); err != nil {
+		t.Fatalf("result: %v", err)
+	}
+}
+
 func TestRegistryWrongProviderHandleNotFound(t *testing.T) {
 	reg := NewRegistry("alpha")
 	run := mustBegin(t, reg, testCtx(t), "ref-1")

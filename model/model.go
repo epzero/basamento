@@ -105,7 +105,9 @@ type Request struct {
 }
 
 // Handle identifies a started invocation. It is valid only for the tenant
-// that started the invocation.
+// that started the invocation. Provider may be empty on a handle returned by
+// Lookup or replayed from storage; identity is the (tenant, client ref) pair.
+// A non-empty Provider that does not match the registry's is not_found.
 type Handle struct {
 	Provider  string `json:"provider"`
 	ID        string `json:"id"` // vendor id, or an adapter-local id for streamed calls

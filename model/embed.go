@@ -115,8 +115,8 @@ func (e *Embedding) execute(run *Run, texts []string) {
 			// Deliberately converts a panic at the invocation boundary;
 			// run.Fail is a no-op after the run ended.
 			var cause error
-			if e, ok := p.(error); ok {
-				cause = e
+			if perr, ok := p.(error); ok {
+				cause = perr
 			}
 			run.Fail(&core.Error{Code: core.CodeInternal, Message: "vendor call panicked", Cause: cause})
 		}
