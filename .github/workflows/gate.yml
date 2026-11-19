@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GATE_STRICT: "1"
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +26,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version-file: go.mod
 
       - name: Install gate tools
         run: |

@@ -1,7 +1,9 @@
 # Runtimes
 
-Status: contract **Implemented** (`runtime/runtime.go`); runtimes **Planned**
-(WP-L5-*). Decisions: ADR-0002, ADR-0011.
+Status: contract **Implemented** (`runtime/runtime.go`); the flow host
+**Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
+(`runtime/local`, WP-L5-01); `temporal` **Planned** (WP-L5-02).
+Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
 
@@ -72,7 +74,7 @@ Settings for the embedded profile:
 | SQLite | `journal_mode=wal`, `synchronous=normal`, `busy_timeout=10000`, 4 connections | Double the fan-out throughput; survives process crashes. |
 | Workflow-task timeout | 2–3 s | Bounds recovery when a task was handed to a dead process (default 10 s). |
 | Module pins | server, API and SDK versions from the matching `temporalio/cli` release | Newer API modules do not compile against a given server release. |
-| Go | ≥ 1.26.10 | Required by server v1.32. |
+| Go | ≥ 1.26.11 | Required by server v1.32. |
 
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.

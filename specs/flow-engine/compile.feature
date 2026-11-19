@@ -1,4 +1,4 @@
-@planned @wp:WP-L4-01 @level:component
+@wp:WP-L4-01 @level:component
 Feature: Compiling flows
 
   @REQ-FLOW-003 @id:FLOW-003-01

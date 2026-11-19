@@ -74,6 +74,23 @@ bounded queues and without blocking the caller (`REQ-TELEM-015`,
 without retrying it, and the observed span, log record or metric point
 completes without error (`REQ-TELEM-017`, `REQ-TELEM-019`).
 
+**Bounds and drops.** Each signal type has its own queue of 4096 entries
+(spans, metric points, log records). A full queue drops its oldest entry and
+is counted by `Setup.DroppedExports`; recording never fails and never waits
+on the exporter. Where `REQ-TELEM-016`'s "record every signal" meets a full
+queue, the bound wins: the call still records and returns without waiting,
+and the oldest pending signal is the one not exported, so the requirement
+text does not change.
+
+**Delivery triggers.** The background exporter drains when the three queues
+hold 512 pending signals in total, on `Flush` and on `Shutdown`. Below that
+size it drains on the first enqueue that finds the oldest pending signal has
+waited one second on `Config.Clock`; the age is compared on enqueue, so no
+wall clock and no timer are involved, and a long-lived, low-volume process
+exports its backlog with its next signal instead of holding it until `Flush`.
+A batch that fails is removed, never retried, and never stalls the next one
+(`REQ-TELEM-017`).
+
 `Inject` and `Extract` serialize and restore W3C TraceContext across process or
 worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
 
@@ -95,13 +112,15 @@ worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
   the table has one shape. A change to that shape is a spec change of its own,
   and it must say how spans still inside the retention period are kept, since
   REQ-TELEM-012 returns them and REQ-TELEM-014 deletes only older ones.
-- **Default retention.** The span store, not configuration, applies the
-  default: when `Config.RetentionPeriod` is zero it keeps spans for 24 hours
-  (`DefaultRetentionPeriod`, REQ-TELEM-014), and a negative period is refused
-  with `invalid_argument` when the store is built. Spans serve debugging of
-  recent runs; a day covers that without letting a local database grow
-  without bound. `specs/config` has no retention key; adding one is a change
-  to that spec.
+- **Retention precedence.** `Config.RetentionPeriod` is the effective window
+  and it wins over the retention a prebuilt store was given: `New` applies it
+  to a `SpanStore` that implements `RetentionApplier` (`SetRetention`). Zero
+  means `DefaultRetentionPeriod`, 24 hours (`REQ-TELEM-014`), and a negative
+  period is refused with `invalid_argument` at construction, by both `New`
+  and `NewSQLSpanStore`. A store that does not implement `RetentionApplier`
+  owns its own window. Spans serve debugging of recent runs; a day covers
+  that without letting a local database grow without bound. `specs/config`
+  has no retention key; adding one is a change to that spec.
 - The statements about `NewSQLSpanStore` describe the work package's
   implementation before it is reviewed; the implementer and the code reviewer
   check them against the code, including the SQLite DDL.
