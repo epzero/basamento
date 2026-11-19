@@ -50,9 +50,10 @@ type blobWorld struct {
 }
 
 type fetchResp struct {
-	status int
-	ctype  string
-	body   []byte
+	status  int
+	ctype   string
+	body    []byte
+	headers http.Header
 }
 
 func newBlobWorld() *blobWorld {
@@ -224,20 +225,17 @@ func registerBlob(sc *godog.ScenarioContext) {
 		b := world(ctx).Blob.content[name]
 		return tenantPut(ctx, tenant, blob.ContentKeyOf(b), bytes.NewReader(b), ctype)
 	})
-	sc.Step(`^tenant "([^"]*)" stores content "([^"]*)" and the source fails after (\d+) MiB$`, func(ctx context.Context, tenant, name string, mib int) error {
+	sc.Step(`^tenant "([^"]*)" stores content "([^"]*)" and (the source fails|the call is cancelled) after (\d+) MiB$`, func(ctx context.Context, tenant, name, kind string, mib int) error {
 		limit := mib * 1024 * 1024
 		b := world(ctx).Blob.content[name]
-		return tenantPut(ctx, tenant, blob.ContentKeyOf(b), &failAfterReader{b: b, limit: limit}, "application/octet-stream")
-	})
-	sc.Step(`^tenant "([^"]*)" stores content "([^"]*)" and the call is cancelled after (\d+) MiB$`, func(ctx context.Context, tenant, name string, mib int) error {
-		limit := mib * 1024 * 1024
-		b := world(ctx).Blob.content[name]
+		if kind == "the source fails" {
+			return tenantPut(ctx, tenant, blob.ContentKeyOf(b), &failAfterReader{b: b, limit: limit}, "application/octet-stream")
+		}
 		key := blob.ContentKeyOf(b)
 		cctx := world(ctx).Blob.tenantCtx(ctx, tenant)
 		cancelCtx, cancelFn := context.WithCancel(cctx)
 		r := &cancelAfterReader{ctx: cancelCtx, b: b, limit: limit, cancel: cancelFn}
-		cctx = cancelCtx
-		world(ctx).Blob.lastErr = world(ctx).Blob.blob.Put(cctx, key, r, "application/octet-stream")
+		world(ctx).Blob.lastErr = world(ctx).Blob.blob.Put(cancelCtx, key, r, "application/octet-stream")
 		return nil
 	})
 	sc.Step(`^the write succeeds$`, func(ctx context.Context) error {
@@ -387,6 +385,7 @@ func registerBlob(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the response has status (\d+), content type "([^"]*)" and body "([^"]*)"$`, assertFetchFull)
 	sc.Step(`^the response has status (\d+) and (body "[^"]*"|an empty body)$`, assertFetchStatusTail)
+	sc.Step(`^the response carries these headers:$`, assertResponseHeaders)
 	sc.Step(`^the response has status (\d+) and its body does not contain "([^"]*)"$`, func(ctx context.Context, status int, sub string) error {
 		if world(ctx).Blob.httpResp.status != status {
 			return fmt.Errorf("status %d, want %d", world(ctx).Blob.httpResp.status, status)
@@ -429,6 +428,18 @@ func registerBlob(sc *godog.ScenarioContext) {
 		return nil
 	})
 	// opening.feature
+	sc.Step(`^a blob store is opened from a file URL of a temporary directory with a signing key of (\d+) bytes$`, openBlobFileWithSignKeyLen)
+	sc.Step(`^a blob store is opened from a file URL of a temporary directory without a signing key$`, openBlobFileWithoutSignKey)
+	sc.Step(`^the store is open$`, func(ctx context.Context) error {
+		w := world(ctx).Blob
+		if w.openErr != nil {
+			return w.openErr
+		}
+		if w.store == nil {
+			return fmt.Errorf("store not open")
+		}
+		return nil
+	})
 	sc.Step(`^a blob store is opened from (a file URL of a temporary directory|an s3 URL of a bucket in the S3 simulator|a gs URL of the nightly test bucket|an azblob URL of the nightly test container)$`, openBlobFromPhrase)
 	sc.Step(`^a blob store is opened from "(.*)"$`, tryOpenPath)
 	sc.Step(`^a blob store is opened from a file URL of its subdirectory "([^"]*)"$`, func(ctx context.Context, sub string) error {
@@ -621,7 +632,7 @@ func fetchRawURL(ctx context.Context, raw string) error {
 		}
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(resp.Body)
-		w.httpResp = fetchResp{status: resp.StatusCode, ctype: resp.Header.Get("Content-Type"), body: b}
+		w.httpResp = fetchResp{status: resp.StatusCode, ctype: resp.Header.Get("Content-Type"), body: b, headers: resp.Header.Clone()}
 		return nil
 	}
 	resp, err := http.Get(raw)
@@ -630,7 +641,75 @@ func fetchRawURL(ctx context.Context, raw string) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
-	w.httpResp = fetchResp{status: resp.StatusCode, ctype: resp.Header.Get("Content-Type"), body: b}
+	w.httpResp = fetchResp{status: resp.StatusCode, ctype: resp.Header.Get("Content-Type"), body: b, headers: resp.Header.Clone()}
+	return nil
+}
+
+func assertResponseHeaders(ctx context.Context, table *godog.Table) error {
+	if len(table.Rows) < 2 {
+		return fmt.Errorf("header table too short")
+	}
+	got := world(ctx).Blob.httpResp.headers
+	if got == nil {
+		return fmt.Errorf("no response headers recorded")
+	}
+	for i, row := range table.Rows[1:] {
+		if len(row.Cells) < 2 {
+			return fmt.Errorf("row %d: want header and value", i+1)
+		}
+		name := row.Cells[0].Value
+		want := row.Cells[1].Value
+		if have := got.Get(name); have != want {
+			return fmt.Errorf("header %q: got %q want %q", name, have, want)
+		}
+	}
+	return nil
+}
+
+func openBlobFileWithSignKeyLen(ctx context.Context, n int) error {
+	dir, err := os.MkdirTemp("", "blob-open-*")
+	if err != nil {
+		return err
+	}
+	world(ctx).Blob.dataDir = dir
+	return openBlobFileWithKey(ctx, dir, bytes.Repeat([]byte("k"), n))
+}
+
+func openBlobFileWithoutSignKey(ctx context.Context) error {
+	dir, err := os.MkdirTemp("", "blob-open-*")
+	if err != nil {
+		return err
+	}
+	world(ctx).Blob.dataDir = dir
+	return openBlobFileWithKey(ctx, dir, nil)
+}
+
+func openBlobFileWithKey(ctx context.Context, dir string, signKey []byte) error {
+	w := world(ctx).Blob
+	opts := blob.Options{
+		Clock:     world(ctx).Core.clock,
+		MaxURLTTL: w.maxTTL,
+		BaseURL:   "http://blob.test" + blob.HandlerRoute(),
+		SignKey:   signKey,
+	}
+	raw := (&url.URL{Scheme: "file", Path: dir}).String()
+	st, h, err := blob.Open(ctx, raw, opts)
+	w.openErr = err
+	if err != nil {
+		w.store, w.blob = nil, nil
+		return nil
+	}
+	w.store, w.blob = st, st
+	w.locURL = raw
+	w.signKey = append([]byte(nil), signKey...)
+	w.handler = h
+	w.emitS3OpenMarkerIfS3(raw)
+	if h != nil {
+		if w.handlerSrv != nil {
+			w.handlerSrv.Close()
+		}
+		w.handlerSrv = httptest.NewServer(h)
+	}
 	return nil
 }
 
@@ -798,6 +877,10 @@ func alterProxiedBlobURL(ctx context.Context, raw, alteration, otherKey, otherTe
 		return "", err
 	}
 	basePath := strings.TrimSuffix(u.Path, "/"+tenant+"/"+hexd)
+	if strings.HasPrefix(alteration, "its tenant replaced by ") {
+		tenant = url.PathEscape(otherTenant)
+		return fmt.Sprintf("%s://%s%s/%s/%s?exp=%d&sig=%s", u.Scheme, u.Host, basePath, tenant, hexd, exp, sig), nil
+	}
 	switch alteration {
 	case `its key replaced by the content key of "world"`:
 		hexd = strings.TrimPrefix(otherKey, "sha256:")
@@ -824,8 +907,6 @@ func alterProxiedBlobURL(ctx context.Context, raw, alteration, otherKey, otherTe
 			return "", err
 		}
 		sig = altU.Query().Get("sig")
-	case `its tenant replaced by "globex"`:
-		tenant = otherTenant
 	default:
 		return "", fmt.Errorf("unknown alteration %q", alteration)
 	}
