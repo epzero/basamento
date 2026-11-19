@@ -6,6 +6,7 @@ require (
 	github.com/cucumber/gherkin/go/v42 v42.0.0
 	github.com/cucumber/godog v0.16.0
 	github.com/cucumber/messages/go/v34 v34.2.0
+	github.com/fergusstrange/embedded-postgres/v2 v2.0.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/oklog/ulid/v2 v2.1.2
@@ -124,4 +125,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-tool github.com/epzero/basamento/tools/gate
+tool (
+	github.com/epzero/basamento/tools/gate
+	github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
+)
