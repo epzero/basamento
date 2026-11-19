@@ -1,12 +1,14 @@
 package catalog
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
+	"github.com/epzero/basamento/model"
 )
 
 func TestValidatePriceNegativeRateMessageIsStable(t *testing.T) {
@@ -69,6 +71,71 @@ func TestEmptySnapshotLoads(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("entries = %d, want 0", len(got))
+	}
+}
+
+func TestBareEmptySnapshotLoads(t *testing.T) {
+	got, err := parseSnapshot(nil)
+	if err != nil {
+		t.Fatalf("parseSnapshot: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("entries = %d, want 0", len(got))
+	}
+	got, err = parseSnapshot([]byte{})
+	if err != nil {
+		t.Fatalf("parseSnapshot empty bytes: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("entries = %d, want 0", len(got))
+	}
+}
+
+func TestCommentOnlySnapshotLoads(t *testing.T) {
+	raw := []byte("# no prices yet\n# still empty\n")
+	got, err := parseSnapshot(raw)
+	if err != nil {
+		t.Fatalf("parseSnapshot: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("entries = %d, want 0", len(got))
+	}
+}
+
+func TestSnapshotBlockScalarFormulaPrices(t *testing.T) {
+	raw := []byte("sim-chat:\n  formula: |\n    usage.input_tokens * 2\n")
+	prices, err := parseSnapshot(raw)
+	if err != nil {
+		t.Fatalf("parseSnapshot: %v", err)
+	}
+	p, ok := prices["sim-chat"]
+	if !ok {
+		t.Fatal("want sim-chat entry")
+	}
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	c, err := New(clock)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	desc := model.Descriptor{
+		ID: "sim-chat", Provider: "sim",
+		Caps:     []model.Capability{model.CapChat},
+		Protocol: model.ProtocolStream, Locality: model.LocalityCloud,
+	}
+	if err := c.AddDescriptor(desc); err != nil {
+		t.Fatalf("AddDescriptor: %v", err)
+	}
+	if err := c.SetSnapshotPrice("sim-chat", p); err != nil {
+		t.Fatalf("SetSnapshotPrice: %v", err)
+	}
+	got, err := c.Estimate(context.Background(), Request{
+		Model: "sim-chat", InputTokens: 1000, OutputLimit: 0,
+	})
+	if err != nil {
+		t.Fatalf("Estimate: %v", err)
+	}
+	if got != 2000 {
+		t.Fatalf("estimate = %d, want 2000", got)
 	}
 }
 

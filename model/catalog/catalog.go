@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -156,7 +155,7 @@ func (c *Catalog) precompilePrice(modelID string, p Price) error {
 		return err
 	}
 	for _, rule := range p.Rules {
-		when := strings.TrimSpace(rule.When)
+		when := exprSource(rule.When)
 		if when == "" || when == "always" {
 			continue
 		}
@@ -168,7 +167,7 @@ func (c *Catalog) precompilePrice(modelID string, p Price) error {
 }
 
 func (c *Catalog) precompileSource(modelID, src string) error {
-	src = strings.TrimSpace(src)
+	src = exprSource(src)
 	if src == "" {
 		return nil
 	}

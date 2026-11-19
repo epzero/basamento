@@ -54,16 +54,17 @@ type pinned struct {
 }
 
 // Price is one model's price in one layer. Rules are tried in order and the
-// first whose When holds applies; an empty When always holds. A Formula, when
-// set, is CEL over params, usage and rates and sets the amount for the rule
-// that held; it does not replace rule selection.
+// first whose When holds applies. A blank When (including whitespace only)
+// means the rule always holds. A Formula, when set after trimming surrounding
+// whitespace, is CEL over params, usage and rates and sets the amount for the
+// rule that held; it does not replace rule selection.
 type Price struct {
 	Formula string `json:"formula,omitempty" yaml:"formula,omitempty"`
 	Rules   []Rule `json:"rules,omitempty" yaml:"rules,omitempty"`
 }
 
-// Rule is one rate rule. When is CEL over at, params, usage and tenant; empty
-// means the rule always holds.
+// Rule is one rate rule. When is CEL over at, params, usage and tenant; blank
+// When (including whitespace only) means the rule always holds.
 type Rule struct {
 	When  string `json:"when,omitempty" yaml:"when,omitempty"`
 	Rates Rates  `json:"rates,omitempty" yaml:"rates,omitempty"`
@@ -76,7 +77,7 @@ type Rates map[string]int64
 
 // valid reports whether the price is an entry. An empty price is a layer with
 // no entry for the model.
-func (p Price) valid() bool { return p.Formula != "" || len(p.Rules) > 0 }
+func (p Price) valid() bool { return exprSource(p.Formula) != "" || len(p.Rules) > 0 }
 
 func (p Price) clone() Price {
 	cp := Price{Formula: p.Formula}

@@ -16,6 +16,13 @@ import (
 
 var million = big.NewInt(1_000_000)
 
+// exprSource normalizes a price expression for compile, lookup and selection.
+// Surrounding whitespace is ignored; a blank result means no expression, the
+// same way a blank When means the rule always holds.
+func exprSource(src string) string {
+	return strings.TrimSpace(src)
+}
+
 // chooseRule returns the first rule whose condition holds for the usage and
 // start time, or an unconditional rule. A formula-only entry has no rules and
 // returns a zero rule. No holding rule fails with core.CodeUnsupported
@@ -29,7 +36,7 @@ func (c *Catalog) chooseRule(entry Price, modelID string, params json.RawMessage
 		return Rule{}, nil
 	}
 	for _, rule := range entry.Rules {
-		when := strings.TrimSpace(rule.When)
+		when := exprSource(rule.When)
 		if when == "" || when == "always" {
 			return rule, nil
 		}
@@ -90,9 +97,9 @@ func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params 
 	if err := validateUsage(usage); err != nil {
 		return 0, err
 	}
-	formula := entry.Formula
+	formula := exprSource(entry.Formula)
 	if formula == "" {
-		formula = descriptorFormula
+		formula = exprSource(descriptorFormula)
 	}
 	var amount int64
 	var err error
@@ -123,6 +130,11 @@ func (c *Catalog) amount(entry Price, descriptorFormula, modelID string, params 
 }
 
 func (c *Catalog) program(src string) (*expr.Program, error) {
+	src = exprSource(src)
+	if src == "" {
+		return nil, internalError("price expression was not compiled at set time",
+			fmt.Errorf("missing compiled program for blank expression"))
+	}
 	c.progMu.Lock()
 	defer c.progMu.Unlock()
 	p, ok := c.programs[src]

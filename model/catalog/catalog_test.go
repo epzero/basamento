@@ -58,6 +58,102 @@ func chatDescriptor(id string) model.Descriptor {
 	}
 }
 
+func TestWhitespacePaddedEntryFormulaPrices(t *testing.T) {
+	formula := "  usage.input_tokens * 2\n"
+	p := catalog.Price{Formula: formula}
+	req := catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 0}
+	usage := model.Usage{InputTokens: 1000}
+
+	assertPaddedFormula := func(t *testing.T, c *catalog.Catalog) {
+		t.Helper()
+		q, err := c.Start(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		charge, err := c.Settle(q, usage)
+		if err != nil {
+			t.Fatalf("Settle: %v", err)
+		}
+		if charge.MilliPoints != 2000 {
+			t.Fatalf("charge = %d, want 2000", charge.MilliPoints)
+		}
+	}
+
+	t.Run("snapshot", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		mustSetSnapshot(t, c, "sim-chat", p)
+		assertPaddedFormula(t, c)
+	})
+	t.Run("deployment", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		mustSetDeployment(t, c, "sim-chat", p)
+		assertPaddedFormula(t, c)
+	})
+	t.Run("tenant", func(t *testing.T) {
+		c, _ := newCatalog(t)
+		mustAdd(t, c, chatDescriptor("sim-chat"))
+		if err := c.SetTenantPrice("acme", "sim-chat", p); err != nil {
+			t.Fatalf("SetTenantPrice: %v", err)
+		}
+		q, err := c.Start(core.WithTenant(context.Background(), "acme"), req)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		charge, err := c.Settle(q, usage)
+		if err != nil {
+			t.Fatalf("Settle: %v", err)
+		}
+		if charge.MilliPoints != 2000 {
+			t.Fatalf("charge = %d, want 2000", charge.MilliPoints)
+		}
+	})
+}
+
+func TestDescriptorFormulaTrailingNewlinePrices(t *testing.T) {
+	c, _ := newCatalog(t)
+	d := chatDescriptor("sim-video")
+	d.Caps = []model.Capability{model.CapVideoGenerate}
+	d.Price = "usage.output_tokens * rates.output\n"
+	mustAdd(t, c, d)
+	mustSetSnapshot(t, c, "sim-video", catalog.Price{Rules: []catalog.Rule{{Rates: catalog.Rates{"output": 500}}}})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-video", InputTokens: 0, OutputLimit: 10})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	charge, err := c.Settle(q, model.Usage{OutputTokens: 10})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 5000 {
+		t.Fatalf("charge = %d, want 5000", charge.MilliPoints)
+	}
+}
+
+func TestWhenWithSurroundingWhitespaceSelectsRule(t *testing.T) {
+	c, _ := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: "  usage.input_tokens > 500  ", Rates: catalog.Rates{"input": 1000, "output": 0}},
+		{Rates: catalog.Rates{"input": 1, "output": 0}},
+	}})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 0})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !strings.Contains(q.Rule, "usage.input_tokens > 500") {
+		t.Fatalf("rule = %q, want padded when that held", q.Rule)
+	}
+	charge, err := c.Settle(q, model.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 1000 {
+		t.Fatalf("charge = %d, want 1000", charge.MilliPoints)
+	}
+}
+
 func TestLookupReturnsDescriptor(t *testing.T) {
 	c, _ := newCatalog(t)
 	mustAdd(t, c, chatDescriptor("sim-chat"))
