@@ -68,6 +68,14 @@ every CEL or jq expression — edge `when` conditions, node `in` mappings, `set`
 assignments, guard `while` conditions and gate `accept_if` conditions
 (REQ-FLOW-004). The builder keeps expressions in the IR as written.
 
+A jq `in` or `over` mapping is parsed, checked for reserved names and measured
+against the expression size limit, but it cannot be type-checked against the
+state schema: a jq mapping has no `state` binding, so REQ-FLOW-004's schema
+check binds CEL in practice, and `over` is only required to be an expression
+whose result shape is the `map` node's business. Checking what a node's input
+must be, per kind, against the state schema is the machine's (WP-L4-02) and the
+host's (WP-L4-04) work, because only they know the kind's contract.
+
 **Determinism** (REQ-FLOW-011): nodes go into `flow.IR.Nodes` and reducers
 into `flow.IR.State.Reducers`, both maps whose keys the canonical JSON form
 (`core/schema`, RFC 8785) sorts, so their declaration order does not reach the

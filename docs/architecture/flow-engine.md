@@ -76,6 +76,12 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
   missing guard (REQ-FLOW-003), and all rejections use code
   `invalid_argument`.
 
+A jq `in` or `over` mapping is parsed, measured and checked for reserved names,
+but it cannot be type-checked against the state schema: a jq mapping has no
+`state` binding, so only CEL is checked against the schema. Checking what a
+node's input must be, per kind, is the machine's (WP-L4-02) and the host's
+(WP-L4-04) work.
+
 ## 3. Machine
 
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
