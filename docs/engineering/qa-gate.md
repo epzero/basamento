@@ -37,7 +37,9 @@ the **release-readiness** job uses `continue-on-error` and is informational only
 
 The SQL conformance driver's **Postgres pass** (not every `@profile:cloud`
 scenario) needs a server once per `go test` process of `internal/bdd` (G3).
-`gate redgreen` starts embedded again per activated scenario (G4).
+`gate redgreen` starts embedded again per activated scenario (G4); each base
+worktree run reuses the head checkout's built supervisor (`EP_SUPERVISOR`) and
+inherits `BDD_POSTGRES_CACHE_DIR`, matching the G3 BDD step environment.
 
 **Precedence.** A non-empty `BDD_POSTGRES_URL` uses only that admin server
 (typically `/postgres`); unreachable or unauthorised URLs never fall back to

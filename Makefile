@@ -114,7 +114,10 @@ pg-prefetch: ## download Postgres bundles into BDD_POSTGRES_CACHE_DIR (ADR-0015)
 	done
 
 redgreen: ## G4
-	@if [ -n "$(BASE)" ]; then $(GATE) redgreen -base $(BASE); else echo "gate: skip redgreen (set BASE=<ref>)"; fi
+	@if [ -n "$(BASE)" ]; then \
+		if [ -z "$$EP_SUPERVISOR" ] && [ -x "$(GATE_PG_BIN)" ]; then export EP_SUPERVISOR="$$(pwd)/$(GATE_PG_BIN)"; fi; \
+		$(GATE) redgreen -base $(BASE); \
+	else echo "gate: skip redgreen (set BASE=<ref>)"; fi
 
 release-check:
 	$(GATE) release-check

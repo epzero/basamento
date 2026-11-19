@@ -55,6 +55,18 @@ func TestMakefileGatePrereqsArePhony(t *testing.T) {
 	}
 }
 
+func TestMakefileRedgreenExportsHeadSupervisor(t *testing.T) {
+	body := makefileBody(t)
+	bdd := regexp.MustCompile(`(?ms)^bdd:.*?^\t.*EP_SUPERVISOR.*GATE_PG_BIN`)
+	red := regexp.MustCompile(`(?ms)^redgreen:.*?EP_SUPERVISOR.*GATE_PG_BIN`)
+	if !bdd.MatchString(body) {
+		t.Fatal("Makefile bdd: must export EP_SUPERVISOR when GATE_PG_BIN is executable")
+	}
+	if !red.MatchString(body) {
+		t.Fatal("Makefile redgreen: must export EP_SUPERVISOR when GATE_PG_BIN is executable (G4 parity)")
+	}
+}
+
 func TestMakefileVulnRecipeFailsClosed(t *testing.T) {
 	body := makefileBody(t)
 	if regexp.MustCompile(`module-roots\s*\|`).MatchString(body) {
