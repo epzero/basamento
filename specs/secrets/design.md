@@ -97,16 +97,18 @@ A cloud keeper that cannot be reached therefore fails a value decrypt with
 the key in the process and has no unreachable state, so none of its failures
 is `unavailable`. The table names only codes `gocloud.dev/gcerrors` has: there
 is no `Unauthenticated` code in it, and no keeper returns one, so a credentials
-failure is not a class of its own. An access-denied answer from the AWS or
-Google KMS API arrives as `PermissionDenied` and keeps its row. A credentials
-failure the driver instead reports as a plain error — no credentials at all, or
-an expired session token the SDK cannot refresh — is classified `Unknown` and
-so falls under "any other code": a cloud keeper treats it as a retryable
-`unavailable` whose message is the scheme only, and the operator finds the
-cause in the key service's own logs, which record the rejected request. It is
-not a configuration fault and is not reported as `internal`. Opening a cloud
-key service URL goes through the same classification: a cancelled context or
-an exceeded deadline keeps `cancelled` or `timeout`, an outage keeps
+failure is not a class of its own. An access-denied answer from the Google KMS
+API arrives as `PermissionDenied` and keeps its row; the AWS driver maps only a
+disabled key and an invalid grant token to `PermissionDenied`, while its
+access-denied answer, `AccessDeniedException`, is not in the driver's table and
+so arrives as `Unknown` and is retried as an outage like a credentials failure.
+A credentials failure the driver instead reports as a plain error — no
+credentials at all, or an expired session token the SDK cannot refresh — is
+classified `Unknown` and so falls under "any other code": a cloud keeper treats
+it as a retryable `unavailable` whose message is the scheme only. It is not a
+configuration fault and is not reported as `internal`. Opening a cloud key
+service URL uses its own one-off classification: a cancelled context or an
+exceeded deadline keeps `cancelled` or `timeout`, an outage keeps
 `unavailable`, and any other failure of the open itself is a configuration
 error — nothing has served a request yet — and becomes
 `invalid_argument` with `invalid key service URL for scheme "<scheme>"`.
