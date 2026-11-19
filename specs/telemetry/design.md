@@ -87,18 +87,10 @@ worker lease boundaries (`REQ-TELEM-021`, ADR-0012 §11).
   `platform/sql` (owned by WP-L1-01). If WP-L1-01 does not already include the
   span table, the implementer lands that schema change first or notes it in the
   pull request with a reviewer from WP-L1-01 (`agent-workflow.md` §4).
-  **As implemented:** WP-L1-01 has no span table, so `platform/telemetry`
-  creates `telemetry_spans` idempotently on the `platform/sql` store it is
-  given (`NewSQLSpanStore`). The schema lives with its only reader and needs no
-  migration owned by another capability; a future move into the SQL migration
-  set is additive.
 - The simulated OTLP collector and test harness helpers live in `internal/bdd`
   (and `_test.go` files), never in `platform/telemetry`.
 
-## Resolved questions
+## Open questions
 
-1. **Default embedded span retention period (`REQ-TELEM-014`):** `24h`
-   (`DefaultRetentionPeriod`), overridable through `Config.RetentionPeriod`.
-2. **Embedded span store migration ownership (WP-L1-01 vs WP-L1-07):** the
-   telemetry package owns an idempotent `telemetry_spans` schema on the
-   `platform/sql` store; no cross-area migration change was needed.
+1. **Default embedded span retention period (`REQ-TELEM-014`):** `REQ-TELEM-014` specifies purging spans older than the configured retention period (`Config.RetentionPeriod`); what default duration (e.g., `24h` vs `7d`) should `WP-L1-05` (`internal/config`) wire when none is set?
+2. **Embedded span store migration ownership (`WP-L1-01` vs `WP-L1-07`):** Should the SQLite migration for the embedded `spans` table land in `WP-L1-01` (`platform/sql`) before `WP-L1-07` implementation starts, or in `WP-L1-07` with a `platform/sql` cross-area note and reviewer?
