@@ -6,25 +6,27 @@
 
 ADR-0004, REQ-CONFIG-012, scenario CONFIG-012-01, the glossary, the architecture
 overview, WP-L1-04 and `platform/platform.go` all name **Vault Transit** as a
-cloud key service through the `hashivault://` scheme. `gocloud.dev` v0.49.0
-(the version in `go.mod`) ships KMS keepers under `secrets/` (`awskms`,
-`azurekeyvault`, `gcpkms`, `localsecrets`) but **no Vault Transit driver**.
+cloud key service through the `hashivault://` scheme.
 
-`specs/secrets/design.md` §1 records that the contract lists `hashivault://`
-while no driver exists in the pinned gocloud version, so when the secrets store
-opens the key service it refuses an unsupported scheme with `invalid_argument`
-(REQ-SECRET-019). The configuration loader still accepts `hashivault://` in the
-cloud profile (CONFIG-012-01). That pairing is an intentional interim state
-until a driver exists. Ticket EP0-88 asked whether to keep or remove the
-scheme; this ADR keeps it.
+`gocloud.dev/secrets/hashivault` is a separate module pinned at v0.49.0. It
+registers the `hashivault` scheme on `secrets.DefaultURLMux()` and its
+`URLOpener` accepts a custom client and token. It requires
+`github.com/hashicorp/vault/api v1.23.0`, which is MPL-2.0 and therefore allowed
+only unmodified under `docs/engineering/coding-guidelines.md` §4.
+
+So the owner has three real choices: import the official driver, write a small
+stdlib driver, or remove the scheme.
 
 ## Decision
+
+We keep `hashivault://` in the contract and implement it as a **hand-written
+stdlib driver** in its own work package after WP-L1-04.
 
 | Rule | Detail |
 | --- | --- |
 | **Contract** | `hashivault://` stays in the configuration contract and approved specs. Removing it would be a P1 spec change across REQ-CONFIG-012, CONFIG-012-01, the glossary and ADR-0004, and would drop the only self-hosted cloud key service. |
 | **URL** | `hashivault://<host>[:<port>]/<mount>/<key>?token_file=<path>[&ca_file=<path>]`. The scheme means HTTPS only (no plain-HTTP variant). The path is the Transit mount (it may have several segments) plus the key name as its last segment; `token_file` is required, `ca_file` optional. Configuration validation checks the **scheme only**, as approved (CONFIG-012-01 and `hashivault://vault.example.test` stay valid); missing key, missing `token_file` or unreadable token file are checked at secrets **open** with `invalid_argument`. Today the example passes validation and fails at open for lack of a driver; later it can fail at open for lack of key and token file. |
-| **Driver** | Vault Transit is implemented in a **work package of its own**, after WP-L1-04 merges the secrets store, not inside WP-L1-04. It is a small driver of ours: a `gocloud.dev/secrets/driver.Keeper` with `Encrypt`, `Decrypt`, `Close`, `ErrorAs` and `ErrorCode`, talking to Transit over HTTPS (`POST /v1/<mount>/encrypt/<key>` and `.../decrypt/<key>`; ciphertext `vault:v<n>:...`). No `github.com/hashicorp/vault/api`. Schedule is the owner's; nothing blocks the work package once the store is on `main`. |
+| **Driver** | Vault Transit is implemented in a **work package of its own**, after WP-L1-04 merges the secrets store, not inside WP-L1-04. It is a small driver of ours: a `gocloud.dev/secrets/driver.Keeper` with `Encrypt`, `Decrypt`, `Close`, `ErrorAs` and `ErrorCode`, talking to Transit over HTTPS (`POST /v1/<mount>/encrypt/<key>` and `.../decrypt/<key>`; ciphertext `vault:v<n>:...`). It uses the Go standard library only; we do **not** import `gocloud.dev/secrets/hashivault` or `github.com/hashicorp/vault/api`. Schedule is the owner's; nothing blocks the work package once the store is on `main`. |
 | **Authentication** | The Vault token is read from the file named by `token_file`, written by the operator or a Vault Agent / OpenBao Agent sink; refresh semantics are for the work package's design. The driver **never sends an empty token**; a token file it cannot read **fails the call** (not "no authentication"). The token is never in the URL, in a process environment variable, in the credential store or in logs or errors; the path is not a secret. **TLS verification is always on**; `ca_file` is an optional PEM bundle **added** to the system roots (private PKI; in the gate the simulator's cert via `ca_file`). No plain-HTTP mode and no skip-verify; Vault without TLS is unsupported. The driver has **no login flow** (no AppRole, no Kubernetes auth): login is the agent's job. REQ-CONFIG-007 and REQ-CONFIG-008 stay satisfied because the URL carries no secret. KMS uses ambient identity; Vault uses a file the deployment provides. |
 | **Dependencies** | The Transit work package depends on **WP-L1-04 only**. A token from `cred://` would require the credential store (envelope-encrypted through Secrets per ADR-0004 and WP-L1-06) to open before the key service can unwrap the credential store's keysets — a bootstrap cycle and a forbidden `platform/secrets` → `platform/credentials` edge against the existing credentials → secrets dependency. |
 | **Interim** | Until that work package lands, `hashivault://` remains valid in validation and is refused at secrets **open** with `invalid_argument`; `kit serve` fails start-up and names the secrets port (REQ-CONFIG-020, REQ-CONFIG-021). |
@@ -32,16 +34,17 @@ scheme; this ADR keeps it.
 
 ## Alternatives considered
 
-| Alternative | Cost | Why rejected |
+| Option | Cost | Verdict |
 | --- | --- | --- |
-| **Remove `hashivault://`** | `git grep -i 'hashivault\|vault transit' origin/main` → **11** lines: **7** under `specs/` (config 2, glossary 2, secrets 3) and **4** in docs and code comments (`docs/adr`, overview, roadmap, `platform/platform.go`); P1 spec churn on approved config and glossary among them. | Re-adding a scheme later breaks the additive contract story. |
-| **`github.com/hashicorp/vault/api`** | MPL-2.0 (coding guidelines §4: allowed only unmodified); scratch module on 2026-11-19: `go list -m all` **24 → 51** modules versus this repository. | Heavy for two REST calls. |
-| **Token in the URL userinfo or query** | A long-lived secret in configuration; renewal needs a config change and restart. | REQ-CONFIG-007/008; file + agent sink rotates without touching config. |
-| **Token from `cred://`** | Credential store must open before key service (cycle above). | Bootstrap deadlock; layering violation. |
-| **Register `hashivault` only when the driver is linked** | Validation would depend on the binary build. | REQ-CONFIG-012 lists cloud schemes statically. |
-| **Separate Go module for the keeper** | Split release graph. | Driver is standard-library only; no dependency saving. |
-| **Vault only as credential-store backend** | ADR-0004 allows an external store for the **Credentials** port (vendor API keys). | Payload keysets stay under Secrets; Transit as key service remains open. |
-| **Wait for upstream gocloud** | No driver in v0.49.0 module cache; upstream **not verified** here. | Unknown schedule; cloud profile already promises Transit. |
+| **1. Import `gocloud.dev/secrets/hashivault`** | One Apache-2.0 module, but it transitively pulls `github.com/hashicorp/vault/api v1.23.0` (MPL-2.0, allowed unmodified) and roughly doubles the module graph. A custom `URLOpener` is still required to read `token_file` from disk and to add `ca_file` to the TLS config without environment variables. | Rejected. The official driver saves only the two REST calls; the Vault SDK dependency is heavy for that, and every MPL-2.0 dependency must remain unmodified and tracked. |
+| **2. Hand-written stdlib driver** (recommended) | A small `gocloud.dev/secrets/driver.Keeper` using `net/http`; no new production dependencies; tested against an `internal/bdd` simulator and `httptest`. | Chosen. It avoids the Vault SDK, keeps the binary small, and keeps all authentication behavior explicit in our code. |
+| **3. Remove `hashivault://`** | `git grep -i 'hashivault\|vault transit' origin/main` → **11** lines: **7** under `specs/` (config 2, glossary 2, secrets 3) and **4** in docs and code comments (`docs/adr`, overview, roadmap, `platform/platform.go`); P1 spec churn on approved config and glossary among them. ADR-0004 would need amending now, followed by a P1 spec change. | Rejected. Re-adding a scheme later breaks the additive contract story, and Transit is the only self-hosted cloud key service in the current contract. |
+
+The official driver's existence removes the original "no driver" reason for
+refusal, but it does not change the dependency cost: the gocloud module is thin
+and the Vault SDK it pulls in is not. For two HTTPS POSTs, keeping the
+implementation in the standard library is smaller, easier to review, and easier
+to simulate in the gate.
 
 ## Consequences
 
