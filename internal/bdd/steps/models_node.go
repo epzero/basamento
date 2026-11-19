@@ -707,6 +707,9 @@ func registerNode(sc *godog.ScenarioContext) {
 		return world(ctx).Node.waitGate(gate)
 	})
 	sc.Step(`^the node fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if w := world(ctx).Worker; w != nil && w.run != nil {
+			return w.assertNodeFails(ctx, code)
+		}
 		w := world(ctx).Node
 		if err := w.waitSettled(); err != nil {
 			return err
@@ -737,6 +740,9 @@ func registerNode(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the run is charged (\d+) milli-points and the reservation is closed$`, func(ctx context.Context, want int64) error {
+		if w := world(ctx).Worker; w != nil && w.run != nil {
+			return w.assertCharged(ctx, want)
+		}
 		w := world(ctx).Node
 		select {
 		case <-w.doneCh:
@@ -786,6 +792,9 @@ func registerNode(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the reservation is released$`, func(ctx context.Context) error {
+		if w := world(ctx).Worker; w != nil && w.run != nil {
+			return w.assertReservationReleased(ctx)
+		}
 		w := world(ctx).Node
 		select {
 		case <-w.doneCh:

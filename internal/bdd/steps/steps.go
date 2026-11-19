@@ -43,6 +43,7 @@ type World struct {
 	Telemetry    *telemetryWorld
 	Temporal     *temporalWorld
 	Tool         *toolWorld
+	Worker       *workerWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -97,4 +98,5 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerTemporal(sc)
 	registerTemporalLocalRunSteps(sc)
 	registerTool(sc)
+	registerWorker(sc)
 }

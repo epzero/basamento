@@ -126,6 +126,9 @@ func registerCore(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the request fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if w := world(ctx); w.Worker != nil && w.Worker.lastErr != nil {
+			return workerCode(w.Worker.lastErr, code)
+		}
 		err := world(ctx).Core.lastErr
 		if err == nil {
 			return fmt.Errorf("request succeeded, want code %s", code)

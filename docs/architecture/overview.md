@@ -73,6 +73,7 @@ flowchart TD
   internal_config["internal/config"]
   model["model"]
   model_node["model/node"]
+  model_worker["model/worker"]
   platform["platform"]
   prompt["prompt"]
   runtime["runtime"]
@@ -101,6 +102,8 @@ flowchart TD
   model --> platform
   model_node --> model
   model_node --> runtime
+  model_worker --> model
+  model_worker --> tool
   platform --> core
   prompt --> core
   runtime --> core
@@ -122,6 +125,7 @@ flowchart TD
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. Contract and adapters **implemented** (WP-L3-01); providers and routing **implemented** (WP-L3-04). |
 | `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. **Implemented** (WP-L3-06). |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). **Implemented** (WP-L3-03). |
+| `model/worker` | Pools, descriptors, the SQL queue with classes, fairness and ageing, leases, the worker journal, restart-safe redelivery and `worker_lost`, spill-over, metrics, administration and routing by labels (ADR-0012 §1–§11). **Implemented** (WP-L3-07). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |
 | `flow` | IR, compiler, builder and the pure `Machine`. Imports no runtime. |
 | `flow/host` | The generic flow host (a `runtime.FlowHost`): drives the machine through `DurableContext` and dispatches node handlers (ADR-0011). |
