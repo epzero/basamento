@@ -1,7 +1,8 @@
 # Models: one invocation contract
 
-Status: **Planned** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04, WP-L3-06; workers in WP-L3-07 and
-WP-L3-08). Design: ADR-0006, ADR-0012,
+Status: **Partly implemented** (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-06);
+providers (WP-L3-04) and workers in WP-L3-07 and WP-L3-08 are planned.
+Design: ADR-0006, ADR-0012,
 `docs/architecture/model-layer.md`.
 
 Every model call is an **invocation**, whatever the model does (chat,

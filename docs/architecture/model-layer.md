@@ -1,10 +1,10 @@
 # Model layer
 
-Status: contract and adapters implemented in `model` and `model/chat`
-(WP-L3-01); structured output and the call middleware implemented in
-`model/structured` and `model/middleware` (WP-L3-02); the catalog and price
-table in `model/catalog` (WP-L3-06); provider construction and routing
-**Planned** (WP-L3-04).
+Status: the invocation contract and adapters in `model` and `model/chat`
+(WP-L3-01), structured output and the call middleware in `model/structured`
+and `model/middleware` (WP-L3-02), the catalog and price table in
+`model/catalog` (WP-L3-06) and the model node in `model/node` (WP-L3-03) are
+implemented; provider construction and routing **Planned** (WP-L3-04).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -108,7 +108,9 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    heartbeating step, or through a gate resolved by a webhook.
 5. **Ingest** output files into content-addressed blob storage with provenance
    (REQ-MODEL-008).
-6. **Settle**: charge the actual cost or release the reservation.
+6. **Settle**: charge the actual cost or release the reservation. The cost is
+   the provider's, or else the price formula on the actual usage; a run
+   without a budget is unmetered and reserves nothing.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.
