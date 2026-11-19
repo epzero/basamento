@@ -17,10 +17,16 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core   *coreWorld
-	SQL    *sqlWorld
-	Prompt *promptWorld
-	Blob   *blobWorld
+	Core        *coreWorld
+	Expr        *exprWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Blob        *blobWorld
+	Secrets     *secretsWorld
+	Credentials *credentialsWorld
+	Schema      *schemaWorld
+	Model       *modelWorld
+	Catalog     *catalogWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -29,17 +35,28 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			SQL:    newSQLWorld(),
-			Prompt: newPromptWorld(),
-			Blob:   newBlobWorld(),
+			Core:    newCoreWorld(),
+			Expr:    &exprWorld{bindings: map[string]any{}},
+			SQL:     newSQLWorld(),
+			Prompt:  newPromptWorld(),
+			Blob:    newBlobWorld(),
+			Schema:  newSchemaWorld(),
+			Model:   newModelWorld(),
+			Catalog: newCatalogWorld(),
 		}), nil
 	})
 	registerCore(sc)
+	registerExpr(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerSecrets(sc)
+	registerCredentials(sc)
+	registerSchema(sc)
+	registerModel(sc)
+	registerCatalog(sc)
 	registerSharedSteps(sc)
+	registerShared(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
@@ -64,4 +81,27 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 		return assertBlobCallCode(ctx, code)
 	}
 	return fmt.Errorf("call succeeded, want %s", code)
+}
+
+// registerShared holds phrases used by more than one domain. The SQL store and
+// the Secrets port both report an open failure with the same phrase; one
+// handler reads whichever domain opened in the scenario.
+func registerShared(sc *godog.ScenarioContext) {
+	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		w := world(ctx)
+		var err error
+		if w.SQL != nil {
+			err = w.SQL.openErr
+		}
+		if err == nil && w.Secrets != nil {
+			err = w.Secrets.lastErr
+		}
+		if err == nil {
+			return fmt.Errorf("opening succeeded, want %s", code)
+		}
+		if got := core.CodeOf(err); string(got) != code {
+			return fmt.Errorf("got code %s, want %s: %w", got, code, err)
+		}
+		return nil
+	})
 }

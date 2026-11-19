@@ -108,10 +108,11 @@ flowchart TD
 
 | Package | Role |
 | --- | --- |
-| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`). `core/coretest` fakes are test-only. **Implemented.** |
+| `core` | ids, clock, error taxonomy, the tenant context (`core.TenantFrom`), canonical JSON and JSON Schema (`core/schema`). `core/coretest` fakes are test-only. **Implemented.** |
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
+| `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |
 | `flow` | IR, compiler, builder and the pure `Machine`. Imports no runtime. |
@@ -178,5 +179,5 @@ We reuse rather than reinvent. Notable choices:
   and cannot be stepped from outside.
 - **Google ADK Go** and Temporal's ADK integration: a reference for workflow
   agents. Our agent loop stays runtime-neutral (ADR-0002).
-- **cel-go** (`github.com/cel-expr/cel-go`), **gojq**, **godog**, **MCP Go SDK**,
+- **cel-go** (`cel.dev/cel-go`), **gojq**, **godog**, **MCP Go SDK**,
   **connect-go**, **gocloud.dev**, **nats-server**.

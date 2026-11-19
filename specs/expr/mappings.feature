@@ -1,4 +1,4 @@
-@planned @wp:WP-L2-01 @level:component
+@wp:WP-L2-01 @level:component
 Feature: JSON mappings
   A mapping reshapes one JSON value into another with gojq, for example a
   provider's request and response mappings. Like an expression, it reads no

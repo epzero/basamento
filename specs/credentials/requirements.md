@@ -1,6 +1,6 @@
 # Credentials: the vault
 
-Status: **Planned** (WP-L1-06, `platform/credentials`). Design: ADR-0004,
+Status: **Implemented** (WP-L1-06, `platform/credentials`). Design: ADR-0004,
 [`design.md`](design.md). Constitution articles 7 and 8.
 
 The credential store is a tenant's vault: named secrets such as vendor API
