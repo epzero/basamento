@@ -1,7 +1,9 @@
 # Flow engine
 
-Status: contracts in `flow/flow.go`; implementation **Planned** (WP-L4-*).
-Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
+Status: IR and compiler in `flow/ir` and `flow/compile` (WP-L4-01); the machine
+in `flow/machine` (WP-L4-02); the host in `flow/host` (WP-L4-04); contracts in
+`flow/flow.go`; builder **Planned** (WP-L4-03). Decisions: ADR-0003, ADR-0011.
+Specs: `specs/flow-engine`.
 
 ## 1. IR
 
@@ -9,6 +11,11 @@ A flow is canonical JSON with `name`, `version`, a state schema with per-key
 reducers, nodes and edges. Its sha256 is its identity, and runs pin it. Authors
 write YAML, use the Go builder, or have an LLM generate the IR; all three
 compile to the same IR.
+
+`flow/ir` decodes that JSON or YAML, rejects unknown fields and duplicate
+keys, produces the RFC 8785 canonical bytes and the content hash, and enforces
+the structural rules below. `flow/compile` type-checks expressions and
+returns the validated canonical form of the same IR.
 
 ```yaml
 flow: codegen.feature
@@ -38,21 +45,41 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
 
 ## 2. Compiler
 
-- Validates the schema, references and node specs.
+- Validates the state schema, reducer keys and reducer forms, node names and
+  kinds, and edge references.
 - Type-checks every CEL expression against the state schema.
 - Requires at least one guarded node on every cycle, which bounds it.
 - Rejects unknown node kinds.
-- Error messages name the node or edge and the expression (REQ-FLOW-003/004).
+- Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
+  those names; a node named `START` or `FAIL`, an edge into `START`, an edge
+  out of `FAIL`, or a flow without exactly one edge from `START` is rejected.
+- Rejects nodes unreachable from `START`.
+- Error messages name the node or edge and the expression (REQ-FLOW-003/004),
+  and all rejections use code `invalid_argument`.
 
 ## 3. Machine
+
+`flow/machine` implements `flow.Machine` over one compiled definition: `New`
+validates the IR and compiles its expressions, then `Start` and `Apply` run it.
 
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
   snapshot and commands. No I/O and no clock.
 - **Supersteps**: every ready node runs. Updates merge through reducers **in
   node-id order** at the barrier, so the result does not depend on completion
-  order (REQ-FLOW-002).
+  order (REQ-FLOW-002). A map node's attempts merge in attempt order after the
+  node id. Steps stay sorted in the snapshot, so two runs that differ only in
+  completion order have identical snapshots.
 - **Edges**: the first edge whose `when` holds, in declaration order;
-  otherwise the default edge (REQ-FLOW-001).
+  otherwise the default edge (REQ-FLOW-001). A node with no outgoing edge ends
+  its branch; reaching the reserved `FAIL` endpoint fails the run.
+- **Node kinds**: `set` nodes and routing are evaluated in the machine with no
+  command (REQ-FLOW-036). A `parallel` node starts every node named by its
+  outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
+  array and starts the node named by `spec.node` once per element, carrying the
+  element as input and the one-based index as the attempt. Every other kind
+  becomes a `run_node`, `await_gate` or `start_timer` command for the host.
+- **Guards**: a `while` that does not hold skips the node and ends its branch;
+  a visit or cost bound that is reached fails the run with `budget_exceeded`.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
   (`cost_mpts`). Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.
