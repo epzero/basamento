@@ -1115,7 +1115,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 
 	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?: without the gate "([^"]*)" being resolved)?$`,
 		func(ctx context.Context, count int, unit, gate string) error {
-			w := world(ctx).Host
 			var duration time.Duration
 			switch strings.TrimSuffix(unit, "s") {
 			case "second":
@@ -1124,6 +1123,14 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 				duration = time.Duration(count) * time.Minute
 			case "hour":
 				duration = time.Duration(count) * time.Hour
+			}
+			// The scenario clock drives every runtime under test; the recording
+			// fake of the host keeps its own clock, so advance both when it is
+			// the one in use.
+			world(ctx).Core.clock.Advance(duration)
+			w := world(ctx).Host
+			if w.dc == nil {
+				return nil
 			}
 			w.dc.advance(duration)
 			w.signal()
