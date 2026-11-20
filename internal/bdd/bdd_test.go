@@ -84,6 +84,7 @@ func TestBDDGateProfiles(t *testing.T) {
 
 // TestFeatures runs every scenario under specs/ in strict mode: undefined or
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
+// BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
 	sqltest.ResetSkipCounts()
 	failed := false
@@ -104,16 +105,56 @@ func TestFeatures(t *testing.T) {
 	enforceStrictNoPostgresSkips(t)
 
 	tags := scenarioTags()
-	for _, profile := range bddGateProfiles() {
-		runSuite(t, tags, profile)
-		if t.Failed() {
-			failed = true
+
+	// BDD_PATHS narrows the run to one subtree (blob conformance). The bus
+	// backend suites below always target specs/bus, so a narrowed run leaves
+	// them out; BDD_BUS_BACKEND restricts the run to one bus implementation.
+	narrowed := os.Getenv("BDD_PATHS") != ""
+	oneBus := os.Getenv("BDD_BUS_BACKEND")
+	if narrowed || oneBus == "" || oneBus == "fake" {
+		for _, profile := range bddGateProfiles() {
+			runSuite(t, tags, profile)
+			if t.Failed() {
+				failed = true
+			}
+		}
+	}
+	if !narrowed {
+		for _, backend := range []string{"embedded", "cloud"} {
+			if oneBus != "" && oneBus != backend {
+				continue
+			}
+			runBusBackendSuite(t, tags, backend)
+			if t.Failed() {
+				failed = true
+			}
 		}
 	}
 	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
 		failed = true
 	}
 	enforceStrictNoPostgresSkips(t)
+}
+
+func runBusBackendSuite(t *testing.T, tags, backend string) {
+	t.Run("bus-"+backend, func(t *testing.T) {
+		t.Setenv("BDD_BUS_BACKEND", backend)
+		t.Setenv("BDD_SQL_PROFILE", "embedded")
+		suite := godog.TestSuite{
+			Name:                "basamento-bus-" + backend,
+			ScenarioInitializer: steps.Initialize,
+			Options: &godog.Options{
+				Format:   "pretty",
+				Paths:    []string{"../../specs/bus"},
+				Tags:     tags,
+				Strict:   true,
+				TestingT: t,
+			},
+		}
+		if code := suite.Run(); code != 0 {
+			t.Fatalf("godog exited with status %d", code)
+		}
+	})
 }
 
 func runSuite(t *testing.T, tags, profile string) {
