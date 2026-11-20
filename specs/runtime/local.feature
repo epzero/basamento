@@ -424,6 +424,14 @@ Feature: The local runtime
     And tenant "acme" lists 1 run of flow "work"
     And step "render" was executed 1 time
 
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-02
+  Scenario: Starting twice with an empty start idempotency key creates two runs
+    Given flow "work" calls step "render" that returns {"ok": true}
+    When tenant "acme" starts run "r1" of "work" with an empty start idempotency key
+    And tenant "acme" starts run "r2" of "work" with an empty start idempotency key
+    Then tenant "acme" lists 2 runs of flow "work"
+    And step "render" was executed 2 times
+
   @planned @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-048 @id:RT-048-01
   Scenario: The same start idempotency key in two tenants starts two runs
     Given flow "work" calls step "render" that returns {"ok": true}
@@ -449,6 +457,23 @@ Feature: The local runtime
     When parent "parent-1" starts child flow "other" with child run id "child-1"
     Then starting the child fails with code "conflict"
     And tenant "acme" describes run "child-1" as "running"
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-02
+  Scenario: Reusing a child run id of a different parent fails with conflict
+    Given tenant "acme" has parent run "parent-1" with child run "child-1" of flow "child"
+    And tenant "acme" has parent run "parent-2" of flow "parent"
+    When parent "parent-2" starts child flow "child" with child run id "child-1"
+    Then starting the child fails with code "conflict"
+    And tenant "acme" describes run "child-1" as "running"
+    And child flow "child" was started 1 time
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-03
+  Scenario: Reusing a top-level run id as a child run id fails with conflict
+    Given tenant "acme" has run "existing-1" of flow "review" waiting at gate "approve"
+    And tenant "acme" has parent run "parent-1" of flow "parent"
+    When parent "parent-1" starts child flow "child" with child run id "existing-1"
+    Then starting the child fails with code "conflict"
+    And tenant "acme" describes run "existing-1" as "running"
 
   # List paging uses an opaque paging cursor bound to its issuing tenant.
 

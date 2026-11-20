@@ -40,7 +40,9 @@ run's tenant, never an empty string or a field the caller passed.
 Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019`,
 `REQ-RT-021` … `REQ-RT-027`, `REQ-RT-042` … `REQ-RT-044` and
 `REQ-RT-046` … `REQ-RT-054` in `local.feature` to the implementer. This
-work package changes no contract file.
+work package needs an additive core change: a timer capability on the clock
+`New` accepts (`After`), implemented by `core.SystemClock` and
+`coretest.FakeClock` (fires on Advance). No runtime contract file changes.
 
 ### Ports the composition root supplies
 
@@ -150,17 +152,21 @@ All three identifiers are resolved under the context tenant, before any work
 starts. A `StartRequest.RunID` that already names a run of that tenant fails
 with `conflict` (`REQ-RT-046`); the same id in another tenant is a different
 run, as `RT-021-01` already shows. A `StartRequest.IdempotencyKey` is mapped
-per tenant too: a repeat in the same tenant returns the first run's reference
-and runs no step (`REQ-RT-047`), while the same key in two tenants yields two
-runs (`REQ-RT-048`, `RT-048-01`). The map is kept for the process's life, like
+per tenant too: a repeat of a non-empty key in the same tenant returns the first
+run's reference and runs no step (`REQ-RT-047`), while the same key in two
+tenants yields two runs (`REQ-RT-048`, `RT-048-01`). Empty keys are not stored
+in the dedupe map, so each start with an empty key creates a new run
+(`REQ-RT-047`, `RT-047-02`). The map is kept for the process's life, like
 the journal (see Retention below).
 
 A child id names a child of one parent and one flow. `Child` with the id of a
 child already started by this parent for this flow returns that child's future
 instead of starting another (`REQ-RT-049`, `RT-049-01`): this is how a parent
-re-attaches after a retry, while the child is still in flight. The same id reused for a different
-parent or flow fails with `conflict` (`REQ-RT-050`, `RT-050-01`); it never
-silently replaces the existing child.
+re-attaches after a retry, while the child is still in flight. An id that
+already names any other run of the tenant — a child of a different parent
+(`RT-050-02`), a child of another flow (`RT-050-01`) or a top-level run
+(`RT-050-03`) — fails with `conflict` (`REQ-RT-050`); it never silently
+replaces the existing run.
 
 ### List paging
 
@@ -178,10 +184,11 @@ denial happens before the page is read, like the tenant checks in
 ### A local runtime needs a timer clock
 
 `New` takes a clock and requires a timer clock — one that can schedule timers
-(`After`), not just report time (`Now`). A clock that cannot do so fails
-construction with an error (`REQ-RT-054`): timers could not move and
-`REQ-RT-008` could not hold. Passing nil selects `core.SystemClock`, which is
-a timer clock. The gate injects a timer-capable fake clock.
+(`After`), not just report time (`Now`). `New` type-asserts/accepts a clock with
+`After`; a `core.Clock` with only `Now` fails construction with an error
+(`REQ-RT-054`, `RT-054-01`): timers could not move and `REQ-RT-008` could not
+hold. Passing nil selects `core.SystemClock`, which is a timer clock. The gate
+injects `coretest.FakeClock`, which fires timers on `Advance`.
 
 ### Panics stay inside one run or step
 

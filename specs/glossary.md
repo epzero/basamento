@@ -18,7 +18,7 @@ the same change that first uses it.
 | **Input mapping** | A node's `in` expression, CEL or jq, that turns the run's state into the node's input. A node with no input mapping receives the run's input (REQ-FLOW-051). |
 | **Superstep sequence** | The `Seq` of a machine snapshot, increased when the machine starts a new superstep; part of a step's idempotency key (REQ-FLOW-058). |
 | **Idempotency key** | The key a step carries so that one logical step is recorded once: a retry of it keeps the same key (REQ-FLOW-058). |
-| **Start idempotency key** | The key `StartRequest.IdempotencyKey` carries: a second start with the same key in the same tenant returns that run's reference without starting another run or executing its steps; keys in different tenants do not deduplicate (REQ-RT-047, REQ-RT-048). |
+| **Start idempotency key** | The key `StartRequest.IdempotencyKey` carries: a non-empty key deduplicates a second start in the same tenant, returning that run's reference without starting another run or executing its steps; empty does not deduplicate; cross-tenant does not (REQ-RT-047, REQ-RT-048). |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
 | **Step** | A side-effecting unit executed by a runtime (a Temporal activity on the temporal runtime). Retried; its result is recorded. |
 | **Gate** | A node that waits for a human or external decision; its payload is validated by schema and CEL. |
