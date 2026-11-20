@@ -37,6 +37,17 @@
 // one-based index as the attempt, up to DefaultMaxFanout (10 000) items per
 // superstep; the host may lower the limit with WithMaxFanout. max_parallel is
 // the host's throttle on how many map children run at once, not a cap on fan-out.
+// A map child must not carry a guard (the machine rejects it at New): guards
+// count routed nodes, but a map child is invoked once per element without
+// visiting the child node id.
+//
+// # Pure supersteps
+//
+// Inside one advance call the machine may run several command-free supersteps.
+// If that count exceeds a limit derived from the definition (and never below
+// DefaultMaxPureSupersteps, overridable with WithMaxPureSupersteps), the run
+// ends with budget_exceeded instead of hanging on a pure cycle whose only bound
+// is cost_mpts.
 //
 // # Guards
 //

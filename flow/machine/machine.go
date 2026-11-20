@@ -17,14 +17,16 @@ import (
 // Machine is the pure interpreter over one definition. The zero value is not
 // usable; call New.
 type Machine struct {
-	def       *flow.IR
-	maxFanout int
-	edges     map[string][]compiledEdge
-	guards    map[string]*expr.Program
-	inputs    map[string]*valueExpr
-	sets      map[string]*valueExpr
-	mapOver   map[string]*valueExpr
-	mapNodes  map[string]string
+	def                *flow.IR
+	maxFanout          int
+	maxPureSupersteps  int
+	pureSuperstepLimit int64
+	edges              map[string][]compiledEdge
+	guards             map[string]*expr.Program
+	inputs             map[string]*valueExpr
+	sets               map[string]*valueExpr
+	mapOver            map[string]*valueExpr
+	mapNodes           map[string]string
 }
 
 type compiledEdge struct {
@@ -61,21 +63,29 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 		return nil, invalid("flow: expressions: "+err.Error(), nil)
 	}
 	m := &Machine{
-		def:       def,
-		maxFanout: DefaultMaxFanout,
-		edges:     make(map[string][]compiledEdge, len(def.Nodes)),
-		guards:    make(map[string]*expr.Program),
-		inputs:    make(map[string]*valueExpr),
-		sets:      make(map[string]*valueExpr),
-		mapOver:   make(map[string]*valueExpr),
-		mapNodes:  make(map[string]string),
+		def:               def,
+		maxFanout:         DefaultMaxFanout,
+		maxPureSupersteps: DefaultMaxPureSupersteps,
+		edges:             make(map[string][]compiledEdge, len(def.Nodes)),
+		guards:            make(map[string]*expr.Program),
+		inputs:            make(map[string]*valueExpr),
+		sets:              make(map[string]*valueExpr),
+		mapOver:           make(map[string]*valueExpr),
+		mapNodes:          make(map[string]string),
 	}
 	for _, opt := range opts {
 		if err := opt(m); err != nil {
 			return nil, err
 		}
 	}
+	m.pureSuperstepLimit = computePureSuperstepLimit(def, m.maxPureSupersteps)
+	mapChildOwners := map[string]string{}
 	for _, edge := range def.Edges {
+		if edge.From == ir.Start && edge.When != "" {
+			return nil, invalid("flow: the edge from START takes no condition", map[string]any{
+				"edge": edge.From + " -> " + edge.To,
+			})
+		}
 		compiled := compiledEdge{to: edge.To}
 		if edge.When != "" {
 			condition, err := env.Compile(edge.When, json.RawMessage(`{"type":"boolean"}`))
@@ -122,6 +132,33 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 			}
 			m.mapOver[id] = value
 			m.mapNodes[id] = child
+			childNode, ok := def.Nodes[child]
+			if !ok {
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q does not exist", id, child),
+					map[string]any{"node": id, "child": child},
+				)
+			}
+			if childNode.Guard != nil {
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element", id, child),
+					map[string]any{"node": id, "child": child},
+				)
+			}
+			switch childNode.Kind {
+			case "set", "map", "parallel":
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q has kind %q, which the machine runs itself", id, child, childNode.Kind),
+					map[string]any{"node": id, "child": child, "kind": childNode.Kind},
+				)
+			}
+			if owner, ok := mapChildOwners[child]; ok {
+				return nil, invalid(
+					fmt.Sprintf("flow: map nodes %q and %q both use child node %q", owner, id, child),
+					map[string]any{"maps": []string{owner, id}, "child": child},
+				)
+			}
+			mapChildOwners[child] = id
 		}
 	}
 	return m, nil
@@ -256,6 +293,7 @@ func accrueCostMpts(s *flow.Snapshot, ev flow.Event) {
 // advance expands a set of ready nodes and runs pure supersteps until it has
 // commands to hand out or the run ends.
 func (m *Machine) advance(s *flow.Snapshot, targets []string) ([]flow.Command, error) {
+	var pureSupersteps int64
 	for {
 		steps, failing, err := m.expand(s, targets)
 		if err != nil {
@@ -280,6 +318,14 @@ func (m *Machine) advance(s *flow.Snapshot, targets []string) ([]flow.Command, e
 		}
 		if len(next) == 0 {
 			return []flow.Command{{Type: "complete"}}, nil
+		}
+		pureSupersteps++
+		if pureSupersteps > m.pureSuperstepLimit {
+			node := targets[0]
+			if len(steps) > 0 {
+				node = steps[0].Node
+			}
+			return []flow.Command{*pureSuperstepFailure(node, m.pureSuperstepLimit)}, nil
 		}
 		s.Seq++
 		targets = next
@@ -628,11 +674,12 @@ func compileValue(env *expr.Env, src string) (*valueExpr, error) {
 	if program, err := env.Compile(src, nil); err == nil {
 		return &valueExpr{cel: program}, nil
 	}
-	if mapping, err := expr.CompileMapping(src, []string{"state", "run"}); err == nil {
+	if mapping, err := expr.CompileMapping(src, nil); err == nil {
 		return &valueExpr{jq: mapping}, nil
 	}
-	_, err := env.Compile(src, nil)
-	return nil, err
+	_, celErr := env.Compile(src, nil)
+	_, mappingErr := expr.CompileMapping(src, nil)
+	return nil, bothMappingErrors(celErr, mappingErr)
 }
 
 func compileSet(env *expr.Env, node flow.Node) (*valueExpr, error) {
@@ -651,7 +698,6 @@ func parseMapSpec(node flow.Node) (over, child string, err error) {
 	var spec struct {
 		Over string `json:"over"`
 		Node string `json:"node"`
-		Max  int    `json:"max_parallel"` // read by the host; the machine fans out all items
 	}
 	if len(bytes.TrimSpace(node.Spec)) == 0 {
 		return "", "", fmt.Errorf("map spec is empty")
@@ -669,7 +715,29 @@ func (v *valueExpr) eval(state, input any, run map[string]any) (any, error) {
 	if v.cel != nil {
 		return v.cel.Eval(map[string]any{"state": state, "input": input, "run": run})
 	}
-	return v.jq.Eval(state, map[string]any{"state": state, "run": run})
+	return v.jq.Eval(state, nil)
+}
+
+func bothMappingErrors(celErr, mappingErr error) error {
+	message := fmt.Sprintf("not CEL (%s) and not jq (%s)", mappingMessageOf(celErr), mappingMessageOf(mappingErr))
+	details := map[string]any{}
+	for _, err := range []error{celErr, mappingErr} {
+		var platform *core.Error
+		if errors.As(err, &platform) {
+			for key, value := range platform.Details {
+				details[key] = value
+			}
+		}
+	}
+	return invalid(message, details)
+}
+
+func mappingMessageOf(err error) string {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Message
+	}
+	return err.Error()
 }
 
 func decodedState(s *flow.Snapshot) (map[string]any, error) {
@@ -707,6 +775,43 @@ func fanoutFailure(id string, count, limit int) *flow.Command {
 	message := fmt.Sprintf("flow: node %q map over has %d items, limit %d", id, count, limit)
 	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
 	return &flow.Command{Type: "fail", Node: id, Input: payload}
+}
+
+func pureSuperstepFailure(id string, limit int64) *flow.Command {
+	message := fmt.Sprintf("flow: node %q: no declared bound can be counted for the cycle through this node (%d consecutive pure supersteps, limit %d)", id, limit, limit)
+	payload, _ := json.Marshal(map[string]any{
+		"code":    string(core.CodeBudgetExceeded),
+		"message": message,
+		"limit":   limit,
+	})
+	return &flow.Command{Type: "fail", Node: id, Input: payload}
+}
+
+const maxVisitsSumCap = math.MaxInt64 / 4096 / 2
+
+func computePureSuperstepLimit(def *flow.IR, floor int) int64 {
+	var sum int64
+	for _, node := range def.Nodes {
+		if node.Guard == nil || node.Guard.MaxVisits <= 0 {
+			continue
+		}
+		v := int64(node.Guard.MaxVisits)
+		if sum > maxVisitsSumCap-v {
+			sum = maxVisitsSumCap
+			break
+		}
+		sum += v
+	}
+	nodes := int64(len(def.Nodes))
+	multiplier := nodes * (1 + sum)
+	if nodes > 0 && multiplier/nodes != 1+sum {
+		multiplier = math.MaxInt64
+	}
+	limit := int64(floor)
+	if multiplier > limit {
+		limit = multiplier
+	}
+	return limit
 }
 
 func guardFailure(id string, node flow.Node) *flow.Command {

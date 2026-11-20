@@ -102,7 +102,11 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   completion order have identical snapshots.
 - **Edges**: the first edge whose `when` holds, in declaration order;
   otherwise the default edge (REQ-FLOW-001). A node with no outgoing edge ends
-  its branch; reaching the reserved `FAIL` endpoint fails the run.
+  its branch; reaching the reserved `FAIL` endpoint fails the run. An edge from
+  `START` must not carry a condition (`New` rejects it).
+- **Map children**: at `New`, every `map` node's `spec.node` must name an
+  existing node whose kind is one the host runs (not `set`, `map` or `parallel`),
+  must not carry a guard, and must not be shared by two map nodes.
 - **Node kinds**: `set` nodes and routing are evaluated in the machine with no
   command (REQ-FLOW-036). A `parallel` node starts every node named by its
   outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
@@ -113,6 +117,12 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   host.
 - **Guards**: a `while` that does not hold skips the node and ends its branch;
   a visit or cost bound that is reached fails the run with `budget_exceeded`.
+  A map child must not have a guard (rejected at `New`). Consecutive
+  command-free supersteps inside one `advance` are capped: the limit is
+  `max(floor, nodes × (1 + sum of declared max_visits))` with floor
+  `DefaultMaxPureSupersteps` (100 000, overridable via `WithMaxPureSupersteps`);
+  exceeding it fails with `budget_exceeded` when cost-only bounds would not
+  accrue on the machine.
   `cost_mpts` is compared with `Snapshot.Cost`, the run's total settled cost,
   when the node is about to start; a node does not start once the cost has
   reached the budget (`cost >= cost_mpts`), like `max_visits` after the last

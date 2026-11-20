@@ -10,6 +10,11 @@ import (
 // throttle, not a cap on how many commands a map may produce.
 const DefaultMaxFanout = 10000
 
+// DefaultMaxPureSupersteps is the floor for consecutive command-free supersteps
+// inside one advance call. The effective limit also scales with the definition's
+// declared max_visits budgets (WithMaxPureSupersteps can raise the floor).
+const DefaultMaxPureSupersteps = 100_000
+
 // Option configures a Machine at construction.
 type Option func(*Machine) error
 
@@ -21,6 +26,18 @@ func WithMaxFanout(n int) Option {
 			return core.NewError(core.CodeInvalidArgument, "flow: max fanout must be at least 1", nil)
 		}
 		m.maxFanout = n
+		return nil
+	}
+}
+
+// WithMaxPureSupersteps sets the floor for consecutive command-free supersteps
+// within one advance. n must be at least 1.
+func WithMaxPureSupersteps(n int) Option {
+	return func(m *Machine) error {
+		if n < 1 {
+			return core.NewError(core.CodeInvalidArgument, "flow: max pure supersteps must be at least 1", nil)
+		}
+		m.maxPureSupersteps = n
 		return nil
 	}
 }
