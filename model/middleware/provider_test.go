@@ -68,9 +68,9 @@ func (f *fakeInvoker) cancelled() []string {
 	return append([]string(nil), f.cancels...)
 }
 
-func failedResult(t *testing.T, code core.Code, retryable bool) model.Result {
+func failedResult(t *testing.T, code core.Code, retryable bool, after time.Duration) model.Result {
 	t.Helper()
-	data, err := json.Marshal(model.Failure{Code: code, Message: string(code), Retryable: retryable})
+	data, err := json.Marshal(model.Failure{Code: code, Message: string(code), Retryable: retryable, RetryAfter: after})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestInvokerProviderSendsEachAttemptsOwnClientRef(t *testing.T) {
 	inv := &fakeInvoker{}
 	inv.resultFor = func(ref string) model.Result {
 		if ref == "call-1" {
-			return failedResult(t, core.CodeUnavailable, true)
+			return failedResult(t, core.CodeUnavailable, true, 0)
 		}
 		return succeeded("Hi", nil)
 	}
@@ -98,5 +98,26 @@ func TestInvokerProviderSendsEachAttemptsOwnClientRef(t *testing.T) {
 	got := inv.started()
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Start refs = %v, want %v", got, want)
+	}
+}
+
+func TestInvokerProviderKeepsRetryAfter(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	inv := &fakeInvoker{}
+	inv.resultFor = func(ref string) model.Result {
+		if ref == "call-1" {
+			return failedResult(t, core.CodeRateLimited, true, 5*time.Second)
+		}
+		return succeeded("Hi", nil)
+	}
+	res, err := Call(context.Background(), baseConfig(rt, InvokerProvider{Invoker: inv}))
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if len(res.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(res.Attempts))
+	}
+	if got := res.Attempts[1].Start.Sub(res.Attempts[0].End); got != 5*time.Second {
+		t.Fatalf("wait after Retry-After = %v, want 5s", got)
 	}
 }

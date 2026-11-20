@@ -75,5 +75,5 @@ func failureError(res model.Result) error {
 	if err := json.Unmarshal(res.Error, &f); err != nil {
 		return core.NewError(core.CodeInternal, "invocation failure is not a failure object", nil)
 	}
-	return &core.Error{Code: f.Code, Message: f.Message, Retryable: f.Retryable}
+	return &core.Error{Code: f.Code, Message: f.Message, Retryable: f.Retryable, RetryAfter: f.RetryAfter}
 }

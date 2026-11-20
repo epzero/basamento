@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/epzero/basamento/core"
 )
@@ -44,6 +45,9 @@ func TestMapError(t *testing.T) {
 func TestFailureOf(t *testing.T) {
 	if got := FailureOf(core.NewError(core.CodeConflict, "taken", nil)); got.Code != core.CodeConflict {
 		t.Fatalf("code = %q, want conflict", got.Code)
+	}
+	if got := FailureOf(&core.Error{Code: core.CodeRateLimited, Retryable: true, RetryAfter: 5 * time.Second}); got.RetryAfter != 5*time.Second {
+		t.Fatalf("retry after = %v, want 5s", got.RetryAfter)
 	}
 	if got := FailureOf(errors.New("boom")); got.Code != core.CodeVendor || got.Message != "vendor call failed" {
 		t.Fatalf("got %+v, want vendor_error with fixed message", got)
