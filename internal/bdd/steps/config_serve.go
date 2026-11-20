@@ -47,11 +47,11 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 		return world(ctx).Config.startServe("--profile", config.ProfileEmbedded)
 	})
 	sc.Step(`^"([^"]*)" starts with no other setting$`, func(ctx context.Context, command string) error {
-		fields := strings.Fields(command)
-		if len(fields) < 1 || fields[0] != "kit" {
-			return fmt.Errorf("unsupported command %q", command)
+		args, err := serveArgs(command)
+		if err != nil {
+			return err
 		}
-		return world(ctx).Config.startServe(fields[1:]...)
+		return world(ctx).Config.startServe(args...)
 	})
 	sc.Step(`^a free loopback listener$`, func(ctx context.Context) error {
 		w := world(ctx).Config
@@ -406,6 +406,17 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+}
+
+// serveArgs turns a scenario command ("kit serve --profile embedded") into
+// the flags passed after the "serve" that startServe adds itself, so the
+// scenario's flags reach the binary (F5).
+func serveArgs(command string) ([]string, error) {
+	fields := strings.Fields(command)
+	if len(fields) < 2 || fields[0] != "kit" || fields[1] != "serve" {
+		return nil, fmt.Errorf("unsupported command %q", command)
+	}
+	return fields[2:], nil
 }
 
 func (w *configWorld) startServe(extra ...string) error {
