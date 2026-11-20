@@ -378,7 +378,7 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 		}
 		// Wait for the listener to close before probing it.
 		w.serverExit()
-		if resp, err := http.Get("http://" + w.listen + "/healthz"); err == nil {
+		if resp, err := httpProbe.Get("http://" + w.listen + "/healthz"); err == nil {
 			_ = resp.Body.Close()
 			return fmt.Errorf("the server still accepts requests")
 		}
@@ -410,7 +410,7 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 
 // serveArgs turns a scenario command ("kit serve --profile embedded") into
 // the flags passed after the "serve" that startServe adds itself, so the
-// scenario's flags reach the binary (F5).
+// scenario's flags reach the binary.
 func serveArgs(command string) ([]string, error) {
 	fields := strings.Fields(command)
 	if len(fields) < 2 || fields[0] != "kit" || fields[1] != "serve" {
@@ -471,7 +471,7 @@ func errorKeysIn(text string) []string {
 // shutdownTimer is the fake config.Timer of CONFIG-023-01 and -024-01. It
 // fires After(d) only once the scenario has advanced the fake clock by at
 // least d, so an advance shorter than shutdown.timeout does not end the
-// drain (F7). advance is synchronous and records the elapsed time, so an
+// drain. advance is synchronous and records the elapsed time, so an
 // advance that arrives before the server calls After is not lost.
 type shutdownTimer struct {
 	mu      sync.Mutex

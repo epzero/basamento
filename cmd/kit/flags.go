@@ -54,8 +54,6 @@ func (f *flags) options(stdin io.Reader) config.Options {
 	auto := ""
 	if path == "" {
 		auto = "kit.yaml"
-	} else {
-		set["config"] = path
 	}
 	return config.Options{
 		File:     path,

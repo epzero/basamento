@@ -200,7 +200,7 @@ func buildKitBinary(moduleRoot, path string) error {
 // `go list -deps ./cmd/kit` reports, the contents of their Go and embedded
 // files (standard-library contents are pinned to GOVERSION), and the effective
 // build environment. Editing docs, specs or a test file therefore keeps the
-// key, while changing code, an embed, a build tag or CGO does not (CR-08).
+// key, while changing code, an embed, a build tag or CGO does not.
 func kitSourceKey(moduleRoot string) (string, error) {
 	env, err := kitBuildEnv(moduleRoot)
 	if err != nil {

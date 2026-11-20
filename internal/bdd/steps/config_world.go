@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/epzero/basamento/internal/config"
 	"gopkg.in/yaml.v3"
@@ -298,8 +299,12 @@ func readyField(line, field string) string {
 	return ""
 }
 
+// httpProbe bounds a probe request so a listener that accepts but never
+// answers cannot hang a scenario.
+var httpProbe = &http.Client{Timeout: 5 * time.Second}
+
 func httpStatus(rawURL string) (int, error) {
-	resp, err := http.Get(rawURL)
+	resp, err := httpProbe.Get(rawURL)
 	if err != nil {
 		return 0, err
 	}

@@ -146,7 +146,7 @@ func staticDefault(v string) func(string, string) string {
 // embeddedURLDefault returns a default only for the embedded profile; the
 // cloud profile has no default port URL (REQ-CONFIG-010). The URL is built
 // with url.URL so a data directory containing '#' or '?' becomes a path, not
-// a fragment or query (CR-02).
+// a fragment or query.
 func embeddedURLDefault(scheme, leaf string) func(string, string) string {
 	return func(profile, dataDir string) string {
 		if profile != ProfileEmbedded {

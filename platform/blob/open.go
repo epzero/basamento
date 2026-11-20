@@ -103,7 +103,7 @@ func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 // fileDir returns the absolute filesystem directory of a file URL. Go parses
 // file://data/blobs with Host "data" and Path "/blobs"; fileblob uses only the
 // path, which would open /blobs. A host other than localhost is therefore the
-// first path segment and is joined with the path (CR-03).
+// first path segment and is joined with the path.
 func fileDir(u *url.URL) (string, error) {
 	dir := u.Path
 	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {

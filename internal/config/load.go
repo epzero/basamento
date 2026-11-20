@@ -167,7 +167,7 @@ func parseConfigFile(b []byte, path string) (*koanf.Koanf, error) {
 // written more than once, as in a nested "sql: {url: ...}" plus a literal
 // "sql.url", or a scalar at a path that also has children. koanf's unflatten
 // step iterates a Go map, so without this check such a file would resolve
-// nondeterministically (CR-07).
+// nondeterministically.
 func rejectDuplicateSettingPaths(data []byte) error {
 	var doc yamlv3.Node
 	if err := yamlv3.Unmarshal(data, &doc); err != nil {

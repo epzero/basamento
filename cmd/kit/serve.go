@@ -60,7 +60,7 @@ func runServe(args []string) {
 
 	// Install the handler before a port opens or the listener binds: a signal
 	// in that window must cancel the openers and close whatever is already
-	// open, not kill the process with a port left open (CR-04).
+	// open, not kill the process with a port left open.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	ln, opened, err := startPorts(ctx, ports, result.Config.Listen.Addr)
 	if err != nil {
@@ -234,7 +234,7 @@ func openBlob(ctx context.Context, raw string) (config.Port, error) {
 // unambiguous: a value that is neither key material nor path-shaped is an
 // error, and a decode failure never falls back to creating a file. A missing
 // key file is created with 32 random bytes and mode 0600; an existing one must
-// be a regular file no group or other user can access (CR-05).
+// be a regular file no group or other user can access.
 func openLocalSecrets(ctx context.Context, raw string) (config.Port, error) {
 	const prefix = "localsecrets://"
 	if !strings.HasPrefix(raw, prefix) {
@@ -442,7 +442,7 @@ func publishKey(tmp, path string) error {
 
 // readKeyFile opens the key without following a symlink, checks the mode of
 // the open file and reads from that same descriptor, so a path swapped
-// between a check and the read cannot redirect it (F9). A missing file keeps
+// between a check and the read cannot redirect it. A missing file keeps
 // its not-exist error so the caller can create it; every other failure is
 // invalid_argument.
 func readKeyFile(path string) ([]byte, error) {
