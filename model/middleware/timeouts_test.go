@@ -155,6 +155,36 @@ func TestDefaultTimeouts(t *testing.T) {
 	}
 }
 
+func TestCallTotalTimeoutStopsAnInFlightStream(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	p := &scriptedProvider{rt: rt}
+	p.run = func(ctx context.Context, p *scriptedProvider, _ Attempt, emit func(model.Event)) (model.Result, error) {
+		for {
+			emit(model.Event{Kind: model.EventText, Text: "x"})
+			if err := p.sleep(ctx, 5*time.Second); err != nil {
+				return model.Result{}, err
+			}
+		}
+	}
+	cfg := baseConfig(rt, p)
+	cfg.Attempts = 1
+	cfg.Timeouts.CallTotal = 3 * time.Second
+	res, err := Call(context.Background(), cfg)
+	if got := codeOf(t, err); got != core.CodeTimeout {
+		t.Fatalf("code = %s, want timeout", got)
+	}
+	first := res.Attempts[0]
+	if first.Outcome != OutcomeCancelled {
+		t.Fatalf("attempt 1 = %+v, want cancelled", first)
+	}
+	if got := first.End.Sub(first.Start); got != 3*time.Second {
+		t.Fatalf("call total stopped the stream after %v, want 3s", got)
+	}
+	if first.Events != 1 {
+		t.Fatalf("events = %d, want 1", first.Events)
+	}
+}
+
 func TestAttemptTotalTimeoutStopsAStreamThatKeepsTalking(t *testing.T) {
 	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	p := &scriptedProvider{rt: rt}

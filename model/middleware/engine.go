@@ -54,6 +54,10 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 	var lastErr error
 
 	for attempt < budget {
+		if !callDeadline.IsZero() && !e.rt.Now().Before(callDeadline) {
+			lastErr = timeoutError("call total")
+			break
+		}
 		rung := structured.RungNone
 		repair := false
 		if spec != nil {
@@ -107,7 +111,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		req.ClientRef = ref
 		res, timedOut, events, attemptErr := e.runAttempt(ctx, Attempt{
 			Number: attempt, Rung: rung, ClientRef: ref, Request: req,
-		})
+		}, callDeadline)
 		ended := e.rt.Now()
 
 		usage := model.Usage{}
@@ -194,8 +198,9 @@ func (e *engine) requestFor(rung structured.Rung) (model.Request, error) {
 	return structured.RequestFor(e.cfg.Request, rung, e.cfg.Structured.Schema())
 }
 
-// runAttempt runs one provider invocation under the attempt's three timers.
-func (e *engine) runAttempt(parent context.Context, a Attempt) (model.Result, bool, int, error) {
+// runAttempt runs one provider invocation under the attempt's three timers
+// and the call's total deadline (REQ-MODEL-053).
+func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time.Time) (model.Result, bool, int, error) {
 	timeouts := e.cfg.Timeouts.WithDefaults()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -215,6 +220,10 @@ func (e *engine) runAttempt(parent context.Context, a Attempt) (model.Result, bo
 
 	first := e.rt.AfterFunc(timeouts.FirstChunk, func() { fire("first-chunk") })
 	total := e.rt.AfterFunc(timeouts.AttemptTotal, func() { fire("attempt total") })
+	var callTotal Timer
+	if !callDeadline.IsZero() {
+		callTotal = e.rt.AfterFunc(callDeadline.Sub(e.rt.Now()), func() { fire("call total") })
+	}
 	var idle Timer
 	stopIdle := func() {
 		if idle != nil {
@@ -241,6 +250,9 @@ func (e *engine) runAttempt(parent context.Context, a Attempt) (model.Result, bo
 		first.Stop()
 	}
 	total.Stop()
+	if callTotal != nil {
+		callTotal.Stop()
+	}
 	stopIdle()
 
 	mu.Lock()
