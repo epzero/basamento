@@ -113,9 +113,6 @@ type hostFake struct {
 
 	selectPreferStep string
 	awaitedGets      []string
-	nodeFailureCost  map[string]int64
-	runSettledCost   int64
-	stepCosts        map[string]int64
 }
 
 func newHostFake() *hostFake {
@@ -125,24 +122,10 @@ func newHostFake() *hostFake {
 		gates:           map[string]*hostFuture{},
 		gateDone:        map[string]json.RawMessage{},
 		childDone:       map[string]json.RawMessage{},
-		executed:        map[string]int{},
-		nodeFailureCost: map[string]int64{},
-		stepCosts:       map[string]int64{},
+		executed: map[string]int{},
 	}
 	d.cond = sync.NewCond(&d.mu)
 	return d
-}
-
-func (d *hostFake) RecordNodeFailure(node string, costMpts int64) {
-	d.mu.Lock()
-	d.nodeFailureCost[node] = costMpts
-	d.mu.Unlock()
-}
-
-func (d *hostFake) RecordRunSettledCost(costMpts int64) {
-	d.mu.Lock()
-	d.runSettledCost = costMpts
-	d.mu.Unlock()
 }
 
 func (d *hostFake) recordFutureGet(step string) {
@@ -304,9 +287,6 @@ func (d *hostFake) Step(name string, in any, o runtime.StepOptions) runtime.Futu
 		kind: "step", name: name, input: append(json.RawMessage(nil), raw...),
 		stepOpts: o, result: append(json.RawMessage(nil), result...), err: execErr,
 	})
-	if execErr == nil {
-		d.stepCosts[name] = 0
-	}
 	return &hostFuture{dc: d, done: true, result: result, err: execErr, step: name}
 }
 
@@ -478,6 +458,15 @@ func (d *hostFake) callLog() []hostCall {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]hostCall(nil), d.calls...)
+}
+
+func (d *hostFake) requireJournalFullyConsumed() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.journalIndex != len(d.journal) {
+		return fmt.Errorf("replay consumed %d journal entries, want all %d", d.journalIndex, len(d.journal))
+	}
+	return nil
 }
 
 func (d *hostFake) executeCount(name string) int {
