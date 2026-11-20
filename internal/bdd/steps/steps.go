@@ -23,12 +23,17 @@ type World struct {
 	Expr        *exprWorld
 	SQL         *sqlWorld
 	Prompt      *promptWorld
+	Telemetry   *telemetryWorld
 	Blob        *blobWorld
 	Bus         *busWorld
 	Secrets     *secretsWorld
 	Credentials *credentialsWorld
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
+	Catalog     *catalogWorld
+	Machine     *machineWorld
+	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
+	Host any
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -42,9 +47,13 @@ func Initialize(sc *godog.ScenarioContext) {
 			Expr:        &exprWorld{bindings: map[string]any{}},
 			SQL:         newSQLWorld(),
 			Prompt:      newPromptWorld(),
+			Telemetry:   newTelemetryWorld(),
 			Blob:        newBlobWorld(),
+			Secrets:     newSecretsWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
+			Catalog:     newCatalogWorld(),
+			Machine:     newMachineWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -53,21 +62,25 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerTelemetry(sc)
 	registerFlowCompile(sc)
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)
+	registerFlowMachine(sc)
 	registerBus(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
+	registerCatalog(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
 	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+	registerSharedRunOutcomeSteps(sc)
 }
 
 // matchPutOutcomeShared owns the put phrase for every capability, because godog

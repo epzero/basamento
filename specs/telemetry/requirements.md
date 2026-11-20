@@ -1,6 +1,6 @@
 # Telemetry: one setup for logs, traces and metrics
 
-Status: **Planned** (WP-L1-07). Design: ADR-0004, `docs/architecture/overview.md` §2.
+Status: **Implemented** (WP-L1-07). Design: ADR-0004, `docs/architecture/overview.md` §2.
 Terms: [glossary](../glossary.md) (telemetry setup, span, log record, trace context,
 metric label, redaction, span store, simulated collector, export batch).
 

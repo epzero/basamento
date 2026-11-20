@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component
+@wp:WP-L1-07 @level:component
 Feature: Shutdown flushes what was recorded and stops telemetry
   A process that shuts down sends what it already recorded before it exits,
   and nothing is recorded after it.
