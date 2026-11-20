@@ -30,7 +30,7 @@ type World struct {
 	Catalog     *catalogWorld
 	Machine     *machineWorld
 	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
-	Host runOutcome
+	Host any
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }

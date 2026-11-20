@@ -459,11 +459,8 @@ func registerFlowMachine(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^node "([^"]*)" fans out to (\d+) items of node "([^"]*)"$`,
-		func(ctx context.Context, mapNode string, want int, child string) error {
+		func(ctx context.Context, _ string, want int, child string) error {
 			w := world(ctx).Machine
-			if w.commands[0].Node != mapNode && len(w.commands) > 0 {
-				// fan-out is from map expansion: commands are for child
-			}
 			var got int
 			seen := make(map[int]bool, want)
 			for _, cmd := range w.commands {
