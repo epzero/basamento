@@ -48,7 +48,7 @@ When a gate is resolved on a run waiting at that gate, the local runtime shall c
 If a gate is resolved a second time on a run that already received the first resolution of that gate, then the local runtime shall reject the second resolution with code `conflict`.
 
 ### REQ-RT-011 — Waiting on the first of several operations
-When a run waits on the first of several pending operations and one or more become ready, the local runtime shall return the lowest index in call order among the ready operations.
+When a run waits on the first of several pending operations, the local runtime shall return the call-order index of the operation that became ready first; operations already ready when the wait begins, and operations that become ready in the same clock reading, are tied and the lowest such index wins.
 
 ### REQ-RT-012 — Cancellation
 When a run is cancelled, the local runtime shall move the run to `cancelled` and deliver cancellation to its in-flight steps and timers.
@@ -94,6 +94,33 @@ When a tenant lists runs of a flow on the local runtime, the local runtime shall
 
 ### REQ-RT-027 — A successful retry ends the step
 When an attempt of a step succeeds before its attempt limit, the local runtime shall stop retrying and return that attempt's result to the flow as the step's result.
+
+### REQ-RT-046 — A run id is unique within a tenant
+If a run is started on the local runtime with a run id that already names a run of the same tenant, then the local runtime shall reject the start with code `conflict`, starting no run and changing no run.
+
+### REQ-RT-047 — A start idempotency key deduplicates within a tenant
+When a run is started on the local runtime with a start idempotency key already used by a run of the same tenant, the local runtime shall return the reference of that existing run instead of starting a new one.
+
+### REQ-RT-048 — Start idempotency keys are scoped to a tenant
+The local runtime shall scope start idempotency key deduplication to a tenant, so that the same key in two tenants starts two runs.
+
+### REQ-RT-049 — A child run can be re-attached by id
+When a parent run on the local runtime starts a child run with a child run id that already names a child run started by that parent for that flow, the local runtime shall return that existing child run instead of starting a second child run.
+
+### REQ-RT-050 — A child run id cannot be reused for another parent or flow
+If a parent run on the local runtime starts a child run with a child run id that already names a child run of another parent or another flow, then the local runtime shall reject the child start with code `conflict`, starting no child run and changing no run.
+
+### REQ-RT-051 — A paging cursor resumes a listing
+When a List query on the local runtime has more matching runs than its limit, the local runtime shall return a paging cursor with the page that resumes the listing at the next run without skipping or repeating a run.
+
+### REQ-RT-052 — An unusable paging cursor fails
+If a List query on the local runtime carries a paging cursor that the local runtime did not issue or that no longer names a position in the listing, then the local runtime shall reject the query with code `invalid_argument`, returning no run.
+
+### REQ-RT-053 — A paging cursor stays within its tenant
+If a List query on the local runtime carries a paging cursor issued to a tenant other than the query's tenant, then the local runtime shall reject the query with code `invalid_argument`, returning no run.
+
+### REQ-RT-054 — A local runtime needs a timer clock
+If the local runtime is constructed with a clock that is not a timer clock, then construction shall fail with an error, because a run's timers could not move.
 
 ## Temporal runtime
 

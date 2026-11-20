@@ -18,6 +18,7 @@ the same change that first uses it.
 | **Input mapping** | A node's `in` expression, CEL or jq, that turns the run's state into the node's input. A node with no input mapping receives the run's input (REQ-FLOW-051). |
 | **Superstep sequence** | The `Seq` of a machine snapshot, increased when the machine starts a new superstep; part of a step's idempotency key (REQ-FLOW-058). |
 | **Idempotency key** | The key a step carries so that one logical step is recorded once: a retry of it keeps the same key (REQ-FLOW-058). |
+| **Start idempotency key** | The key `StartRequest.IdempotencyKey` carries: a second start with the same key in the same tenant returns that run's reference without starting another run or executing its steps; keys in different tenants do not deduplicate (REQ-RT-047, REQ-RT-048). |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
 | **Step** | A side-effecting unit executed by a runtime (a Temporal activity on the temporal runtime). Retried; its result is recorded. |
 | **Gate** | A node that waits for a human or external decision; its payload is validated by schema and CEL. |
@@ -31,6 +32,7 @@ the same change that first uses it.
 | **Delta** | An ephemeral increment of a message (text, audio, progress), ordered by `dseq`, kept while its message is in flight. |
 | **Message** | A model output inside a run, streamed as deltas and completed as a durable event. |
 | **Cursor** | What a client sends to resume a stream: last durable `seq` and last `dseq` per open message. |
+| **Paging cursor** | The opaque token a `List` returns with a page of runs. A client passes it back unchanged to resume at the next run; it is bound to the tenant and query that issued it, and the client does not interpret it (REQ-RT-051 … REQ-RT-053). |
 | **Snapshot** | The text of an in-flight message so far, sent on reconnect before further deltas. |
 | **Detach / reattach** | A client closing / reopening its stream without affecting the run. |
 | **Invocation** | One call of a model (or remote service) through the invocation contract: start, events, result, cancel, lookup. |
@@ -86,6 +88,7 @@ the same change that first uses it.
 | **Handoff** | A model request that ends its agent run so that another agent node continues with the model turns so far. |
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
+| **Timer clock** | A clock that can schedule and complete timers (it provides `After`), which the local runtime requires because a run's timers move only with the clock; a nil clock means the system clock (REQ-RT-008, REQ-RT-054). |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
 | **User message** | A message with a message id and text that a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |
