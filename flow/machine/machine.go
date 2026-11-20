@@ -576,7 +576,7 @@ func (m *Machine) nodeInput(s *flow.Snapshot, id string, node flow.Node) (json.R
 	if node.In == "" {
 		// A node without an input mapping receives the run's input, as the
 		// host's subflow scenario states (host.feature, FLOW-033-01).
-		if len(s.Input) == 0 {
+		if len(bytes.TrimSpace(s.Input)) == 0 {
 			return json.RawMessage(`{}`), nil
 		}
 		return append(json.RawMessage(nil), s.Input...), nil

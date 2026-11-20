@@ -603,6 +603,29 @@ func TestNodeInputWithoutInUsesRunInput(t *testing.T) {
 			}
 		})
 	}
+	t.Run("whitespace_run_input", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			start string
+			want  string
+		}{
+			{name: "empty", start: `{}`, want: `{}`},
+			{name: "space", start: ` `, want: `{}`},
+			{name: "ws", start: "\n\t ", want: `{}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := requireMachine(t, def)
+				_, commands, err := m.Start(json.RawMessage(tc.start))
+				if err != nil {
+					t.Fatal(err)
+				}
+				requireCommands(t, commands)
+				if string(commands[0].Input) != tc.want {
+					t.Fatalf("input %s, want %s", commands[0].Input, tc.want)
+				}
+			})
+		}
+	})
 	t.Run("in_mapping", func(t *testing.T) {
 		mapped := &flow.IR{
 			Name:    "input-mapped",
