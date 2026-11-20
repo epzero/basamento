@@ -101,12 +101,15 @@ renders and what the environment mapping is derived from.
 | `secrets.url` | URL | profile-dependent | scheme per profile |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
 
-The embedded profile defaults the four port URLs to
-`sqlite://$(data.dir)/kit.db`, `file://$(data.dir)/blobs`,
-`nats-embedded://$(data.dir)/nats`, `localsecrets://$(data.dir)/secrets.key`.
-`$(data.dir)` is expanded after loading, so changing `data.dir` moves every
-default port URL with it. The cloud profile has no default for a port URL:
-each must be set (REQ-CONFIG-010).
+The embedded profile computes the four port URLs at load time from the data
+directory made absolute: `sqlite:///<abs>/kit.db`, `file:///<abs>/blobs`,
+`nats-embedded:///<abs>/nats` and `localsecrets:///<abs>/secrets.key`, where
+`<abs>` is a percent-escaped URL path (a space becomes `%20`; `#` and `?`
+stay in the path). Changing `data.dir` moves every default port URL with it.
+A port URL the operator sets, in a flag, an environment variable or the
+file, is taken literally: `$(data.dir)` is not expanded in it, and a relative
+path stays relative. The cloud profile has no default for a port URL: each
+must be set (REQ-CONFIG-010).
 
 ## 3. Loading
 
@@ -133,16 +136,20 @@ func (r Result) Validate() []error
 func (r Result) Report(w io.Writer)
 
 type Options struct {
-    File   string              // configuration file path; empty = none
-    Env    []string            // os.Environ() form
-    Stdin  io.Reader           // for YAML from stdin ("-"), optional
-    Flags  map[string]string   // flags actually set on the command line
+    File     string            // explicit configuration file path; empty = none, "-" = stdin
+    AutoFile string            // file a command discovers when --config is absent; optional
+    Env      []string          // os.Environ() form
+    Stdin    io.Reader         // for YAML from stdin ("-"), optional
+    Flags    map[string]string // flags actually set on the command line
 }
 ```
 
-- **File.** `--config <path>`; YAML. Without the flag, the config file a
-  command declared defaults to is used when present (`./kit.yaml` for
-  `serve`). A missing file is not an error unless `--config` names it.
+- **File.** `--config <path>`; YAML. The explicit path (`Options.File`) is
+  strict: a missing or unreadable file is an `invalid_argument` error. Without
+  the flag, a command uses the file it declared defaults to when present
+  (`./kit.yaml` for `serve`; `Options.AutoFile`). Only absence
+  (`IsNotExist`) is tolerated: any other discovery error (a symlink loop, a
+  directory, a permission problem) is an error too.
 - **Environment.** Every `KIT_<KEY>` with `.` written as `_` and letters
   uppercased (REQ-CONFIG-002). The mapping is built from the key table, so
   `KIT_LISTEN_ADDR` is `listen.addr`; an unknown `KIT_` variable is ignored.
