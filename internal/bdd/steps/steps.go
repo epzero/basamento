@@ -31,6 +31,7 @@ type World struct {
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
+	Model       *modelWorld
 	Machine     *machineWorld
 	Host        *hostWorld
 }
@@ -52,6 +53,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
+			Model:       newModelWorld(),
 			Machine:     newMachineWorld(),
 			Host:        newHostWorld(),
 		}), nil
@@ -75,6 +77,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerCatalog(sc)
+	registerModel(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

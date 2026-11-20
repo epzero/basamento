@@ -62,6 +62,8 @@ message Output {
   string url = 1;
   string media = 2;
   string mime = 3;
+  // Local path for a command-line provider.
+  string path = 4;
 }
 
 // InputSlot names an input a model accepts, e.g. prompt, first_frame, mask.
@@ -87,6 +89,8 @@ message Descriptor {
   string price = 6;
   // cloud | machine_local
   string locality = 7;
+  // How the vendor answers: stream | single | poll | webhook | socket | command.
+  string protocol = 8;
 }
 
 // Vector is one embedding.
@@ -133,6 +137,8 @@ message StartRequest {
   optional int64 seed = 9;
   // Idempotency key, stable across retries of one logical invocation.
   string client_ref = 10;
+  // Embedding inputs, in order.
+  repeated string texts = 11;
 }
 
 // StartResponse returns the handle.
