@@ -186,14 +186,24 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 	g := &gate{spec: spec, future: newFuture(r)}
 	r.gates[spec.Name] = g
 	if spec.Timeout > 0 {
+		stop := make(chan struct{})
+		g.timeoutStop = stop
 		wake := r.rt.after(spec.Timeout)
+		r.gateTimeouts.Add(1)
 		r.rt.wg.Add(1)
 		go func() {
 			defer r.rt.wg.Done()
+			defer r.gateTimeouts.Add(-1)
 			select {
 			case <-wake:
-				g.future.complete(nil, core.NewError(core.CodeTimeout,
-					fmt.Sprintf("local: gate %q timed out", spec.Name), map[string]any{"gate": spec.Name}))
+				r.mu.Lock()
+				if !g.resolved && !g.future.Ready() {
+					g.future.complete(nil, core.NewError(core.CodeTimeout,
+						fmt.Sprintf("local: gate %q timed out", spec.Name), map[string]any{"gate": spec.Name}))
+				}
+				r.mu.Unlock()
+			case <-stop:
+				return
 			case <-r.ctx.Done():
 				g.future.complete(nil, cancelledErr("gate cancelled"))
 			}

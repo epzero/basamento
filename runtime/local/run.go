@@ -46,6 +46,9 @@ type run struct {
 
 	shuttingDown bool
 	stepWG       sync.WaitGroup
+
+	parentRun    *run
+	gateTimeouts atomic.Int32
 }
 
 // step is the journal entry of one step name in a run (REQ-RT-007).
@@ -55,10 +58,11 @@ type step struct {
 
 // gate is the journal entry of one gate name in a run (REQ-RT-009, REQ-RT-010).
 type gate struct {
-	spec     runtime.GateSpec
-	future   *future
-	resolved bool
-	payload  json.RawMessage
+	spec        runtime.GateSpec
+	future      *future
+	resolved    bool
+	payload     json.RawMessage
+	timeoutStop chan struct{}
 }
 
 // childLink ties a parent run to a child run it started (REQ-RT-014,
@@ -137,13 +141,17 @@ func (r *run) finish(out json.RawMessage, err error) {
 		r.closeChildrenLocked()
 	}
 	var waiters []*future
-	if r.state != stateRunning {
+	terminal := r.state != stateRunning
+	if terminal {
 		waiters = append(waiters, r.waiters...)
 	}
 	r.mu.Unlock()
 	r.notify()
 	for _, f := range waiters {
 		f.complete(out, err)
+	}
+	if terminal {
+		r.cancel()
 	}
 }
 
@@ -219,8 +227,16 @@ func (r *run) shutdown() {
 
 // completeWaitsLocked ends every pending gate wait, timer and child wait with
 // err. It is a no-op for waits that already completed.
+func (g *gate) stopTimeout() {
+	if g.timeoutStop != nil {
+		close(g.timeoutStop)
+		g.timeoutStop = nil
+	}
+}
+
 func (r *run) completeWaitsLocked(err error) {
 	for _, g := range r.gates {
+		g.stopTimeout()
 		if !g.resolved {
 			g.future.complete(nil, err)
 		}
@@ -278,6 +294,7 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 		r.mu.Unlock()
 		return core.NewError(core.CodeConflict, "local: the gate was already resolved", map[string]any{"gate": name, "run": r.id})
 	}
+	g.stopTimeout()
 	g.resolved = true
 	g.payload = append(json.RawMessage(nil), payload...)
 	g.future.complete(g.payload, nil)
