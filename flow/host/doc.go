@@ -4,7 +4,8 @@
 // returns into a call on the run's runtime.DurableContext, and dispatches an
 // effectful node whose kind has a registered NodeHandler to that handler.
 //
-// The package is runtime-neutral: it may import core, expr, flow and runtime,
+// The package is runtime-neutral: it may import core, flow, flow/ir, flow/machine
+// and runtime,
 // never a durable-execution vendor (ADR-0002, ADR-0011, layering.yaml). It
 // imports no node handler either; the composition root registers them by kind
 // with RegisterHandler before it registers the host with a runtime.
