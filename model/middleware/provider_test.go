@@ -20,6 +20,7 @@ type fakeInvoker struct {
 	cancels   []string
 	eventsErr error
 	resultErr error
+	cancelErr error
 	resultFor func(ref string) model.Result
 }
 
@@ -52,7 +53,7 @@ func (f *fakeInvoker) Cancel(_ context.Context, h model.Handle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, h.ClientRef)
-	return nil
+	return f.cancelErr
 }
 
 func (f *fakeInvoker) Lookup(context.Context, string) (*model.Handle, error) { return nil, nil }
@@ -145,5 +146,84 @@ func TestInvokerProviderCancelsWhenFollowingFails(t *testing.T) {
 				t.Fatalf("Cancel calls = %v, want [call-1]", got)
 			}
 		})
+	}
+}
+
+func TestInvokerProviderSurfacesCancelFailureAsNonRetryable(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelErr error
+		code      core.Code
+	}{
+		{name: "retryable vendor error becomes non-retryable", cancelErr: &core.Error{Code: core.CodeTimeout, Message: "vendor timeout", Retryable: true}, code: core.CodeTimeout},
+		{name: "plain error maps to vendor error", cancelErr: errors.New("no answer"), code: core.CodeVendor},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inv := &fakeInvoker{eventsErr: errors.New("stream broke"), cancelErr: tc.cancelErr}
+			_, err := (InvokerProvider{Invoker: inv}).Attempt(context.Background(), Attempt{
+				Number: 1, ClientRef: "call-1", Request: model.Request{ClientRef: "call-1"},
+			}, func(model.Event) {})
+			if err == nil {
+				t.Fatal("Attempt succeeded, want the cancel failure")
+			}
+			var ce *cancelError
+			if !errors.As(err, &ce) {
+				t.Fatalf("error = %T %v, want a cancelError", err, err)
+			}
+			if got := core.CodeOf(err); got != tc.code {
+				t.Fatalf("code = %s, want %s", got, tc.code)
+			}
+			if core.IsRetryable(err) {
+				t.Fatalf("cancel failure %v is retryable", err)
+			}
+			if got := inv.cancelled(); len(got) != 1 || got[0] != "call-1" {
+				t.Fatalf("Cancel calls = %v, want [call-1]", got)
+			}
+		})
+	}
+}
+
+// immediateTimerRuntime fires every timer as soon as it is scheduled.
+type immediateTimerRuntime struct {
+	now time.Time
+}
+
+func (r immediateTimerRuntime) Now() time.Time { return r.now }
+
+func (immediateTimerRuntime) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+func (immediateTimerRuntime) AfterFunc(_ time.Duration, f func()) Timer {
+	f()
+	return stoppedTimer{}
+}
+
+type stoppedTimer struct{}
+
+func (stoppedTimer) Stop() {}
+
+func TestCancelFailureStopsTheCallWithoutANewStart(t *testing.T) {
+	now := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	inv := &fakeInvoker{cancelErr: core.NewError(core.CodeUnavailable, "cannot reach vendor", nil)}
+	logs := &logCollector{}
+	cfg := baseConfig(newVirtualRuntime(now), InvokerProvider{Invoker: inv})
+	cfg.Runtime = immediateTimerRuntime{now: now}
+	cfg.Attempts = 3
+	cfg.CallLog = logs
+	res, err := Call(context.Background(), cfg)
+	if got := codeOf(t, err); got != core.CodeUnavailable {
+		t.Fatalf("code = %s, want unavailable", got)
+	}
+	if core.IsRetryable(err) {
+		t.Fatalf("cancel failure %v is retryable", err)
+	}
+	if got := inv.started(); len(got) != 1 {
+		t.Fatalf("Start calls = %v, want 1 (no retry under a new client ref)", got)
+	}
+	if len(res.Attempts) != 1 || res.Attempts[0].Outcome != OutcomeFailed || res.Attempts[0].Code != core.CodeUnavailable {
+		t.Fatalf("attempts = %+v, want one failed attempt with unavailable", res.Attempts)
+	}
+	if len(logs.entries) != 1 || logs.entries[0].State != OutcomeFailed {
+		t.Fatalf("call log = %+v, want one failed entry", logs.entries)
 	}
 }

@@ -276,6 +276,14 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 
 	to, reason := timedOut, what
 	if to {
+		// A provider run the middleware could not cancel may still be
+		// alive; report that failure instead of a retryable timeout so the
+		// call does not start a second invocation under a new client ref
+		// (REQ-MODEL-005, REQ-MODEL-009).
+		var ce *cancelError
+		if errors.As(err, &ce) {
+			return res, false, events, err
+		}
 		return res, true, events, timeoutError(reason)
 	}
 	if err != nil {
