@@ -449,18 +449,6 @@ func (d *hostFake) waitFinished() {
 	d.mu.Unlock()
 }
 
-func (d *hostFake) waitReleased(cond func() bool) {
-	d.mu.Lock()
-	for !cond() && !d.finished {
-		d.parked = true
-		d.cond.Broadcast()
-		d.cond.Wait()
-		d.parked = false
-		d.cond.Broadcast()
-	}
-	d.mu.Unlock()
-}
-
 func (d *hostFake) copyJournal() []hostJournalEntry {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1590,25 +1578,6 @@ func journalsEqual(first, replay []hostJournalEntry) error {
 		}
 	}
 	return nil
-}
-
-func callKinds(calls []hostCall) []string {
-	out := make([]string, len(calls))
-	for i, call := range calls {
-		switch call.kind {
-		case "step":
-			out[i] = "step:" + call.name
-		case "timer":
-			out[i] = "timer:" + call.duration.String()
-		case "gate":
-			out[i] = "gate:" + call.gate.Name
-		case "child":
-			out[i] = "child:" + call.child.Name
-		default:
-			out[i] = call.kind
-		}
-	}
-	return out
 }
 
 func rawText(raw json.RawMessage) string {

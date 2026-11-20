@@ -137,14 +137,6 @@ func replayFakeDC(journal []journalEntry) *fakeDC {
 	return d
 }
 
-func (d *fakeDC) markFinished() {
-	d.mu.Lock()
-	d.finished = true
-	d.parked = false
-	d.cond.Broadcast()
-	d.mu.Unlock()
-}
-
 func (d *fakeDC) wake() {
 	d.parked = false
 	d.cond.Broadcast()
@@ -853,11 +845,11 @@ func TestNodeFailurePayloadDoesNotLeakCauseOrDuplicateCode(t *testing.T) {
 			name: "handler",
 			code: core.CodeUnavailable,
 			msg:  "tool a failed",
-			run: func(cat *catalog, h *host.Host, dc *fakeDC, ref runtime.FlowRef) error {
+			run: func(cat *catalog, h *host.Host, dc *fakeDC, _ runtime.FlowRef) error {
 				def := newFlow("handler-fail")
 				def.Nodes["plan"] = node("agent", "", "", "")
 				addLinear(def, "plan")
-				ref = cat.register(def)
+				ref := cat.register(def)
 				h.RegisterHandler("agent", func(runtime.DurableContext, flow.Node, json.RawMessage) (host.NodeResult, error) {
 					return host.NodeResult{}, typed
 				})
@@ -869,11 +861,11 @@ func TestNodeFailurePayloadDoesNotLeakCauseOrDuplicateCode(t *testing.T) {
 			name: "step",
 			code: core.CodeUnavailable,
 			msg:  "tool a failed",
-			run: func(cat *catalog, h *host.Host, dc *fakeDC, ref runtime.FlowRef) error {
+			run: func(cat *catalog, h *host.Host, dc *fakeDC, _ runtime.FlowRef) error {
 				def := newFlow("step-fail")
 				def.Nodes["worker"] = node("tool", `{"tool":"w1"}`, "", "")
 				addLinear(def, "worker")
-				ref = cat.register(def)
+				ref := cat.register(def)
 				dc.steps["w1"] = scripted{err: typed}
 				_, err := h.Run(dc, ref, json.RawMessage(`{}`))
 				return err
@@ -883,11 +875,11 @@ func TestNodeFailurePayloadDoesNotLeakCauseOrDuplicateCode(t *testing.T) {
 			name: "gate",
 			code: core.CodeTimeout,
 			msg:  "gate timed out",
-			run: func(cat *catalog, h *host.Host, dc *fakeDC, ref runtime.FlowRef) error {
+			run: func(cat *catalog, h *host.Host, dc *fakeDC, _ runtime.FlowRef) error {
 				def := newFlow("gate-fail")
 				def.Nodes["g"] = node("gate", `{"schema":"r.json","accept_if":"true","timeout":"1s"}`, "", "")
 				addLinear(def, "g")
-				ref = cat.register(def)
+				ref := cat.register(def)
 				done := make(chan error, 1)
 				go func() {
 					_, err := h.Run(dc, ref, json.RawMessage(`{}`))
@@ -902,11 +894,11 @@ func TestNodeFailurePayloadDoesNotLeakCauseOrDuplicateCode(t *testing.T) {
 			name: "child",
 			code: core.CodeUnavailable,
 			msg:  "tool a failed",
-			run: func(cat *catalog, h *host.Host, dc *fakeDC, ref runtime.FlowRef) error {
+			run: func(cat *catalog, h *host.Host, dc *fakeDC, _ runtime.FlowRef) error {
 				def := newFlow("child-fail")
 				def.Nodes["verify"] = node("subflow", `{"flow":"checks"}`, "", "")
 				addLinear(def, "verify")
-				ref = cat.register(def)
+				ref := cat.register(def)
 				dc.steps["child:checks"] = scripted{err: typed}
 				_, err := h.Run(dc, ref, json.RawMessage(`{}`))
 				return err
