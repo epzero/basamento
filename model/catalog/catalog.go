@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -69,8 +71,8 @@ func NewWithSnapshot(clock core.Clock, snapshotYAML []byte) (*Catalog, error) {
 		env:         env,
 		programs:    map[string]*expr.Program{},
 	}
-	for modelID, p := range snapshot {
-		if err := c.precompilePrice(modelID, p); err != nil {
+	for _, modelID := range slices.Sorted(maps.Keys(snapshot)) {
+		if err := c.precompilePrice(modelID, snapshot[modelID]); err != nil {
 			return nil, err
 		}
 	}
