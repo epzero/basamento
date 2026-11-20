@@ -346,6 +346,11 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 		r.mu.Unlock()
 		return core.NewError(core.CodeConflict, "local: the gate was already resolved", map[string]any{"gate": name, "run": r.id})
 	}
+	// Hold r.mu before future.Ready() (r.mu then future.mu everywhere; select_scan.go).
+	if g.future.Ready() {
+		r.mu.Unlock()
+		return core.NewError(core.CodeConflict, "local: the gate wait already ended", map[string]any{"gate": name, "run": r.id})
+	}
 	g.stopTimeout()
 	if g.timeoutTimer != nil {
 		r.removeTimer(g.timeoutTimer)

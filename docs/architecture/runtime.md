@@ -96,3 +96,4 @@ behaviour is spec-silent and covered only by unit tests or this document.
 | `List` cursor paging: opaque version-1 token (`base64.RawURLEncoding` of JSON `{"v":1,"tenant":"<id>","pos":<n>}`), tenant-bound, `pos` is that tenant's start-order ordinal; clients must not parse it (BDD steps craft one token in this form for RT-052-01); invalid, out-of-range or foreign-tenant cursor → `invalid_argument` before any run is read | RT-051…053, RT-026 lists runs |
 | Every started run stays in memory (no retention) | RT-006 / design §Local |
 | `New` requires a timer clock (`After`); failure message names timer scheduling | RT-054-01 |
+| `Resolve` on a gate whose wait already ended (run cancelled, gate timeout, runtime shut down) → `conflict`, payload not delivered | spec-silent (unit tests) |
