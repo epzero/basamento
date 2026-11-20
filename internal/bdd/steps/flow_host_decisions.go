@@ -135,7 +135,11 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 
 	sc.Step(`^a run of "([^"]*)" pinned to "([^"]*)" starts with input (\{.*\})$`,
 		func(ctx context.Context, name, pin, input string) error {
-			return world(ctx).Host.startRef(runtime.FlowRef{Name: name, Hash: pin}, input)
+			ref, err := world(ctx).Host.catalog.pinnedRef(name, pin)
+			if err != nil {
+				return err
+			}
+			return world(ctx).Host.startRef(ref, input)
 		})
 
 	sc.Step(`^the run fails with code "([^"]*)" naming flow "([^"]*)"$`, func(ctx context.Context, code, name string) error {
@@ -310,12 +314,18 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 	sc.Step(`^the replayed step "([^"]*)" carried the same idempotency key as the failed first attempt$`,
 		func(ctx context.Context, step string) error {
 			w := world(ctx).Host
+			if err := w.waitDone(); err != nil {
+				return err
+			}
 			firstKey, err := firstStepIdempotencyKey(w.firstJournal, step)
 			if err != nil {
 				return err
 			}
-			replayKey, err := firstStepIdempotencyKey(w.replayJournal, step)
+			replayKey, err := stepIdempotencyKeyFromCallLog(w.dc.callLog(), step)
 			if err != nil {
+				return err
+			}
+			if err := w.dc.requireJournalFullyConsumed(); err != nil {
 				return err
 			}
 			if firstKey != replayKey {
@@ -389,6 +399,18 @@ func firstStepIdempotencyKey(journal []hostJournalEntry, step string) (string, e
 		}
 	}
 	return "", fmt.Errorf("journal has no step %q", step)
+}
+
+func stepIdempotencyKeyFromCallLog(calls []hostCall, step string) (string, error) {
+	for _, c := range calls {
+		if c.kind == "step" && c.name == step {
+			if c.stepOpts.IdempotencyKey == "" {
+				return "", fmt.Errorf("step %q call has no idempotency key", step)
+			}
+			return c.stepOpts.IdempotencyKey, nil
+		}
+	}
+	return "", fmt.Errorf("call log has no step %q", step)
 }
 
 func hostFailureBlob(err error) string {

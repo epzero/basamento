@@ -639,19 +639,27 @@ func registerFlowHostSteps(sc *godog.ScenarioContext) {
 		if err := w.waitDone(); err != nil {
 			return err
 		}
-		w.replayJournal = w.dc.copyJournal()
 		if w.err != nil && !w.replayAcceptsFailure {
 			return fmt.Errorf("replayed run failed: %w", w.err)
 		}
 		if w.dc.diverged != nil {
 			return fmt.Errorf("replay diverged: %w", w.dc.diverged)
 		}
+		if err := w.dc.requireJournalFullyConsumed(); err != nil {
+			return err
+		}
 		return nil
 	})
 
 	sc.Step(`^the replayed run made the same durable calls in the same order as the first run$`, func(ctx context.Context) error {
 		w := world(ctx).Host
-		if err := journalsEqual(w.firstJournal, w.replayJournal); err != nil {
+		if err := w.waitDone(); err != nil {
+			return err
+		}
+		if err := durableReplayCallsMatch(w.firstJournal, w.dc); err != nil {
+			return err
+		}
+		if err := w.dc.requireJournalFullyConsumed(); err != nil {
 			return err
 		}
 		return nil
@@ -814,30 +822,74 @@ func hasEdgeFrom(def *flow.IR, from, to string) bool {
 	return false
 }
 
-func journalsEqual(first, replay []hostJournalEntry) error {
-	if len(first) != len(replay) {
-		return fmt.Errorf("journal length %d, want %d", len(replay), len(first))
+func durableReplayCallsMatch(first []hostJournalEntry, replay *hostFake) error {
+	want := journalDurableCalls(first)
+	got := replay.callLog()
+	if len(want) != len(got) {
+		return fmt.Errorf("replay durable calls %d, want %d from first run", len(got), len(want))
 	}
-	for i := range first {
-		a, b := first[i], replay[i]
-		if a.kind != b.kind || a.name != b.name || a.duration != b.duration || a.id != b.id || a.idKind != b.idKind {
-			return fmt.Errorf("entry %d: %+v, want %+v", i, b, a)
+	for i := range want {
+		if err := hostCallsEqual(want[i], got[i]); err != nil {
+			return fmt.Errorf("durable call %d: %w", i, err)
 		}
-		if a.child.Name != b.child.Name || a.child.Hash != b.child.Hash {
-			return fmt.Errorf("entry %d child: %+v, want %+v", i, b.child, a.child)
+	}
+	var wantIDs []hostJournalEntry
+	for _, e := range first {
+		if e.kind == "id" {
+			wantIDs = append(wantIDs, e)
 		}
-		if !rawJSONEqual(a.input, b.input) || !rawJSONEqual(a.result, b.result) {
-			return fmt.Errorf("entry %d payload mismatch", i)
+	}
+	replay.mu.Lock()
+	var gotIDs int
+	for _, e := range replay.journal {
+		if e.kind == "id" {
+			if gotIDs >= len(wantIDs) {
+				break
+			}
+			if e.idKind != wantIDs[gotIDs].idKind || e.id != wantIDs[gotIDs].id {
+				replay.mu.Unlock()
+				return fmt.Errorf("replay id %d %q-%q, want %q-%q", gotIDs, e.idKind, e.id, wantIDs[gotIDs].idKind, wantIDs[gotIDs].id)
+			}
+			gotIDs++
 		}
-		if a.stepOpts.IdempotencyKey != b.stepOpts.IdempotencyKey || a.childOpts.ID != b.childOpts.ID {
-			return fmt.Errorf("entry %d keys mismatch", i)
+	}
+	replay.mu.Unlock()
+	if gotIDs != len(wantIDs) {
+		return fmt.Errorf("replay consumed %d ids, want %d", gotIDs, len(wantIDs))
+	}
+	return nil
+}
+
+func journalDurableCalls(journal []hostJournalEntry) []hostCall {
+	var out []hostCall
+	for _, e := range journal {
+		if e.kind == "id" {
+			continue
 		}
-		if (a.err == nil) != (b.err == nil) {
-			return fmt.Errorf("entry %d err mismatch", i)
-		}
-		if a.err != nil && core.CodeOf(a.err) != core.CodeOf(b.err) {
-			return fmt.Errorf("entry %d code %v, want %v", i, core.CodeOf(b.err), core.CodeOf(a.err))
-		}
+		out = append(out, hostCall{
+			kind: e.kind, name: e.name, input: e.input, duration: e.duration,
+			gate: e.gate, child: e.child, stepOpts: e.stepOpts, childOpts: e.childOpts,
+		})
+	}
+	return out
+}
+
+func hostCallsEqual(a, b hostCall) error {
+	if a.kind != b.kind || a.name != b.name || a.duration != b.duration {
+		return fmt.Errorf("got %+v, want %+v", b, a)
+	}
+	if a.child.Name != b.child.Name || a.child.Hash != b.child.Hash {
+		return fmt.Errorf("child %+v, want %+v", b.child, a.child)
+	}
+	if !rawJSONEqual(a.input, b.input) {
+		return fmt.Errorf("input mismatch")
+	}
+	if a.stepOpts.IdempotencyKey != b.stepOpts.IdempotencyKey || a.childOpts.ID != b.childOpts.ID {
+		return fmt.Errorf("keys mismatch")
+	}
+	if a.gate.Name != b.gate.Name || a.gate.Timeout != b.gate.Timeout || a.gate.AcceptIf != b.gate.AcceptIf ||
+		!bytes.Equal(a.gate.Schema, b.gate.Schema) {
+		return fmt.Errorf("gate mismatch")
 	}
 	return nil
 }
