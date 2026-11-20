@@ -28,8 +28,10 @@ Go: the root and embedded `go.mod` files name the same minimum patch
 set it.
 
 Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
-the **line** job above, and a flake hunt (repeated runs that look for
-nondeterminism; a flaky scenario is quarantined with an issue and an expiry).
+the **line** job above, and a flake hunt (repeated `go test -race -count=10
+-timeout 90m ./...` runs that look for nondeterminism; the explicit per-binary
+timeout avoids the default 10m cap, which is shorter than ten full BDD suite
+runs under `-race`).
 The **release-readiness** job uses `continue-on-error` and is informational
 only (P0 backlog is expected); **line** is the blocking nightly signal.
 
