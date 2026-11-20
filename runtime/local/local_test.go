@@ -983,6 +983,44 @@ func TestDurableContextHelpers(t *testing.T) {
 	}
 }
 
+func TestFlowHostPanicFailsRunWithoutKillingProcess(t *testing.T) {
+	const leak = "panic-value-must-not-leak"
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	f.flow("panic", func(_ runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		panic(leak)
+	})
+	f.start(t, "acme", "r1", "panic", `{}`)
+	f.waitState(t, "acme", "r1", stateFailed)
+	target := f.rt.lookup(core.TenantID("acme"), "r1")
+	if target == nil {
+		t.Fatal("run not found")
+	}
+	target.mu.Lock()
+	runErr := target.err
+	target.mu.Unlock()
+	if codeOf(runErr) != "internal" {
+		t.Fatalf("run error code %q, want internal", codeOf(runErr))
+	}
+	var platform *core.Error
+	if !errors.As(runErr, &platform) {
+		t.Fatalf("run error %v is not a *core.Error", runErr)
+	}
+	if platform.Message != "local: the flow host panicked" {
+		t.Fatalf("message %q, want fixed host panic message", platform.Message)
+	}
+	if strings.Contains(platform.Message, leak) {
+		t.Fatal("panic value leaked into the platform message")
+	}
+	status, err := f.rt.Describe(tenantCtx("acme"), runtime.RunRef{RunID: "r1"})
+	if err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+	if status.State != stateFailed {
+		t.Fatalf("Describe state %q, want failed", status.State)
+	}
+	f.close(t)
+}
+
 func TestCapabilities(t *testing.T) {
 	caps := New(Options{}).Capabilities()
 	want := runtime.Caps{SyncGateUpdates: true}

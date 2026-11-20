@@ -105,9 +105,18 @@ func (r *run) ref() runtime.RunRef {
 }
 
 // execute runs the registered flow host on this run's goroutine and closes the
-// run with its outcome.
+// run with its outcome. A panicking host fails the run without ending the process.
 func (r *run) execute() {
-	out, err := r.rt.host(&durableContext{run: r}, r.flow, r.input)
+	var out json.RawMessage
+	var err error
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = flowPanicErr(recovered)
+			}
+		}()
+		out, err = r.rt.host(&durableContext{run: r}, r.flow, r.input)
+	}()
 	r.finish(out, err)
 }
 
