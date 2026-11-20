@@ -36,11 +36,25 @@ type InvokerProvider struct {
 }
 
 // Attempt runs one invocation on the invoker.
-func (p InvokerProvider) Attempt(ctx context.Context, a Attempt, emit func(model.Event)) (model.Result, error) {
+func (p InvokerProvider) Attempt(ctx context.Context, a Attempt, emit func(model.Event)) (res model.Result, err error) {
 	h, err := p.Invoker.Start(ctx, a.Request)
 	if err != nil {
 		return model.Result{}, &StartError{Err: model.MapError(err)}
 	}
+	// The provider owns the run beyond this call's context, so a follow that
+	// fails must cancel it rather than leave it alive (REQ-MODEL-009).
+	cancelled := false
+	cancelRun := func() {
+		if !cancelled {
+			cancelled = true
+			_ = p.Invoker.Cancel(context.WithoutCancel(ctx), h)
+		}
+	}
+	defer func() {
+		if err != nil {
+			cancelRun()
+		}
+	}()
 	events, err := p.Invoker.Events(ctx, h, 0)
 	if err != nil {
 		return model.Result{}, model.MapError(err)
@@ -49,11 +63,10 @@ func (p InvokerProvider) Attempt(ctx context.Context, a Attempt, emit func(model
 		emit(ev)
 	}
 	if ctx.Err() != nil {
-		// The attempt was cancelled (a timeout): tell the provider, which owns
-		// the run beyond this call's context.
-		_ = p.Invoker.Cancel(context.WithoutCancel(ctx), h)
+		// The attempt was cancelled (a timeout): tell the provider.
+		cancelRun()
 	}
-	res, err := p.Invoker.Result(ctx, h)
+	res, err = p.Invoker.Result(ctx, h)
 	if err != nil {
 		return res, model.MapError(err)
 	}

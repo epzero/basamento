@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -119,5 +120,30 @@ func TestInvokerProviderKeepsRetryAfter(t *testing.T) {
 	}
 	if got := res.Attempts[1].Start.Sub(res.Attempts[0].End); got != 5*time.Second {
 		t.Fatalf("wait after Retry-After = %v, want 5s", got)
+	}
+}
+
+func TestInvokerProviderCancelsWhenFollowingFails(t *testing.T) {
+	tests := []struct {
+		name string
+		inv  *fakeInvoker
+	}{
+		{name: "events error", inv: &fakeInvoker{eventsErr: errors.New("stream broke")}},
+		{name: "result error", inv: &fakeInvoker{resultErr: errors.New("result lost")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := InvokerProvider{Invoker: tc.inv}
+			_, err := p.Attempt(context.Background(), Attempt{
+				Number: 1, ClientRef: "call-1", Request: model.Request{ClientRef: "call-1"},
+			}, func(model.Event) {})
+			if err == nil {
+				t.Fatal("Attempt succeeded, want an error")
+			}
+			got := tc.inv.cancelled()
+			if len(got) != 1 || got[0] != "call-1" {
+				t.Fatalf("Cancel calls = %v, want [call-1]", got)
+			}
+		})
 	}
 }
