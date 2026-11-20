@@ -87,7 +87,7 @@ behaviour is spec-silent and covered only by unit tests or this document.
 
 | Behaviour | Spec coverage |
 | --- | --- |
-| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` breaks ties by lowest index within a batch and otherwise prefers the earliest completion seq | RT-008 / RT-011 (incl. RT-011-04) |
+| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` snapshots run-owned futures under the run lock so a batch is visible all-or-nothing (same as `fireDue`), then breaks ties by lowest index within a batch and otherwise prefers the earliest completion seq | RT-008 / RT-011 (incl. RT-011-04) |
 | Duplicate `Start` with the same `RunID` in one tenant → `conflict` | RT-046-01 |
 | Non-empty `StartRequest.IdempotencyKey` deduplicates within a tenant; empty key does not; keys do not cross tenants | RT-047 / RT-048 |
 | Panic in the flow host → failed run, process survives | spec-silent (unit tests) |

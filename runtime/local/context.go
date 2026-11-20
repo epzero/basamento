@@ -223,7 +223,8 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 
 // Select waits for the first pending operation to complete (REQ-RT-011).
 //
-// At call time, the lowest index among futures that are already Ready wins.
+// At call time, the lowest index among futures that are already Ready wins;
+// run-owned futures are observed under r.mu so a timer batch is all-or-nothing.
 // While the run is blocked in Select, the ready future with the earliest
 // completion seq wins; equal seqs keep the lowest index (one timer batch).
 // When steps complete independently, completion order is the order in which
@@ -234,25 +235,24 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
 	}
 	r := dc.run
-	for i, f := range fs {
-		if f.Ready() {
-			return i, nil
-		}
+	snaps := r.snapshotLocalFutures(fs)
+	if i, ok := lowestReadyAtCall(fs, snaps); ok {
+		return i, nil
 	}
 	for {
 		// Subscribe before scanning: a completion cannot land between the
 		// check and the wait without also closing this wake channel.
 		changed := r.wake()
-		if index := r.firstCompleted(fs); index >= 0 {
+		snaps = r.snapshotLocalFutures(fs)
+		if index := firstCompletedFromSnap(fs, snaps); index >= 0 {
 			return index, nil
 		}
 		select {
 		case <-changed:
 		case <-r.ctx.Done():
-			for i, f := range fs {
-				if f.Ready() {
-					return i, nil
-				}
+			snaps = r.snapshotLocalFutures(fs)
+			if i, ok := lowestReadyAtCall(fs, snaps); ok {
+				return i, nil
 			}
 			return 0, cancelledErr("select cancelled")
 		}
@@ -260,29 +260,10 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 }
 
 // firstCompleted returns the index of the ready future with the earliest
-// completion seq, or -1 when none are ready. A foreign future that is already
-// Ready is returned at once. Equal seqs keep the lowest index because only a
-// strictly smaller seq updates the candidate.
+// completion seq, or -1 when none are ready. Run-owned futures are read under
+// r.mu via snapshotLocalFutures; callers should prefer that path in hot loops.
 func (r *run) firstCompleted(fs []runtime.Future) int {
-	index := -1
-	var earliest uint64
-	for i, f := range fs {
-		local, ok := f.(*future)
-		if !ok {
-			if f.Ready() {
-				return i
-			}
-			continue
-		}
-		seq, done := local.completedSeq()
-		if !done {
-			continue
-		}
-		if index < 0 || seq < earliest {
-			index, earliest = i, seq
-		}
-	}
-	return index
+	return firstCompletedFromSnap(fs, r.snapshotLocalFutures(fs))
 }
 
 // Emit appends to the run's ordered outbox (REQ-RT-006).
