@@ -1646,7 +1646,7 @@ func TestWithMaxFanoutLimitsMapAndRejectsZero(t *testing.T) {
 	}
 }
 
-// Failed-handler settled cost through Run is pinned in TestRunHandlersFailurePassesSettledCostToEvent (REQ-FLOW-049).
+// Failed-handler settled cost is not observable through Host.Run; see TestRunHandlersFailurePassesSettledCostToEvent (REQ-FLOW-049).
 func TestNodeCostAccruesOnCompletedHandlers(t *testing.T) {
 	t.Run("success path reaches guard after accrual", func(t *testing.T) {
 		def := newFlow("cost-sum")

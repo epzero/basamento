@@ -895,9 +895,10 @@ var replayFlowStep = regexp.MustCompile(`^a flow with node "([^"]*)" of kind "to
 func declareReplayFlow(ctx context.Context, first, firstSpec, second, duration, third, step string) error {
 	w := world(ctx).Host
 	w.newFlow("replay", 1)
+	w.stateSchema(hostObjectSchema(map[string]string{third: `{"type":"object"}`}))
 	w.addNode(first, "tool", firstSpec, "", "")
 	w.addNode(second, "wait", fmt.Sprintf(`{"duration":%q}`, duration), "", "")
-	w.addNode(third, "agent", "", "", "")
+	w.addNode(third, "agent", "", "", third)
 	w.addEdge(ir.Start, first, "")
 	w.addEdge(first, second, "")
 	w.addEdge(second, third, "")
@@ -1549,9 +1550,21 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 
 	sc.Step(`^the replayed run completed node "([^"]*)" with the result (\{.*\})$`, func(ctx context.Context, node, want string) error {
 		w := world(ctx).Host
-		b := w.behavior(node)
-		if b == nil || !jsonEquivalent(b.result, json.RawMessage(want)) {
-			return fmt.Errorf("replayed node %q result %s, want %s", node, b.result, want)
+		if err := w.waitDone(); err != nil {
+			return err
+		}
+		if w.err != nil {
+			return fmt.Errorf("replayed run failed: %w", w.err)
+		}
+		got, ok, err := w.runStateNodeResult(node)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("replayed node %q has no result in the replay run state", node)
+		}
+		if !jsonEquivalent(got, json.RawMessage(want)) {
+			return fmt.Errorf("replayed node %q result %s, want %s", node, got, want)
 		}
 		return nil
 	})
@@ -1621,6 +1634,26 @@ func (w *hostWorld) gates() []hostCall {
 		}
 	}
 	return out
+}
+
+// runStateNodeResult is the replayed-run outcome from Host.Run final state only (no handler bookkeeping).
+func (w *hostWorld) runStateNodeResult(node string) (json.RawMessage, bool, error) {
+	if w.flow == nil {
+		return nil, false, nil
+	}
+	n, ok := w.flow.Nodes[node]
+	if !ok || n.Out == "" {
+		return nil, false, fmt.Errorf("flow host test: node %q has no Out key for run-state result", node)
+	}
+	var state map[string]json.RawMessage
+	if err := json.Unmarshal(w.result, &state); err != nil {
+		return nil, false, fmt.Errorf("replayed run state %s: %w", w.result, err)
+	}
+	value, ok := state[n.Out]
+	if !ok {
+		return nil, false, nil
+	}
+	return value, true, nil
 }
 
 // nodeResult reads the result a node completed with: the state key it writes,
