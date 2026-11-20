@@ -24,6 +24,7 @@ func registerLocal(sc *godog.ScenarioContext) {
 	registerLocalCancel(sc)
 	registerLocalChildren(sc)
 	registerLocalTenant(sc)
+	registerLocalPaging(sc)
 	registerLocalShutdown(sc)
 	registerLocalStartIDs(sc)
 	registerLocalChildIDs(sc)

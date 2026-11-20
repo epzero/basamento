@@ -477,7 +477,7 @@ Feature: The local runtime
 
   # List paging uses an opaque paging cursor bound to its issuing tenant.
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-051 @id:RT-051-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-051 @id:RT-051-01
   Scenario: A paging cursor resumes the next page without skipping or repeating a run
     Given tenant "acme" has runs "r1", "r2" and "r3" of flow "review" waiting at gate "approve"
     When tenant "acme" lists runs of flow "review" with limit 2 and no paging cursor
@@ -486,7 +486,7 @@ Feature: The local runtime
     And the second page lists run id "r3"
     And the two pages share no run id
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-052 @id:RT-052-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-052 @id:RT-052-01
   Scenario Outline: Listing with an unusable paging cursor fails with invalid_argument
     Given tenant "acme" has run "r1" of flow "review" waiting at gate "approve"
     When tenant "acme" lists runs of flow "review" with the paging cursor "<cursor>"
@@ -497,7 +497,7 @@ Feature: The local runtime
       | a paging cursor the runtime never issued |
       | a paging cursor past the last run        |
 
-  @planned @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-053 @id:RT-053-01
+  @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-053 @id:RT-053-01
   Scenario: A paging cursor issued to one tenant cannot list another tenant's runs
     Given tenant "acme" has runs "r1" and "r2" of flow "review" waiting at gate "approve"
     And tenant "globex" has run "g1" of flow "review" waiting at gate "approve"

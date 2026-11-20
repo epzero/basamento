@@ -221,6 +221,7 @@ type localWorld struct {
 	lastStart     runtime.RunRef
 	lastStatus    runtime.RunStatus
 	lastList      []runtime.RunStatus
+	paging        *localPagingRecorder
 	pendingRef    runtime.RunRef
 	serveCancel   context.CancelFunc
 	serveDone     chan error
