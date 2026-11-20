@@ -216,18 +216,23 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	var mu sync.Mutex
-	timedOut := false
-	what := ""
+	// The first completed outcome wins: a timer that fires before the attempt
+	// returns cancels it and makes it a timeout; a timer that fires after the
+	// attempt returned must not discard the result it produced. sync.Once
+	// orders the two claims (SystemRuntime timers race with the return).
+	var (
+		once     sync.Once
+		timedOut bool
+		what     string
+	)
 	fire := func(reason string) {
-		mu.Lock()
-		if !timedOut {
+		once.Do(func() {
 			timedOut = true
 			what = reason
-		}
-		mu.Unlock()
-		cancel()
+			cancel()
+		})
 	}
+	complete := func() { once.Do(func() {}) }
 
 	first := e.rt.AfterFunc(timeouts.FirstChunk, func() { fire("first-chunk") })
 	total := e.rt.AfterFunc(timeouts.AttemptTotal, func() { fire("attempt total") })
@@ -257,6 +262,9 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	}
 
 	res, err := e.cfg.Provider.Attempt(ctx, a, emit)
+	// Claim the attempt's completion before stopping the timers, so a timer
+	// that already started late cannot turn this result into a timeout.
+	complete()
 	if first != nil {
 		first.Stop()
 	}
@@ -266,9 +274,7 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	}
 	stopIdle()
 
-	mu.Lock()
 	to, reason := timedOut, what
-	mu.Unlock()
 	if to {
 		return res, true, events, timeoutError(reason)
 	}
