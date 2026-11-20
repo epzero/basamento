@@ -13,7 +13,6 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/confmap v1.0.0
-	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.3.0
 	github.com/nats-io/nats-server/v2 v2.11.15
@@ -105,7 +104,6 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.39.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
