@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/runtime"
 )
 
@@ -28,13 +29,28 @@ func TestChildRejectsDifferentParentRun(t *testing.T) {
 	})
 	f.start(t, "acme", "parent-1", "parent", `{}`)
 	f.waitState(t, "acme", "parent-1", stateCompleted)
-	f.waitState(t, "acme", "c1", stateRunning)
-	before := childRuns.Load()
+	for i := 0; i < spinBudget && childRuns.Load() < 1; i++ {
+		goruntime.Gosched()
+	}
+	if childRuns.Load() != 1 {
+		t.Fatalf("child flow ran %d times, want 1 before second parent", childRuns.Load())
+	}
 	f.start(t, "acme", "parent-2", "parent2", `{}`)
 	f.waitState(t, "acme", "parent-2", stateFailed)
-	if childRuns.Load() != before {
-		t.Fatalf("child flow ran %d times total, want %d (no second start)", childRuns.Load(), before)
+	if childRuns.Load() != 1 {
+		t.Fatalf("child flow ran %d times, want 1 (no second start)", childRuns.Load())
 	}
+	target := f.rt.lookup(core.TenantID("acme"), "parent-2")
+	if target == nil {
+		t.Fatal("parent-2 run not found")
+	}
+	target.mu.Lock()
+	err := target.err
+	target.mu.Unlock()
+	if codeOf(err) != "conflict" {
+		t.Fatalf("parent-2 error %v, want conflict", err)
+	}
+	f.waitState(t, "acme", "c1", stateRunning)
 }
 
 func TestChildRejectsTopLevelRunIDOtherFlow(t *testing.T) {
