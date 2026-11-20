@@ -28,7 +28,7 @@ func TestChildRejectsDifferentParentRun(t *testing.T) {
 	})
 	f.start(t, "acme", "parent-1", "parent", `{}`)
 	f.waitState(t, "acme", "parent-1", stateCompleted)
-	pollUntil(t, "child flow to run once", func() bool { return childRuns.Load() == 1 })
+	pollUntil(t, "child flow to run once", func() bool { return childRuns.Load() >= 1 })
 	if childRuns.Load() != 1 {
 		t.Fatalf("child flow ran %d times, want 1 before second parent", childRuns.Load())
 	}
@@ -97,7 +97,7 @@ func TestChildRejectsTopLevelSameFlowID(t *testing.T) {
 	f.start(t, "acme", "parent-1", "parent", `{}`)
 	f.waitState(t, "acme", "parent-1", stateFailed)
 	f.waitState(t, "acme", "existing-1", stateRunning)
-	pollUntil(t, "child flow to run once", func() bool { return runs.Load() == 1 })
+	pollUntil(t, "child flow to run once", func() bool { return runs.Load() >= 1 })
 	if runs.Load() != 1 {
 		t.Fatalf("child flow ran %d times, want 1", runs.Load())
 	}
@@ -120,7 +120,7 @@ func TestChildRejectsDifferentFlowName(t *testing.T) {
 	})
 	f.start(t, "acme", "p1", "parent", `{}`)
 	f.waitState(t, "acme", "p1", stateFailed)
-	pollUntil(t, "child flow to run once", func() bool { return runs.Load() == 1 })
+	pollUntil(t, "child flow to run once", func() bool { return runs.Load() >= 1 })
 	if runs.Load() != 1 {
 		t.Fatalf("child flow ran %d times, want 1", runs.Load())
 	}
@@ -143,7 +143,7 @@ func TestChildRejectsDifferentFlowHash(t *testing.T) {
 	})
 	f.start(t, "acme", "p1", "parent", `{}`)
 	f.waitState(t, "acme", "p1", stateFailed)
-	pollUntil(t, "child flow to run once", func() bool { return runs.Load() == 1 })
+	pollUntil(t, "child flow to run once", func() bool { return runs.Load() >= 1 })
 	if runs.Load() != 1 {
 		t.Fatalf("child flow ran %d times, want 1", runs.Load())
 	}

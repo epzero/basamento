@@ -199,7 +199,7 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 		return fmt.Errorf("the local runtime is not serving")
 	}
 	cancel()
-	guard, stopGuard := context.WithTimeout(ctx, waitBound)
+	guard, stopGuard := context.WithTimeout(context.Background(), waitBound)
 	defer stopGuard()
 	select {
 	case err := <-done:

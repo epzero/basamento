@@ -107,8 +107,9 @@ func TestAwaitReturnsTheGateTheJournalAlreadyHolds(t *testing.T) {
 	defer f.close(t)
 	atGate := make(chan struct{})
 	f.flow("waiting", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		wait := dc.Await(runtime.GateSpec{Name: "approve"})
 		close(atGate)
-		return nil, dc.Await(runtime.GateSpec{Name: "approve"}).Get(nil)
+		return nil, wait.Get(nil)
 	})
 	ref := f.start(t, "acme", "r1", "waiting", `{}`)
 	waitOn(t, "the run to await the gate", atGate)
