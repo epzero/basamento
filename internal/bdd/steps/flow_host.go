@@ -28,6 +28,7 @@ import (
 // calls back exactly.
 type hostWorld struct {
 	mu      sync.Mutex
+	cond    *sync.Cond
 	catalog *hostCatalog
 	host    *host.Host
 	dc      *hostFake
@@ -40,14 +41,13 @@ type hostWorld struct {
 	handlerKinds map[string]bool
 	handlerCalls []hostHandlerCall
 
-	activity    chan struct{}
 	done        chan struct{}
 	result      json.RawMessage
 	err         error
 	callsAtDone int
 
-	firstCalls  []hostCall
-	replayCalls []hostCall
+	firstJournal  []hostJournalEntry
+	replayJournal []hostJournalEntry
 }
 
 type hostHandlerCall struct {
@@ -59,10 +59,9 @@ type hostBehavior struct {
 	output   json.RawMessage
 	err      error
 	blocking bool
-	release  chan struct{}
+	released bool
 	step     string
 	called   bool
-	released bool
 	result   json.RawMessage
 }
 
@@ -73,17 +72,10 @@ func newHostWorld() *hostWorld {
 		versions:     map[string]map[int]runtime.FlowRef{},
 		behaviors:    map[string]*hostBehavior{},
 		handlerKinds: map[string]bool{},
-		activity:     make(chan struct{}, 1),
 	}
+	w.cond = sync.NewCond(&w.mu)
 	w.host = host.New(w.catalog)
 	return w
-}
-
-func (w *hostWorld) signal() {
-	select {
-	case w.activity <- struct{}{}:
-	default:
-	}
 }
 
 func (w *hostWorld) newFlow(name string, version int) *flow.IR {
@@ -152,7 +144,7 @@ func (w *hostWorld) behavior(node string) *hostBehavior {
 	return w.behaviors[node]
 }
 
-func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (json.RawMessage, error) {
+func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (host.NodeResult, error) {
 	w.mu.Lock()
 	b := w.behaviors[node.Name]
 	w.handlerCalls = append(w.handlerCalls, hostHandlerCall{node: node.Name, input: append(json.RawMessage(nil), input...)})
@@ -160,26 +152,43 @@ func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json
 		b.called = true
 	}
 	w.mu.Unlock()
-	w.signal()
 	if b == nil {
-		return nil, fmt.Errorf("flow host test: no behavior for node %q", node.Name)
+		return host.NodeResult{}, fmt.Errorf("flow host test: no behavior for node %q", node.Name)
 	}
 	if b.step != "" {
 		var out json.RawMessage
 		if err := dc.Step(b.step, input, runtime.StepOptions{}).Get(&out); err != nil {
-			return nil, err
+			return host.NodeResult{}, err
 		}
 		w.mu.Lock()
 		b.result = append(json.RawMessage(nil), out...)
 		w.mu.Unlock()
-		return out, nil
+		return host.NodeResult{Output: out}, nil
 	}
-	if b.blocking {
-		<-b.release
+	if b.blocking && w.dc != nil {
+		dc := w.dc
+		for {
+			w.mu.Lock()
+			released := b.released
+			w.mu.Unlock()
+			dc.mu.Lock()
+			if released || dc.finished {
+				dc.parked = false
+				dc.cond.Broadcast()
+				dc.mu.Unlock()
+				break
+			}
+			dc.parked = true
+			dc.cond.Broadcast()
+			dc.cond.Wait()
+			dc.parked = false
+			dc.cond.Broadcast()
+			dc.mu.Unlock()
+		}
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return b.output, b.err
+	return host.NodeResult{Output: b.output}, b.err
 }
 
 func (w *hostWorld) handlerReturns(node, output string) error {
@@ -191,10 +200,15 @@ func (w *hostWorld) handlerReturns(node, output string) error {
 	w.mu.Lock()
 	b.output = value
 	if b.blocking && !b.released {
-		close(b.release)
 		b.released = true
+		w.cond.Broadcast()
 	}
 	w.mu.Unlock()
+	if w.dc != nil {
+		w.dc.mu.Lock()
+		w.dc.wake()
+		w.dc.mu.Unlock()
+	}
 	return nil
 }
 
@@ -203,10 +217,15 @@ func (w *hostWorld) handlerFails(node string, err error) {
 	w.mu.Lock()
 	b.err = err
 	if b.blocking && !b.released {
-		close(b.release)
 		b.released = true
+		w.cond.Broadcast()
 	}
 	w.mu.Unlock()
+	if w.dc != nil {
+		w.dc.mu.Lock()
+		w.dc.wake()
+		w.dc.mu.Unlock()
+	}
 }
 
 func (w *hostWorld) start(input string) error {
@@ -234,49 +253,34 @@ func (w *hostWorld) startRef(ref runtime.FlowRef, input string) error {
 	go func() {
 		w.result, w.err = w.host.Run(w.dc, ref, json.RawMessage(input))
 		w.callsAtDone = len(w.dc.callLog())
-		w.signal()
+		w.dc.markFinished()
 		close(w.done)
 	}()
 	return w.settle()
 }
 
-// settle waits until the run finishes or pauses on a durable call. The fake
-// signals activity for every call and the handler does the same for every
-// invocation, so a quiet period means the run is blocked in Select.
+// settle waits until the run goroutine has parked on the fake or finished.
 func (w *hostWorld) settle() error {
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	quiet := time.NewTimer(20 * time.Millisecond)
-	quiet.Stop()
-	active := false
-	for {
-		select {
-		case <-w.done:
-			return nil
-		case <-w.activity:
-			active = true
-			if !quiet.Stop() {
-				select {
-				case <-quiet.C:
-				default:
-				}
-			}
-			quiet.Reset(20 * time.Millisecond)
-		case <-quiet.C:
-			if active {
-				return nil
-			}
-		case <-deadline.C:
-			return fmt.Errorf("run did not settle")
-		}
+	if w.dc == nil {
+		return nil
+	}
+	w.dc.waitParkedOrFinished()
+	select {
+	case <-w.done:
+		return nil
+	default:
+		return nil
 	}
 }
 
 func (w *hostWorld) waitDone() error {
+	if w.dc != nil {
+		w.dc.waitFinished()
+	}
 	select {
 	case <-w.done:
 		return nil
-	case <-time.After(5 * time.Second):
+	default:
 		return fmt.Errorf("run did not finish")
 	}
 }
@@ -286,24 +290,42 @@ func (w *hostWorld) timePassed(_ context.Context, duration time.Duration) error 
 		return nil
 	}
 	w.dc.advance(duration)
-	w.signal()
 	return w.settle()
 }
 
 // --- recording fake DurableContext ----------------------------------------
 
 type hostCall struct {
-	kind     string
-	name     string
-	input    json.RawMessage
-	duration time.Duration
-	gate     runtime.GateSpec
-	child    runtime.FlowRef
+	kind      string
+	name      string
+	input     json.RawMessage
+	duration  time.Duration
+	gate      runtime.GateSpec
+	child     runtime.FlowRef
+	stepOpts  runtime.StepOptions
+	childOpts runtime.ChildOptions
+}
+
+type hostJournalEntry struct {
+	kind      string
+	name      string
+	input     json.RawMessage
+	duration  time.Duration
+	gate      runtime.GateSpec
+	child     runtime.FlowRef
+	stepOpts  runtime.StepOptions
+	childOpts runtime.ChildOptions
+	idKind    string
+	id        string
+	result    json.RawMessage
+	err       error
 }
 
 type hostScript struct {
-	result json.RawMessage
-	err    error
+	result    json.RawMessage
+	err       error
+	failTimes int
+	failCode  core.Code
 }
 
 type hostFuture struct {
@@ -316,7 +338,11 @@ type hostFuture struct {
 func (f *hostFuture) Get(out any) error {
 	f.dc.mu.Lock()
 	for !f.done {
+		f.dc.parked = true
+		f.dc.cond.Broadcast()
 		f.dc.cond.Wait()
+		f.dc.parked = false
+		f.dc.cond.Broadcast()
 	}
 	f.dc.mu.Unlock()
 	if f.err != nil {
@@ -341,27 +367,31 @@ type hostTimer struct {
 }
 
 type hostFake struct {
-	mu        sync.Mutex
-	cond      *sync.Cond
-	now       time.Time
-	calls     []hostCall
-	notify    chan struct{}
-	steps     map[string]hostScript
-	gates     map[string]*hostFuture
-	timers    []hostTimer
-	gateDone  map[string]json.RawMessage
-	childDone map[string]json.RawMessage
-	emits     int
-	checks    int
-	instant   bool
-	replaying bool
-	executed  map[string]int
+	mu           sync.Mutex
+	cond         *sync.Cond
+	now          time.Time
+	calls        []hostCall
+	journal      []hostJournalEntry
+	journalIndex int
+	steps        map[string]hostScript
+	gates        map[string]*hostFuture
+	timers       []hostTimer
+	gateDone     map[string]json.RawMessage
+	childDone    map[string]json.RawMessage
+	emits        int
+	checks       int
+	instant      bool
+	replaying    bool
+	executed     map[string]int
+	diverged     error
+	parked       bool
+	finished     bool
+	nextID       int
 }
 
-func newHostFake(notify chan struct{}) *hostFake {
+func newHostFake() *hostFake {
 	d := &hostFake{
 		now:       time.Unix(1_700_000_000, 0).UTC(),
-		notify:    notify,
 		steps:     map[string]hostScript{},
 		gates:     map[string]*hostFuture{},
 		gateDone:  map[string]json.RawMessage{},
@@ -372,14 +402,69 @@ func newHostFake(notify chan struct{}) *hostFake {
 	return d
 }
 
-func (d *hostFake) record(c hostCall) {
+func replayHostFake(journal []hostJournalEntry) *hostFake {
+	d := newHostFake()
+	d.replaying = true
+	d.journal = append([]hostJournalEntry(nil), journal...)
+	d.instant = true
+	return d
+}
+
+func (d *hostFake) markFinished() {
 	d.mu.Lock()
-	d.calls = append(d.calls, c)
+	d.finished = true
+	d.parked = false
+	d.cond.Broadcast()
 	d.mu.Unlock()
-	select {
-	case d.notify <- struct{}{}:
-	default:
+}
+
+func (d *hostFake) wake() {
+	d.parked = false
+	d.cond.Broadcast()
+}
+
+func (d *hostFake) record(c hostCall) {
+	d.calls = append(d.calls, c)
+	d.parked = true
+	d.cond.Broadcast()
+}
+
+func (d *hostFake) appendJournal(e hostJournalEntry) {
+	d.journal = append(d.journal, e)
+}
+
+func (d *hostFake) waitParkedOrFinished() {
+	d.mu.Lock()
+	for !d.parked && !d.finished {
+		d.cond.Wait()
 	}
+	d.mu.Unlock()
+}
+
+func (d *hostFake) waitFinished() {
+	d.mu.Lock()
+	for !d.finished {
+		d.cond.Wait()
+	}
+	d.mu.Unlock()
+}
+
+func (d *hostFake) waitReleased(cond func() bool) {
+	d.mu.Lock()
+	for !cond() && !d.finished {
+		d.parked = true
+		d.cond.Broadcast()
+		d.cond.Wait()
+		d.parked = false
+		d.cond.Broadcast()
+	}
+	d.mu.Unlock()
+}
+
+func (d *hostFake) copyJournal() []hostJournalEntry {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]hostJournalEntry(nil), d.journal...)
 }
 
 func (d *hostFake) Context() context.Context { return context.Background() }
@@ -389,61 +474,163 @@ func (d *hostFake) Now() time.Time {
 	return d.now
 }
 
-var fakeID int
-
 func (d *hostFake) NewID(kind string) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	fakeID++
-	return fmt.Sprintf("%s-%d", kind, fakeID)
+	if d.replaying {
+		if d.journalIndex >= len(d.journal) {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: unexpected durable call", nil)
+			return ""
+		}
+		e := d.journal[d.journalIndex]
+		if e.kind != "id" || e.idKind != kind {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: id mismatch", nil)
+			return ""
+		}
+		d.journalIndex++
+		return e.id
+	}
+	d.nextID++
+	id := fmt.Sprintf("%s-%d", kind, d.nextID)
+	d.appendJournal(hostJournalEntry{kind: "id", idKind: kind, id: id})
+	return id
 }
 
 func (d *hostFake) Rand(string) *rand.Rand { return rand.New(rand.NewPCG(1, 2)) }
 
-func (d *hostFake) Step(name string, in any, _ runtime.StepOptions) runtime.Future {
-	d.record(hostCall{kind: "step", name: name, input: rawArgument(in)})
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	script := d.steps[name]
-	if !d.replaying {
-		d.executed[name]++
+func (d *hostFake) journalOrFail(kind string) (hostJournalEntry, error) {
+	if d.journalIndex >= len(d.journal) {
+		d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: unexpected durable call", map[string]any{"kind": kind})
+		return hostJournalEntry{}, d.diverged
 	}
-	return &hostFuture{dc: d, done: true, result: script.result, err: script.err}
+	return d.journal[d.journalIndex], nil
 }
 
-func (d *hostFake) Child(ref runtime.FlowRef, in any, _ runtime.ChildOptions) runtime.Future {
-	d.record(hostCall{kind: "child", child: ref, input: rawArgument(in)})
+func (d *hostFake) Step(name string, in any, o runtime.StepOptions) runtime.Future {
+	raw := rawArgument(in)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.replaying {
+		d.record(hostCall{kind: "step", name: name, input: raw, stepOpts: o})
+		e, err := d.journalOrFail("step")
+		if err != nil {
+			return &hostFuture{dc: d, done: true, err: err}
+		}
+		if e.kind != "step" || e.name != name || !jsonEquivalent(e.input, raw) || e.stepOpts.IdempotencyKey != o.IdempotencyKey {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: step call mismatch", nil)
+			return &hostFuture{dc: d, done: true, err: d.diverged}
+		}
+		d.journalIndex++
+		return &hostFuture{dc: d, done: true, result: e.result, err: e.err}
+	}
+	script := d.steps[name]
+	var result json.RawMessage
+	var execErr error
+	d.executed[name]++
+	if script.failTimes > 0 {
+		for i := 0; i < script.failTimes; i++ {
+			d.executed[name]++
+			if script.failCode != "" {
+				_ = script.failCode
+			}
+		}
+		result = append(json.RawMessage(nil), script.result...)
+	} else {
+		result = append(json.RawMessage(nil), script.result...)
+		execErr = script.err
+	}
+	d.record(hostCall{kind: "step", name: name, input: raw, stepOpts: o})
+	d.appendJournal(hostJournalEntry{
+		kind: "step", name: name, input: append(json.RawMessage(nil), raw...),
+		stepOpts: o, result: append(json.RawMessage(nil), result...), err: execErr,
+	})
+	return &hostFuture{dc: d, done: true, result: result, err: execErr}
+}
+
+func (d *hostFake) Child(ref runtime.FlowRef, in any, o runtime.ChildOptions) runtime.Future {
+	raw := rawArgument(in)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.replaying {
+		d.record(hostCall{kind: "child", child: ref, input: raw, childOpts: o})
+		e, err := d.journalOrFail("child")
+		if err != nil {
+			return &hostFuture{dc: d, done: true, err: err}
+		}
+		if e.kind != "child" || e.child.Name != ref.Name || e.child.Hash != ref.Hash ||
+			!jsonEquivalent(e.input, raw) || e.childOpts.ID != o.ID {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: child call mismatch", nil)
+			return &hostFuture{dc: d, done: true, err: d.diverged}
+		}
+		d.journalIndex++
+		return &hostFuture{dc: d, done: true, result: e.result, err: e.err}
+	}
 	script := d.steps["child:"+ref.Name]
+	d.record(hostCall{kind: "child", child: ref, input: raw, childOpts: o})
+	d.appendJournal(hostJournalEntry{
+		kind: "child", child: ref, input: append(json.RawMessage(nil), raw...),
+		childOpts: o, result: append(json.RawMessage(nil), script.result...), err: script.err,
+	})
 	if len(script.result) > 0 && script.err == nil {
 		d.childDone[ref.Name] = script.result
 	}
+	d.executed["child:"+ref.Name]++
 	return &hostFuture{dc: d, done: true, result: script.result, err: script.err}
 }
 
 func (d *hostFake) Sleep(duration time.Duration) runtime.Future {
-	d.record(hostCall{kind: "timer", duration: duration})
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.replaying {
+		d.record(hostCall{kind: "timer", duration: duration})
+		e, err := d.journalOrFail("timer")
+		if err != nil {
+			return &hostFuture{dc: d, done: true, err: err}
+		}
+		if e.kind != "timer" || e.duration != duration {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: timer mismatch", nil)
+			return &hostFuture{dc: d, done: true, err: d.diverged}
+		}
+		d.journalIndex++
+		return &hostFuture{dc: d, done: true}
+	}
 	f := &hostFuture{dc: d}
 	if d.instant {
 		f.done = true
+		d.record(hostCall{kind: "timer", duration: duration})
+		d.appendJournal(hostJournalEntry{kind: "timer", duration: duration})
 		return f
 	}
 	d.timers = append(d.timers, hostTimer{deadline: d.now.Add(duration), future: f})
+	d.record(hostCall{kind: "timer", duration: duration})
+	d.appendJournal(hostJournalEntry{kind: "timer", duration: duration})
 	return f
 }
 
 func (d *hostFake) Await(spec runtime.GateSpec) runtime.Future {
-	d.record(hostCall{kind: "gate", gate: spec})
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.replaying {
+		d.record(hostCall{kind: "gate", gate: spec})
+		e, err := d.journalOrFail("gate")
+		if err != nil {
+			return &hostFuture{dc: d, done: true, err: err}
+		}
+		if e.kind != "gate" || e.gate.Name != spec.Name || e.gate.Timeout != spec.Timeout ||
+			e.gate.AcceptIf != spec.AcceptIf || !bytes.Equal(e.gate.Schema, spec.Schema) {
+			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: gate mismatch", nil)
+			return &hostFuture{dc: d, done: true, err: d.diverged}
+		}
+		d.journalIndex++
+		return &hostFuture{dc: d, done: true, result: e.result, err: e.err}
+	}
 	f := &hostFuture{dc: d}
 	d.gates[spec.Name] = f
 	if spec.Timeout > 0 {
 		d.timers = append(d.timers, hostTimer{deadline: d.now.Add(spec.Timeout), future: f, gate: true})
 	}
+	d.record(hostCall{kind: "gate", gate: spec})
+	d.appendJournal(hostJournalEntry{kind: "gate", gate: spec})
 	return f
 }
 
@@ -456,7 +643,11 @@ func (d *hostFake) Select(futures ...runtime.Future) (int, error) {
 				return i, nil
 			}
 		}
+		d.parked = true
+		d.cond.Broadcast()
 		d.cond.Wait()
+		d.parked = false
+		d.cond.Broadcast()
 	}
 }
 
@@ -494,7 +685,7 @@ func (d *hostFake) advance(duration time.Duration) {
 		}
 	}
 	d.timers = kept
-	d.cond.Broadcast()
+	d.wake()
 }
 
 func (d *hostFake) resolveGate(name string, payload json.RawMessage) {
@@ -505,7 +696,7 @@ func (d *hostFake) resolveGate(name string, payload json.RawMessage) {
 		f.done = true
 		f.result = payload
 		d.gateDone[name] = payload
-		d.cond.Broadcast()
+		d.wake()
 	}
 }
 
@@ -519,19 +710,6 @@ func (d *hostFake) executeCount(name string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.executed[name]
-}
-
-func (d *hostFake) clone() *hostFake {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	out := newHostFake(d.notify)
-	out.now = d.now
-	out.instant = d.instant
-	out.replaying = true
-	for name, script := range d.steps {
-		out.steps[name] = script
-	}
-	return out
 }
 
 func rawArgument(in any) json.RawMessage {
@@ -629,10 +807,9 @@ func (w *hostWorld) registerHandledKind(kind string) {
 	w.ensureHandler(kind)
 }
 
-// replayFlowStep is the FLOW-037-01 declaration; flow_builder's catch-all routes
-// matching text here so godog sees one step definition (EP0-100 replaces this).
 var replayFlowStep = regexp.MustCompile(`^a flow with node "([^"]*)" of kind "tool" with node spec (\{.*\}), then node "([^"]*)" of kind "wait" for "([^"]*)", then node "([^"]*)" of kind "agent" whose handler calls step "([^"]*)"$`)
 
+// declareReplayFlow is the FLOW-037-01 flow declaration; flow_builder's catch-all routes matching text here.
 func declareReplayFlow(ctx context.Context, first, firstSpec, second, duration, third, step string) error {
 	w := world(ctx).Host
 	w.newFlow("replay", 1)
@@ -652,7 +829,7 @@ func declareReplayFlow(ctx context.Context, first, firstSpec, second, duration, 
 func registerFlowHost(sc *godog.ScenarioContext) {
 	sc.Step(`^a recording fake durable context$`, func(ctx context.Context) error {
 		w := world(ctx).Host
-		w.dc = newHostFake(w.activity)
+		w.dc = newHostFake()
 		return nil
 	})
 
@@ -671,7 +848,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			w.ensureHandler(kind)
 			b := w.behavior(first)
 			b.blocking = true
-			b.release = make(chan struct{})
 			return nil
 		})
 
@@ -1033,7 +1209,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 	sc.Step(`^the gate "([^"]*)" is resolved with (\{.*\})$`, func(ctx context.Context, gate, payload string) error {
 		w := world(ctx).Host
 		w.dc.resolveGate(gate, json.RawMessage(payload))
-		w.signal()
 		return w.settle()
 	})
 
@@ -1141,8 +1316,8 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass without the gate "([^"]*)" being resolved$`,
-		func(ctx context.Context, count int, unit, gate string) error {
+	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass without the gate "[^"]*" being resolved$`,
+		func(ctx context.Context, count int, unit string) error {
 			w := world(ctx).Host
 			var duration time.Duration
 			switch strings.TrimSuffix(unit, "s") {
@@ -1153,9 +1328,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			case "hour":
 				duration = time.Duration(count) * time.Hour
 			}
-			_ = gate
 			w.dc.advance(duration)
-			w.signal()
 			return w.settle()
 		})
 
@@ -1191,18 +1364,28 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	// FLOW-037: replay — declareReplayFlow is called from flow_builder's catch-all.
-
 	sc.Step(`^a first run recorded tool "([^"]*)" failing with code "([^"]*)" (\d+) times then returning (\{.*\}), the (\S+) timer of "([^"]*)" firing, and step "([^"]*)" returning (\{.*\})$`,
 		func(ctx context.Context, tool, code string, attempts int, toolResult, duration, timerNode, step, stepResult string) error {
 			w := world(ctx).Host
-			w.dc.instant = true
-			w.dc.steps[tool] = hostScript{result: json.RawMessage(toolResult)}
+			w.dc.instant = false
+			w.dc.steps[tool] = hostScript{
+				result:    json.RawMessage(toolResult),
+				failTimes: attempts,
+				failCode:  core.Code(code),
+			}
 			w.dc.steps[step] = hostScript{result: json.RawMessage(stepResult)}
-			// The retries belong to the runtime: the recorded history holds the
-			// failed attempts and then the success the host's Step future returns.
 			if err := w.start(`{}`); err != nil {
 				return err
+			}
+			waitFor, err := time.ParseDuration(duration)
+			if err != nil {
+				return err
+			}
+			if timerNode == "b" {
+				w.dc.advance(waitFor)
+				if err := w.settle(); err != nil {
+					return err
+				}
 			}
 			if err := w.waitDone(); err != nil {
 				return err
@@ -1210,17 +1393,17 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			if w.err != nil {
 				return fmt.Errorf("first run failed: %w", w.err)
 			}
-			w.firstCalls = w.dc.callLog()
+			if w.dc.executed[tool] != attempts+1 {
+				return fmt.Errorf("tool %q ran %d times, want %d", tool, w.dc.executed[tool], attempts+1)
+			}
+			w.firstJournal = w.dc.copyJournal()
 			_ = code
-			_ = attempts
-			_ = duration
-			_ = timerNode
 			return nil
 		})
 
 	sc.Step(`^the run is replayed from its recorded history$`, func(ctx context.Context) error {
 		w := world(ctx).Host
-		replay := w.dc.clone()
+		replay := replayHostFake(w.firstJournal)
 		w.dc = replay
 		w.done = nil
 		if err := w.start(`{}`); err != nil {
@@ -1232,14 +1415,17 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		if w.err != nil {
 			return fmt.Errorf("replayed run failed: %w", w.err)
 		}
-		w.replayCalls = w.dc.callLog()
+		if w.dc.diverged != nil {
+			return fmt.Errorf("replay diverged: %w", w.dc.diverged)
+		}
+		w.replayJournal = w.dc.copyJournal()
 		return nil
 	})
 
 	sc.Step(`^the replayed run made the same durable calls in the same order as the first run$`, func(ctx context.Context) error {
 		w := world(ctx).Host
-		if got, want := callKinds(w.replayCalls), callKinds(w.firstCalls); strings.Join(got, ",") != strings.Join(want, ",") {
-			return fmt.Errorf("replay calls %v, want %v", got, want)
+		if err := journalsEqual(w.firstJournal, w.replayJournal); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -1257,6 +1443,9 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		w := world(ctx).Host
 		if count := w.dc.executeCount(step); count != 0 {
 			return fmt.Errorf("step %q ran %d times in replay, want the recorded result", step, count)
+		}
+		if w.dc.diverged != nil {
+			return fmt.Errorf("replay diverged: %w", w.dc.diverged)
 		}
 		return nil
 	})
@@ -1375,6 +1564,34 @@ func hasEdgeFrom(def *flow.IR, from, to string) bool {
 	return false
 }
 
+func journalsEqual(first, replay []hostJournalEntry) error {
+	if len(first) != len(replay) {
+		return fmt.Errorf("journal length %d, want %d", len(replay), len(first))
+	}
+	for i := range first {
+		a, b := first[i], replay[i]
+		if a.kind != b.kind || a.name != b.name || a.duration != b.duration || a.id != b.id || a.idKind != b.idKind {
+			return fmt.Errorf("entry %d: %+v, want %+v", i, b, a)
+		}
+		if a.child.Name != b.child.Name || a.child.Hash != b.child.Hash {
+			return fmt.Errorf("entry %d child: %+v, want %+v", i, b.child, a.child)
+		}
+		if !rawJSONEqual(a.input, b.input) || !rawJSONEqual(a.result, b.result) {
+			return fmt.Errorf("entry %d payload mismatch", i)
+		}
+		if a.stepOpts.IdempotencyKey != b.stepOpts.IdempotencyKey || a.childOpts.ID != b.childOpts.ID {
+			return fmt.Errorf("entry %d keys mismatch", i)
+		}
+		if (a.err == nil) != (b.err == nil) {
+			return fmt.Errorf("entry %d err mismatch", i)
+		}
+		if a.err != nil && core.CodeOf(a.err) != core.CodeOf(b.err) {
+			return fmt.Errorf("entry %d code %v, want %v", i, core.CodeOf(b.err), core.CodeOf(a.err))
+		}
+	}
+	return nil
+}
+
 func callKinds(calls []hostCall) []string {
 	out := make([]string, len(calls))
 	for i, call := range calls {
@@ -1403,6 +1620,13 @@ func rawText(raw json.RawMessage) string {
 		return text
 	}
 	return string(raw)
+}
+
+func rawJSONEqual(left, right json.RawMessage) bool {
+	if len(left) == 0 && len(right) == 0 {
+		return true
+	}
+	return jsonEquivalent(left, right)
 }
 
 func jsonEquivalent(left, right json.RawMessage) bool {
