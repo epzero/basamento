@@ -9,6 +9,7 @@ import (
 
 // Defaults used only when the scenario text does not name a value (see local.feature RT-049…050).
 const (
+	localDefaultChildFlow   = "child"
 	localDefaultParentFlow  = "parent"
 	localDefaultClosePolicy = "abandon"
 )

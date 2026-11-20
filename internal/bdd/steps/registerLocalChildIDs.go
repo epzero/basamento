@@ -13,7 +13,7 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 			w := localStepWorld(ctx)
 			reg, ok := w.parentReg(parent)
 			if !ok {
-				reg = parentChildReg{child: localDefaultParentFlow, id: childID, policy: localDefaultClosePolicy}
+				reg = parentChildReg{child: localDefaultChildFlow, id: childID, policy: localDefaultClosePolicy}
 			}
 			w.setChildGateFlow(reg.child, gate)
 			w.setCommandParent(parent, &reg)
