@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -43,8 +44,9 @@ type Registry struct {
 	mu    sync.Mutex
 	byRef map[invocationKey]*Run
 	// ended holds ended invocations in end-time order; ended[head:] are the
-	// ones still held. Appending at the end keeps the order of two
-	// invocations that end at the same instant (design R2).
+	// ones still held. An ending invocation is inserted at its time position,
+	// after any entry with an equal end time, so two invocations that end at
+	// the same instant keep the order in which they ended (design R2).
 	ended []endedInvocation
 	head  int
 }
@@ -273,12 +275,22 @@ func (g *Registry) sweepLocked() {
 		g.forgetLocked(g.head)
 		g.head++
 	}
-	// Compact once the consumed prefix is half the queue, so a steady state
-	// copies rarely and never keeps more than twice the live entries.
+	// Compact once the consumed prefix is half the queue. A burst leaves a
+	// backing array sized for its peak; when the live entries are far below
+	// that capacity, a right-sized copy replaces the slice so the peak array
+	// can be collected. Otherwise the copy stays in place, and a steady state
+	// then keeps a capacity of at most twice the live entries.
 	if g.head > 0 && g.head*2 >= len(g.ended) {
-		n := copy(g.ended, g.ended[g.head:])
-		clear(g.ended[n:])
-		g.ended = g.ended[:n]
+		live := len(g.ended) - g.head
+		if cap(g.ended) > 2*live {
+			kept := make([]endedInvocation, live)
+			copy(kept, g.ended[g.head:])
+			g.ended = kept
+		} else {
+			n := copy(g.ended, g.ended[g.head:])
+			clear(g.ended[n:])
+			g.ended = g.ended[:n]
+		}
 		g.head = 0
 	}
 }
@@ -294,12 +306,26 @@ func (g *Registry) forgetLocked(i int) {
 	}
 }
 
-// runEnded appends a run that just ended to the retention queue, stamped with
-// the registry's clock. The sweep that follows evicts on the next registry
-// method call, never in this one, so it only reads the queue.
+// runEnded inserts a run that just ended into the retention queue in end-time
+// order, stamped with the registry's clock. It inserts after every entry with
+// an equal end time, so a tie keeps the order in which its invocations ended
+// even when the clock steps back between them (design R2). The sweep that
+// follows evicts on the next registry method call, never in this one, so it
+// only reads the queue.
 func (g *Registry) runEnded(key invocationKey, run *Run) {
 	g.mu.Lock()
-	g.ended = append(g.ended, endedInvocation{key: key, run: run, at: g.clock.Now()})
+	at := g.clock.Now()
+	live := g.ended[g.head:]
+	i := len(live)
+	if n := len(live); n > 0 && live[n-1].at.After(at) {
+		// First entry that ends strictly after at; an equal end stays before
+		// the insertion point, so it keeps its end order.
+		i = sort.Search(n, func(j int) bool { return live[j].at.After(at) })
+	}
+	g.ended = append(g.ended, endedInvocation{})
+	pos := g.head + i
+	copy(g.ended[pos+1:], g.ended[pos:])
+	g.ended[pos] = endedInvocation{key: key, run: run, at: at}
 	g.mu.Unlock()
 }
 

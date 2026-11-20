@@ -233,6 +233,96 @@ func TestEqualEndTimesKeepTheirEndOrder(t *testing.T) {
 	}
 }
 
+// TestCompactionReleasesThePeakBackingArray fills the queue with a burst and
+// then lets one sweep evict it down to the ended bound: the backing array sized
+// for the burst must not outlive the entries that filled it (SELF-140-01).
+func TestCompactionReleasesThePeakBackingArray(t *testing.T) {
+	clock := retentionClock()
+	reg := newRetentionRegistry(t, clock, time.Hour, 4)
+	ctx := testCtx(t)
+
+	// Begin every run before any ends, so the burst reaches the queue without
+	// an interleaved sweep to compact it early.
+	runs := make([]*Run, 0, 256)
+	for i := 0; i < 256; i++ {
+		runs = append(runs, mustBegin(t, reg, ctx, fmt.Sprintf("ref-%d", i)))
+	}
+	for _, run := range runs {
+		run.Succeed(Result{})
+	}
+	// One sweeping call moves the consumed prefix past half the queue and
+	// compacts it; with the window unexpired, only the ended bound evicts.
+	if _, err := reg.Lookup(ctx, "never-started"); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+
+	reg.mu.Lock()
+	held, capacity, refs := len(reg.ended)-reg.head, cap(reg.ended), len(reg.byRef)
+	reg.mu.Unlock()
+	if held != 4 || refs != 4 {
+		t.Fatalf("held %d ended invocations and %d refs, want 4 and 4", held, refs)
+	}
+	if capacity > 4*reg.maxEnded {
+		t.Fatalf("retained capacity %d after a 256-entry burst, want at most %d", capacity, 4*reg.maxEnded)
+	}
+}
+
+// TestClockStepBackKeepsTheQueueInEndTimeOrder ends one invocation at 10:30,
+// steps the clock back to 10:00 and ends another, then advances to 11:00: the
+// 10:00 invocation has left its window and must be evicted, while the 10:30
+// one must stay (SELF-140-02).
+func TestClockStepBackKeepsTheQueueInEndTimeOrder(t *testing.T) {
+	clock := retentionClock()
+	reg := newRetentionRegistry(t, clock, time.Hour, 0)
+	ctx := testCtx(t)
+
+	clock.Advance(90 * time.Minute) // 10:30
+	mustBegin(t, reg, ctx, "ref-late").Succeed(Result{})
+	clock.Advance(-30 * time.Minute) // back to 10:00
+	mustBegin(t, reg, ctx, "ref-early").Succeed(Result{})
+	clock.Advance(time.Hour) // 11:00: ref-early's window has passed, ref-late's has not
+
+	if got, err := reg.Lookup(ctx, "ref-early"); err != nil || got != nil {
+		t.Fatalf("lookup ref-early = (%v, %v), want (nil, nil): expired entry still readable", got, err)
+	}
+	if got, err := reg.Lookup(ctx, "ref-late"); err != nil || got == nil {
+		t.Fatalf("lookup ref-late = (%v, %v), want the unexpired entry", got, err)
+	}
+}
+
+// TestInsertedEqualEndKeepsEndOrder inserts a tie in the middle of the queue:
+// ref-b ends at 10:30, the clock steps back and ref-a then ref-c end at 10:00.
+// ref-a and ref-c are the tie, and ref-c ended later, so under the bound of 2
+// the sweep evicts ref-a and keeps both ref-b and ref-c (design R2).
+func TestInsertedEqualEndKeepsEndOrder(t *testing.T) {
+	clock := retentionClock()
+	reg := newRetentionRegistry(t, clock, time.Hour, 2)
+	ctx := testCtx(t)
+
+	clock.Advance(90 * time.Minute) // 10:30
+	mustBegin(t, reg, ctx, "ref-b").Succeed(Result{})
+	clock.Advance(-30 * time.Minute) // back to 10:00
+	mustBegin(t, reg, ctx, "ref-a").Succeed(Result{})
+	mustBegin(t, reg, ctx, "ref-c").Succeed(Result{})
+
+	for _, tc := range []struct {
+		ref  string
+		want bool
+	}{
+		{"ref-a", false},
+		{"ref-b", true},
+		{"ref-c", true},
+	} {
+		got, err := reg.Lookup(ctx, tc.ref)
+		if err != nil {
+			t.Fatalf("lookup %s: %v", tc.ref, err)
+		}
+		if (got != nil) != tc.want {
+			t.Fatalf("lookup %s = %v, want found=%v", tc.ref, got, tc.want)
+		}
+	}
+}
+
 func TestRunningInvocationIsNeverEvicted(t *testing.T) {
 	clock := retentionClock()
 	reg := newRetentionRegistry(t, clock, time.Hour, 2)
