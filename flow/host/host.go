@@ -60,7 +60,9 @@ func New(catalog DefinitionCatalog, opts ...Option) *Host {
 
 // RegisterHandler registers handler for a node kind. Calling it again for the
 // same kind replaces the handler; the composition root does it before the host
-// is used. The host itself imports no handler (ADR-0011).
+// is used. RegisterHandler is not safe to call concurrently with Run: the
+// handler table is a plain map written here and read during runs once
+// registration has finished. The host itself imports no handler (ADR-0011).
 func (h *Host) RegisterHandler(kind string, handler NodeHandler) {
 	if h.handlers == nil {
 		h.handlers = map[string]NodeHandler{}
