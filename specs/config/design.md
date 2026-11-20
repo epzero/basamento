@@ -74,11 +74,13 @@ import the implementations and their constructors. `cmd/kit` may already
 import `platform` and `runtime`; with the row in place it also imports
 `internal/config`.
 
-`serve.go` holds the part of `kit serve` that does not know a port: it opens
-the ports it is given in order, binds the listener, prints the ready line and
-drains requests on shutdown. `cmd/kit` supplies the openers; the component
-suite supplies fakes and a timer, so `CONFIG-023-01` and `CONFIG-024-01` drive
-the same code as the binary without a sleep.
+`serve.go` holds the part of `kit serve` that does not know a port:
+`config.Server` serves an already-bound listener, drains requests on shutdown
+and closes the ports it is given; it starts nothing. `cmd/kit` validates the
+configuration, opens the ports, binds the listener, installs the signal
+handler and prints the ready line, as §5 describes. `cmd/kit` supplies the
+openers; the component suite supplies fakes and a timer, so `CONFIG-023-01`
+and `CONFIG-024-01` drive the same server code as the binary without a sleep.
 
 ## 2. Keys, types and defaults
 
