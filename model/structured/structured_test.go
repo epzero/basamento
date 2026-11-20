@@ -154,6 +154,34 @@ func TestRepairFixesTypographicQuotes(t *testing.T) {
 	}
 }
 
+func TestRepairKeepsBracketsInsideTypographicStrings(t *testing.T) {
+	objectSpec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := objectSpec.Repair(replyWith(t, "{\u201ctext\u201d: \u201ca } b\u201d}")); !ok || string(got) != `{"text":"a } b"}` {
+		t.Fatalf("object Repair = %s, %v", got, ok)
+	}
+
+	arraySpec, err := NewSpec(json.RawMessage(`{"type":"array","items":{"type":"string"}}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := arraySpec.Repair(replyWith(t, "[\u201ca ] b\u201d, \u201cc } d\u201d]")); !ok || string(got) != `["a ] b","c } d"]` {
+		t.Fatalf("array Repair = %s, %v", got, ok)
+	}
+}
+
+func TestRepairKeepsBracketsInsideStraightStrings(t *testing.T) {
+	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := spec.Repair(replyWith(t, `{"text": "a } b ] c"}`)); !ok || string(got) != `{"text":"a } b ] c"}` {
+		t.Fatalf("Repair = %s, %v", got, ok)
+	}
+}
+
 func TestRepairPreservesTypographicQuotesInsideStrings(t *testing.T) {
 	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}},"required":["note"]}`), []Rung{RungJSONMode})
 	if err != nil {
