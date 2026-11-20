@@ -22,7 +22,6 @@ import (
 // machine; that payload is not observable through DurableContext and is pinned by
 // flow/host/run_handlers_test.go TestNodeFailedEventPayloadIsOnlyCodeAndMessage.
 func registerFlowHostDecisions(sc *godog.ScenarioContext) {
-	// FLOW-051 (REQ-FLOW-051): default node input.
 	sc.Step(`^a flow whose node "([^"]*)" of kind "([^"]*)" has no input mapping and the node spec (\{.*\})$`,
 		func(ctx context.Context, node, kind, spec string) error {
 			w := world(ctx).Host
