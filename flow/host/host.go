@@ -226,7 +226,10 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				return nil, nil, nil, err
 			}
 		case "start_timer":
-			node := def.Nodes[command.Node]
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			duration, err := durationOf(node, command.Node)
 			if err != nil {
 				return nil, nil, nil, err
@@ -237,7 +240,10 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				event:   "timer_fired",
 			})
 		case "await_gate":
-			node := def.Nodes[command.Node]
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			spec, err := gateSpecOf(node, command.Node)
 			if err != nil {
 				return nil, nil, nil, err
@@ -248,9 +254,9 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				event:   "gate_resolved",
 			})
 		case "run_node":
-			node, ok := def.Nodes[command.Node]
-			if !ok {
-				return nil, nil, nil, invalid(fmt.Sprintf("flow host: node %q does not exist", command.Node), map[string]any{"node": command.Node})
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			switch node.Kind {
 			case "tool", "task", "subflow":
@@ -280,7 +286,10 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 		if err := runContextError(dc.Context()); err != nil {
 			return nil, err
 		}
-		node := def.Nodes[command.Node]
+		node, err := lookupNode(def, command.Node)
+		if err != nil {
+			return nil, err
+		}
 		handler, ok := h.handlers[node.Kind]
 		if !ok {
 			return nil, core.NewError(core.CodeUnsupported,
@@ -333,13 +342,7 @@ func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *fl
 			Node:    call.command.Node,
 			Attempt: call.command.Attempt,
 		}
-		if call.event == "node_completed" {
-			if err != nil {
-				event = failedEvent(call.command.Node, call.command.Attempt, err, 0)
-			} else {
-				event.Payload = payload
-			}
-		} else if err != nil {
+		if err != nil {
 			// A timer or gate that fails (timeout, cancellation) is a failed
 			// node like any other.
 			event = failedEvent(call.command.Node, call.command.Attempt, err, 0)
