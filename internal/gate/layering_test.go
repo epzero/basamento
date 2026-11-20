@@ -123,18 +123,14 @@ func TestLayeringExcludedTestFileMayImportTestOnly(t *testing.T) {
 		"low/a/a.go": "package a\n",
 		"support/h/h.go": `package h
 `,
-		"low/a/other_test.go": `//go:build windows
-
-package a
+		"low/a/other_test.go": layeringExcludedGoFile(`package a
 
 import _ "example.com/mod/support/h"
-`,
-		"low/a/prod_tagged.go": `//go:build windows
-
-package a
+`),
+		"low/a/prod_tagged.go": layeringExcludedGoFile(`package a
 
 import _ "example.com/mod/support/h"
-`,
+`),
 	})
 	got, err := Layering(root)
 	if err != nil {
@@ -181,12 +177,10 @@ func TestLayeringExcludedFileInPackage(t *testing.T) {
 	root := layeringModule(t, map[string]string{
 		"low/a/active.go": `package a
 `,
-		"low/a/other.go": `//go:build windows
-
-package a
+		"low/a/other.go": layeringExcludedGoFile(`package a
 
 import _ "example.com/mod/high/b"
-`,
+`),
 		"high/b/b.go": "package b\n",
 	})
 	got, err := Layering(root)
@@ -201,19 +195,17 @@ import _ "example.com/mod/high/b"
 
 func TestLayeringAllExcludedDirectory(t *testing.T) {
 	root := layeringModule(t, map[string]string{
-		"mid/x/only_windows.go": `//go:build windows
-
-package x
+		"mid/x/only_excluded.go": layeringExcludedGoFile(`package x
 
 import _ "example.com/mod/high/b"
-`,
+`),
 		"high/b/b.go": "package b\n",
 	})
 	got, err := Layering(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mid/x (layer mid, in an excluded file only_windows.go) may not import high/b (layer high)"}
+	want := []string{"mid/x (layer mid, in an excluded file only_excluded.go) may not import high/b (layer high)"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -241,12 +233,10 @@ import _ "example.com/mod/high/b"
 
 func TestLayeringUnlayeredExcludedDirectory(t *testing.T) {
 	root := layeringModule(t, map[string]string{
-		"orphan/x/skip.go": `//go:build windows
-
-package x
+		"orphan/x/skip.go": layeringExcludedGoFile(`package x
 
 import _ "example.com/mod/low/a"
-`,
+`),
 		"low/a/a.go": "package a\n",
 	})
 	got, err := Layering(root)
@@ -262,13 +252,11 @@ import _ "example.com/mod/low/a"
 func TestLayeringUnparsableImport(t *testing.T) {
 	root := layeringModule(t, map[string]string{
 		"low/a/active.go": "package a\n",
-		"low/a/bad.go": `//go:build windows
-
-package a
+		"low/a/bad.go": layeringExcludedGoFile(`package a
 
 import (
 	"
-`,
+`),
 	})
 	got, err := Layering(root)
 	if err != nil {
@@ -282,14 +270,12 @@ import (
 func TestLayeringGarbageAfterImportsAccepted(t *testing.T) {
 	root := layeringModule(t, map[string]string{
 		"low/a/active.go": "package a\n",
-		"low/a/skip.go": `//go:build windows
-
-package a
+		"low/a/skip.go": layeringExcludedGoFile(`package a
 
 import _ "example.com/mod/low/a"
 
 {{{ not go
-`,
+`),
 	})
 	got, err := Layering(root)
 	if err != nil {
