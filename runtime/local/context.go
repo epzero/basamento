@@ -105,9 +105,11 @@ func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMe
 		}
 		var out json.RawMessage
 		var err error
+		var panicked bool
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					panicked = true
 					err = stepPanicErr(step, recovered)
 				}
 			}()
@@ -117,7 +119,7 @@ func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMe
 			f.complete(out, nil)
 			return
 		}
-		if isStepPanic(err) {
+		if panicked {
 			f.complete(nil, err)
 			return
 		}

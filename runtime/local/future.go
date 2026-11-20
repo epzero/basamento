@@ -2,7 +2,6 @@ package local
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -136,11 +135,6 @@ func flowPanicErr(recovered any) error {
 // stepPanicErr turns a recovered step panic into a non-retryable step error. The
 // recovered value is kept as Cause only for logging inside the runtime;
 // Describe, List and RunStatus never surface it.
-func isStepPanic(err error) bool {
-	var platform *core.Error
-	return errors.As(err, &platform) && platform.Message == "local: the step panicked"
-}
-
 func stepPanicErr(step string, recovered any) error {
 	var cause error
 	switch x := recovered.(type) {
