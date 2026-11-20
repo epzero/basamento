@@ -124,11 +124,11 @@ invocation and settles by the provider's final state (REQ-MODEL-009).
   the last supported rung: it strips prose and code fences and fixes JSON
   syntax, never a field, so a missing field is not fabricated.
 - **Middleware order** (`model/middleware`): call log ∘ recording ∘ fallback ∘
-  metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk,
-  idle, total). Every attempt of one call, across rungs and retries, spends one
-  budget of 3 unless the call sets another; waits double from one second plus
-  up to half of it from the call's seeded randomness, and a longer Retry-After
-  wins. Streaming defaults are 30 seconds without a first event, 60 seconds
+  metering ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk, idle, total).
+  Every attempt of one call, across rungs and retries, spends one budget of 3
+  unless the call sets another; waits double from one second plus up to half
+  of it from the call's seeded randomness, and a longer Retry-After wins.
+  Streaming defaults are 30 seconds without a first event, 60 seconds
   without one in progress and 10 minutes per attempt, with no call total
   timeout unless the call sets one. Metering records every attempt that reached
   the provider; the call log records one entry per attempt without message
