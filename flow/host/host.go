@@ -343,8 +343,8 @@ func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *fl
 			Attempt: call.command.Attempt,
 		}
 		if err != nil {
-			// A timer or gate that fails (timeout, cancellation) is a failed
-			// node like any other.
+			// Any failed future (a step, a child run, or a timer or gate that
+			// times out or is cancelled) is a failed node (REQ-FLOW-035).
 			event = failedEvent(call.command.Node, call.command.Attempt, err, 0)
 		} else {
 			event.Payload = payload
