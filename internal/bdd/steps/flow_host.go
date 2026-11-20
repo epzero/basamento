@@ -721,16 +721,16 @@ func (d *hostFake) Select(futures ...runtime.Future) (int, error) {
 func (d *hostFake) Emit(runtime.ProgressEvent) error {
 	d.mu.Lock()
 	d.emits++
-	d.mu.Unlock()
 	d.record(hostCall{kind: "emit"})
+	d.mu.Unlock()
 	return nil
 }
 
 func (d *hostFake) Checkpoint(runtime.SnapshotRef) error {
 	d.mu.Lock()
 	d.checks++
-	d.mu.Unlock()
 	d.record(hostCall{kind: "checkpoint"})
+	d.mu.Unlock()
 	return nil
 }
 
