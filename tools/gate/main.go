@@ -4,9 +4,10 @@
 //	gate agent whoami | list | release [-instance <id>]
 //	gate agent status <status> [-note <text>] [-issue <id>]   # how this session ended; the next one reads it
 //	gate wp [-state ready] [-json]   # every work package: done, in-progress, ready or blocked
-//	gate docs [-write]       # generated diagrams match layering.yaml and the roadmap
+//	gate docs [-write]       # generated diagrams, CODEOWNERS and specs/README.md statuses
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
+//	gate hygiene [-base <ref>] # test determinism, production isolation and conflict markers; with -base <ref> also spec/code separation
 //	gate gomod                  # every tracked go.mod names the same go directive
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
@@ -102,6 +103,13 @@ func main() {
 		errs, err := gate.Layering(root)
 		must(err)
 		report("layering", errs)
+	case "hygiene":
+		fs := flag.NewFlagSet("hygiene", flag.ExitOnError)
+		base := fs.String("base", "", "optional git ref for diff-level checks (spec/code separation)")
+		must(fs.Parse(os.Args[2:]))
+		errs, err := gate.Hygiene(root, *base)
+		must(err)
+		report("hygiene", errs)
 	case "gomod":
 		errs, err := gate.CheckSameGoModLine(root)
 		must(err)
@@ -347,6 +355,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | nightly | bdd-skips | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | hygiene [-base <ref>] | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | nightly | bdd-skips | redgreen -base <ref>")
 	os.Exit(2)
 }

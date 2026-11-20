@@ -32,6 +32,10 @@ type Config struct {
 	Descriptors []model.Descriptor
 	// Model is the eino chat model the adapter drives.
 	Model einomodel.BaseChatModel
+	// Clock is the adapter registry's clock: it stamps the end time of an
+	// invocation and drives the retention window for ended ones. It is
+	// required, so the adapter never falls back to the system clock.
+	Clock core.Clock
 }
 
 // Adapter implements model.Invoker over an eino chat model.
@@ -55,13 +59,20 @@ func New(cfg Config) (*Adapter, error) {
 	if cfg.Model == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "chat adapter has no model", nil)
 	}
+	if cfg.Clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "chat adapter has no clock", nil)
+	}
 	if !anyChat(cfg.Descriptors) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the chat capability", nil)
+	}
+	runs, err := model.NewRegistry(cfg.Provider, model.WithClock(cfg.Clock))
+	if err != nil {
+		return nil, err
 	}
 	return &Adapter{
 		descriptors:           cfg.Descriptors,
 		chat:                  cfg.Model,
-		runs:                  model.NewRegistry(cfg.Provider),
+		runs:                  runs,
 		maxStreamPayloadBytes: defaultMaxStreamPayloadBytes,
 		maxStreamChunks:       defaultMaxStreamChunks,
 	}, nil
@@ -73,8 +84,10 @@ func (a *Adapter) Describe(context.Context) ([]model.Descriptor, error) {
 }
 
 // Start validates the request, opens the invocation and returns at once. It is
-// idempotent per ClientRef: a repeated start returns the original handle and
-// publishes nothing more.
+// idempotent per ClientRef while the adapter's registry retains the invocation:
+// a repeated start returns the original handle and publishes nothing more.
+// Once the client ref is evicted, a start opens a new invocation
+// (REQ-MODEL-088).
 func (a *Adapter) Start(ctx context.Context, r model.Request) (model.Handle, error) {
 	if _, ok := core.TenantFrom(ctx); !ok {
 		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)

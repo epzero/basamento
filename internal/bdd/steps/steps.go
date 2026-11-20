@@ -81,6 +81,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerCatalog(sc)
 	registerModel(sc)
 	registerLocal(sc)
+	registerModelRetention(sc)
 }
 
 // durationPassStepPattern is the shared "N … pass" step. It is anchored on a
