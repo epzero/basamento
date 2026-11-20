@@ -62,8 +62,10 @@ func runServe(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	ln, opened, err := startPorts(ctx, ports, result.Config.Listen.Addr)
 	if err != nil {
+		// Read the context before stop: stop itself cancels it.
+		cancelled := ctx.Err() != nil
 		stop()
-		if ctx.Err() != nil {
+		if cancelled {
 			// Terminated before ready: the openers were cancelled and their
 			// ports closed. There is nothing to serve.
 			os.Exit(0)
