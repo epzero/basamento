@@ -236,6 +236,9 @@ func registerModelRetention(sc *godog.ScenarioContext) {
 func acceptedInvocations(ctx context.Context, want int) error {
 	w := world(ctx).Model
 	got := w.accepted
+	if w.call != nil {
+		got = len(w.call.invocations())
+	}
 	if w.retention.reg != nil {
 		got = w.retention.started
 	}

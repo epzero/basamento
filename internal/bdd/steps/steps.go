@@ -108,12 +108,22 @@ func matchPutOutcomeShared(ctx context.Context, tail string) error {
 }
 
 func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
+	// The middleware scenarios say "1 more second passes" to step the call's
+	// virtual runtime; the word carries no duration of its own.
+	elapsed = strings.Replace(elapsed, " more ", " ", 1)
 	d, err := parseElapsed(elapsed)
 	if err != nil {
 		return err
 	}
-	world(ctx).Core.clock.Advance(d)
-	if sink, ok := any(world(ctx).Host).(timeSink); ok {
+	w := world(ctx)
+	if cw := w.Model.call; cw != nil {
+		// The call runs on its own virtual runtime over the scenario clock, so
+		// advancing it also fires the call's timers and wakes its goroutine.
+		cw.rt.Advance(d)
+	} else {
+		w.Core.clock.Advance(d)
+	}
+	if sink, ok := any(w.Host).(timeSink); ok {
 		return sink.timePassed(ctx, d)
 	}
 	return nil
