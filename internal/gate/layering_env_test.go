@@ -184,3 +184,31 @@ func TestLayeringGoEnvUsedByGoList(t *testing.T) {
 		t.Fatalf("sanitize: got %q, want GOFLAGS=-mod=readonly", flags)
 	}
 }
+
+func TestNestedModuleProbeIgnoresAmbientGoFlags(t *testing.T) {
+	okMod := filepath.Join(t.TempDir(), "ok.mod")
+	if err := os.WriteFile(okMod, []byte("module ok.example\n\ngo 1.22.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := layeringModule(t, map[string]string{
+		"low/a/a.go":      "package a\n",
+		"low/evil/go.mod": "not a real mod\n",
+		"low/evil/x.go":   "package x\n",
+	})
+	evilDir := filepath.Join(root, "low/evil")
+	t.Setenv("GOFLAGS", "-modfile="+okMod)
+	probe := exec.Command("go", "list", "-m")
+	probe.Dir = evilDir
+	probe.Env = os.Environ()
+	if err := probe.Run(); err != nil {
+		t.Fatalf("precondition: unsanitized go list -m in low/evil with -modfile must succeed, got %v", err)
+	}
+	got, err := Layering(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := goModCannotLoadMsg("low/evil/go.mod", "low/evil")
+	if !containsString(got, want) {
+		t.Fatalf("got %v, want containing %q", got, want)
+	}
+}
