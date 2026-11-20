@@ -434,10 +434,33 @@ func (c *hostCatalog) registerContentAlias(alias string, def *flow.IR) {
 	c.mu.Unlock()
 }
 
-func (c *hostCatalog) setPinSubstitute(pinnedHash string, def *flow.IR) {
+func (c *hostCatalog) setPinSubstitute(pinnedLabel string, def *flow.IR) {
+	resolved, err := c.contentHash(pinnedLabel)
+	if err != nil {
+		panic(err)
+	}
 	c.mu.Lock()
-	c.pinSubstitute[pinnedHash] = def
+	c.pinSubstitute[resolved] = def
 	c.mu.Unlock()
+}
+
+// contentHash resolves a catalog content-hash label to the definition's ir.Hash.
+func (c *hostCatalog) contentHash(label string) (string, error) {
+	c.mu.RLock()
+	def, ok := c.byHash[label]
+	c.mu.RUnlock()
+	if !ok {
+		return label, nil
+	}
+	return ir.Hash(def)
+}
+
+func (c *hostCatalog) pinnedRef(name, pinLabel string) (runtime.FlowRef, error) {
+	hash, err := c.contentHash(pinLabel)
+	if err != nil {
+		return runtime.FlowRef{}, err
+	}
+	return runtime.FlowRef{Name: name, Hash: hash}, nil
 }
 
 var replayFlowStep = regexp.MustCompile(`^a flow with node "([^"]*)" of kind "tool" with node spec (\{.*\}), then node "([^"]*)" of kind "wait" for "([^"]*)", then node "([^"]*)" of kind "agent" whose handler calls step "([^"]*)"$`)
