@@ -44,6 +44,8 @@ jobs:
   flake-hunt:
     # Repeated runs look for nondeterminism; a flaky scenario is quarantined
     # with @quarantine @issue:<key> @until:<date> (docs/engineering/bdd-convention.md).
+    # The default go test package timeout (10m) is shorter than ten BDD runs under
+    # -race; the step sets -timeout 90m (the job still ends at GitHub's 6h limit).
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
@@ -52,7 +54,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -race -count=10 ./...
+      - run: go test -race -count=10 -timeout 90m ./...
 
   slow-lanes:
     # @slow scenarios; @live and @eval join once credentials and recordings exist.

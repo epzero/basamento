@@ -437,12 +437,20 @@ nodes that follow it in command order in that superstep (REQ-FLOW-053).
 **Node failure (REQ-FLOW-035, REQ-FLOW-057).** Any error from a `NodeHandler`,
 `dc.Step`, `dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a
 `node_failed` event carrying the error's `core.Code` and message (`core.CodeOf`,
-so a non-`*core.Error` becomes `internal`). The payload carries only the code
-and message: no error details, no node input and no state. A non-`*core.Error`
-is reported as code `internal` with the message `flow: node "<id>" failed`; the
-original error text is not reported (REQ-FLOW-057). Handing `node_failed` to the
-machine is the host's whole decision; when the machine returns `fail`, the host
-returns a `*core.Error` with that code.
+so a non-`*core.Error` becomes `internal`). A non-`*core.Error` is reported as
+code `internal` with the message `flow: node "<id>" failed`. Handing
+`node_failed` to the machine is the host's whole decision; when the machine
+returns `fail`, the host returns a `*core.Error` with that code and message,
+which is the error the caller of the run observes. That run's error carries only that code and message — no error details, no node input and no state — and the original error text of a non-`*core.Error` is not reported (REQ-FLOW-057).
+
+Unit-level invariant (not observable by a scenario): the `node_failed` event the
+host feeds `machine.Apply` carries only the code and message in its payload — no
+error details, no node input and no state. It is an internal hand-off between
+the host and the machine: `DurableContext` does not carry it, so FLOW-057-01
+asserts the caller-observable run error instead. The event-payload invariant is
+pinned by `TestNodeFailedEventPayloadIsOnlyCodeAndMessage` in
+`flow/host/run_handlers_test.go`, which calls the host's single event
+constructor `failedEvent`, used by every failure path.
 
 **Node cost (REQ-FLOW-049, REQ-FLOW-050, REQ-FLOW-059).** The host reports a
 finished node's settled cost to the machine in `flow.Event.CostMpts`: an

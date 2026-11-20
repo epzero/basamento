@@ -229,14 +229,13 @@ Feature: The flow host
       | gate | timeout  | -1h      |
 
   @REQ-FLOW-057 @id:FLOW-057-01
-  Scenario: An unclassified handler error reports a generic failure and no error text
+  Scenario: An unclassified handler error fails the run with a generic error and no leaked text
     Given a flow whose node "plan" of kind "agent" has a registered node handler
     And the node handler of "plan" returns an unclassified error "SEALED-CRITICAL-DETAIL"
     When a run of the flow starts with input {"secret": "input-value"}
-    Then the run fails with code "internal"
-    And the failure payload has code "internal" and message 'flow: node "plan" failed'
-    And the failure payload does not contain "SEALED-CRITICAL-DETAIL"
-    And the failure payload does not contain "input-value"
+    Then the run fails with code "internal" and message 'flow: node "plan" failed'
+    And the run's error does not contain "SEALED-CRITICAL-DETAIL"
+    And the run's error does not contain "input-value"
 
   @REQ-FLOW-058 @id:FLOW-058-01
   Scenario: A node visited twice in a loop issues two different idempotency keys
