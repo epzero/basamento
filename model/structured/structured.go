@@ -217,6 +217,10 @@ func withResponseFormat(params json.RawMessage, format string) (json.RawMessage,
 			return nil, core.NewError(core.CodeInvalidArgument,
 				"params are not a JSON object", map[string]any{"cause": err.Error()})
 		}
+		if merged == nil {
+			// A JSON null means the call set no params; it is not an object.
+			merged = map[string]any{}
+		}
 	}
 	merged["response_format"] = format
 	out, err := json.Marshal(merged)

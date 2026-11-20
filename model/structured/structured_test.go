@@ -219,6 +219,22 @@ func TestRequestForNativeAndJSONMode(t *testing.T) {
 	}
 }
 
+func TestRequestForNullParams(t *testing.T) {
+	for _, rung := range []Rung{RungNativeSchema, RungJSONMode} {
+		req, err := RequestFor(model.Request{Model: "sim-chat", Params: json.RawMessage("null")}, rung, json.RawMessage(answerSchema))
+		if err != nil {
+			t.Fatalf("RequestFor(%s) with null params: %v", rung, err)
+		}
+		var params map[string]any
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			t.Fatalf("%s params = %s: %v", rung, req.Params, err)
+		}
+		if params["response_format"] == nil {
+			t.Fatalf("%s dropped the response format: %s", rung, req.Params)
+		}
+	}
+}
+
 func TestRequestForForcedTool(t *testing.T) {
 	req, err := RequestFor(model.Request{Model: "sim-chat"}, RungForcedTool, json.RawMessage(answerSchema))
 	if err != nil {
