@@ -327,6 +327,70 @@ func TestSelectPrefersTheFutureThatCompletedFirst(t *testing.T) {
 	}
 }
 
+func TestSelectSameAdvanceReturnsLowestIndex(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	got := make(chan int, 1)
+	started := make(chan struct{})
+	f.flow("select", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		first := dc.Sleep(2 * time.Hour)
+		second := dc.Sleep(time.Hour)
+		close(started)
+		index, err := dc.Select(first, second)
+		if err != nil {
+			return nil, err
+		}
+		got <- index
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "select", `{}`)
+	waitOn(t, "timers", started)
+	f.clock.Advance(2 * time.Hour)
+	select {
+	case index := <-got:
+		if index != 0 {
+			t.Fatalf("Select index %d, want 0 (lowest when both timers fire together)", index)
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("Select did not return")
+	}
+}
+
+func TestSelectReadyAtCallBeatsLaterReady(t *testing.T) {
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	late, early := newFuture(r), newFuture(r)
+	early.complete(nil, nil)
+	index, err := (&durableContext{run: r}).Select(late, early)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index != 1 {
+		t.Fatalf("Select index %d, want 1 (higher index ready at call)", index)
+	}
+}
+
+func TestSelectReadyAtCallUsesLowestIndex(t *testing.T) {
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	first, second := newFuture(r), newFuture(r)
+	first.complete(nil, nil)
+	second.complete(nil, nil)
+	index, err := (&durableContext{run: r}).Select(first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index != 0 {
+		t.Fatalf("Select index %d, want 0", index)
+	}
+}
+
 func TestGateResolutionAndConflict(t *testing.T) {
 	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 	defer f.close(t)

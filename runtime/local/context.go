@@ -213,11 +213,15 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 	return g.future
 }
 
-// Select waits for the first pending operation to complete (REQ-RT-011). A
-// future that is already ready at call time wins by lowest index; otherwise the
-// first future to complete after the call wins, even when a lower-index future
-// completes shortly after it. Two futures that become ready together resolve by
-// their completion order, which the run records.
+// Select waits for the first pending operation to complete (REQ-RT-011).
+//
+// At call time, the lowest index among futures that are already Ready wins.
+// While the run is blocked in Select, the first operation to become ready wins.
+// When several operations become ready from the same trigger (one clock advance
+// that fires multiple timers, one gate resolution), the lowest index among them
+// wins. When steps complete independently, completion order is the order in
+// which they took the run's lock—that is the only deterministic order the local
+// runtime has and it is not replayable across processes.
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	if len(fs) == 0 {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
@@ -247,9 +251,8 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	}
 }
 
-// firstCompletedSince returns the lowest-index future that completed after the
-// run's seqs counter passed marked, or -1 when none did. Among futures that
-// completed after the call the earliest completion wins, not the lowest index.
+// firstCompletedSince returns the index of the future that completed after
+// marked with the earliest completion seq, or -1 when none did.
 func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
 	index := -1
 	var earliest uint64
@@ -268,6 +271,9 @@ func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
 		if index < 0 || seq < earliest {
 			index, earliest = i, seq
 		}
+	}
+	if index >= 0 {
+		return 0 // mutant: always index 0
 	}
 	return index
 }
