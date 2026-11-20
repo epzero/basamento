@@ -336,14 +336,15 @@ machine adds it to `Snapshot.Cost` with the node's other updates, when it
 applies the event (REQ-FLOW-049), so the edges out of that node and every later
 expression see it in `run.cost`, which is what a guard's `cost_mpts` compares
 against (§2.4). The number is part of the node's recorded result — the amount
-the node's step, node handler, gate or child run returned — and never a value
+the node's step, node handler or child run returned — and never a value
 read from a ledger, a price table or a meter while replaying: the event the
 host feeds back already carries it, so replaying the same history accrues the
 same cost and reaches the same guard verdicts (REQ-FLOW-037). A `node_failed`
 accrues the settled cost of the pending step the event names, once: applying it
 removes that pending step. For a node whose result carries no cost the host
-reports `0`, and a pure `set` node and a `wait` node cost nothing. The field
-is non-negative by contract — settlement charges a non-negative number of
+reports `0`, and a pure `set` node, a wait node and a gate node cost nothing, so
+their completions carry no cost. The field is non-negative by contract —
+settlement charges a non-negative number of
 milli-points (`specs/models/design.md` §C3 and §C5) — so the machine never has
 to read a negative cost as a refund.
 

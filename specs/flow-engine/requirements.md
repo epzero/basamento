@@ -159,4 +159,4 @@ When the flow machine completes a run, the flow host shall complete the run with
 When the flow machine returns multiple commands in one superstep, the flow host shall start every durable call in that superstep before waiting for any of them to complete.
 
 ### REQ-FLOW-050 — The cost is part of the node's recorded result
-When the flow host reports a finished node to the flow machine, the flow host shall report the node's settled cost in milli-points, taken from the result the node's step, node handler, gate or child run returned for this run.
+When the flow host reports a finished node to the flow machine, the flow host shall report the node settled cost in milli-points, taken from the result the node step, node handler or child run returned for this run; a gate or wait node completion carries no cost.

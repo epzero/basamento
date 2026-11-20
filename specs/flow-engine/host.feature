@@ -165,7 +165,7 @@ Feature: The flow host
     Then the run made a timer for 10s and a timer for 30s
     And the run is waiting
 
-  @REQ-FLOW-050 @id:FLOW-050-01
+  @REQ-FLOW-050 @cost @id:FLOW-050-01
   Scenario: A cycle bounded only by a cost budget stops when the handlers' cost reaches it
     Given a flow whose node "verify" of kind "set" precedes node "repair" of kind "agent" with a registered node handler
     And node "repair" has a guard of 5000 milli-points and routes back to node "verify"

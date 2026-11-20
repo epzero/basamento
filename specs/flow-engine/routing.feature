@@ -27,9 +27,9 @@ Feature: Routing and merging in the flow machine
     Then node "repair" ran 3 times
     And the run fails with code "budget_exceeded" naming node "repair" and the visit budget 3
 
-  @REQ-FLOW-047 @id:FLOW-047-02
+  @REQ-FLOW-047 @cost @id:FLOW-047-02
   Scenario: A cost budget stops its node before the third visit
-    Given a flow "loop" where node "verify" of kind "set" precedes node "repair" of kind "set", which routes back to node "verify" and has a guard of 80 milli-points
+    Given a flow "loop" where node "verify" of kind "set" precedes node "repair" of kind "tool", which routes back to node "verify" and has a guard of 80 milli-points
     And each completion of node "repair" carries a settled cost of 40 milli-points
     When a run of the flow starts
     Then node "repair" ran 2 times
@@ -51,16 +51,16 @@ Feature: Routing and merging in the flow machine
     When a run of the flow starts
     Then node "impl" fans out to 10000 items of node "impl_item"
 
-  @REQ-FLOW-049 @id:FLOW-049-01
+  @REQ-FLOW-049 @cost @id:FLOW-049-01
   Scenario: A finished node's settled cost accrues to the run
-    Given a flow whose node "a" of kind "set" precedes node "b" of kind "set"
+    Given a flow whose node "a" of kind "tool" precedes node "b" of kind "tool"
     And a run of the flow has started
     When node "a" completes with a settled cost of 40 milli-points
     And node "b" fails with a settled cost of 25 milli-points
     Then the run's settled cost is 65 milli-points
 
-  @REQ-FLOW-049 @id:FLOW-049-02
+  @REQ-FLOW-049 @cost @id:FLOW-049-02
   Scenario: A later expression reads the accrued cost as run.cost
-    Given a flow whose node "a" of kind "set" routes to node "b" of kind "set" when "run.cost == 40", otherwise to node "c" of kind "set"
+    Given a flow whose node "a" of kind "tool" routes to node "b" of kind "set" when "run.cost == 40", otherwise to node "c" of kind "set"
     When node "a" completes with a settled cost of 40 milli-points
     Then the next node is "b"
