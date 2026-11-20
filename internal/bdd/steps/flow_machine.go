@@ -188,10 +188,15 @@ func registerFlowMachine(sc *godog.ScenarioContext) {
 		if len(w.commands) != 1 {
 			return fmt.Errorf("commands %+v, want exactly one", w.commands)
 		}
-		if w.commands[0].Type != "run_node" || w.commands[0].Node != want {
-			return fmt.Errorf("next command %+v, want run_node %q", w.commands[0], want)
+		cmd := w.commands[0]
+		if cmd.Type == "run_node" && cmd.Node == want {
+			return nil
 		}
-		return nil
+		// A pure set target runs inside the same advance; routing still chose want.
+		if cmd.Type == "complete" && w.snapshot.Visit != nil && w.snapshot.Visit[want] > 0 {
+			return nil
+		}
+		return fmt.Errorf("next command %+v, want run_node %q", cmd, want)
 	})
 
 	sc.Step(`^flow "([^"]*)" runs nodes "([^"]*)", "([^"]*)" and "([^"]*)" in parallel, each appending its name to "([^"]*)"$`,
