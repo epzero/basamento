@@ -23,11 +23,19 @@ func jsonArgument(raw json.RawMessage) any {
 	return raw
 }
 
+func lookupNode(def *flow.IR, id string) (flow.Node, error) {
+	node, ok := def.Nodes[id]
+	if !ok {
+		return flow.Node{}, invalid(fmt.Sprintf("flow host: node %q does not exist", id), map[string]any{"node": id})
+	}
+	return node, nil
+}
+
 func nameOf(node flow.Node, id string) (string, error) {
 	var spec map[string]json.RawMessage
 	if len(bytes.TrimSpace(node.Spec)) > 0 {
 		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return "", invalid(fmt.Sprintf("flow: node %q: invalid %s spec: %s", id, node.Kind, err.Error()), map[string]any{"node": id})
+			return "", invalid(fmt.Sprintf("flow: node %q: invalid %s spec: want a JSON object with a string %q", id, node.Kind, node.Kind), map[string]any{"node": id})
 		}
 	}
 	name, ok := stringAt(spec, node.Kind)
@@ -41,7 +49,7 @@ func durationOf(node flow.Node, id string) (time.Duration, error) {
 	var spec map[string]json.RawMessage
 	if len(bytes.TrimSpace(node.Spec)) > 0 {
 		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return 0, invalid(fmt.Sprintf("flow: node %q: invalid wait spec: %s", id, err.Error()), map[string]any{"node": id})
+			return 0, invalid(fmt.Sprintf("flow: node %q: invalid wait spec: want a JSON object", id), map[string]any{"node": id})
 		}
 	}
 	text, ok := stringAt(spec, "duration")
@@ -50,7 +58,7 @@ func durationOf(node flow.Node, id string) (time.Duration, error) {
 	}
 	duration, err := time.ParseDuration(text)
 	if err != nil {
-		return 0, invalid(fmt.Sprintf("flow: node %q: duration %q: %s", id, text, err.Error()), map[string]any{"node": id})
+		return 0, invalid(fmt.Sprintf("flow: node %q: duration %q: want a duration such as \"30s\"", id, text), map[string]any{"node": id})
 	}
 	if duration < 0 {
 		return 0, invalid(fmt.Sprintf("flow: node %q: duration %q is negative", id, text), map[string]any{"node": id})
@@ -66,14 +74,14 @@ func gateSpecOf(node flow.Node, id string) (runtime.GateSpec, error) {
 	}
 	if len(bytes.TrimSpace(node.Spec)) > 0 {
 		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: invalid gate spec: %s", id, err.Error()), map[string]any{"node": id})
+			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: invalid gate spec: want a JSON object", id), map[string]any{"node": id})
 		}
 	}
 	var timeout time.Duration
 	if spec.Timeout != "" {
 		parsed, err := time.ParseDuration(spec.Timeout)
 		if err != nil {
-			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: timeout %q: %s", id, spec.Timeout, err.Error()), map[string]any{"node": id})
+			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: timeout %q: want a duration such as \"72h\"", id, spec.Timeout), map[string]any{"node": id})
 		}
 		if parsed < 0 {
 			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: timeout %q is negative", id, spec.Timeout), map[string]any{"node": id})
@@ -95,7 +103,7 @@ func subflowOf(node flow.Node, id string) (runtime.FlowRef, error) {
 	}
 	if len(bytes.TrimSpace(node.Spec)) > 0 {
 		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return runtime.FlowRef{}, invalid(fmt.Sprintf("flow: node %q: invalid subflow spec: %s", id, err.Error()), map[string]any{"node": id})
+			return runtime.FlowRef{}, invalid(fmt.Sprintf("flow: node %q: invalid subflow spec: want a JSON object", id), map[string]any{"node": id})
 		}
 	}
 	if spec.Flow == "" {
