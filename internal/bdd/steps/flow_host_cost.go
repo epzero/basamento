@@ -22,6 +22,12 @@ func registerFlowHostCost(sc *godog.ScenarioContext) {
 	sc.Step(`^a flow that runs node "([^"]*)" of kind "([^"]*)" with node spec (\{.*\}) before node "([^"]*)" of kind "([^"]*)" with a guard of (\d+) milli-points$`,
 		func(ctx context.Context, work, workKind, workSpec, repair, repairKind string, guard int) error {
 			w := world(ctx).Host
+			observed, err := durableStepName(workKind, workSpec)
+			if err != nil {
+				return fmt.Errorf("node %q: %w", work, err)
+			}
+			w.costObservedStep = observed
+			w.costObserverNode = repair
 			w.newFlow("cost-tool", 1)
 			w.stateSchema(hostObjectSchema(map[string]string{
 				"ok":    `{"type":"boolean"}`,
@@ -64,15 +70,20 @@ func registerFlowHostCost(sc *godog.ScenarioContext) {
 			if w.err != nil {
 				return fmt.Errorf("run failed: %w", w.err)
 			}
-			// Observed via run.cost passed into the next handler after the tool step.
-			accrual, ok := accruedCostBeforeRepairHandler(w, "repair")
-			if !ok {
-				return fmt.Errorf("node handler %q was never called", "repair")
+			if w.costObservedStep != "" && step != w.costObservedStep {
+				return fmt.Errorf("step %q was not the node the flow ran before %q", step, w.costObserverNode)
+			}
+			observer := w.costObserverNode
+			if observer == "" {
+				return fmt.Errorf("no cost observer node recorded for this flow")
+			}
+			accrual, err := accruedCostAtObserverHandler(w, observer)
+			if err != nil {
+				return err
 			}
 			if accrual != int64(want) {
 				return fmt.Errorf("run cost before downstream handler %d, want %d", accrual, want)
 			}
-			_ = step
 			return nil
 		})
 
@@ -146,28 +157,39 @@ func registerFlowHostCost(sc *godog.ScenarioContext) {
 		})
 }
 
-func accruedCostBeforeRepairHandler(w *hostWorld, downstream string) (int64, bool) {
+func durableStepName(kind, spec string) (string, error) {
+	if kind != "tool" && kind != "task" {
+		return "", fmt.Errorf("cost observation requires a tool or task node, got kind %q", kind)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(spec), &fields); err != nil {
+		return "", fmt.Errorf("invalid node spec: %w", err)
+	}
+	raw, ok := fields[kind]
+	if !ok {
+		return "", fmt.Errorf("%s spec has no %q name", kind, kind)
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil || name == "" {
+		return "", fmt.Errorf("%s spec has no %q name", kind, kind)
+	}
+	return name, nil
+}
+
+func accruedCostAtObserverHandler(w *hostWorld, observer string) (int64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, call := range w.handlerCalls {
-		if call.node != downstream {
+		if call.node != observer {
 			continue
 		}
 		var asInt int64
-		raw := strings.TrimSpace(string(call.input))
-		if raw == "" {
-			return 0, true
-		}
 		if err := json.Unmarshal(call.input, &asInt); err != nil {
-			var asFloat float64
-			if err2 := json.Unmarshal(call.input, &asFloat); err2 != nil {
-				return 0, true
-			}
-			asInt = int64(asFloat)
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
 		}
-		return asInt, true
+		return asInt, nil
 	}
-	return 0, false
+	return 0, fmt.Errorf("node handler %q was never called", observer)
 }
 
 func probeFailureCostMpts(w *hostWorld, failingNode string, want int64, scenarioCode core.Code) error {
