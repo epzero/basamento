@@ -13,6 +13,11 @@ the same change that first uses it.
 | **Fan-out limit** | The most items one `map` node may fan out to in a run: `DefaultMaxFanout`, 10,000, lowered for a host with `WithMaxFanout`. A larger collection fails the run with `budget_exceeded` before any item starts. |
 | **Edge endpoint** | The two ends of an edge: a node, or one of the reserved endpoints `START` (the flow's entry, only an edge source) and `FAIL` (its failure exit, only an edge target). `START` and `FAIL` are not nodes. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
+| **Definition catalog** | The source a flow host loads a compiled flow definition from by a flow reference (a name and a content hash). |
+| **Content hash** | The hash of a flow definition's canonical form; it identifies the immutable definition a run pins (REQ-FLOW-005). |
+| **Input mapping** | A node's `in` expression, CEL or jq, that turns the run's state into the node's input. A node with no input mapping receives the run's input (REQ-FLOW-051). |
+| **Superstep sequence** | The `Seq` of a machine snapshot, increased when the machine starts a new superstep; part of a step's idempotency key (REQ-FLOW-058). |
+| **Idempotency key** | The key a step carries so that one logical step is recorded once: a retry of it keeps the same key (REQ-FLOW-058). |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
 | **Step** | A side-effecting unit executed by a runtime (a Temporal activity on the temporal runtime). Retried; its result is recorded. |
 | **Gate** | A node that waits for a human or external decision; its payload is validated by schema and CEL. |

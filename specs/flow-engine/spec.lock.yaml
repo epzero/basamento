@@ -703,3 +703,149 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/116
         human:
             status: pending
+    FLOW-051-01:
+        hash: sha256:b188ffbdc864abcffb21d857339f465e0cfb27fcaeee7b1d81a7c4bdf2349c93
+        reqs:
+            - REQ-FLOW-051
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: Default node input when in is absent; host BDD.
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-052-01:
+        hash: sha256:9915931208c06b08cda9ced17e96bfabd63cea08e58eb068c06a897b850b39f7
+        reqs:
+            - REQ-FLOW-052
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-053-01:
+        hash: sha256:94e0295729218acdd9df678c77b60e9fb3efc850fa82fb7d574eb4c9c3a2b801
+        reqs:
+            - REQ-FLOW-053
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-054-01:
+        hash: sha256:333cfa5758cc22d593756d696c08c1ab939421662ab41c94b2db6d9068560a4b
+        reqs:
+            - REQ-FLOW-054
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-055-01:
+        hash: sha256:99eecc17a40cab593ec9f444a0b1d30d4d3268d76e49ce110c4d09d0730de05f
+        reqs:
+            - REQ-FLOW-055
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-056-01:
+        hash: sha256:5d5583ebd5d69e4372e9a85e397e43bc3c12e3f032283d8a9029dac8b40b6c63
+        reqs:
+            - REQ-FLOW-056
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-057-01:
+        hash: sha256:67e77d8181724a91265505e3c7bb4774ad8dde48ca41d829fa2befc0ba492a78
+        reqs:
+            - REQ-FLOW-057
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-058-01:
+        hash: sha256:1ce1d78e6df5f2cc797d8b734a9b5a684f36257071f8a0a67dd9de517c533a9b
+        reqs:
+            - REQ-FLOW-058
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-058-02:
+        hash: sha256:3cb8a8a622a0c16acb299d735db94664f62d92b23c7bc66edf685bf1cf55cd1d
+        reqs:
+            - REQ-FLOW-058
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-059-01:
+        hash: sha256:1223c94224a195423b634a9b7bd87683d426b960f77f557309fdf69163f17295
+        reqs:
+            - REQ-FLOW-059
+        tier: P0
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): only NodeHandler settles cost; tool/task/subflow report 0; failed handler still accrues result cost on node_failed.'
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-059-02:
+        hash: sha256:554bc2b0c6bd1d12521d65f44276d09d9befef89dafd87c003db008880e1f092
+        reqs:
+            - REQ-FLOW-059
+        tier: P0
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): only NodeHandler settles cost; tool/task/subflow report 0; failed handler still accrues result cost on node_failed.'
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-060-01:
+        hash: sha256:010a6bb62406aab2cfa5b3c412724a367f2c4107c4feed24c915b795420a0238
+        reqs:
+            - REQ-FLOW-060
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-061-01:
+        hash: sha256:c0072e23d9180b754f25a3eb7040f6a1a9f194c80f631b0725c4d66050a08aac
+        reqs:
+            - REQ-FLOW-061
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
