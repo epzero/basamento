@@ -486,6 +486,89 @@ func TestCancelEndsPendingWaitsWithCancelled(t *testing.T) {
 	}
 }
 
+func TestChildRejectsConflictingRunID(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	var childRuns atomic.Int32
+	f.flow("child", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		childRuns.Add(1)
+		return json.RawMessage(`{"from":"child"}`), nil
+	})
+	f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		first := dc.Child(runtime.FlowRef{Name: "child"}, nil, runtime.ChildOptions{ID: "c1"})
+		if err := first.Get(nil); err != nil {
+			return nil, err
+		}
+		second := dc.Child(runtime.FlowRef{Name: "other-child"}, nil, runtime.ChildOptions{ID: "c1"})
+		return nil, second.Get(nil)
+	})
+	f.start(t, "acme", "parent-1", "parent", `{}`)
+	f.waitState(t, "acme", "parent-1", stateFailed)
+	if got := childRuns.Load(); got != 1 {
+		t.Fatalf("child ran %d times, want 1", got)
+	}
+	target := f.rt.lookup(core.TenantID("acme"), "parent-1")
+	target.mu.Lock()
+	err := target.err
+	target.mu.Unlock()
+	if codeOf(err) != "conflict" {
+		t.Fatalf("parent error %v, want conflict", err)
+	}
+}
+
+func TestChildIdempotentSameParentAndFlow(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	var childRuns atomic.Int32
+	f.flow("child", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		childRuns.Add(1)
+		return json.RawMessage(`{"n":1}`), nil
+	})
+	f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		opts := runtime.ChildOptions{ID: "c1"}
+		first, second := dc.Child(runtime.FlowRef{Name: "child"}, nil, opts), dc.Child(runtime.FlowRef{Name: "child"}, nil, opts)
+		var a, b json.RawMessage
+		if err := first.Get(&a); err != nil {
+			return nil, err
+		}
+		if err := second.Get(&b); err != nil {
+			return nil, err
+		}
+		if string(a) != string(b) {
+			return nil, fmt.Errorf("outputs differ: %s vs %s", a, b)
+		}
+		return a, nil
+	})
+	f.start(t, "acme", "parent-1", "parent", `{}`)
+	f.waitState(t, "acme", "parent-1", stateCompleted)
+	if got := childRuns.Load(); got != 1 {
+		t.Fatalf("child ran %d times, want 1", got)
+	}
+}
+
+func TestChildDoesNotAttachAcrossTenants(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("marker", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"tenant":"globex"}`), nil
+	})
+	f.start(t, "globex", "shared-id", "marker", `{}`)
+	f.waitState(t, "globex", "shared-id", stateCompleted)
+
+	var childOut json.RawMessage
+	f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		return nil, dc.Child(runtime.FlowRef{Name: "child"}, nil, runtime.ChildOptions{ID: "shared-id"}).Get(&childOut)
+	})
+	f.flow("child", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"tenant":"acme"}`), nil
+	})
+	f.start(t, "acme", "parent-1", "parent", `{}`)
+	f.waitState(t, "acme", "parent-1", stateCompleted)
+	if string(childOut) != `{"tenant":"acme"}` {
+		t.Fatalf("child output %s, want acme run not globex reuse", childOut)
+	}
+}
+
 func TestChildRunReturnsOutputInParentTenant(t *testing.T) {
 	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 	defer f.close(t)

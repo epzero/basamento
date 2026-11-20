@@ -216,6 +216,7 @@ func (r *Runtime) startChild(tenant core.TenantID, id string, flow runtime.FlowR
 	}
 	ctx := context.WithoutCancel(parent.ctx)
 	started := newRun(r, tenant, id, flow, in, ctx)
+	started.parentRun = parent
 	r.runs[key] = started
 	r.order = append(r.order, started)
 	r.wg.Add(1)
