@@ -808,9 +808,9 @@ serveDone:
 	if got := f.state(t, "acme", "r1"); got != stateRunning {
 		t.Fatalf("in-flight run after shutdown = %s, want running", got)
 	}
-	_, err := f.rt.Start(tenantCtx("acme"), runtime.StartRequest{Flow: runtime.FlowRef{Name: "timer"}, RunID: "r2"})
-	if codeOf(err) != "unavailable" {
-		t.Fatalf("Start after shutdown = %v, want unavailable", err)
+	_, startErr := f.rt.Start(tenantCtx("acme"), runtime.StartRequest{Flow: runtime.FlowRef{Name: "timer"}, RunID: "r2"})
+	if codeOf(startErr) != "unavailable" {
+		t.Fatalf("Start after shutdown = %v, want unavailable", startErr)
 	}
 }
 
