@@ -41,6 +41,24 @@ func TestPureSuperstepLimitEndsCostOnlySetCycle(t *testing.T) {
 	}
 }
 
+func TestPureSuperstepLimitUsesDeclaredMaxVisits(t *testing.T) {
+	def := pureSetMaxVisitsLoop(200)
+	m, err := New(def, WithMaxPureSupersteps(50))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, commands, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail from guard or budget", commands)
+	}
+	if snapshot.Visit["loop"] != 200 {
+		t.Fatalf("visits %d, want 200 when limit scales with max_visits", snapshot.Visit["loop"])
+	}
+}
+
 func TestMaxVisitsPureLoopRespectsDeclaredBudget(t *testing.T) {
 	def := pureMaxVisitsLoop(200)
 	m, err := New(def, WithMaxPureSupersteps(50))
@@ -157,6 +175,18 @@ func pureSetCostCycle() *flow.IR {
 			{From: "a", To: "b"},
 			{From: "b", To: "a"},
 		},
+	}
+}
+
+func pureSetMaxVisitsLoop(max int) *flow.IR {
+	return &flow.IR{
+		Name:    "pure-set-visits",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"loop": {Kind: "set", Spec: json.RawMessage(`{}`), Guard: &flow.Guard{MaxVisits: max}},
+		},
+		Edges: []flow.Edge{{From: ir.Start, To: "loop"}, {From: "loop", To: "loop"}},
 	}
 }
 
