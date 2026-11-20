@@ -142,28 +142,30 @@ func (d *fakeDC) wake() {
 	d.cond.Broadcast()
 }
 
+// record appends one durable call to the log. Caller must hold d.mu; it must not
+// set parked (only blocking runtime calls do).
 func (d *fakeDC) record(c call) {
 	d.calls = append(d.calls, c)
-	d.parked = true
 	d.cond.Broadcast()
 }
 
 type runHandle struct {
+	dc     *fakeDC
 	done   chan struct{}
 	result json.RawMessage
 	err    error
 }
 
 func (d *fakeDC) startRun(h *host.Host, ref runtime.FlowRef, input json.RawMessage) *runHandle {
-	rh := &runHandle{done: make(chan struct{})}
+	rh := &runHandle{dc: d, done: make(chan struct{})}
 	go func() {
 		rh.result, rh.err = h.Run(d, ref, input)
 		d.mu.Lock()
+		close(rh.done)
 		d.finished = true
 		d.parked = false
 		d.cond.Broadcast()
 		d.mu.Unlock()
-		close(rh.done)
 	}()
 	return rh
 }
@@ -177,12 +179,9 @@ func (d *fakeDC) settle() {
 }
 
 func (rh *runHandle) finished() bool {
-	select {
-	case <-rh.done:
-		return true
-	default:
-		return false
-	}
+	rh.dc.mu.Lock()
+	defer rh.dc.mu.Unlock()
+	return rh.dc.finished
 }
 
 func (d *fakeDC) appendJournal(e journalEntry) {
