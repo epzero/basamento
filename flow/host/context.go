@@ -10,9 +10,6 @@ import (
 // runContextError maps a done run context to the platform error the host
 // returns when the run ends because the context was cancelled or timed out.
 func runContextError(ctx context.Context) error {
-	if ctx == nil {
-		return nil
-	}
 	err := ctx.Err()
 	if err == nil {
 		return nil

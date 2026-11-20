@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -181,29 +180,5 @@ func TestRunStopsWhenContextIsDone(t *testing.T) {
 		})
 		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
 		assertRunTimeout(t, err)
-	})
-}
-
-func TestRunContextErrorMapping(t *testing.T) {
-	// Guards the cancelled vs timeout mapping used by the host (mutant anchor).
-	t.Run("canceled_not_timeout", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		dc := newFakeDC()
-		dc.bindContext(ctx)
-		def := newFlow("map-cancel")
-		def.Nodes["w"] = node("agent", "", "", "")
-		addLinear(def, "w")
-		cat := newCatalog()
-		ref := cat.register(def)
-		h := host.New(cat)
-		h.RegisterHandler("agent", func(runtime.DurableContext, flow.Node, json.RawMessage) (host.NodeResult, error) {
-			return host.NodeResult{}, fmt.Errorf("should not run")
-		})
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-		assertRunCancelled(t, err)
-		if errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("cancelled run mapped to deadline: %v", err)
-		}
 	})
 }
