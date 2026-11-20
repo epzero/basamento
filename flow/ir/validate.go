@@ -274,10 +274,13 @@ func validateMaps(f *flow.IR) error {
 }
 
 // mapChild returns a map node's child name. The child is decided by the
-// spec's "node" field alone: "over" is an expression flow/compile judges, so
-// an empty or missing over must not skip the child checks (REQ-FLOW-062). A
-// spec whose node is absent or not a non-empty string names no child the
-// machine can run, so the compiler rejects it here (EP0-149).
+// spec's "node" field alone, so the child checks run even when "over" is
+// empty or missing: flow/compile leaves empty spec expressions alone, while
+// flow/machine's parseMapSpec requires a non-empty "over" before it runs a
+// map. That accept/reject split is pre-existing; a follow-up ticket will
+// settle whether compile should reject an empty "over" for a map. A spec
+// whose node is absent or not a non-empty string names no child the machine
+// can run, so the compiler rejects it here (EP0-149).
 func mapChild(id string, node flow.Node) (string, error) {
 	var spec struct {
 		Node json.RawMessage `json:"node"`
