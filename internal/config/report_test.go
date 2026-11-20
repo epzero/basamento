@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -57,5 +58,69 @@ secrets:
 	got.Report(&buf)
 	if strings.Contains(buf.String(), "p%40ss") || strings.Contains(buf.String(), "p@ss") {
 		t.Fatalf("report leaks the password:\n%s", buf.String())
+	}
+}
+
+func TestReportRedactsEveryCredentialForm(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	cases := []struct {
+		name   string
+		key    string
+		value  string
+		want   string
+		secret string
+	}{
+		{
+			name:   "query password",
+			key:    "sql.url",
+			value:  "postgres://ana@db.example.test/kit?password=s3cr3t-query",
+			want:   `sql.url: postgres://***@db.example.test/kit?password=*** (env)`,
+			secret: "s3cr3t-query",
+		},
+		{
+			name:   "s3 query credentials",
+			key:    "blob.url",
+			value:  "s3://bucket?access_key_id=AKIAEXAMPLE&secret_access_key=SECRETEXAMPLE&session_token=TOKENEXAMPLE",
+			want:   `blob.url: s3://bucket?access_key_id=***&secret_access_key=***&session_token=*** (env)`,
+			secret: "SECRETEXAMPLE",
+		},
+		{
+			name:   "lone userinfo token",
+			key:    "bus.url",
+			value:  "nats://bus-token-value@bus.example.test",
+			want:   `bus.url: nats://***@bus.example.test (env)`,
+			secret: "bus-token-value",
+		},
+		{
+			name:   "localsecrets key",
+			key:    "secrets.url",
+			value:  "localsecrets://" + key,
+			want:   `secrets.url: localsecrets://*** (env)`,
+			secret: key,
+		},
+		{
+			name:   "opaque url",
+			key:    "bus.url",
+			value:  "opaque:secret-token-value",
+			want:   `bus.url: opaque://*** (env)`,
+			secret: "secret-token-value",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Load(Options{Env: []string{EnvironName(tc.key) + "=" + tc.value}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			got.Report(&buf)
+			report := buf.String()
+			if !strings.Contains(report, tc.want) {
+				t.Fatalf("report does not contain %q:\n%s", tc.want, report)
+			}
+			if strings.Contains(report, tc.secret) {
+				t.Fatalf("report leaks %q:\n%s", tc.secret, report)
+			}
+		})
 	}
 }
