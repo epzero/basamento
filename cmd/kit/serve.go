@@ -149,7 +149,7 @@ func wireEmbedded(cfg config.Config) []wirePort {
 			return openBlob(ctx, cfg.Blob.URL)
 		}},
 		{name: config.PortBus, implementation: cfg.Implementation(config.PortBus), open: func(ctx context.Context) (config.Port, error) {
-			return bus.OpenEmbedded(ctx, cfg.Data.Dir, bus.Options{})
+			return openBus(ctx, cfg.Bus.URL)
 		}},
 		{name: config.PortSecrets, implementation: cfg.Implementation(config.PortSecrets), open: func(ctx context.Context) (config.Port, error) {
 			return openLocalSecrets(ctx, cfg.Secrets.URL)
@@ -172,6 +172,43 @@ func wireCloud(cfg config.Config) []wirePort {
 			return secrets.OpenURL(ctx, cfg.Secrets.URL)
 		}},
 	}
+}
+
+// openBus opens the embedded bus store its URL names. platform/bus keeps its
+// JetStream store in <dataDir>/nats, so the URL path is the store directory
+// and the composition root passes its parent: an operator who sets bus.url
+// moves the store instead of leaving it under data.dir.
+func openBus(ctx context.Context, raw string) (config.Port, error) {
+	dir, err := embeddedBusDataDir(raw)
+	if err != nil {
+		return nil, err
+	}
+	return bus.OpenEmbedded(ctx, dir, bus.Options{})
+}
+
+// embeddedBusDataDir derives the bus data directory from a nats-embedded URL.
+// A path whose last segment is the conventional "nats" names the store itself
+// (the default form, <data.dir>/nats); any other path names the bus data
+// directory, under which platform/bus creates its store. A URL with a host is
+// treated like a file URL: the host is a path segment, and localhost is
+// dropped.
+func embeddedBusDataDir(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "nats-embedded" {
+		return "", core.NewError(core.CodeInvalidArgument, "embedded bus URL cannot be parsed", nil)
+	}
+	path := u.Path
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		path = filepath.Join(u.Host, path)
+	}
+	if path == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "embedded bus URL has no directory", nil)
+	}
+	path = filepath.Clean(path)
+	if filepath.Base(path) == "nats" {
+		return filepath.Dir(path), nil
+	}
+	return path, nil
 }
 
 func openSQL(ctx context.Context, raw string) (config.Port, error) {

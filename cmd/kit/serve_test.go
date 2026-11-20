@@ -275,3 +275,65 @@ func TestStartPortsClosesPortsWhenListenerCannotBind(t *testing.T) {
 		t.Fatal("port was not closed after the listener failed")
 	}
 }
+
+func TestEmbeddedBusDataDirFollowsTheURL(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"nats-embedded:///var/lib/kit/nats", "/var/lib/kit"},
+		{"nats-embedded:///srv/busdata", "/srv/busdata"},
+		{"nats-embedded://data/nats", "data"},
+		{"nats-embedded://localhost/srv/kit/nats", "/srv/kit"},
+	}
+	for _, c := range cases {
+		got, err := embeddedBusDataDir(c.raw)
+		if err != nil {
+			t.Fatalf("embeddedBusDataDir(%q): %v", c.raw, err)
+		}
+		if got != c.want {
+			t.Errorf("embeddedBusDataDir(%q) = %q, want %q", c.raw, got, c.want)
+		}
+	}
+}
+
+func TestEmbeddedBusDataDirRejectsAForeignURL(t *testing.T) {
+	for _, raw := range []string{"nats://bus.example.test:4222", "nats-embedded://"} {
+		_, err := embeddedBusDataDir(raw)
+		if err == nil {
+			t.Fatalf("embeddedBusDataDir(%q) accepted it", raw)
+		}
+		if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+			t.Fatalf("embeddedBusDataDir(%q) code = %q, want invalid_argument", raw, code)
+		}
+	}
+}
+
+func TestWireEmbeddedBusUsesTheBusURLNotTheDataDir(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	storeDir := filepath.Join(root, "elsewhere", "nats")
+	var cfg config.Config
+	cfg.Data.Dir = dataDir
+	cfg.Bus.URL = "nats-embedded://" + filepath.ToSlash(storeDir)
+
+	var open func(context.Context) (config.Port, error)
+	for _, p := range wireEmbedded(cfg) {
+		if p.name == config.PortBus {
+			open = p.open
+		}
+	}
+	if open == nil {
+		t.Fatal("wireEmbedded has no bus port")
+	}
+	port, err := open(context.Background())
+	if err != nil {
+		t.Fatalf("open bus at %q: %v", cfg.Bus.URL, err)
+	}
+	if err := port.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(storeDir); err != nil {
+		t.Fatalf("the bus store is not at the bus.url path %q: %v", storeDir, err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "nats")); !os.IsNotExist(err) {
+		t.Fatalf("the bus store was also created under data.dir: %v", err)
+	}
+}

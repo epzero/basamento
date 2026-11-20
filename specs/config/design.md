@@ -111,6 +111,12 @@ file, is taken literally: `$(data.dir)` is not expanded in it, and a relative
 path stays relative. The cloud profile has no default for a port URL: each
 must be set (REQ-CONFIG-010).
 
+The embedded `bus.url` path names the JetStream store directory
+(`platform/bus` keeps its store under the directory it is given, as `nats`).
+Setting `bus.url` moves the store with it instead of leaving it under
+`data.dir`; the parent of a path that ends in `nats` is passed as the bus
+data directory, and any other path is the data directory itself.
+
 ## 3. Loading
 
 ```go
