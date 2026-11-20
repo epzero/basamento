@@ -1062,6 +1062,20 @@ func TestMapFanOutUsesDistinctIdempotencyKeys(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("got %d keys, want 3", len(seen))
 	}
+	wantKeys := []string{
+		fmt.Sprintf("mapped@%s/work#1@1", ref.Hash),
+		fmt.Sprintf("mapped@%s/work#2@1", ref.Hash),
+		fmt.Sprintf("mapped@%s/work#3@1", ref.Hash),
+	}
+	got := make([]string, 0, 3)
+	for _, c := range dc.callLog() {
+		if c.kind == "step" {
+			got = append(got, c.stepOpts.IdempotencyKey)
+		}
+	}
+	if fmt.Sprint(got) != fmt.Sprint(wantKeys) {
+		t.Fatalf("keys %v, want %v", got, wantKeys)
+	}
 }
 
 func TestIdempotencyKeyUsesDefinitionNameNotCallerRefName(t *testing.T) {
