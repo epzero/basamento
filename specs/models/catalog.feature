@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-06 @level:component
+@wp:WP-L3-06 @level:component
 Feature: Model catalog and price table
   The catalog holds a descriptor for every model id and the price table holds
   what a call of it costs: rates shipped with the binary, overridden per
@@ -170,3 +170,72 @@ Feature: Model catalog and price table
     When the price table prices the settled usage of call "c2" as 250000 input tokens and 20000 output tokens
     Then 92 milli-points are charged for call "c2"
     And call "c2" was estimated at 1 milli-point
+
+  @REQ-MODEL-083 @cost @wp:WP-L3-06 @id:MODEL-083-01
+  Scenario Outline: A rate condition that errors fails pricing
+    Given the model "sim-chat" has the rate rules:
+      | when        | input | output |
+      | <condition> | 560   | 2200   |
+      | always      | 280   | 1100   |
+    When a call of "sim-chat" spends 1000 input tokens and 200 output tokens
+    Then pricing fails with code "invalid_argument"
+
+    Examples:
+      | condition                  |
+      | usage.input_tokens / 0 > 0 |
+      | params.missing_rate > 0    |
+      | usage.input_tokens         |
+
+  @REQ-MODEL-084 @cost @wp:WP-L3-06 @id:MODEL-084-01
+  Scenario Outline: A negative rate is refused where a price layer sets it
+    When <layer> sets the rate "<rate>" of "sim-chat" to -5 per million tokens
+    Then the price is refused with code "invalid_argument" naming model "sim-chat" and rate "<rate>"
+
+    Examples:
+      | layer                | rate   |
+      | tenant "acme"        | input  |
+      | the deployment       | output |
+      | the shipped snapshot | cached |
+
+  @REQ-MODEL-084 @cost @wp:WP-L3-06 @id:MODEL-084-02
+  Scenario: A shipped snapshot with a negative rate does not load
+    Given a price snapshot that sets the rate "cached" of "sim-chat" to -1 per million tokens
+    When a catalog loads that price snapshot
+    Then loading fails with code "invalid_argument" naming model "sim-chat" and rate "cached"
+
+  @REQ-MODEL-085 @cost @wp:WP-L3-06 @id:MODEL-085-01
+  Scenario Outline: A negative usage count fails pricing before any formula runs
+    Given the model "sim-chat" is priced by the shipped snapshot at "usage.input_tokens * usage.input_tokens + usage.output_tokens * usage.output_tokens + usage.cached_tokens * usage.cached_tokens + usage.reasoning_tokens * usage.reasoning_tokens" milli-points
+    When a call of "sim-chat" reports a usage with <count> of -1
+    Then pricing fails with code "invalid_argument" naming model "sim-chat" and field "<field>"
+
+    Examples:
+      | count             | field            |
+      | an input count    | input_tokens     |
+      | an output count   | output_tokens    |
+      | a cached count    | cached_tokens    |
+      | a reasoning count | reasoning_tokens |
+
+  @REQ-MODEL-086 @cost @wp:WP-L3-06 @id:MODEL-086-01
+  Scenario: A formula that returns a negative amount fails pricing
+    Given the model "sim-chat" is priced by the shipped snapshot at "0 - usage.input_tokens" milli-points
+    When a call of "sim-chat" spends 1000 input tokens and 0 output tokens
+    Then pricing fails with code "invalid_argument"
+
+  @REQ-MODEL-086 @cost @wp:WP-L3-06 @id:MODEL-086-02
+  Scenario: A formula that returns zero prices the call at nothing
+    Given the model "sim-chat" is priced by the shipped snapshot at "usage.input_tokens - usage.input_tokens" milli-points
+    When a call of "sim-chat" spends 1000 input tokens and 0 output tokens
+    Then 0 milli-points are charged for the call
+
+  @REQ-MODEL-087 @cost @wp:WP-L3-06 @id:MODEL-087-01
+  Scenario Outline: A formula's amount is a whole number of milli-points
+    Given the model "sim-chat" is priced by the shipped snapshot at "<formula>" milli-points
+    When a call of "sim-chat" spends 100 input tokens and 0 output tokens
+    Then <result>
+
+    Examples:
+      | formula                            | result                                                              |
+      | 100                                | 100 milli-points are charged for the call                           |
+      | double(usage.input_tokens) * 2.5   | 250 milli-points are charged for the call                           |
+      | double(usage.input_tokens) * 0.145 | pricing fails with code "invalid_argument" naming model "sim-chat" |

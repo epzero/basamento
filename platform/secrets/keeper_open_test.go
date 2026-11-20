@@ -79,12 +79,16 @@ func TestOpenKeyServiceInvalidCloudURL(t *testing.T) {
 
 type closeCountKey struct {
 	budgetKey
-	closes *atomic.Int32
+	closes   *atomic.Int32
+	closeErr error
 }
 
 func (c *closeCountKey) Close() error {
 	if c.closes != nil {
 		c.closes.Add(1)
+	}
+	if c.closeErr != nil {
+		return c.closeErr
 	}
 	return c.budgetKey.Close()
 }

@@ -20,11 +20,13 @@ data key, keyset) apply here but are not respecified.
 | Audit store | `AuditStore`: this package's SQL implementation of `platform.Audit`, an append-only table holding tenant events and deployment-level events, with tenant-scoped reads (REQ-CRED-029 to REQ-CRED-035). |
 | Use context | `Use`: principal, run and step, carried by the context of a resolution. |
 
-The constructor is `New(backend Backend, audit platform.Audit, secrets platform.Secrets, clock core.Clock) *Store`;
-the composition root supplies non-nil dependencies. The package opens no
-database and parses no URL itself: the SQL store (WP-L1-01) owns opening and
-migrating, and wiring (WP-L1-05) selects the backend and passes the SQL audit
-store as `platform.Audit`.
+The constructor is
+`New(backend Backend, audit platform.Audit, secrets platform.Secrets, clock core.Clock, opts ...Option) *Store`;
+the composition root supplies non-nil dependencies and may pass `WithLogger`
+to direct the store's operational log records, which otherwise go to
+`slog.Default()`. The package opens no database and parses no URL itself: the
+SQL store (WP-L1-01) owns opening and migrating, and wiring (WP-L1-05) selects
+the backend and passes the SQL audit store as `platform.Audit`.
 
 ## 2. Values and rows
 
@@ -43,19 +45,24 @@ payload encoding; it stores the opaque bytes the Secrets port returned
 The SQL implementation ships its goose migrations, embedded from
 `platform/credentials/migrations`; the package exposes them as `Migrations() fs.FS`
 for the composition root and the BDD driver. The set holds the `credentials`
-table below and the `audit_events` table of §6. The composition root includes
-it in the SQL store's migration set.
+table below, the `audit_events` table and the one-row `audit_seq` table that
+hands out audit ids (§6). The composition root includes it in the SQL store's
+migration set.
 
 ```sql
 CREATE TABLE credentials (
   tenant_id  TEXT NOT NULL,
   name       TEXT NOT NULL,
-  ciphertext BLOB NOT NULL,
+  ciphertext BYTEA NOT NULL,
   created_at TIMESTAMP NOT NULL,
   updated_at TIMESTAMP NOT NULL,
   PRIMARY KEY (tenant_id, name)
 );
 ```
+
+`BYTEA` is the portable spelling of the binary column. SQLite gives a
+`BYTEA` column `NUMERIC` affinity, but BLOB values are stored and returned
+unchanged; the SQL store binds `[]byte` to either dialect.
 
 The store keeps no decrypted value and no ciphertext after a call returns.
 Each resolution reads the row again, so a replacement is seen at once
@@ -186,11 +193,11 @@ fields above (REQ-CRED-019).
 `AuditStore` is this package's implementation of `platform.Audit`, constructed
 with `NewSQLAudit(store)` over the SQL store. It keeps one table for every
 producer, this package and WP-L8-02's denials among them; there is no second
-audit store.
+audit store. Beside it, a one-row `audit_seq` table only hands out the ids.
 
 ```sql
 CREATE TABLE audit_events (
-  id         INTEGER PRIMARY KEY, -- dialect-specific identity/auto-increment
+  id         BIGINT NOT NULL PRIMARY KEY, -- taken from audit_seq, never an identity column
   tenant_id  TEXT NOT NULL,
   at         TIMESTAMP NOT NULL,
   principal  TEXT NOT NULL,
@@ -202,11 +209,22 @@ CREATE TABLE audit_events (
   reason     TEXT NOT NULL
 );
 CREATE INDEX audit_events_tenant_at ON audit_events (tenant_id, at, id);
+
+CREATE TABLE audit_seq (
+  id      INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+  next_id BIGINT NOT NULL
+);
 ```
 
 `Record` derives the effective tenant from `core.TenantFrom(ctx)` and appends
 one row (REQ-CRED-029); optional fields are stored as empty strings, never
-`NULL`, so a read returns the event as recorded. Following `platform.Audit`
+`NULL`, so a read returns the event as recorded. The id is not a dialect's
+identity column: `Record` advances the single `audit_seq` row with
+`UPDATE audit_seq SET next_id = next_id + 1 WHERE id = 1 RETURNING next_id`,
+which is atomic on both dialects, and inserts the value explicitly. Concurrent
+producers therefore get distinct ids without a transaction; an insert that
+fails after the sequence advanced leaves a gap, which ordering tolerates
+because reads order by time then id. Following `platform.Audit`
 (`platform/platform.go`):
 
 - With a tenant `t` in `ctx`, `e.Tenant` must be empty or equal to `t`; `Record`
@@ -294,7 +312,8 @@ The BDD steps live in `internal/bdd/steps/credentials.go` and helpers beside
 it, in the `internal/bdd` package:
 
 - Each scenario gets a fresh SQLite file opened through the SQL store with
-  this package's migration set (credentials and audit events), a simulated key
+  this package's migration set (credentials, audit events and the audit
+  sequence), a simulated key
   service holding the named master key (reusing the secrets steps' helper),
   the fake clock from `core/coretest`, and the SQL audit store wired as
   `platform.Audit` through a **counting `platform.Audit` wrapper** in
@@ -306,9 +325,10 @@ it, in the `internal/bdd` package:
 - When a step names a principal, run and step, the driver attaches `Use` to
   the context; when a step does not name them, the driver attaches no `Use`,
   so `UseFrom(ctx)` returns empty strings.
-- A **failing `platform.Audit` wrapper** in `internal/bdd` implements `Record`
-  by returning an error, for `CRED-028-01`; `CRED-019-03` uses the same
-  wrapper to prove the failed resolution's error and log carry no value.
+- The counting `platform.Audit` wrapper doubles as the failing one: a step
+  sets its reject flag, so `Record` counts the call, passes nothing on and
+  returns an error, for `CRED-028-01`; `CRED-019-03` uses the same wrapper to
+  prove the failed resolution's error and log carry no value.
 - A **simulated external store** implements `credentials.Backend` in
   `internal/bdd`: it keeps records per tenant and exposes what it stored, so a
   scenario can assert ciphertext-only rows and that no SQL credential row

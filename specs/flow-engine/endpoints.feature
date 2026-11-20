@@ -1,4 +1,4 @@
-@planned @wp:WP-L4-01 @level:component
+@wp:WP-L4-01 @level:component
 Feature: Reserved edge endpoints
 
   START and FAIL are the entry and the failure exit of a flow. They are edge

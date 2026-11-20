@@ -93,7 +93,13 @@ check every change against this page. Tools enforce what they can
     and restricted licenses such as GPL and AGPL;
   - be pure Go (the binary is built with `CGO_ENABLED=0`).
 - Pin exact versions. Heavy dependencies (servers, SDKs with large trees) live
-  in their own module, as `runtime/temporal/embedded` does.
+  in their own module, as `runtime/temporal/embedded` does (454 modules on
+  `go list -m all`). Platform port libraries stay in the root module: SDKs such
+  as `gocloud.dev` and Tink, and embedded servers whose trees stay small.
+  `github.com/nats-io/nats-server/v2` adds about ten pure-Go modules (44 total
+  modules on this root module versus 24 on `main` without bus); `platform/bus`,
+  the BDD harness and kit use it in one code path (profiles table in
+  `docs/architecture/overview.md` section 2).
 - A port vendor library (cloud SDKs, SQL drivers, NATS, gocloud, Temporal, Tink
   and the like) must not be imported from `internal/config`; add its import-path
   prefix to that layer's `deny_external` in the same change (ADR-0016). The

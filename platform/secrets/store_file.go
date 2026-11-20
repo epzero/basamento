@@ -51,7 +51,7 @@ func (s *FileStore) cleanupTemps() {
 }
 
 func (s *FileStore) path(tenant string) (string, error) {
-	if err := ValidateTenant(tenant); err != nil {
+	if err := tenantStringOK(tenant); err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(tenant))

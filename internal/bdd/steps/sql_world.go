@@ -252,9 +252,28 @@ func skipByProfile(scn *godog.Scenario, profile string) error {
 		if hasEmbedded && !hasCloud {
 			return godog.ErrSkip
 		}
-		if !sqltest.PostgresConfigured() {
+		if !sqltest.PostgresAvailable() {
+			// Only the SQL conformance driver's Postgres pass counts (ADR-0015):
+			// a cloud scenario without a server is skipped, not a recorded run.
+			if isPostgresPass(scn) {
+				sqltest.RecordSkipRun(sqltest.SkipPostgresUnavailable)
+			}
 			return godog.ErrSkip
 		}
 	}
 	return nil
+}
+
+// isPostgresPass reports whether the scenario runs the SQL conformance driver's
+// Postgres dialect pass, which its @REQ-SQL requirement tag identifies.
+func isPostgresPass(scn *godog.Scenario) bool {
+	if scn == nil {
+		return false
+	}
+	for _, t := range scn.Tags {
+		if strings.HasPrefix(t.Name, "@REQ-SQL-") {
+			return true
+		}
+	}
+	return false
 }

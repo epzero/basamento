@@ -7,6 +7,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -17,13 +18,22 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core    *coreWorld
-	Schema  *schemaWorld
-	Expr    *exprWorld
-	SQL     *sqlWorld
-	Prompt  *promptWorld
-	Blob    *blobWorld
-	Secrets *secretsWorld
+	Core        *coreWorld
+	Schema      *schemaWorld
+	Expr        *exprWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Telemetry   *telemetryWorld
+	Blob        *blobWorld
+	Bus         *busWorld
+	Secrets     *secretsWorld
+	Credentials *credentialsWorld
+	Flow        *flowWorld
+	FlowBuilder *builderWorld
+	Catalog     *catalogWorld
+	Machine     *machineWorld
+	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
+	Host any
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -32,12 +42,18 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:   newCoreWorld(),
-			Schema: newSchemaWorld(),
-			Expr:   &exprWorld{bindings: map[string]any{}},
-			SQL:    newSQLWorld(),
-			Prompt: newPromptWorld(),
-			Blob:   newBlobWorld(),
+			Core:        newCoreWorld(),
+			Schema:      newSchemaWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Telemetry:   newTelemetryWorld(),
+			Blob:        newBlobWorld(),
+			Secrets:     newSecretsWorld(),
+			Flow:        newFlowWorld(),
+			FlowBuilder: newBuilderWorld(),
+			Catalog:     newCatalogWorld(),
+			Machine:     newMachineWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -46,14 +62,50 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerTelemetry(sc)
+	registerFlowCompile(sc)
+	registerFlowLimits(sc)
+	registerFlowBuilder(sc)
+	registerFlowMachine(sc)
+	registerBus(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
+	registerCredentials(sc)
+	registerCatalog(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+	registerSharedRunOutcomeSteps(sc)
+}
+
+// matchPutOutcomeShared owns the put phrase for every capability, because godog
+// has one step namespace and both the bus and the credentials scenarios say
+// "the put fails with code ...". The KV world is created only for bus scenarios
+// (registerBus) and the credentials world only for credentials ones, so the
+// worlds tell the two apart without reading the text.
+func matchPutOutcomeShared(ctx context.Context, tail string) error {
+	if world(ctx).Bus != nil {
+		return matchPutOutcome(ctx, tail)
+	}
+	if strings.HasPrefix(tail, `fails with code "`) {
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(credentialsW(ctx).putErr, code)
+	}
+	return fmt.Errorf("unknown put outcome %q", tail)
+}
+
+func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
+	d, err := parseElapsed(elapsed)
+	if err != nil {
+		return err
+	}
+	world(ctx).Core.clock.Advance(d)
+	return nil
 }
 
 func assertCallFailsWithCode(ctx context.Context, code string) error {
@@ -72,6 +124,12 @@ func assertCallFailsWithCode(ctx context.Context, code string) error {
 	}
 	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
 		return assertBlobCallCode(ctx, code)
+	}
+	if w.Bus != nil && w.Bus.lastErr != nil {
+		if string(core.CodeOf(w.Bus.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Bus.lastErr), code)
+		}
+		return nil
 	}
 	return fmt.Errorf("call succeeded, want %s", code)
 }

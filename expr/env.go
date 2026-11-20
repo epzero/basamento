@@ -2,6 +2,7 @@ package expr
 
 import (
 	"fmt"
+	"strings"
 
 	_ "time/tzdata"
 
@@ -75,6 +76,17 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 			if _, err := e.objectFromSchema(st, adapter); err != nil {
 				return nil, err
 			}
+		} else if st.schema != nil {
+			// A variable whose root is a map still needs the object types
+			// nested in it: a map's values keep the fields of their
+			// properties (design.md §2, EXPR-003-05).
+			visiting := map[string]bool{}
+			if st.rootDef != "" {
+				visiting[st.rootDef] = true
+			}
+			if err := e.registerNestedObjects(st.schema, st.path, st, adapter, visiting); err != nil {
+				return nil, exprErr(fmt.Sprintf("schema %q: %s", v.Name, err.Error()), map[string]any{"variable": v.Name})
+			}
 		}
 		celOpts = append(celOpts, cel.Variable(v.Name, st.celType))
 	}
@@ -90,9 +102,11 @@ func NewEnv(vars []Var, opts ...EnvOption) (*Env, error) {
 // schema document is normalized first: parseSchema names the element type of a
 // root array, but st.schema still holds the array, so building from it would
 // register an empty object type (design.md §2). objectSchemaForBuild follows
-// that array's items, or a $ref chain, to the document with the properties.
+// that array's items, or a $ref chain, to the document with the properties and
+// reports the schema path it reached, which names the type as mapSchema named
+// it.
 func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObjectType, error) {
-	doc, defName, err := objectSchemaForBuild(st.schema, st)
+	doc, defName, path, err := objectSchemaForBuild(st.schema, st, st.path)
 	if err != nil {
 		return nil, exprErr(fmt.Sprintf("schema %q: %s", st.typeName, err.Error()), map[string]any{"variable": st.typeName})
 	}
@@ -103,14 +117,18 @@ func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObj
 	if defName != "" {
 		visiting[defName] = true
 	}
-	return e.buildObjectType(doc, st.typeName, st, adapter, visiting)
+	return e.buildObjectType(doc, path, st, adapter, visiting)
 }
 
-// buildObjectType registers the object type for doc. visiting holds the $defs
-// names that are being built by an enclosing call: a reference back to one of
-// them maps to dyn at that point (design.md §2), so recursive definitions
-// terminate instead of expanding without end.
-func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
+// buildObjectType registers the object type for the object schema doc, which
+// sits at the schema path path: the type is named the way mapSchemaVisit names
+// it, so a field typed with that name finds this type, and its own fields take
+// the path below it. visiting holds the $defs names that are being built by an
+// enclosing call: a reference back to one of them maps to dyn at that point
+// (design.md §2), so recursive definitions terminate instead of expanding
+// without end.
+func (e *Env) buildObjectType(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
+	typeName := objectTypeNameForSchemaPath(path)
 	if obj := e.objects[typeName]; obj != nil {
 		return obj, nil
 	}
@@ -129,27 +147,14 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 		if !ok {
 			continue
 		}
-		t, objName, err := st.mapSchemaVisit(pm, typeName+"."+pname, visiting)
+		fieldPath := joinSchemaPath(path, pname)
+		t, _, err := st.mapSchemaVisit(pm, fieldPath, visiting)
 		if err != nil {
 			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 		fields[pname] = fieldMeta{celType: t, required: reqSet[pname]}
-		if objName != "" {
-			objSchema, defName, err := objectSchemaForBuild(pm, st)
-			if err != nil {
-				return nil, exprErr(err.Error(), map[string]any{"variable": typeName})
-			}
-			if defName != "" && visiting[defName] {
-				continue
-			}
-			next := visiting
-			if defName != "" {
-				next = cloneVisiting(visiting)
-				next[defName] = true
-			}
-			if _, err := e.buildObjectType(objSchema, objName, st, adapter, next); err != nil {
-				return nil, exprErr(fmt.Sprintf("schema %q: %s", objName, err.Error()), map[string]any{"variable": typeName})
-			}
+		if err := e.registerNestedObjects(pm, fieldPath, st, adapter, visiting); err != nil {
+			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
 		}
 	}
 	obj := &jsonObjectType{typeName: typeName, fields: fields, adapter: adapter, objects: e.objects}
@@ -161,31 +166,62 @@ func (e *Env) buildObjectType(doc map[string]any, typeName string, st *schemaTyp
 	return obj, nil
 }
 
-func cloneVisiting(visiting map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(visiting)+1)
-	for name := range visiting {
-		out[name] = true
+// registerNestedObjects registers the object types nested in a schema value:
+// the fields of an object, the element type of a list's items and the value
+// type of a map's additionalProperties, at any depth. An object type keeps the
+// fields of its properties wherever it appears (design.md §2, EXPR-003-05), so
+// an object reached only as a map value must be registered before an expression
+// types and reads one of its fields.
+func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) error {
+	if ref, ok := doc["$ref"].(string); ok {
+		// One hop at a time on the shared set, deleting each name on return as
+		// mapSchemaVisit does: N aliases cost N hops, and a definition that
+		// refers back to itself stops here (design.md §2). parseSchema has
+		// validated every reference reachable from here (schema.go), so it is
+		// local and names an existing definition.
+		name := strings.TrimPrefix(ref, "#/$defs/")
+		if visiting[name] {
+			return nil
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+		return e.registerNestedObjects(st.defs[name], path, st, adapter, visiting)
 	}
-	return out
+	switch typ, _ := doc["type"].(string); typ {
+	case "object":
+		if _, ok := doc["properties"].(map[string]any); ok {
+			// buildObjectType walks these properties itself and registers the
+			// objects nested in them under the names mapSchemaVisit computes,
+			// so walking them here too would repeat that work at every level.
+			_, err := e.buildObjectType(doc, path, st, adapter, visiting)
+			return err
+		}
+		if ap, ok := doc["additionalProperties"].(map[string]any); ok {
+			return e.registerNestedObjects(ap, joinSchemaPathMapValue(path), st, adapter, visiting)
+		}
+	case "array":
+		if items, ok := doc["items"].(map[string]any); ok {
+			return e.registerNestedObjects(items, joinSchemaPathArray(path), st, adapter, visiting)
+		}
+	}
+	return nil
 }
 
 // objectSchemaForBuild follows $ref chains and array items to the schema
 // document that declares an object type, and returns the $defs name it came
-// from so callers can track recursion.
-func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, string, error) {
-	seen := map[string]bool{}
+// from so callers can track recursion, along with the schema path the document
+// sits at: a $ref keeps the path of the place it is written and each array hop
+// adds "[]", as mapSchemaVisit names them.
+func objectSchemaForBuild(pm map[string]any, st *schemaType, path string) (map[string]any, string, string, error) {
 	doc, defName := pm, ""
 	for {
 		if ref, ok := doc["$ref"].(string); ok {
-			resolved, names, err := defRefChain(ref, st.defs)
+			// The chain is acyclic: a chain that closed on itself types as dyn
+			// in mapSchemaVisit, so the schema never resolves to an object and
+			// this function is not called for it (design.md §2).
+			resolved, names, _, err := defRefChain(ref, st.defs)
 			if err != nil {
-				return nil, "", err
-			}
-			for _, name := range names {
-				if seen[name] {
-					return nil, "", fmt.Errorf("cyclic reference %q", ref)
-				}
-				seen[name] = true
+				return nil, "", "", err
 			}
 			doc, defName = resolved, names[len(names)-1]
 			continue
@@ -193,11 +229,12 @@ func objectSchemaForBuild(pm map[string]any, st *schemaType) (map[string]any, st
 		if typ, _ := doc["type"].(string); typ == "array" {
 			items, ok := doc["items"].(map[string]any)
 			if !ok {
-				return doc, defName, nil
+				return doc, defName, path, nil
 			}
 			doc = items
+			path = joinSchemaPathArray(path)
 			continue
 		}
-		return doc, defName, nil
+		return doc, defName, path, nil
 	}
 }

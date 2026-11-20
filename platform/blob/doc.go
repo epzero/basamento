@@ -24,6 +24,5 @@
 // keys that are not well-formed staging slots (including stranded *.tmp partial
 // writes an operator may remove when no upload is in flight).
 //
-// Tenant ids must be one safe path segment until shared validation lands in core
-// (EP0-52); see validateTenantSegment.
+// Tenant ids must satisfy REQ-CORE-005; only core.TenantFrom decides validity.
 package blob

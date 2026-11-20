@@ -142,3 +142,7 @@ The registry lints every template it registers: errors refuse it
 (REQ-PROMPT-020), warnings are returned with it (REQ-PROMPT-023). An
 undeclared variable is refused by the registry itself (REQ-PROMPT-004). Rule
 names are stable: new rules are added, none is renamed or removed.
+
+`PROMPT-021-02` is the scenario that keeps the lint from being satisfied by
+refusing everything: the assembler's own recorded pairs are linted clean
+there, and the unit tests pin the two sides.

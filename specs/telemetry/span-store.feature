@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component @profile:embedded
+@wp:WP-L1-07 @level:component @profile:embedded
 Feature: The embedded profile keeps a run's spans for the inspector
   In the embedded profile, ended spans go to the span store, and the run
   inspector reads them back as one ordered trace per run. A tenant never

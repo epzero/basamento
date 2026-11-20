@@ -1,6 +1,6 @@
 # Flow engine: flows as data
 
-Status: **Planned** (WP-L4-01, WP-L4-02). Design: ADR-0003, `docs/architecture/flow-engine.md`.
+Status: **In progress** (IR and compiler implemented, WP-L4-01; machine, builder and host planned, WP-L4-02, WP-L4-03, WP-L4-04). Design: ADR-0003, `docs/architecture/flow-engine.md`.
 
 ### REQ-FLOW-001 — Conditional edges
 When a node completes, the flow machine shall follow the first outgoing edge whose condition holds, in declaration order, and otherwise the edge without a condition.
@@ -19,6 +19,22 @@ When a flow definition changes, runs that already started shall continue with th
 
 ### REQ-FLOW-006 — Gate payload validation
 If a gate payload does not satisfy the gate's schema or acceptance condition, then the system shall reject it with code `invalid_argument` and keep the gate open.
+
+## Flow machine (WP-L4-02)
+
+The machine enforces the bounds the compiler accepted (REQ-FLOW-003, REQ-FLOW-045) and the fan-out limit of `design.md` §2.5 at run time. Scenarios: `routing.feature`.
+
+### REQ-FLOW-047 — Guard budgets at run time
+While the run's settled cost is at least the positive `cost_mpts` of a node's guard, or the node has had at least the positive `max_visits` visits that guard allows, the flow machine shall not start that node and shall fail the run with code `budget_exceeded`, naming the node and the budget it reached.
+
+### REQ-FLOW-048 — The map fan-out limit
+If the collection a `map` node fans out over holds more items than the fan-out limit of `design.md` §2.5, then the flow machine shall fail the run with code `budget_exceeded` before it creates any fan-out for that node, naming the node, the item count and the limit, and the failure shall carry no state data.
+
+### REQ-FLOW-049 — A finished node's settled cost accrues to the run
+When the flow machine applies a `node_completed` or `node_failed` event carrying a node's settled cost, the flow machine shall add that cost, in milli-points, to the run's settled cost, which later expressions read as `run.cost`.
+
+### REQ-FLOW-051 — A node with no input mapping receives the run's input
+Where a node has no input mapping (`in`), the flow machine shall pass the run's input to the node, passing `{}` when the run's input is empty.
 
 ## Compiler limits (WP-L4-01)
 
@@ -101,6 +117,55 @@ If an edge starts at `FAIL`, then the flow compiler shall reject the flow with c
 ### REQ-FLOW-043 — Exactly one edge starts at START
 If a flow has no edge from `START`, or more than one, then the flow compiler shall reject the flow with code `invalid_argument`, stating that the flow needs exactly one edge from `START`.
 
+## Definition errors the machine cannot repair (WP-L4-01)
+
+Five defects make a definition unrunnable in a way the machine cannot report
+well once a run is in flight: a fan-out to a node that is not declared, a child
+the machine should run itself, two fan-outs that share one child, a guard on a
+child that a fan-out runs, and a condition on the first edge. `flow/machine`'s
+`New` rejects all five as defence for an IR built in Go without the compiler
+(ADR-0003), and the compiler rejects them at definition time as well, so the
+author sees them when the flow is registered rather than when a run starts.
+Every rejection below fails with code `invalid_argument`, naming the node or
+edge at fault (REQ-FLOW-062 to REQ-FLOW-066). Scenarios: `compile.feature`.
+
+### REQ-FLOW-062 — A map child that is not a declared node
+If a `map` node's spec names as its child a node the flow does not declare, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the missing child node.
+
+The child would otherwise never run: the machine emits no `run_node` command
+for it, so the host would receive commands for a node that is not in the
+definition at all.
+
+### REQ-FLOW-063 — A map child of a kind the machine runs itself
+If a `map` node's child is of kind `set`, `parallel` or `map`, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node, the child node and the kind.
+
+The machine runs those three kinds itself and emits no `run_node` command for
+them, so the host has nothing to run for the child of the fan-out.
+
+### REQ-FLOW-064 — One child claimed by two map nodes
+If two `map` nodes name the same child node, then the flow compiler shall reject the flow with code `invalid_argument`, naming both `map` nodes and the child node.
+
+Steps of a fan-out are identified by `(node, attempt)` (REQ-FLOW-002, scenario
+FLOW-002-01), so two `map` nodes over one child produce colliding steps and the
+canonical merge depends on which fan-out completed first — exactly what
+REQ-FLOW-002 rules out.
+
+### REQ-FLOW-065 — A map child that carries a guard
+If a `map` node's child carries a guard, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the child node, and stating that a guard counts visits of the nodes the machine routes to while a map child runs once per element.
+
+A guard bounds a cycle by counting the visits of the nodes the machine routes
+to (REQ-FLOW-003, within the budgets of REQ-FLOW-045). A map child is invoked
+once per element without being routed to, so its visits are never counted: a
+`map` → child → `map` cycle that only the child's `max_visits` bounds would
+count as bounded to REQ-FLOW-003 and never stop.
+
+### REQ-FLOW-066 — No condition on the edge from START
+If the one edge from `START` carries a `when` condition, then the flow compiler shall reject the flow with code `invalid_argument`, naming the edge.
+
+`START` is where a run enters the definition, before any node has completed
+and routed, so the first superstep has nothing to route on and the machine
+does not evaluate the condition: accepting one would silently ignore it.
+
 ## Flow host (WP-L4-04)
 
 The flow host is the one durable entrypoint, `runtime.FlowHost` (ADR-0011): it
@@ -144,3 +209,36 @@ When the flow machine completes a run, the flow host shall complete the run with
 
 ### REQ-FLOW-044 — Concurrent superstep commands
 When the flow machine returns multiple commands in one superstep, the flow host shall start every durable call in that superstep before waiting for any of them to complete.
+
+### REQ-FLOW-050 — The cost is part of the node's recorded result
+When the flow host reports a finished node to the flow machine, the flow host shall report the node settled cost in milli-points, taken from the result the node handler returned for this run; a gate or wait node completion carries no cost.
+
+### REQ-FLOW-052 — The first failure in a superstep ends the run
+When more than one future of one superstep fails, the flow host shall fail the run with the error of the future its `Select` reports first, shall not await the other futures and shall run no later superstep.
+
+### REQ-FLOW-053 — A failed handler stops the superstep
+When a node handler returns an error, the flow host shall not call the handler of any node that follows it in command order in that superstep.
+
+### REQ-FLOW-054 — A mismatched pinned hash fails the run
+If a loaded flow definition's content hash differs from the run's non-empty pinned hash, then the flow host shall fail the run with code `internal`, naming the flow, before making any durable call.
+
+### REQ-FLOW-055 — The callers pin runs, not the flow host
+The caller that starts a top-level run shall resolve the flow's name through the definition catalog and pass the resolved content hash in the run's `FlowRef`, and the flow host shall not resolve a hash itself. Where a `subflow` node's specification carries a `hash`, the flow host shall pass that hash in the child run's `FlowRef`; where it does not, the child run's `FlowRef` hash shall be empty. An empty hash is accepted and leaves the run unpinned: the flow host shall run whatever definition the catalog resolves when the run starts or restarts, and REQ-FLOW-005 shall not apply to that run.
+
+### REQ-FLOW-056 — Negative durations are rejected when the node runs
+If a `wait` node's duration or a `gate` node's timeout is negative, then the flow host shall fail the run with code `invalid_argument` when the node runs, before making any durable call for that node, and shall neither wait zero nor panic.
+
+### REQ-FLOW-057 — A node failure carries only the error code and message
+When a node fails, the flow host shall put only the error's platform code and message in the `node_failed` event's payload, carrying no error details, node input or state; where the error is not a `*core.Error`, the host shall report code `internal` with the message `flow: node "<id>" failed` and shall not report the original error text.
+
+### REQ-FLOW-058 — A step's idempotency key identifies one logical step
+When the flow host runs a `tool` or `task` node as a step, the host shall give the step the idempotency key `<definition name>@<hash>/<node>#<attempt>@<superstep sequence>`, formed from the loaded definition's name, the run's pinned hash, the node id, the step's attempt and the machine's superstep sequence (the snapshot's `Seq`), so that the same logical step keeps its key across a retry and a second visit of a node in a loop issues a different key.
+
+### REQ-FLOW-059 — Only a node handler carries settled cost
+The flow host shall take a finished node's settled cost only from the result its node handler returned: a `tool` or `task` step's result and a `subflow` child run's result shall carry no settled cost and the host shall report `0` for them. Where a node handler returns both a result and an error, the host shall report the result's settled cost on the `node_failed` event.
+
+### REQ-FLOW-060 — The map fan-out limit is clamped above the default
+Where a flow host is built with `WithMaxFanout(n)` and `n` is above the default fan-out limit, the flow host shall use the default fan-out limit for the runs it starts.
+
+### REQ-FLOW-061 — A fan-out limit below one fails the run
+If a flow host is built with `WithMaxFanout(n)` where `n` is below 1, then the flow host shall fail each run it starts with code `invalid_argument`, before any durable call.
