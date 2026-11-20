@@ -133,6 +133,8 @@ func flowPanicErr(recovered any) error {
 }
 
 // stepPanicErr turns a recovered step panic into a non-retryable step error. The
+// wrapper is deliberately not marked retryable, so runStep's retryable check ends
+// attempts after the first panic even when Cause is a retryable *core.Error. The
 // recovered value is kept as Cause only for logging inside the runtime;
 // Describe, List and RunStatus never surface it.
 func stepPanicErr(step string, recovered any) error {
