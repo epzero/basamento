@@ -3,16 +3,22 @@ module github.com/epzero/basamento
 go 1.26.11
 
 require (
+	github.com/cloudwego/eino v0.9.23
 	github.com/cucumber/gherkin/go/v42 v42.0.0
 	github.com/cucumber/godog v0.16.0
 	github.com/cucumber/messages/go/v34 v34.2.0
+	github.com/fergusstrange/embedded-postgres/v2 v2.0.1
 	github.com/google/jsonschema-go v0.3.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/johannesboyne/gofakes3 v1.2.0
+	github.com/nats-io/nats-server/v2 v2.11.15
+	github.com/nats-io/nats.go v1.49.0
+	github.com/nats-io/nuid v1.0.1
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/tink-crypto/tink-go/v2 v2.9.0
+	go.opentelemetry.io/proto/otlp v1.11.1
 	gocloud.dev v0.49.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,8 +27,29 @@ require (
 
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic v1.15.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/eino-contrib/jsonschema v1.0.3 // indirect
+	github.com/goph/emperror v0.17.2 // indirect
 	github.com/itchyny/timefmt-go v0.1.9 // indirect
+	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/nikolalohinski/gonja v1.5.3 // indirect
+	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
+	github.com/yargevad/filepathx v1.0.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/arch v0.11.0 // indirect
 )
 
 require (
@@ -45,6 +72,7 @@ require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.10.1 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.62.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.62.0 // indirect
+	github.com/antithesishq/antithesis-sdk-go v0.6.0-default-no-op // indirect
 	github.com/apache/arrow-go/v18 v18.8.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.47.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.22 // indirect
@@ -78,6 +106,7 @@ require (
 	github.com/goccy/go-json v0.11.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/google/wire v0.7.0 // indirect
@@ -96,6 +125,9 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
+	github.com/nats-io/jwt/v2 v2.8.1 // indirect
+	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
@@ -110,12 +142,12 @@ require (
 	go.opentelemetry.io/contrib/detectors/gcp v1.47.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0 // indirect
-	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
-	go.opentelemetry.io/otel/metric v1.47.0 // indirect
+	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
-	go.opentelemetry.io/otel/trace v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
@@ -138,4 +170,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-tool github.com/epzero/basamento/tools/gate
+tool (
+	github.com/epzero/basamento/tools/gate
+	github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
+)

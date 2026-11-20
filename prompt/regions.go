@@ -33,7 +33,11 @@ func delimiterRecordInWrapped(wrapped string, base int) (DelimiterRecord, bool) 
 }
 
 func recordMatchesText(text string, r DelimiterRecord) bool {
-	if r.OpenStart < 0 || r.OpenEnd > len(text) || r.CloseStart < r.OpenEnd || r.CloseEnd > len(text) {
+	if r.OpenStart < 0 ||
+		r.OpenEnd < r.OpenStart ||
+		r.CloseStart < r.OpenEnd ||
+		r.CloseEnd < r.CloseStart ||
+		r.CloseEnd > len(text) {
 		return false
 	}
 	end, ok := scanCanonicalOpen(text, r.OpenStart)

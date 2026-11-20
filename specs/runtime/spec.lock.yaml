@@ -185,6 +185,17 @@ scenarios:
         note: New local runtime behavior.
         human:
             status: pending
+    RT-011-04:
+        hash: sha256:9b44bad5c7cfe4e46ba90b7c1ee2a1bd4d79db6ef418d8efa4b84f4f4403b184
+        reqs:
+            - REQ-RT-011
+        tier: P1
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: Agreed Select first-ready vs tie, and start-idempotency empty vs non-empty key behaviour.
+        human:
+            status: pending
     RT-012-01:
         hash: sha256:81245b0a04e43ec0b30b54b5f0fca70906acc59156480bacb7ae377758d7c473
         reqs:
@@ -1053,3 +1064,135 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/28
+    RT-046-01:
+        hash: sha256:205e30bd89329d9c4a9ca0d42adbb9d04a4674bf7823c8aa3fb37219491eef73
+        reqs:
+            - REQ-RT-046
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-047-01:
+        hash: sha256:d2619658119532a50c03b118f53278f4b97d35543a4d3b0f6b48d580d464a318
+        reqs:
+            - REQ-RT-047
+        tier: P1
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: Agreed Select first-ready vs tie, and start-idempotency empty vs non-empty key behaviour.
+        human:
+            status: pending
+    RT-047-02:
+        hash: sha256:039ba7ecd4cd7fb6f0fb08a4b7662ae5f107825548b6cd94fc645277989ead19
+        reqs:
+            - REQ-RT-047
+        tier: P1
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: Agreed Select first-ready vs tie, and start-idempotency empty vs non-empty key behaviour.
+        human:
+            status: pending
+    RT-048-01:
+        hash: sha256:0b3ae737dde3ab6bf7856e0b73fbef7f0b43523f7b75e70268417348856f3e29
+        reqs:
+            - REQ-RT-048
+        tier: P0
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: 'Tenant isolation: start idempotency keys and List paging cursors must not cross tenants.'
+        human:
+            status: pending
+    RT-049-01:
+        hash: sha256:bcece0472aadf4aa35e7042d0774e0b545db891226fafd1794546748c4f03b19
+        reqs:
+            - REQ-RT-049
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-050-01:
+        hash: sha256:2e387838e78b6a7a1a9781a7ce22b710d8c2f12e93975f2d5c33d0e5b23ef36c
+        reqs:
+            - REQ-RT-050
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-050-02:
+        hash: sha256:c076b2e42046967c30bac982d03ec059068032f9da1edc4beeb4f66f20cd7a66
+        reqs:
+            - REQ-RT-050
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-050-03:
+        hash: sha256:813b9a2978eb77529a6e74cc0edecdc2557080135533f076a28eb9d76f0eed08
+        reqs:
+            - REQ-RT-050
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-051-01:
+        hash: sha256:eb4c9e7f3a5e96a1f8978c63c8b57b39275290c93a633f9aa384520ed0b4d9a6
+        reqs:
+            - REQ-RT-051
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-052-01:
+        hash: sha256:8abb3af9a07823d29b2e2ee8189a41e1e2836a269114e84da3c282d48b194073
+        reqs:
+            - REQ-RT-052
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending
+    RT-053-01:
+        hash: sha256:9c55112ed15ef5ffaf824cf65c3106a3d529a0643b449fe7341e59d617d97b34
+        reqs:
+            - REQ-RT-053
+        tier: P0
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: 'Tenant isolation: start idempotency keys and List paging cursors must not cross tenants.'
+        human:
+            status: pending
+    RT-054-01:
+        hash: sha256:9c54b62d3947ce1e397d3a50b3d4cc89d8578143db325860803fe884fae2d83a
+        reqs:
+            - REQ-RT-054
+        tier: P2
+        author: opencode:spec-author:6c58e1
+        reviewer: cursor:spec-reviewer:93bac6
+        approved_at: "2026-11-20"
+        note: New local runtime open behaviours for WP-L5-01.
+        human:
+            status: pending

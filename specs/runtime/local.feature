@@ -96,6 +96,15 @@ Feature: The local runtime
     Then the wait returns index 1
     And step "b" was executed 1 time
 
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-011 @id:RT-011-04
+  Scenario: An operation that completed strictly first wins even when a lower index also becomes ready
+    Given the clock is frozen at "2026-11-17T09:00:00Z"
+    And a flow is waiting on the first of a "2h" timer and a "1h" timer, in that order
+    When 1 hour passes
+    And 1 hour passes
+    And the run answers its pending wait on the first ready operation
+    Then the wait returns index 1
+
   @REQ-RT-012 @id:RT-012-01
   Scenario: Cancelling a run stops the step it has in flight
     Given a flow runs step "render" that blocks until cancelled
@@ -394,3 +403,112 @@ Feature: The local runtime
       | tenant |
       |        |
       | acme   |
+
+  # A run id is unique within a tenant, a start idempotency key deduplicates a
+  # start within its tenant only, and a child id can be re-attached only to the
+  # same child. All three are per-tenant, like the other local lookups.
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-046 @id:RT-046-01
+  Scenario: Starting a run with a run id already used in the same tenant fails with conflict
+    Given tenant "acme" has run "r1" of flow "review" waiting at gate "approve"
+    When run "r1" of "review" is started with context tenant "acme" and an empty request tenant
+    Then starting the run fails with code "conflict"
+    And tenant "acme" describes run "r1" as "running"
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-01
+  Scenario: Starting twice with the same start idempotency key in one tenant returns the first run
+    Given flow "work" calls step "render" that returns {"ok": true}
+    And tenant "acme" starts run "r1" of "work" with start idempotency key "k1"
+    When tenant "acme" starts a run of "work" with start idempotency key "k1"
+    Then the run reference the second start returned is run "r1" of tenant "acme"
+    And tenant "acme" lists 1 run of flow "work"
+    And step "render" was executed 1 time
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-02
+  Scenario: Starting twice with an empty start idempotency key creates two runs
+    Given flow "work" calls step "render" that returns {"ok": true}
+    When tenant "acme" starts run "r1" of "work" with an empty start idempotency key
+    And tenant "acme" starts run "r2" of "work" with an empty start idempotency key
+    Then tenant "acme" lists 2 runs of flow "work"
+    And step "render" was executed 2 times
+
+  @planned @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-048 @id:RT-048-01
+  Scenario: The same start idempotency key in two tenants starts two runs
+    Given flow "work" calls step "render" that returns {"ok": true}
+    When tenant "acme" starts run "a1" of "work" with start idempotency key "k1"
+    And tenant "globex" starts run "g1" of "work" with start idempotency key "k1"
+    Then tenant "acme" lists 1 run for tenant "acme" with run id "a1"
+    And tenant "globex" lists 1 run for tenant "globex" with run id "g1"
+    And step "render" was executed 2 times
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-049 @id:RT-049-01
+  Scenario: Reattaching a child by its id returns the existing child of the same parent and flow
+    Given parent flow "parent" starts child flow "child" with child run id "child-1" and close policy "abandon"
+    And flow "child" waits at gate "approve"
+    And a run of "parent" for tenant "acme" has child run "child-1" waiting at gate "approve"
+    When the parent starts child flow "child" again with child run id "child-1"
+    Then the child call returns the existing child run "child-1"
+    And tenant "acme" describes run "child-1" as "running"
+    And child flow "child" was started 1 time
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-01
+  Scenario: Reusing a child run id for a different flow fails with conflict
+    Given tenant "acme" has parent run "parent-1" with child run "child-1" of flow "child"
+    When parent "parent-1" starts child flow "other" with child run id "child-1"
+    Then starting the child fails with code "conflict"
+    And tenant "acme" describes run "child-1" as "running"
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-02
+  Scenario: Reusing a child run id of a different parent fails with conflict
+    Given tenant "acme" has parent run "parent-1" with child run "child-1" of flow "child"
+    And tenant "acme" has parent run "parent-2" of flow "parent"
+    When parent "parent-2" starts child flow "child" with child run id "child-1"
+    Then starting the child fails with code "conflict"
+    And tenant "acme" describes run "child-1" as "running"
+    And child flow "child" was started 1 time
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-03
+  Scenario: Reusing a top-level run id as a child run id fails with conflict
+    Given tenant "acme" has run "existing-1" of flow "review" waiting at gate "approve"
+    And tenant "acme" has parent run "parent-1" of flow "parent"
+    When parent "parent-1" starts child flow "child" with child run id "existing-1"
+    Then starting the child fails with code "conflict"
+    And tenant "acme" describes run "existing-1" as "running"
+
+  # List paging uses an opaque paging cursor bound to its issuing tenant.
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-051 @id:RT-051-01
+  Scenario: A paging cursor resumes the next page without skipping or repeating a run
+    Given tenant "acme" has runs "r1", "r2" and "r3" of flow "review" waiting at gate "approve"
+    When tenant "acme" lists runs of flow "review" with limit 2 and no paging cursor
+    And tenant "acme" lists the next page with the paging cursor from that listing
+    Then the first page lists run ids "r1" then "r2"
+    And the second page lists run id "r3"
+    And the two pages share no run id
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-052 @id:RT-052-01
+  Scenario Outline: Listing with an unusable paging cursor fails with invalid_argument
+    Given tenant "acme" has run "r1" of flow "review" waiting at gate "approve"
+    When tenant "acme" lists runs of flow "review" with the paging cursor "<cursor>"
+    Then listing runs fails with code "invalid_argument"
+
+    Examples:
+      | cursor                                   |
+      | a paging cursor the runtime never issued |
+      | a paging cursor past the last run        |
+
+  @planned @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-053 @id:RT-053-01
+  Scenario: A paging cursor issued to one tenant cannot list another tenant's runs
+    Given tenant "acme" has runs "r1" and "r2" of flow "review" waiting at gate "approve"
+    And tenant "globex" has run "g1" of flow "review" waiting at gate "approve"
+    And tenant "acme" has a paging cursor for flow "review" limited to 1 run
+    When tenant "globex" lists runs of flow "review" with that paging cursor
+    Then listing runs fails with code "invalid_argument"
+    And tenant "globex" describes run "g1" as "running"
+
+  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-054 @id:RT-054-01
+  Scenario: Constructing the local runtime with a clock that is not a timer clock fails
+    Given a clock that is not a timer clock
+    When the local runtime is constructed with that clock
+    Then construction fails with an error
+    And the error says the clock cannot schedule timers

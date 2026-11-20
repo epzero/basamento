@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component
+@wp:WP-L1-07 @level:component
 Feature: Log records carry the trace, run and tenant they belong to
   One setup emits log records, spans and metrics. Every log record can be
   joined to the span it came from, the run it belongs to and the tenant that

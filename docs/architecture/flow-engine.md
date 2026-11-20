@@ -1,7 +1,8 @@
 # Flow engine
 
-Status: IR and compiler in `flow/ir` and `flow/compile` (WP-L4-01); contracts
-in `flow/flow.go`; machine, builder and host **Planned** (WP-L4-02 … 04).
+Status: IR, compiler and Go builder in `flow/ir`, `flow/compile` and
+`flow/builder` (WP-L4-01, WP-L4-03); the machine in `flow/machine` (WP-L4-02);
+contracts in `flow/flow.go`; host **Planned** (WP-L4-04).
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -15,7 +16,9 @@ compile to the same IR.
 a stream carrying more than one document, produces the RFC 8785 canonical bytes
 and the content hash, and enforces the structural rules below. `flow/compile`
 type-checks expressions, enforces the definition limits and returns the
-validated canonical form of the same IR.
+validated canonical form of the same IR. `flow/builder` writes the same IR from
+typed Go declarations; it checks only what those declarations can tell it and
+leaves kinds, spec shapes, expressions and cycles to the compiler.
 
 ```yaml
 name: codegen.feature
@@ -84,16 +87,62 @@ node's input must be, per kind, is the machine's (WP-L4-02) and the host's
 
 ## 3. Machine
 
+`flow/machine` implements `flow.Machine` over one compiled definition: `New`
+validates the IR and compiles its expressions, then `Start` and `Apply` run it.
+
 - **Pure**: `Start` and `Apply` take a snapshot and an event and return a new
-  snapshot and commands. No I/O and no clock.
+  snapshot and commands. The snapshot passed to `Apply` is never modified; on
+  error the host keeps it. Raw JSON in snapshots, events and commands shares
+  backing arrays across return values; callers must treat them as read-only. No
+  I/O and no clock.
 - **Supersteps**: every ready node runs. Updates merge through reducers **in
   node-id order** at the barrier, so the result does not depend on completion
-  order (REQ-FLOW-002).
+  order (REQ-FLOW-002). A map node's attempts merge in attempt order after the
+  node id. Steps stay sorted in the snapshot, so two runs that differ only in
+  completion order have identical snapshots.
 - **Edges**: the first edge whose `when` holds, in declaration order;
-  otherwise the default edge (REQ-FLOW-001).
+  otherwise the default edge (REQ-FLOW-001). A node with no outgoing edge ends
+  its branch; reaching the reserved `FAIL` endpoint fails the run. An edge from
+  `START` must not carry a condition (`New` rejects it).
+- **Map children**: at `New`, every `map` node's `spec.node` must name an
+  existing node whose kind is one the host runs (not `set`, `map` or `parallel`),
+  must not carry a guard, and must not be shared by two map nodes.
+- **Node kinds**: `set` nodes and routing are evaluated in the machine with no
+  command (REQ-FLOW-036). A `parallel` node starts every node named by its
+  outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
+  array and starts the node named by `spec.node` once per element, carrying the
+  element as input and the one-based index as the attempt, up to
+  `DefaultMaxFanout` (10 000; the host may lower it via `WithMaxFanout`). Every
+  other kind becomes a `run_node`, `await_gate` or `start_timer` command for the
+  host.
+- **Guards**: a `while` that does not hold skips the node and ends its branch;
+  a visit or cost bound that is reached fails the run with `budget_exceeded`.
+  A map child must not have a guard (rejected at `New`). Consecutive
+  command-free supersteps inside one `advance` are capped: the limit is
+  `max(floor, nodes × (1 + sum of declared max_visits))` with floor
+  `DefaultMaxPureSupersteps` (100 000, overridable via `WithMaxPureSupersteps`);
+  exceeding it fails with `budget_exceeded` when cost-only bounds would not
+  accrue on the machine.
+  `cost_mpts` is compared with `Snapshot.Cost`, the run's total settled cost,
+  when the node is about to start; a node does not start once the cost has
+  reached the budget (`cost >= cost_mpts`), like `max_visits` after the last
+  allowed visit.
 - **Budget**: `run.cost` is visible to CEL and bounded by guards
-  (`cost_mpts`). Reserving and settling is the model node's work
+  (`cost_mpts`). The host puts each node's settled milli-points on
+  `Event.cost_mpts` for `node_completed` and `node_failed`; `Apply` adds them
+  to `Snapshot.Cost`. A `node_failed` accrues its cost once, for the pending
+  step it names. Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.
+- **Guards at run time**: a node does not start once the run's settled cost
+  (`Snapshot.Cost`, CEL `run.cost`) has reached its guard's `cost_mpts`, or
+  once it has had the guard's `max_visits` visits; the run then fails with code
+  `budget_exceeded` (REQ-FLOW-047). A finished node's settled cost arrives with
+  its event, in `flow.Event.CostMpts` (REQ-FLOW-049), so a replay accrues the
+  same cost instead of reading a ledger.
+- **Fan-out bound**: a `map` node over more than `DefaultMaxFanout` (10,000)
+  items fails the run with `budget_exceeded` before any fan-out, carrying no
+  state data (REQ-FLOW-048). `max_parallel` throttles the host; it does not
+  bound the collection.
 - **Large values** are blob references in state.
 
 Property tests generate random completion orders and check the final snapshots

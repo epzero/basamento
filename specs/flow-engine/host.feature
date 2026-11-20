@@ -164,3 +164,121 @@ Feature: The flow host
     When a run of the flow starts with input {}
     Then the run made a timer for 10s and a timer for 30s
     And the run is waiting
+
+  @REQ-FLOW-050 @cost @id:FLOW-050-01
+  Scenario: A cycle bounded only by a cost budget stops when the handlers' cost reaches it
+    Given a flow whose node "verify" of kind "set" precedes node "repair" of kind "agent" with a registered node handler
+    And node "repair" has a guard of 5000 milli-points and routes back to node "verify"
+    And the node handler of "repair" returns {"fixed": true} with a settled cost of 2500 milli-points
+    When a run of the flow starts with input {"failed": 1}
+    Then node "repair" ran 2 times
+    And the run fails with code "budget_exceeded" naming node "repair" and the cost budget 5000 milli-points
+
+  @REQ-FLOW-051 @id:FLOW-051-01
+  Scenario: A tool node with no input mapping receives the run's input
+    Given a flow whose node "worker" of kind "tool" has no input mapping and the node spec {"tool": "w1"}
+    And the step "w1" returns {"done": true}
+    When a run of the flow starts with input {"a": 1}
+    Then the run made exactly one step, named "w1", with input {"a": 1}
+
+  @REQ-FLOW-052 @id:FLOW-052-01
+  Scenario: The first failing future reported by Select decides the run's error
+    Given a flow that runs node "a" of kind "tool" with node spec {"tool": "a"} and node "b" of kind "tool" with node spec {"tool": "b"} in parallel, then node "after" of kind "tool" with node spec {"tool": "t2"}
+    And the step "a" fails with code "unavailable"
+    And the step "b" fails with code "vendor_error"
+    And Select reports the failed step "b" before the failed step "a"
+    When a run of the flow starts with input {}
+    Then the run fails with code "vendor_error"
+    And the run awaited the failed step "b" but not the failed step "a"
+    And the run made no step named "after"
+
+  @REQ-FLOW-053 @id:FLOW-053-01
+  Scenario: A failed handler is not followed by the other handler of the superstep
+    Given a flow that runs node "first" of kind "agent" and node "second" of kind "agent" in parallel
+    And the node handler of "first" returns the error "vendor_error"
+    And the node handler of "second" returns {"ok": true}
+    When a run of the flow starts with input {}
+    Then the run fails with code "vendor_error"
+    And the node handler of "second" was never called
+
+  @REQ-FLOW-054 @id:FLOW-054-01
+  Scenario: A definition that does not match the pinned hash fails the run before any durable call
+    Given flow "review" is registered in the definition catalog with content hash "hash-v1"
+    And the catalog returns flow "review" with content hash "hash-v2" for a run pinned to "hash-v1"
+    When a run of "review" pinned to "hash-v1" starts with input {}
+    Then the run fails with code "internal" naming flow "review"
+    And the run made no step, timer, gate wait, child run or durable event
+
+  @REQ-FLOW-055 @id:FLOW-055-01
+  Scenario: A run with an empty pinned hash runs the definition the catalog resolves
+    Given flow "review" version 1 whose node "done" of kind "set" sets "v" to 1 is registered in the definition catalog
+    And flow "review" version 2 whose node "done" of kind "set" sets "v" to 2 is registered in the definition catalog
+    When a run of "review" starts with an empty pinned hash and input {}
+    Then the run completes with state {"v": 2}
+
+  @REQ-FLOW-056 @id:FLOW-056-01
+  Scenario Outline: A negative <field> fails the run before any durable call
+    Given a flow whose node "slow" of kind "<kind>" has the node spec {"<field>": "<duration>"}
+    When a run of the flow starts with input {}
+    Then the run fails with code "invalid_argument" naming node "slow"
+    And the run made no step, timer, gate wait, child run or durable event
+
+    Examples:
+      | kind | field    | duration |
+      | wait | duration | -5s      |
+      | gate | timeout  | -1h      |
+
+  @REQ-FLOW-057 @id:FLOW-057-01
+  Scenario: An unclassified handler error fails the run with a generic error and no leaked text
+    Given a flow whose node "plan" of kind "agent" has a registered node handler
+    And the node handler of "plan" returns an unclassified error "SEALED-CRITICAL-DETAIL"
+    When a run of the flow starts with input {"secret": "input-value"}
+    Then the run fails with code "internal" and message 'flow: node "plan" failed'
+    And the run's error does not contain "SEALED-CRITICAL-DETAIL"
+    And the run's error does not contain "input-value"
+
+  @REQ-FLOW-058 @id:FLOW-058-01
+  Scenario: A node visited twice in a loop issues two different idempotency keys
+    Given a flow that visits node "worker" of kind "tool" with node spec {"tool": "w1"} twice in a loop guarded by at most 2 visits
+    And the step "w1" returns {"ok": true}
+    When a run of the flow starts with input {}
+    Then the step "w1" was called twice
+    And the two idempotency keys of step "w1" differ only in their superstep sequence
+
+  @REQ-FLOW-058 @id:FLOW-058-02
+  Scenario: Replaying a failed step reuses its idempotency key
+    Given a flow whose node "worker" of kind "tool" with node spec {"tool": "w1"} is recorded with step "w1" failing once then returning {"ok": true}
+    When the run is replayed from its recorded history
+    Then the replayed step "w1" carried the same idempotency key as the failed first attempt
+
+  @REQ-FLOW-059 @cost @id:FLOW-059-01
+  Scenario: A tool step's completion carries no settled cost
+    Given a flow that runs node "work" of kind "tool" with node spec {"tool": "w1"} before node "repair" of kind "agent" with a guard of 100 milli-points
+    And the step "w1" returns {"ok": true}
+    And the node handler of "repair" returns {"fixed": true} with a settled cost of 60 milli-points
+    When a run of the flow starts with input {}
+    Then the run completes with state {"ok": true, "fixed": true}
+    And the step "w1" contributed 0 to the run's settled cost
+
+  @REQ-FLOW-059 @cost @id:FLOW-059-02
+  Scenario: A handler's result cost is reported on node_failed when it also returns an error
+    Given a flow whose node "repair" of kind "agent" has a registered node handler
+    And the node handler of "repair" returns {"fixed": true} with a settled cost of 2500 milli-points and the error "vendor_error"
+    When a run of the flow starts with input {}
+    Then the run fails with code "vendor_error"
+    And the node "repair" failure reported a settled cost of 2500 milli-points
+
+  @REQ-FLOW-060 @id:FLOW-060-01
+  Scenario: WithMaxFanout above the default is clamped to the default
+    Given a flow whose node "impl" of kind "map" fans out over 10001 items
+    And a flow host built with WithMaxFanout(20000)
+    When a run of the flow starts with input {}
+    Then the run fails with code "budget_exceeded" naming node "impl", the item count 10001 and the fan-out limit 10000
+
+  @REQ-FLOW-061 @id:FLOW-061-01
+  Scenario: WithMaxFanout below one fails the run before any durable call
+    Given a flow whose node "impl" of kind "map" fans out over 2 items
+    And a flow host built with WithMaxFanout(0)
+    When a run of the flow starts with input {}
+    Then the run fails with code "invalid_argument"
+    And the run made no step, timer, gate wait, child run or durable event

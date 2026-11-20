@@ -25,7 +25,11 @@ define tool
 	else echo "gate: skip $(1) (not installed)"; fi
 endef
 
-.PHONY: gate tools static spec test bdd redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check
+.PHONY: gate tools static spec test bdd bdd-skips redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check pg-prefetch
+
+EP_EMBEDDED_POSTGRES ?= github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
+GATE_PG_BIN := .gate/bin/embedded-postgres
+GATE_PG_CACHE ?= $(BDD_POSTGRES_CACHE_DIR)
 
 # Built from source with this project's Go: a prebuilt golangci-lint cannot
 # type-check a standard library newer than the Go it was built with.
@@ -84,14 +88,42 @@ spec: ## G2
 	$(GATE) spec lock
 	$(GATE) docs
 
+# Packages excluding internal/bdd (BDD runs separately so the skip summary runs after it).
+GATE_TEST_PKGS := $(shell $(GO) list ./... | grep -v '/internal/bdd$$')
+
 test: ## G3 (includes the BDD suite)
-	$(GO) test -race -count=1 ./...
+	$(GO) test -race -count=1 $(GATE_TEST_PKGS)
+	$(MAKE) --no-print-directory bdd
 
 bdd:
-	$(GO) test -count=1 ./internal/bdd/
+	@mkdir -p .gate/bin
+	@if [ -z "$$EP_SUPERVISOR" ] && [ -x "$(GATE_PG_BIN)" ]; then export EP_SUPERVISOR="$$(pwd)/$(GATE_PG_BIN)"; fi; \
+	$(GO) test -race -count=1 ./internal/bdd/ && $(MAKE) --no-print-directory bdd-skips
+
+bdd-skips:
+	$(GATE) bdd-skips
+
+# pg-prefetch's --postgres-version is the driver's pin (embeddedpostgres.V16 in
+# internal/bdd/sqltest): the head BDD step starts that exact bundle, so the
+# literal must never drift from it (pinned by a test in internal/gate).
+pg-prefetch: ## download Postgres bundles into BDD_POSTGRES_CACHE_DIR (ADR-0015)
+	@mkdir -p .gate/bin
+	$(GO) build -o $(GATE_PG_BIN) $(EP_EMBEDDED_POSTGRES)
+	@cache="$(GATE_PG_CACHE)"; \
+	if [ -z "$$cache" ]; then echo "gate: pg-prefetch requires BDD_POSTGRES_CACHE_DIR"; exit 1; fi; \
+	mkdir -p "$$cache"; \
+	attempt=0; \
+	until EP_SUPERVISOR="$$(pwd)/$(GATE_PG_BIN)" "$(GATE_PG_BIN)" prefetch --postgres-version 16.15.1 --cache-dir "$$cache" --json; do \
+		attempt=$$((attempt + 1)); \
+		if [ "$$attempt" -ge 5 ]; then exit 1; fi; \
+		sleep 2; \
+	done
 
 redgreen: ## G4
-	@if [ -n "$(BASE)" ]; then $(GATE) redgreen -base $(BASE); else echo "gate: skip redgreen (set BASE=<ref>)"; fi
+	@if [ -n "$(BASE)" ]; then \
+		if [ -z "$$EP_SUPERVISOR" ] && [ -x "$(GATE_PG_BIN)" ]; then export EP_SUPERVISOR="$$(pwd)/$(GATE_PG_BIN)"; fi; \
+		$(GATE) redgreen -base $(BASE); \
+	else echo "gate: skip redgreen (set BASE=<ref>)"; fi
 
 release-check:
 	$(GATE) release-check

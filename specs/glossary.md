@@ -8,9 +8,17 @@ the same change that first uses it.
 | **Flow** | A versioned definition (IR) of nodes and edges, stored as data and identified by its content hash. |
 | **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled, terminated. |
 | **Node** | One step of a flow: `set`, `task`, `model`, `agent`, `tool`, `map`, `parallel`, `subflow`, `gate`, `wait`. |
-| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (milli-points spent there). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (the run's settled milli-points, `run.cost`, when the node is about to start, not a per-node total). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Settled cost** | The milli-points a run has been charged so far: the machine's `Snapshot.Cost`, visible to CEL as `run.cost`, increased by the cost each finished node's recorded result carries. |
+| **Fan-out limit** | The most items one `map` node may fan out to in a run: `DefaultMaxFanout`, 10,000, lowered for a host with `WithMaxFanout`. A larger collection fails the run with `budget_exceeded` before any item starts. |
 | **Edge endpoint** | The two ends of an edge: a node, or one of the reserved endpoints `START` (the flow's entry, only an edge source) and `FAIL` (its failure exit, only an edge target). `START` and `FAIL` are not nodes. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
+| **Definition catalog** | The source a flow host loads a compiled flow definition from by a flow reference (a name and a content hash). |
+| **Content hash** | The hash of a flow definition's canonical form; it identifies the immutable definition a run pins (REQ-FLOW-005). |
+| **Input mapping** | A node's `in` expression, CEL or jq, that turns the run's state into the node's input. A node with no input mapping receives the run's input (REQ-FLOW-051). |
+| **Superstep sequence** | The `Seq` of a machine snapshot, increased when the machine starts a new superstep; part of a step's idempotency key (REQ-FLOW-058). |
+| **Idempotency key** | The key a step carries so that one logical step is recorded once: a retry of it keeps the same key (REQ-FLOW-058). |
+| **Start idempotency key** | The key `StartRequest.IdempotencyKey` carries: a non-empty key deduplicates a second start in the same tenant, returning that run's reference without starting another run or executing its steps; empty does not deduplicate; cross-tenant does not (REQ-RT-047, REQ-RT-048). |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
 | **Step** | A side-effecting unit executed by a runtime (a Temporal activity on the temporal runtime). Retried; its result is recorded. |
 | **Gate** | A node that waits for a human or external decision; its payload is validated by schema and CEL. |
@@ -24,6 +32,7 @@ the same change that first uses it.
 | **Delta** | An ephemeral increment of a message (text, audio, progress), ordered by `dseq`, kept while its message is in flight. |
 | **Message** | A model output inside a run, streamed as deltas and completed as a durable event. |
 | **Cursor** | What a client sends to resume a stream: last durable `seq` and last `dseq` per open message. |
+| **Paging cursor** | The opaque token a `List` returns with a page of runs. A client passes it back unchanged to resume at the next run; it is bound to the tenant and query that issued it, and the client does not interpret it (REQ-RT-051 … REQ-RT-053). |
 | **Snapshot** | The text of an in-flight message so far, sent on reconnect before further deltas. |
 | **Detach / reattach** | A client closing / reopening its stream without affecting the run. |
 | **Invocation** | One call of a model (or remote service) through the invocation contract: start, events, result, cancel, lookup. |
@@ -53,6 +62,7 @@ the same change that first uses it.
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
 | **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..` (REQ-CRED-006, REQ-CRED-007). |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical invocation (including retries of an unacknowledged start). |
+| **Invocation registry** | The in-process store of one provider's invocations: it answers a client ref with the invocation, its event log from a cursor and its result. It keeps an ended invocation for its **retention window** after its end and holds at most its **ended bound** of ended invocations, evicting the oldest ended first and never a running one; an evicted client ref behaves as one it never held. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |
 | **Price table** | The rate rules of each model (rates per token, image or second, with the condition under which they apply), shipped with the binary and overridden per deployment and tenant. |
@@ -78,6 +88,7 @@ the same change that first uses it.
 | **Handoff** | A model request that ends its agent run so that another agent node continues with the model turns so far. |
 | **Memory policy** | What of the history goes into a model turn when it does not fit the model's input token limit. |
 | **Run clock** | The time `DurableContext.Now` reports for a run; it advances with the fake clock in tests. |
+| **Timer clock** | A clock that can schedule and complete timers (it provides `After`), which the local runtime requires because a run's timers move only with the clock; a nil clock means the system clock (REQ-RT-008, REQ-RT-054). |
 | **Work package (WP)** | One unit of roadmap work with its dependencies and owned directories. Its state (done, in progress, ready, blocked) is derived from the repository. |
 | **Conversation** | An exchange of user messages and model messages between one user and an assistant, kept as history. A conversation is open until it is cancelled. |
 | **User message** | A message with a message id and text that a user sends to a conversation, in one of three modes: queue (run it as the next turn), steer (redirect the running turn) or cancel (stop the running turn). `queue` is the default. |

@@ -161,17 +161,19 @@ error — nothing has served a request yet — and becomes
   changing under it fails it with `conflict`, retryable; neither writes a
   partial record. A completed rotation clears the codec's cache, so the next
   encode or decode of each tenant loads the rewrapped record.
+- Master-key rotation retires replaced master keys without closing them;
+  `Codec.Close` closes the ring and every retired key once. Deferred close
+  lets calls that hold a snapshot of the ring finish. `Close` must not run
+  concurrently with `Encode`, `Decode`, `RotateMasterKey` or `RotateDataKey`
+  (stop those callers first); if it does, nothing is closed twice and no key
+  leaks, but the racing call may fail with an error from the closed key.
 
 ### 2.5 Tenant ids
 
-- Every tenant id is checked against the grammar of REQ-CORE-005 by
-  `ValidateTenant`: non-empty, at most 128 bytes, valid UTF-8, no control
-  characters from U+0000 to U+001F and U+007F, not `.` or `..`, no `/` or
-  `\`, and no leading or trailing Unicode white space. The file store, the
-  keyset framing and the codec's context lookup all call it.
-- The local check is interim: `core.TenantFrom` enforces the same grammar, and
-  the package will rely on it and drop the copy. Until then `ValidateTenant`
-  is a copy of the rule and changes with it.
+- Every tenant id satisfies REQ-CORE-005 and is checked only by
+  `core.TenantFrom`. The codec's context lookup calls it directly; the file
+  store and keyset framing, which receive the id as a string, call it through
+  one helper (`tenantStringOK`). The package keeps no copy of the grammar.
 
 ## 3. Encoded payload
 
@@ -220,8 +222,8 @@ requests per codec and in total, and can delete a master key. The seeded random
 helper the scenarios use for deterministic payloads and keys lives beside it in
 `internal/bdd`; no production code path accepts a seeded random source. Unit
 tests in `platform/secrets` use fakes defined in their own `_test.go` files.
-`core/coretest` remains the only package listed as test-only in
-`layering.yaml` and belongs to another work package, so this WP adds none.
+Packages listed in `layering.yaml` `test_only` belong to other work packages;
+this WP adds none.
 No check exercises the live keepers yet; the gate uses `localsecrets` and the
 simulator.
 
