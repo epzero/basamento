@@ -214,7 +214,8 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 
 // timePassed waits until every timer the scripted flow registered with watchTimer
 // and due at the clock reading after a duration-pass step is Ready. The shared
-// duration-pass step advances the fake clock before calling this.
+// duration-pass step advances the fake clock before calling this. The duration
+// argument is unused but present so localWorld can satisfy the Host timeSink shape.
 func (w *localWorld) timePassed(ctx context.Context, _ time.Duration) error {
 	if w.rt == nil {
 		return nil
@@ -227,7 +228,7 @@ func (w *localWorld) timePassed(ctx context.Context, _ time.Duration) error {
 	}
 	reading := world(ctx).Core.clock.Now()
 	what := fmt.Sprintf("timers due at %s to become ready", reading.Format(time.RFC3339))
-	err := w.spin(what, func() bool { return exec.timersDueReadyAt(reading) })
+	err := w.spin(what, func() bool { return exec.pendingTimersAt(reading) == 0 })
 	if err == nil {
 		return nil
 	}

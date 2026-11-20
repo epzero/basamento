@@ -84,20 +84,7 @@ func (e *localExec) watchTimer(f runtime.Future, deadline time.Time) {
 	e.mu.Unlock()
 }
 
-// timersDueReadyAt reports whether every watched timer due at reading is Ready.
-func (e *localExec) timersDueReadyAt(reading time.Time) bool {
-	e.mu.Lock()
-	watch := append([]watchedTimer(nil), e.watched...)
-	e.mu.Unlock()
-	for _, t := range watch {
-		if !t.deadline.After(reading) && !t.future.Ready() {
-			return false
-		}
-	}
-	return true
-}
-
-// pendingTimersAt counts watched timers due at reading that are not yet Ready.
+// pendingTimersAt returns how many watched timers due at reading are not yet Ready.
 func (e *localExec) pendingTimersAt(reading time.Time) int {
 	e.mu.Lock()
 	watch := append([]watchedTimer(nil), e.watched...)
