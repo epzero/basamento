@@ -270,6 +270,10 @@ type listCursorWire struct {
 }
 
 // craftListCursorToken builds the documented list cursor form for BDD preconditions.
+// It hand-builds the wire shape instead of calling the production encoder because
+// the step plays a client forging a token; the control list step first uses an
+// in-range crafted cursor so a drift in the production format fails there instead
+// of letting the "past the last run" scenario pass for the wrong reason.
 func craftListCursorToken(tenant string, pos int) string {
 	raw, err := json.Marshal(listCursorWire{V: 1, Tenant: tenant, Pos: pos})
 	if err != nil {
