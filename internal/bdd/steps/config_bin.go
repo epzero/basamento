@@ -44,7 +44,7 @@ func cachedKitBinary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cacheRoot, err := kitCacheRoot()
+	cacheRoot, err := kitCacheRoot(root)
 	if err != nil {
 		return "", err
 	}
@@ -66,14 +66,17 @@ func cachedKitBinaryIn(moduleRoot, cacheRoot string) (string, error) {
 	return buildCachedKit(moduleRoot, cacheRoot, key)
 }
 
-// kitCacheRoot is a private per-user directory. A shared location would let
-// another user plant the binary this process is about to execute (SEC-2).
-func kitCacheRoot() (string, error) {
+// kitCacheRoot is a private per-user directory for one module tree. A shared
+// location would let another user plant the binary this process is about to
+// execute (SEC-2); a directory per tree keeps parallel worktrees from pruning
+// each other's entries.
+func kitCacheRoot(moduleRoot string) (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("kit binary cache directory: %w", err)
 	}
-	root := filepath.Join(base, kitBinaryCache)
+	sum := sha256.Sum256([]byte(filepath.Clean(moduleRoot)))
+	root := filepath.Join(base, kitBinaryCache, hex.EncodeToString(sum[:16]))
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", fmt.Errorf("kit binary cache directory: %w", err)
 	}
