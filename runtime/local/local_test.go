@@ -44,7 +44,11 @@ func newFixture(t *testing.T, at time.Time) *fixture {
 	t.Helper()
 	clock := coretest.NewFakeClock(at)
 	f := &fixture{clock: clock, host: testHost{}}
-	f.rt = New(Options{Clock: clock, IDs: &coretest.SeqIds{}})
+	var err error
+	f.rt, err = New(Options{Clock: clock, IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if err := f.rt.RegisterFlowHost(f.host.Run); err != nil {
 		t.Fatalf("RegisterFlowHost: %v", err)
 	}
@@ -265,7 +269,10 @@ func TestSelectReturnsLowestReadyIndex(t *testing.T) {
 }
 
 func TestSelectIsDeterministicOverReadySubsets(t *testing.T) {
-	rt := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rng := rand.New(rand.NewPCG(7, 11))
 	for trial := 0; trial < 200; trial++ {
 		r := newRun(rt, "acme", fmt.Sprintf("r%d", trial), runtime.FlowRef{Name: "x"}, nil, context.Background())
@@ -298,7 +305,10 @@ func TestSelectIsDeterministicOverReadySubsets(t *testing.T) {
 }
 
 func TestSelectPrefersTheFutureThatCompletedFirst(t *testing.T) {
-	rt := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
 	first, second := newFuture(r), newFuture(r)
 	marked := r.seqs.Load()
@@ -1074,8 +1084,23 @@ func TestFlowHostPanicFailsRunWithoutKillingProcess(t *testing.T) {
 	f.close(t)
 }
 
+type clockNowOnly struct{}
+
+func (clockNowOnly) Now() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+func TestNewRejectsClockWithoutAfter(t *testing.T) {
+	_, err := New(Options{Clock: clockNowOnly{}})
+	if codeOf(err) != "invalid_argument" {
+		t.Fatalf("New = %v, want invalid_argument", err)
+	}
+}
+
 func TestCapabilities(t *testing.T) {
-	caps := New(Options{}).Capabilities()
+	rt, err := New(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps := rt.Capabilities()
 	want := runtime.Caps{SyncGateUpdates: true}
 	if caps != want {
 		t.Fatalf("caps %+v, want %+v", caps, want)

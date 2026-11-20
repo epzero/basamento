@@ -16,19 +16,18 @@ import (
 // core.SystemClock and core.ULIDs in the binary, coretest.FakeClock and
 // coretest.SeqIds in the gate (see specs/runtime/design.md §Local runtime).
 type Options struct {
-	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. A clock that
-	// also implements After(d) <-chan time.Time is used for timers; otherwise
-	// the runtime falls back to real timers. nil means core.SystemClock.
+	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. It must
+	// implement After(d) <-chan time.Time. nil means core.SystemClock.
 	Clock core.Clock
 	// IDs issues run ids when StartRequest.RunID is empty. nil means ULIDs
 	// over Clock.
 	IDs core.Ids
 }
 
-// timerClock is the optional extension of core.Clock a runtime uses to wake a
-// timer when the clock reaches its deadline. coretest.FakeClock implements it;
-// the production clock falls back to real timers in after.
-type timerClock interface {
+// wakeClock is the clock port the local runtime uses for Now and timer wake-ups.
+// core.SystemClock and coretest.FakeClock implement it.
+type wakeClock interface {
+	core.Clock
 	After(time.Duration) <-chan time.Time
 }
 
@@ -61,7 +60,7 @@ type idemKey struct {
 // Runtime is the in-process implementation of runtime.Runtime.
 type Runtime struct {
 	mu    sync.Mutex
-	clock core.Clock
+	clock wakeClock
 	ids   core.Ids
 	host  runtime.FlowHost
 	steps map[string]registeredStep
@@ -82,21 +81,27 @@ type registeredStep struct {
 
 // New returns a local runtime. It starts empty: it has no record of any run
 // from an earlier instance (REQ-RT-006).
-func New(opts Options) *Runtime {
+func New(opts Options) (*Runtime, error) {
+	clock := opts.Clock
+	if clock == nil {
+		clock = core.SystemClock{}
+	}
+	wake, ok := clock.(wakeClock)
+	if !ok {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"local: the clock must implement After(duration)", nil)
+	}
 	r := &Runtime{
-		clock: opts.Clock,
+		clock: wake,
 		ids:   opts.IDs,
 		steps: map[string]registeredStep{},
 		runs:  map[runKey]*run{},
 		idem:  map[idemKey]*run{},
 	}
-	if r.clock == nil {
-		r.clock = core.SystemClock{}
-	}
 	if r.ids == nil {
 		r.ids = core.NewULIDs(r.clock, nil)
 	}
-	return r
+	return r, nil
 }
 
 // RegisterFlowHost installs the single flow entrypoint the composition root
@@ -333,10 +338,7 @@ func (r *Runtime) lookup(tenant core.TenantID, id string) *run {
 }
 
 func (r *Runtime) after(d time.Duration) <-chan time.Time {
-	if clock, ok := r.clock.(timerClock); ok {
-		return clock.After(d)
-	}
-	return time.After(d)
+	return r.clock.After(d)
 }
 
 // tenant enforces the shared rule: the tenant of a call is the context's, and

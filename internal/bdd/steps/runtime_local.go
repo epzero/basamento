@@ -254,7 +254,10 @@ func (w *localWorld) runtimeLocked(ctx context.Context) *local.Runtime {
 	if w.registered == nil {
 		w.registered = map[string]bool{}
 	}
-	rt := local.New(local.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	rt, err := local.New(local.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	if err != nil {
+		panic(err)
+	}
 	if err := rt.RegisterFlowHost(w.host); err != nil {
 		panic(err)
 	}
