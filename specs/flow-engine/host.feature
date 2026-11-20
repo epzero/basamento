@@ -164,3 +164,12 @@ Feature: The flow host
     When a run of the flow starts with input {}
     Then the run made a timer for 10s and a timer for 30s
     And the run is waiting
+
+  @REQ-FLOW-050 @cost @id:FLOW-050-01
+  Scenario: A cycle bounded only by a cost budget stops when the handlers' cost reaches it
+    Given a flow whose node "verify" of kind "set" precedes node "repair" of kind "agent" with a registered node handler
+    And node "repair" has a guard of 5000 milli-points and routes back to node "verify"
+    And the node handler of "repair" returns {"fixed": true} with a settled cost of 2500 milli-points
+    When a run of the flow starts with input {"failed": 1}
+    Then node "repair" ran 2 times
+    And the run fails with code "budget_exceeded" naming node "repair" and the cost budget 5000 milli-points

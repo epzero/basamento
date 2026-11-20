@@ -104,17 +104,19 @@ exists in the state schema's properties.
 ## 2. Compiler and machine
 
 WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
-requirements REQ-FLOW-001 … 006 and 045 … 046, scenarios `compile.feature`,
+requirements REQ-FLOW-001 … 006, 045 … 049, scenarios `compile.feature`,
 `routing.feature` and `runs.feature`.
 
 ### 2.1 Bounded cycles (REQ-FLOW-003)
 
 A cycle terminates only if something it passes through is consumed on every
-lap. `guard.max_visits` counts the visits of its node and `guard.cost_mpts`
-counts the milli-points spent there; either is a finite number in the IR, so a
+lap. `guard.max_visits` counts the visits of its node, and `guard.cost_mpts`
+bounds the run's settled milli-points (`Snapshot.Cost`, CEL `run.cost`) at the
+moment the node is about to start — it is a budget for the run, not for the
+milli-points spent inside that node; either is a finite number in the IR, so a
 bound exists for the machine to enforce. What a run does when a guard is
-reached is the machine's behavior (`specs/glossary.md`, "Repair guard"), not
-the compiler's. One of the two is enough: a node on the cycle with
+reached is the machine's behavior (§2.4, `specs/glossary.md` "Repair guard"),
+not the compiler's. One of the two is enough: a node on the cycle with
 `{max_visits: 3}` and a node on it with `{cost_mpts: 5000}` both bound the
 cycle.
 
@@ -193,14 +195,64 @@ before type-checking expressions; `ir.Canonical` and `ir.Hash` are then never
 asked to hash a definition the compiler would reject. A definition over
 several limits reports the first check in that order, deterministically.
 
+### 2.4 Guard budgets at run time (REQ-FLOW-047)
+
+`max_visits` and `cost_mpts` are enforced by the machine at the moment a node
+is about to start, before a command for that node exists. **Reached** means
+`>=`: a cost or a visit count one below its budget still lets the node start.
+
+- `max_visits`: the node may start while `Snapshot.Visit[node]` is below the
+  budget. A guard of 3 lets the node run 3 times and refuses the fourth start,
+  so the run still does the work its last allowed visit pays for. Scenario
+  `FLOW-047-01`.
+- `cost_mpts`: the budget is compared with the run's settled milli-points
+  (`Snapshot.Cost`, which is the `run.cost` CEL sees), not with a per-node
+  total: a budget protects the run, and the node that spends is not always the
+  guarded one. The node may start while `Snapshot.Cost` is below `cost_mpts`;
+  at or above it, the start fails. A `cost_mpts` of 80 with 40 milli-points
+  settled per visit therefore stops the run before the third visit: `40` after
+  the first, `80` after the second, refused before the third. Scenario
+  `FLOW-047-02`; the per-visit number is the cost the node's event carries, §3.
+
+A refused start returns the machine's `fail` command with code
+`budget_exceeded` and a message naming the node and the budget, for example
+`flow: node "repair": visit budget 3 reached` and
+`flow: node "repair": cost budget 80 milli-points reached with 80 settled`.
+The host turns that command into the run's error (REQ-FLOW-035), so the run
+ends `failed` with `budget_exceeded`, as `specs/glossary.md` ("Repair guard")
+and the preset scenarios already state. A guard field that is absent or 0 is
+no budget (§2.2) and never refuses a start.
+
+### 2.5 Map fan-out limit (REQ-FLOW-048)
+
+A `map` node fans out to one command per item of its collection. `flow/machine`
+exports `DefaultMaxFanout = 10000`, the most items one `map` node may fan out
+to in a run, and a collection with more items than that fails the run with
+code `budget_exceeded` before the machine returns any fan-out command for the
+node, so the host creates no step and no child run for it. The message names
+the node, the item count and the limit, for example
+`flow: node "impl": fan-out limit 10000 items exceeded: 10001 items`, and the
+`fail` command carries no state data: the run fails at the start of the
+superstep, before any item's result could be merged.
+
+A collection of exactly the limit is not over it, so every item fans out
+(scenario `FLOW-048-02`). `WithMaxFanout(n)` lowers the limit for the runs the
+host starts (§3); it never raises it above the default.
+
+`max_parallel` in a `map` node's spec is the host's throttle on how many of the
+node's items are in flight at once. It bounds neither the superstep nor the
+size of the collection: REQ-FLOW-046 limits the definition — its nodes, edges,
+expressions and canonical bytes — not the number of items a run's collection
+holds, which is data the run receives and not part of the definition.
+
 ## 3. Flow host (WP-L4-04)
 
 `flow/host` is the layer ADR-0011 defines (`layering.yaml`): it may import
 `core`, `expr`, `flow` and `runtime`, never a durable-execution vendor, and it
 imports no node handler. It provides the one `runtime.FlowHost`
 (`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
-owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038 and 044, scenarios
-`host.feature`.
+owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038, 044 and 050,
+scenarios `host.feature`.
 
 ```go
 // NodeHandler is the flow code of one effectful node kind (ADR-0011).
@@ -210,11 +262,15 @@ type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawM
 // catalog and registered node handlers.
 type Host struct{ /* unexported */ }
 
-func New(catalog DefinitionCatalog) *Host
+func New(catalog DefinitionCatalog, opts ...Option) *Host
 // RegisterHandler registers the handler for a node kind. The composition root
 // calls it before the host is registered with a runtime.
 func (h *Host) RegisterHandler(kind string, handler NodeHandler)
 func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.RawMessage) (json.RawMessage, error)
+
+// WithMaxFanout lowers the map fan-out limit for the runs the host starts
+// (REQ-FLOW-048, design.md §2.5); the machine's DefaultMaxFanout is the cap.
+func WithMaxFanout(limit int) Option
 
 // DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
 type DefinitionCatalog interface {
@@ -271,6 +327,34 @@ event carrying the error's `core.Code` and message (`core.CodeOf`, so a
 non-`*core.Error` becomes `internal`). Handing `node_failed` to the machine is
 the host's whole decision; when the machine returns `fail`, the host returns a
 `*core.Error` with that code.
+
+**Node cost (REQ-FLOW-049, REQ-FLOW-050).** The host reports a finished node's
+settled cost to the machine in `flow.Event.CostMpts`: an additive field of
+`flow.Event`, an `int64` of milli-points, non-negative, set only on
+`node_completed` and `node_failed` and left zero on every other event. The
+machine adds it to `Snapshot.Cost` with the node's other updates, when it
+applies the event (REQ-FLOW-049), so the edges out of that node and every later
+expression see it in `run.cost`, which is what a guard's `cost_mpts` compares
+against (§2.4). The number is part of the node's recorded result — the amount
+the node's step, node handler or child run returned — and never a value
+read from a ledger, a price table or a meter while replaying: the event the
+host feeds back already carries it, so replaying the same history accrues the
+same cost and reaches the same guard verdicts (REQ-FLOW-037). A `node_failed`
+accrues the settled cost of the pending step the event names, once: applying it
+removes that pending step. For a node whose result carries no cost the host
+reports `0`, and a pure `set` node, a wait node and a gate node cost nothing, so
+their completions carry no cost. The field is non-negative by contract —
+settlement charges a non-negative number of
+milli-points (`specs/models/design.md` §C3 and §C5) — so the machine never has
+to read a negative cost as a refund.
+
+The exact shape in which a result carries its cost — for example a result type
+that pairs the node's output with the settled milli-points — is the host
+design owner's decision (Saber, EP0-29). This spec fixes only the carrier's
+destination and its properties. `model/node` (WP-L3-03) is where reservation
+and settlement happen (`specs/models/design.md` §C4 and §C5,
+`docs/architecture/model-layer.md` §4), so its handler's result is the natural
+carrier for the cost of a model or agent node.
 
 **Replay and state (REQ-FLOW-037, 038).** The host keeps no state between calls
 other than local variables of the `FlowHost` call and the machine `Snapshot`
