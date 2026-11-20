@@ -32,6 +32,14 @@ func newMachineWorld() *machineWorld {
 	return &machineWorld{}
 }
 
+func (w *machineWorld) declared() bool {
+	return w.ir != nil
+}
+
+func (w *machineWorld) startDeclared() error {
+	return w.start(`{}`)
+}
+
 func (w *machineWorld) started() bool {
 	return w.machine != nil
 }
@@ -322,10 +330,6 @@ func registerFlowMachine(sc *godog.ScenarioContext) {
 			return w.driveRunUntilFail(10)
 		}
 		return nil
-	})
-
-	sc.Step(`^a run of the flow has started$`, func(ctx context.Context) error {
-		return world(ctx).Machine.start(`{}`)
 	})
 
 	sc.Step(`^a flow whose node "([^"]*)" of kind "([^"]*)" precedes node "([^"]*)" of kind "([^"]*)"$`,
