@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -372,5 +373,80 @@ func TestOpenLocalSecretsRejectsSymlinkedKeyFile(t *testing.T) {
 	}
 	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
 		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+	}
+}
+
+func TestKeyPublishKeepsThePartialKeyInvisible(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.key")
+	tmp, err := writeKeyTemp(dir, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the key is visible before publish: %v", err)
+	}
+	if err := publishKey(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(tmp)
+	got, err := readKeyFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, testKey()) {
+		t.Fatal("the published key differs from the key written")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("published key mode = %o, want 600", got)
+	}
+}
+
+func TestPublishKeyDoesNotReplaceAnExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.key")
+	first := bytes.Repeat([]byte{1}, 32)
+	tmp, err := writeKeyTemp(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publishKey(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(tmp)
+
+	tmp, err = writeKeyTemp(dir, bytes.Repeat([]byte{2}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(tmp) })
+	if err := publishKey(tmp, path); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("publishKey error = %v, want fs.ErrExist", err)
+	}
+	got, err := readKeyFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, first) {
+		t.Fatal("publishKey replaced the existing key")
+	}
+}
+
+func TestLoadOrCreateKeyLeavesNoTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.key")
+	if _, err := loadOrCreateKey(path); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "secrets.key" {
+		t.Fatalf("directory holds %v, want only secrets.key", entries)
 	}
 }

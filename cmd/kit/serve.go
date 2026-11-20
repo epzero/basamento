@@ -359,30 +359,85 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, invalidSecretKey("secrets key directory could not be created")
 	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, core.NewError(core.CodeInternal, "secrets key could not be generated", nil)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	tmp, err := writeKeyTemp(dir, key)
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return readKeyFile(path)
+		return nil, invalidSecretKey("secrets key file could not be written")
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	if err := publishKey(tmp, path); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, invalidSecretKey("secrets key file could not be written")
 		}
-		return nil, invalidSecretKey("secrets key file could not be written")
-	}
-	if _, err := f.Write(key); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return nil, invalidSecretKey("secrets key file could not be written")
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return nil, invalidSecretKey("secrets key file could not be written")
+		existing, err := readKeyFile(path)
+		if err != nil {
+			return nil, invalidSecretKey("secrets key file could not be read")
+		}
+		return existing, nil
 	}
 	return key, nil
+}
+
+// writeKeyTemp writes key to a 0600 temporary file in dir and fsyncs it before
+// closing, so the final path never holds a partial key. The caller publishes
+// it with publishKey and removes it afterwards.
+func writeKeyTemp(dir string, key []byte) (string, error) {
+	f, err := os.CreateTemp(dir, ".secrets-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmp := f.Name()
+	published := false
+	defer func() {
+		if !published {
+			_ = f.Close()
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return "", err
+	}
+	if _, err := f.Write(key); err != nil {
+		return "", err
+	}
+	if err := f.Sync(); err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	published = true
+	return tmp, nil
+}
+
+// publishKey makes tmp appear at path atomically without replacing a key
+// another process wrote: a hard link fails with ErrExist instead of
+// overwriting, and the caller then reads the existing key. A file system
+// without hard links falls back to rename, as platform/secrets does. The
+// directory is synced so the new name survives a crash.
+func publishKey(tmp, path string) error {
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			return err
+		}
+	}
+	dir := filepath.Dir(path)
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	return d.Sync()
 }
 
 // readKeyFile opens the key without following a symlink, checks the mode of
