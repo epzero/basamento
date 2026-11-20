@@ -41,15 +41,6 @@ func scenarioTags() string {
 	return strings.Join(clauses, ",")
 }
 
-// TestMain closes the embedded Postgres server once after every test in this
-// process, so go test -count=N reuses the server InitPostgres started on the
-// first repetition (ADR-0015, EP0-154).
-func TestMain(m *testing.M) {
-	code := m.Run()
-	_ = sqltest.ClosePostgres()
-	os.Exit(code)
-}
-
 func splitTagCSV(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))
@@ -96,12 +87,17 @@ func TestBDDGateProfiles(t *testing.T) {
 // BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
 	sqltest.ResetSkipCounts()
+	// An earlier -count repetition, or a test such as the strict URL probe in
+	// report_test.go, may close the embedded server or leave a failed InitPostgres
+	// outcome in this process; start from a clean server (EP0-154).
+	sqltest.ResetPostgresForTest()
 	failed := false
 	defer func() {
 		if err := WriteBDDReport(failed); err != nil {
 			t.Errorf("bdd report: %v", err)
 		}
 	}()
+	defer func() { _ = sqltest.ClosePostgres() }()
 
 	if err := sqltest.InitPostgres(context.Background()); err != nil {
 		failed = true
