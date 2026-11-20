@@ -40,6 +40,50 @@ func TestOpenLocalSecretsRejectsMistypedBase64WithoutCreatingAFile(t *testing.T)
 	}
 }
 
+func TestOpenLocalSecretsRejectsAnInvalidPathEscape(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	_, err := openLocalSecrets(context.Background(), "localsecrets://secrets%zz.key")
+	if err == nil {
+		t.Fatal("openLocalSecrets accepted a path with a bad percent escape")
+	}
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a bad path escape created %d entries, want none", len(entries))
+	}
+}
+
+func TestOpenLocalSecretsUsesTheDefaultURLPathWithASpace(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "kit data")
+	got, err := config.Load(config.Options{Env: []string{"KIT_DATA_DIR=" + dataDir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, ok := got.Setting("secrets.url")
+	if !ok {
+		t.Fatal("secrets.url has no embedded default")
+	}
+	p, err := openLocalSecrets(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("openLocalSecrets(%q): %v", raw, err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	keyPath := filepath.Join(dataDir, "secrets.key")
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("key file was not created at %q: %v", keyPath, err)
+	}
+	escaped := filepath.Join(filepath.Dir(dataDir), "kit%20data", "secrets.key")
+	if _, err := os.Stat(escaped); !os.IsNotExist(err) {
+		t.Fatalf("the percent-encoded path %q exists: %v", escaped, err)
+	}
+}
+
 func TestOpenLocalSecretsCreatesMissingKeyFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "secrets.key")
 	p, err := openLocalSecrets(context.Background(), "localsecrets://"+path)

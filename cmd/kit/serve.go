@@ -271,10 +271,17 @@ func looksLikeKeyPath(s string) bool {
 	return filepath.Ext(s) != ""
 }
 
-// keyFilePath resolves the explicit file:// form and leaves a plain path as is.
+// keyFilePath resolves the explicit file:// form and percent-decodes a plain
+// path. The built-in default is escaped as a URL path, so a data directory
+// with a space arrives as %20; decoding it keeps the key in the real
+// directory. A bad escape is invalid_argument.
 func keyFilePath(rest string) (string, error) {
 	if !strings.HasPrefix(rest, "file://") {
-		return rest, nil
+		path, err := url.PathUnescape(rest)
+		if err != nil {
+			return "", invalidSecretKey("secrets key path has an invalid percent escape")
+		}
+		return path, nil
 	}
 	u, err := url.Parse(rest)
 	if err != nil || u.Scheme != "file" {
