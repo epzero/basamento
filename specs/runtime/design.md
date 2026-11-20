@@ -213,11 +213,13 @@ spec change.
 
 ### Changes outside `runtime/local`
 
-None are needed: `runtime/runtime.go` already has `Caps`, `StepOptions`,
+An additive timer capability on the clock `New` accepts (`After`), implemented
+by `core.SystemClock` and `coretest.FakeClock` (fires on Advance), as stated
+above. `runtime/runtime.go` already has `Caps`, `StepOptions`,
 `ChildOptions.ParentClose`, the `terminated` state and every code used, and
-the package `runtime/local` exists in `layering.yaml`. If the implementer
-finds that a contract change is needed, it lands first in a pull request of
-its own.
+the package `runtime/local` exists in `layering.yaml`. No runtime contract
+file changes. If the implementer finds that a further contract change is
+needed, it lands first in a pull request of its own.
 
 ## Temporal runtime (WP-L5-02)
 
