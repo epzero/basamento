@@ -31,6 +31,7 @@ type World struct {
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
+	Model       *modelWorld
 	Machine     *machineWorld
 	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
 	Host any
@@ -53,6 +54,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
+			Model:       newModelWorld(),
 			Machine:     newMachineWorld(),
 		}), nil
 	})
@@ -74,6 +76,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerCatalog(sc)
+	registerModel(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

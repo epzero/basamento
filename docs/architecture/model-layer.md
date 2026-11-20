@@ -1,8 +1,8 @@
 # Model layer
 
-Status: contract in `model/model.go`; the catalog and price table in
-`model/catalog` (WP-L3-06); the rest of the implementation **Planned**
-(WP-L3-*).
+Status: contract and adapters implemented in `model` and `model/chat`
+(WP-L3-01); the catalog and price table in `model/catalog` (WP-L3-06);
+provider construction and routing **Planned** (WP-L3-04).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -36,6 +36,28 @@ video. It outlives the client connection, streams, can be cancelled, retried
 and recorded. A single contract gives every model the same path for budget,
 cancellation, reattach and replay. Small calls such as embeddings use the
 blocking `Invoke` in process.
+
+`model.Registry` holds what every adapter owes regardless of protocol:
+idempotent starts per client ref within the tenant of the call's context, the
+ordered event log with replay from a cursor, the result, cancellation and
+lookup. Bounding memory for ended invocations is ticketed as EP0-140. The chat
+adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
+eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
+values, so the contract itself stays free of the dependency. The chat adapter
+caps one vendor stream at 8 MiB of payload and 262144 chunks; exceeding either
+limit ends the invocation with `vendor_error`. The payload counts assistant text
+and reasoning, every string of a tool call, the text and the URL or URI of legacy
+multi-content parts, and the text, reasoning, URL, base64 data, file id and MIME
+type of assistant-generated parts; Extra and ResponseMeta are metadata and are not
+counted. A stream that ends with only vendor metadata
+(`Extra`, `ResponseMeta` such as a content filter or refusal finish reason) and
+no assistant content is `vendor_error` with a fixed message; provider adapters
+map refusals to text or typed errors before that check. A vendor panic inside the
+adapter's execute goroutine is converted to `internal` at that boundary without
+crashing the process. Unmapped `Request.Params` keys (for example `tier` for
+pricing) are ignored; the adapter maps `temperature`, `top_p`, `max_tokens` and
+`stop`. Provider construction is WP-L3-04's, including the OpenAI-compatible
+mode MiniMax and GLM use.
 
 ## 2. Descriptors
 
