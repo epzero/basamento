@@ -102,6 +102,9 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		if err != nil {
 			return CallResult{}, err
 		}
+		// Start must see this attempt's idempotency key, not the call's
+		// original one, or a retry would replay attempt 1 (REQ-MODEL-054).
+		req.ClientRef = ref
 		res, timedOut, events, attemptErr := e.runAttempt(ctx, Attempt{
 			Number: attempt, Rung: rung, ClientRef: ref, Request: req,
 		})
