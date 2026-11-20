@@ -87,12 +87,12 @@ behaviour is spec-silent and covered only by unit tests or this document.
 
 | Behaviour | Spec coverage |
 | --- | --- |
-| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` breaks ties by lowest index | RT-008 / RT-011 scenarios (timer batching via flow stubs) |
-| Duplicate `Start` with the same `RunID` in one tenant → `conflict` | spec-silent (unit tests) |
-| `IdempotencyKey` deduplication scoped per tenant | RT-044 (tenant isolation); per-tenant key scope spec-silent |
+| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` breaks ties by lowest index within a batch and otherwise prefers the earliest completion seq | RT-008 / RT-011 (incl. RT-011-04) |
+| Duplicate `Start` with the same `RunID` in one tenant → `conflict` | RT-046-01 |
+| Non-empty `StartRequest.IdempotencyKey` deduplicates within a tenant; empty key does not; keys do not cross tenants | RT-047 / RT-048 |
 | Panic in the flow host → failed run, process survives | spec-silent (unit tests) |
 | Panic in a registered step → `internal` step error, not retried, process survives | spec-silent (unit tests) |
-| `Child` re-attach: same parent run and flow returns the existing child; otherwise `conflict` | partial (child scenarios); re-attach rule spec-silent |
+| `Child` re-attach: same parent run and flow (name and hash) returns the existing child; otherwise `conflict` | RT-049 / RT-050 |
 | `List` cursor paging: opaque decimal index into start order; invalid or out-of-range cursor → `invalid_argument`; cursor does not widen tenant visibility | RT-026 lists runs; paging semantics spec-silent |
 | Every started run stays in memory (no retention) | RT-006 / design §Local |
-| `New` requires a clock that implements `After` | spec-silent (unit test) |
+| `New` requires a timer clock (`After`); failure message names timer scheduling | RT-054-01 |
