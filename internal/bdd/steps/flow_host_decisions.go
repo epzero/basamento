@@ -186,8 +186,9 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 			return world(ctx).Host.startRef(runtime.FlowRef{Name: name, Hash: ""}, input)
 		})
 
-	sc.Step(`^the failure payload has code "([^"]*)" and message 'flow: node "([^"]*)" failed'$`,
-		func(ctx context.Context, code, node string) error {
+	// FLOW-057-01: exact code and Message on the run error returned by Host.Run.
+	sc.Step(`^the run fails with code "([^"]*)" and message '([^']*)'$`,
+		func(ctx context.Context, code, wantMsg string) error {
 			w := world(ctx).Host
 			if err := w.waitDone(); err != nil {
 				return err
@@ -195,24 +196,21 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 			if w.err == nil {
 				return fmt.Errorf("run succeeded, want failure")
 			}
-			wantMsg := fmt.Sprintf(`flow: node "%s" failed`, node)
 			var pe *core.Error
-			if errors.As(w.err, &pe) {
-				if string(pe.Code) != code {
-					return fmt.Errorf("code %s, want %s", pe.Code, code)
-				}
-				if pe.Message != wantMsg {
-					return fmt.Errorf("message %q, want %q", pe.Message, wantMsg)
-				}
-				return nil
+			if !errors.As(w.err, &pe) {
+				return fmt.Errorf("run error is %T, want *core.Error with code %s and message %q: %w", w.err, code, wantMsg, w.err)
 			}
-			if string(core.CodeOf(w.err)) != code || !strings.Contains(w.err.Error(), wantMsg) {
-				return fmt.Errorf("error %w, want code %s message %q", w.err, code, wantMsg)
+			if string(pe.Code) != code {
+				return fmt.Errorf("code %s, want %s", pe.Code, code)
+			}
+			if pe.Message != wantMsg {
+				return fmt.Errorf("message %q, want %q", pe.Message, wantMsg)
 			}
 			return nil
 		})
 
-	sc.Step(`^the failure payload does not contain "([^"]*)"$`, func(ctx context.Context, forbidden string) error {
+	// FLOW-057-01: forbidden text must not appear anywhere in the run error blob.
+	sc.Step(`^the run's error does not contain "([^"]*)"$`, func(ctx context.Context, forbidden string) error {
 		w := world(ctx).Host
 		if err := w.waitDone(); err != nil {
 			return err
@@ -221,7 +219,7 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 			return fmt.Errorf("run succeeded, want failure")
 		}
 		if strings.Contains(hostRunErrorBlob(w.err), forbidden) {
-			return fmt.Errorf("failure payload contains forbidden text %q", forbidden)
+			return fmt.Errorf("run error contains forbidden text %q", forbidden)
 		}
 		return nil
 	})
