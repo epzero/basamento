@@ -211,8 +211,12 @@ func (r *Runtime) startChild(tenant core.TenantID, id string, flow runtime.FlowR
 	key := runKey{tenant: tenant, id: id}
 	existing := r.runs[key]
 	if existing != nil {
+		if existing.parentRun == parent && existing.flow == flow {
+			r.mu.Unlock()
+			return existing, nil
+		}
 		r.mu.Unlock()
-		return existing, nil
+		return nil, core.NewError(core.CodeConflict, "local: a run with that id already exists", map[string]any{"run": id})
 	}
 	ctx := context.WithoutCancel(parent.ctx)
 	started := newRun(r, tenant, id, flow, in, ctx)

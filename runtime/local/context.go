@@ -272,9 +272,6 @@ func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
 			index, earliest = i, seq
 		}
 	}
-	if index >= 0 {
-		return 0 // mutant: always index 0
-	}
 	return index
 }
 

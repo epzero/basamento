@@ -1048,9 +1048,6 @@ func registerLocal(sc *godog.ScenarioContext) {
 		}
 		got := w.output(w.current)
 		if len(got) == 0 && w.currentExec != nil {
-			w.currentExec.mu.Lock()
-			got = append(json.RawMessage(nil), w.currentExec.result...)
-			w.currentExec.mu.Unlock()
 			w.recordOutput(w.current, w.currentExec)
 			got = w.output(w.current)
 		}
