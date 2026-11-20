@@ -35,7 +35,6 @@ with `make tools`, which pins their versions in the `Makefile`.
   `test_only_allowed_from` (the BDD harness) are neither fakes nor production:
   their non-test `.go` files skip both checks, so ADR-0015's `crypto/rand`
   Postgres password and harness `ForTest` helpers are allowed.
-
 - **Spec/code separation**, with `-base <ref>`: a change that touches any file
   outside `specs/` and `docs/` does not edit `specs/<capability>/design.md`
   (`agent-workflow.md` §7.3). A design that turns out wrong or incomplete

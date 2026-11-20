@@ -18,8 +18,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// bannedTestTimeFuncs lists wall-clock and sleep functions forbidden in tests,
-// test-only packages and BDD step code (AGENTS.md: use coretest.FakeClock).
+// bannedTestTimeFuncs lists wall-clock and sleep functions forbidden in tests
+// and fake packages from test_only (AGENTS.md: use coretest.FakeClock).
 // Timers and ticks wait on the real clock, so they are sleeps too.
 // context.WithTimeout and context.WithDeadline stay allowed: they read the
 // wall clock, but a test uses them only as a hang guard, never as a source of
