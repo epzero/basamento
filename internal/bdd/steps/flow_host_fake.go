@@ -117,12 +117,12 @@ type hostFake struct {
 
 func newHostFake() *hostFake {
 	d := &hostFake{
-		now:             time.Unix(1_700_000_000, 0).UTC(),
-		steps:           map[string]hostScript{},
-		gates:           map[string]*hostFuture{},
-		gateDone:        map[string]json.RawMessage{},
-		childDone:       map[string]json.RawMessage{},
-		executed: map[string]int{},
+		now:       time.Unix(1_700_000_000, 0).UTC(),
+		steps:     map[string]hostScript{},
+		gates:     map[string]*hostFuture{},
+		gateDone:  map[string]json.RawMessage{},
+		childDone: map[string]json.RawMessage{},
+		executed:  map[string]int{},
 	}
 	d.cond = sync.NewCond(&d.mu)
 	return d
