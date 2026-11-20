@@ -30,7 +30,7 @@ func TestRunHandlersFailurePassesSettledCostToEvent(t *testing.T) {
 			},
 		},
 	}
-	dc := &nilTestDC{}
+	dc := ctxOnlyDC{}
 	events, err := h.runHandlers(dc, def, []flow.Command{{Type: "run_node", Node: "repair", Attempt: 2}})
 	if err != nil {
 		t.Fatalf("runHandlers: %v", err)

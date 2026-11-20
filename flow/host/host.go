@@ -146,7 +146,7 @@ func (h *Host) checkHandlers(def *flow.IR) error {
 		if node.Kind != "model" && node.Kind != "agent" {
 			continue
 		}
-		if handler, ok := h.handlers[node.Kind]; ok && handler != nil {
+		if _, ok := h.handlers[node.Kind]; ok {
 			continue
 		}
 		return core.NewError(core.CodeUnsupported,
@@ -282,7 +282,7 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 		}
 		node := def.Nodes[command.Node]
 		handler, ok := h.handlers[node.Kind]
-		if !ok || handler == nil {
+		if !ok {
 			return nil, core.NewError(core.CodeUnsupported,
 				fmt.Sprintf("flow: node %q: no node handler is registered for kind %q", command.Node, node.Kind),
 				map[string]any{"node": command.Node, "kind": node.Kind})
