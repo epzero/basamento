@@ -1305,7 +1305,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		func(ctx context.Context, node, spec string) error {
 			w := world(ctx).Host
 			w.newFlow("gate", 1)
-			w.addNode(node, "gate", spec, "", "")
+			w.addNode(node, "gate", spec, "", node)
 			w.addEdge(ir.Start, node, "")
 			return nil
 		})
@@ -1342,7 +1342,7 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		func(ctx context.Context, node, spec string) error {
 			w := world(ctx).Host
 			w.newFlow("subflow", 1)
-			w.addNode(node, "subflow", spec, "", "")
+			w.addNode(node, "subflow", spec, "", node)
 			w.addEdge(ir.Start, node, "")
 			return nil
 		})
@@ -1636,16 +1636,6 @@ func (w *hostWorld) nodeResult(node string) (json.RawMessage, bool) {
 				}
 			}
 		}
-	}
-	w.dc.mu.Lock()
-	gatePayload, hasGate := w.dc.gateDone[node]
-	childPayload, hasChild := w.dc.childDone[node]
-	w.dc.mu.Unlock()
-	if hasGate {
-		return gatePayload, true
-	}
-	if hasChild {
-		return childPayload, true
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
