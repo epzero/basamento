@@ -1315,7 +1315,7 @@ func TestReplayCoversChildGateAndMap(t *testing.T) {
 		bad := append([]journalEntry(nil), journal...)
 		for i := range bad {
 			if bad[i].kind == "gate" {
-				bad[i].gate.Timeout = bad[i].gate.Timeout + time.Second
+				bad[i].gate.Timeout += time.Second
 				break
 			}
 		}
