@@ -17,24 +17,6 @@ type timeSink interface {
 	timePassed(context.Context, time.Duration) error
 }
 
-// registerSharedPassStep wires elapsed-time steps used by blob and flow-host scenarios.
-func registerSharedPassStep(sc *godog.ScenarioContext) {
-	sc.Step(`^([^"]+) pass$`, stepElapsedPasses)
-}
-
-// stepElapsedPasses advances the core fake clock and any host fake timer state.
-func stepElapsedPasses(ctx context.Context, elapsed string) error {
-	d, err := parseElapsed(elapsed)
-	if err != nil {
-		return err
-	}
-	world(ctx).Core.clock.Advance(d)
-	if sink, ok := any(world(ctx).Host).(timeSink); ok {
-		return sink.timePassed(ctx, d)
-	}
-	return nil
-}
-
 // runStarter is how a domain world starts a run with empty input from the
 // shared sentence "a run of the flow has started".
 type runStarter interface {

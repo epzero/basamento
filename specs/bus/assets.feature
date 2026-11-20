@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:cloud
+@wp:WP-L1-03 @level:component @profile:cloud
 Feature: Streams and buckets the bus can use
   The bus shares a JetStream cluster with other clients. It creates what it
   needs when it finds nothing, accepts what already matches its configuration,

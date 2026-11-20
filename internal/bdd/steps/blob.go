@@ -780,6 +780,8 @@ func parsePositiveDuration(s string) (time.Duration, error) {
 		}
 		unit := parts[i+1]
 		switch {
+		case strings.HasPrefix(unit, "millisecond"):
+			total += time.Duration(n) * time.Millisecond
 		case strings.HasPrefix(unit, "second"):
 			total += time.Duration(n) * time.Second
 		case strings.HasPrefix(unit, "minute"):

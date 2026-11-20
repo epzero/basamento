@@ -23,7 +23,8 @@
 // A malformed subject is empty, has whitespace, a wildcard token ('*' or '>'),
 // or is not one or more dot-separated tokens of letters, digits, '-', and '_'
 // with no empty token. A malformed key is empty, has whitespace or a wildcard,
-// starts or ends with '.', or is not made of letters, digits, '-', '_', '/',
+// starts or ends with '.', contains an empty dot-separated token, exceeds the
+// bus key length bound, or is not made of ASCII letters, digits, '-', '_', '/',
 // '=', and '.'. Every Bus and KV method rejects a malformed subject or key
 // with code invalid_argument before touching storage.
 //
