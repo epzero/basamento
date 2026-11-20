@@ -76,3 +76,44 @@ Feature: Compiling flows
       | edge count      | 16385   | edges | 16384   |
       | expression size | 16385   | bytes | 16384   |
       | definition size | 1048577 | bytes | 1048576 |
+
+  @REQ-FLOW-062 @id:FLOW-062-01 @planned @wp:WP-L4-01
+  Scenario: A map node whose child is not a declared node is rejected
+    Given a flow with a map node "fanout" that fans out over "state.items" to node "ghost"
+    When the flow is compiled
+    Then compilation fails with code "invalid_argument" naming the map node "fanout" and the missing child node "ghost"
+
+  @REQ-FLOW-063 @id:FLOW-063-01 @planned @wp:WP-L4-01
+  Scenario Outline: A map child of a kind the machine runs itself is rejected
+    Given a flow with a map node "fanout" that fans out over "state.items" to node "fanout_item"
+    And the node "fanout_item" is of kind "<kind>"
+    When the flow is compiled
+    Then compilation fails with code "invalid_argument" naming the map node "fanout", the child node "fanout_item" and the kind "<kind>"
+
+    Examples:
+      | kind     |
+      | set      |
+      | parallel |
+      | map      |
+
+  @REQ-FLOW-064 @id:FLOW-064-01 @planned @wp:WP-L4-01
+  Scenario: One child node claimed by two map nodes is rejected
+    Given a flow with a map node "fanout" that fans out over "state.items" to node "fanout_item"
+    And an edge from node "fanout" to node "review"
+    And a map node "review" that fans out over "state.files" to node "fanout_item"
+    When the flow is compiled
+    Then compilation fails with code "invalid_argument" naming the map nodes "fanout" and "review" and the child node "fanout_item"
+
+  @REQ-FLOW-065 @id:FLOW-065-01 @planned @wp:WP-L4-01
+  Scenario: A map child that carries a guard is rejected
+    Given a flow with a map node "fanout" that fans out over "state.items" to node "fanout_item"
+    And the node "fanout_item" has a guard of 3 visits
+    When the flow is compiled
+    Then compilation fails with code "invalid_argument" naming the map node "fanout" and the child node "fanout_item"
+    And the failure says that a guard counts visits of the nodes the machine routes to while a map child runs once per element
+
+  @REQ-FLOW-066 @id:FLOW-066-01 @planned @wp:WP-L4-01
+  Scenario: A condition on the edge from START is rejected
+    Given a flow whose edge from "START" to "plan" is conditional on "true"
+    When the flow is compiled
+    Then compilation fails with code "invalid_argument" naming the edge from "START" to "plan"

@@ -114,6 +114,55 @@ If an edge starts at `FAIL`, then the flow compiler shall reject the flow with c
 ### REQ-FLOW-043 — Exactly one edge starts at START
 If a flow has no edge from `START`, or more than one, then the flow compiler shall reject the flow with code `invalid_argument`, stating that the flow needs exactly one edge from `START`.
 
+## Definition errors the machine cannot repair (WP-L4-01)
+
+Five defects make a definition unrunnable in a way the machine cannot report
+well once a run is in flight: a fan-out to a node that is not declared, a child
+the machine should run itself, two fan-outs that share one child, a guard on a
+child that a fan-out runs, and a condition on the first edge. `flow/machine`'s
+`New` rejects all five as defence for an IR built in Go without the compiler
+(ADR-0003), and the compiler rejects them at definition time as well, so the
+author sees them when the flow is registered rather than when a run starts.
+Every rejection below fails with code `invalid_argument`, naming the node or
+edge at fault (REQ-FLOW-062 to REQ-FLOW-066). Scenarios: `compile.feature`.
+
+### REQ-FLOW-062 — A map child that is not a declared node
+If a `map` node's spec names as its child a node the flow does not declare, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the missing child node.
+
+The child would otherwise never run: the machine emits no `run_node` command
+for it, so the host would receive commands for a node that is not in the
+definition at all.
+
+### REQ-FLOW-063 — A map child of a kind the machine runs itself
+If a `map` node's child is of kind `set`, `parallel` or `map`, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node, the child node and the kind.
+
+The machine runs those three kinds itself and emits no `run_node` command for
+them, so the host has nothing to run for the child of the fan-out.
+
+### REQ-FLOW-064 — One child claimed by two map nodes
+If two `map` nodes name the same child node, then the flow compiler shall reject the flow with code `invalid_argument`, naming both `map` nodes and the child node.
+
+Steps of a fan-out are identified by `(node, attempt)` (REQ-FLOW-002, scenario
+FLOW-002-01), so two `map` nodes over one child produce colliding steps and the
+canonical merge depends on which fan-out completed first — exactly what
+REQ-FLOW-002 rules out.
+
+### REQ-FLOW-065 — A map child that carries a guard
+If a `map` node's child carries a guard, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the child node, and stating that a guard counts visits of the nodes the machine routes to while a map child runs once per element.
+
+A guard bounds a cycle by counting the visits of the nodes the machine routes
+to (REQ-FLOW-003, within the budgets of REQ-FLOW-045). A map child is invoked
+once per element without being routed to, so its visits are never counted: a
+`map` → child → `map` cycle that only the child's `max_visits` bounds would
+count as bounded to REQ-FLOW-003 and never stop.
+
+### REQ-FLOW-066 — No condition on the edge from START
+If the one edge from `START` carries a `when` condition, then the flow compiler shall reject the flow with code `invalid_argument`, naming the edge.
+
+`START` is where a run enters the definition, before any node has completed
+and routed, so the first superstep has nothing to route on and the machine
+does not evaluate the condition: accepting one would silently ignore it.
+
 ## Flow host (WP-L4-04)
 
 The flow host is the one durable entrypoint, `runtime.FlowHost` (ADR-0011): it
