@@ -14,7 +14,7 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 | Package | Role | Owned by |
 | --- | --- | --- |
 | `internal/config` | load, validate, effective report, schema of known keys, and the port-agnostic serve lifecycle (`serve.go`) | WP-L1-05 |
-| `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
+| `structs.go` in `internal/config` | the `Config` struct and the one key table: key, Go field, default, validator and the apply path (§2) | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
 
