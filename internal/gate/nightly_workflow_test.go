@@ -243,7 +243,7 @@ func TestNightlyWorkflowPostgresGuardsMutations(t *testing.T) {
 			d.Jobs["flake-hunt"] = j
 		}, "actions/cache@v4"},
 		{"flake-hunt", "prefetch after test", func(d *nightlyWorkflowDoc) {
-			d.Jobs["flake-hunt"] = reorderPrefetchAfterTest(d.Jobs["flake-hunt"], expects["flake-hunt"])
+			d.Jobs["flake-hunt"] = reorderPrefetchAfterTest(d.Jobs["flake-hunt"])
 		}, "make pg-prefetch must run before go test"},
 		{"flake-hunt", "no test timeout", func(d *nightlyWorkflowDoc) {
 			d.Jobs["flake-hunt"] = stripNightlyTestTimeout(d.Jobs["flake-hunt"], expects["flake-hunt"])
@@ -297,7 +297,7 @@ func dropNightlySteps(job nightlyWorkflowJob, drop func(nightlyWorkflowStep) boo
 	return out
 }
 
-func reorderPrefetchAfterTest(job nightlyWorkflowJob, _ nightlyJobExpect) nightlyWorkflowJob {
+func reorderPrefetchAfterTest(job nightlyWorkflowJob) nightlyWorkflowJob {
 	out := cloneNightlyJob(job)
 	var prefetch, rest []nightlyWorkflowStep
 	for _, s := range out.Steps {
