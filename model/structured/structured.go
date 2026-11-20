@@ -231,8 +231,10 @@ func forcedTool(spec json.RawMessage) (json.RawMessage, error) {
 		"name":              "structured_output",
 		"desc":              "Answer with the call's output schema",
 		"has_params_one_of": true,
-		// eino's ToolInfo carries a JSON schema as an encoded string.
-		"json_schema": string(spec),
+		// eino's ToolInfo decodes json_schema as a JSON-schema object, not as
+		// an encoded string (model/chat.callOptions unmarshals Tools into
+		// []*schema.ToolInfo).
+		"json_schema": spec,
 	}
 	out, err := json.Marshal([]any{tool})
 	if err != nil {

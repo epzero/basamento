@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
 )
@@ -226,11 +227,18 @@ func TestRequestForForcedTool(t *testing.T) {
 	if len(req.OutputSchema) != 0 {
 		t.Fatalf("forced tool still carries a native schema: %s", req.OutputSchema)
 	}
-	var tools []map[string]any
+	var tools []*schema.ToolInfo
 	if err := json.Unmarshal(req.Tools, &tools); err != nil {
-		t.Fatalf("tools = %s: %v", req.Tools, err)
+		t.Fatalf("tools do not decode as eino tool infos: %s: %v", req.Tools, err)
 	}
-	if len(tools) != 1 || tools[0]["name"] != "structured_output" {
+	if len(tools) != 1 || tools[0].Name != "structured_output" {
 		t.Fatalf("tools = %s", req.Tools)
+	}
+	schema, err := tools[0].ToJSONSchema()
+	if err != nil {
+		t.Fatalf("tool schema: %v", err)
+	}
+	if schema.Type != "object" {
+		t.Fatalf("tool schema type = %q, want object", schema.Type)
 	}
 }
