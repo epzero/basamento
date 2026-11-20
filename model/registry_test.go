@@ -17,7 +17,7 @@ func testHandle(clientRef string) Handle {
 }
 
 func TestBeginRejectsEmptyClientRef(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	if _, _, err := reg.Begin(context.Background(), ""); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("no tenant: code = %q, want invalid_argument", core.CodeOf(err))
 	}
@@ -27,7 +27,7 @@ func TestBeginRejectsEmptyClientRef(t *testing.T) {
 }
 
 func TestLookupRejectsEmptyClientRef(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	if _, err := reg.Lookup(context.Background(), ""); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("no tenant: code = %q, want invalid_argument", core.CodeOf(err))
 	}
@@ -37,7 +37,7 @@ func TestLookupRejectsEmptyClientRef(t *testing.T) {
 }
 
 func TestRegistryEmptyProviderHandleResolves(t *testing.T) {
-	reg := NewRegistry("alpha")
+	reg := newTestRegistryAlpha(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-empty-prov")
 	h := run.Handle()
 	h.Provider = ""
@@ -51,7 +51,7 @@ func TestRegistryEmptyProviderHandleResolves(t *testing.T) {
 }
 
 func TestRegistryWrongProviderHandleNotFound(t *testing.T) {
-	reg := NewRegistry("alpha")
+	reg := newTestRegistryAlpha(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	h := run.Handle()
 	h.Provider = "beta"
@@ -67,7 +67,7 @@ func TestRegistryWrongProviderHandleNotFound(t *testing.T) {
 }
 
 func TestRegistryStartIsIdempotent(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	first, existing, err := reg.Begin(testCtx(t), "ref-1")
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -91,7 +91,7 @@ func TestRegistryStartIsIdempotent(t *testing.T) {
 }
 
 func TestEventsAreOrderedAndReplayable(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "a"})
 	run.Publish(Event{Kind: EventText, Text: "b"})
@@ -114,7 +114,7 @@ func TestEventsAreOrderedAndReplayable(t *testing.T) {
 }
 
 func TestEventsChannelClosesAtTheEnd(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventProgress, Progress: 0.5})
 	run.Succeed(Result{})
@@ -127,7 +127,7 @@ func TestEventsChannelClosesAtTheEnd(t *testing.T) {
 }
 
 func TestResultAfterSuccess(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "hi"})
 	run.Succeed(Result{Vectors: [][]float32{{1, 2}}})
@@ -146,7 +146,7 @@ func TestResultAfterSuccess(t *testing.T) {
 
 func TestFailStripsRawVendorTextFromStoredError(t *testing.T) {
 	const secret = "401: invalid key sk-secret"
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(errors.New(secret))
 
@@ -170,7 +170,7 @@ func TestFailStripsRawVendorTextFromStoredError(t *testing.T) {
 }
 
 func TestFailRecordsPlatformCoreError(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(core.NewError(core.CodeRateLimited, "slow down", nil))
 
@@ -185,7 +185,7 @@ func TestFailRecordsPlatformCoreError(t *testing.T) {
 }
 
 func TestFailMapsContextErrorsBeforePersisting(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Fail(context.Canceled)
 
@@ -200,7 +200,7 @@ func TestFailMapsContextErrorsBeforePersisting(t *testing.T) {
 }
 
 func TestCancelEndsTheInvocation(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventProgress, Progress: 0.5})
 
@@ -225,7 +225,7 @@ func TestCancelEndsTheInvocation(t *testing.T) {
 }
 
 func TestCancelAfterEndIsANoop(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Succeed(Result{})
 	if err := reg.Cancel(testCtx(t), run.Handle()); err != nil {
@@ -238,7 +238,7 @@ func TestCancelAfterEndIsANoop(t *testing.T) {
 }
 
 func TestLookupFindsTheInvocation(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	if h, err := reg.Lookup(testCtx(t), "missing"); err != nil || h != nil {
 		t.Fatalf("lookup missing = (%v, %v), want (nil, nil)", h, err)
 	}
@@ -253,7 +253,7 @@ func TestLookupFindsTheInvocation(t *testing.T) {
 }
 
 func TestEventsReplayFromCursor(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	for i := 0; i < 5; i++ {
 		run.Publish(Event{Kind: EventText, Text: fmt.Sprintf("%d", i)})
@@ -275,7 +275,7 @@ func TestEventsReplayFromCursor(t *testing.T) {
 }
 
 func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "a"})
 	run.Publish(Event{Kind: EventText, Text: "b"})
@@ -287,7 +287,7 @@ func TestEventsNegativeCursorReplaysFromStart(t *testing.T) {
 }
 
 func TestEventsMinInt64CursorReplaysFromStart(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "only"})
 	run.Succeed(Result{})
@@ -298,7 +298,7 @@ func TestEventsMinInt64CursorReplaysFromStart(t *testing.T) {
 }
 
 func TestEventsMaxInt64CursorWaitsForLaterEvents(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "first"})
 
@@ -322,7 +322,7 @@ func TestEventsMaxInt64CursorWaitsForLaterEvents(t *testing.T) {
 }
 
 func TestEventsCursorBeyondEndWaitsForLaterEvents(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	run.Publish(Event{Kind: EventText, Text: "first"})
 
@@ -347,7 +347,7 @@ func TestEventsCursorBeyondEndWaitsForLaterEvents(t *testing.T) {
 
 func TestEventsLongStreamLateAndEarlyFollowers(t *testing.T) {
 	const n = 5000
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	run := mustBegin(t, reg, testCtx(t), "ref-1")
 	early := mustEvents(t, reg, run.Handle(), 0)
 	var lateCh <-chan Event
@@ -383,7 +383,7 @@ func TestEventsLongStreamLateAndEarlyFollowers(t *testing.T) {
 }
 
 func TestUnknownHandle(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	if _, err := reg.Result(testCtx(t), testHandle("missing")); core.CodeOf(err) != core.CodeNotFound {
 		t.Fatalf("result code = %q, want not_found", core.CodeOf(err))
 	}

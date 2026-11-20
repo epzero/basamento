@@ -19,6 +19,9 @@ type EmbeddingConfig struct {
 	// Embedder is the eino embedding model the adapter drives. Every eino-ext
 	// embedding provider satisfies it.
 	Embedder einoEmbedding.Embedder
+	// Clock is the adapter registry's clock, read for the end times and the
+	// retention window of ended invocations. It is required.
+	Clock core.Clock
 }
 
 // Embedding adapts an eino embedding model to the Invoker contract. It answers
@@ -43,13 +46,20 @@ func NewEmbedding(cfg EmbeddingConfig) (*Embedding, error) {
 	if cfg.Embedder == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "embedding adapter has no embedder", nil)
 	}
+	if cfg.Clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "embedding adapter has no clock", nil)
+	}
 	if !anySupports(cfg.Descriptors, CapEmbed) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the embed capability", nil)
+	}
+	runs, err := NewRegistry(cfg.Provider, WithClock(cfg.Clock))
+	if err != nil {
+		return nil, err
 	}
 	return &Embedding{
 		descriptors: cfg.Descriptors,
 		embedder:    cfg.Embedder,
-		runs:        NewRegistry(cfg.Provider),
+		runs:        runs,
 	}, nil
 }
 
@@ -59,7 +69,9 @@ func (e *Embedding) Describe(context.Context) ([]Descriptor, error) {
 }
 
 // Start sends the embedding batch and returns at once. It is idempotent per
-// ClientRef: a repeated start returns the original handle.
+// ClientRef while the adapter's registry retains the invocation: a repeated
+// start returns the original handle. Once the client ref is evicted, a start
+// opens a new invocation (REQ-MODEL-088).
 func (e *Embedding) Start(ctx context.Context, r Request) (Handle, error) {
 	if _, ok := core.TenantFrom(ctx); !ok {
 		return Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)

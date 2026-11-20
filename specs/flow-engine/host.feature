@@ -1,4 +1,4 @@
-@planned @wp:WP-L4-04 @level:component
+@wp:WP-L4-04 @level:component
 Feature: The flow host
   The flow host is the one durable entrypoint (ADR-0011). It runs the flow
   definition a run was started with, drives the pure flow machine through the
