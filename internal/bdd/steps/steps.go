@@ -22,6 +22,7 @@ type World struct {
 	Expr        *exprWorld
 	SQL         *sqlWorld
 	Prompt      *promptWorld
+	Telemetry   *telemetryWorld
 	Blob        *blobWorld
 	Secrets     *secretsWorld
 	Credentials *credentialsWorld
@@ -44,7 +45,9 @@ func Initialize(sc *godog.ScenarioContext) {
 			Expr:        &exprWorld{bindings: map[string]any{}},
 			SQL:         newSQLWorld(),
 			Prompt:      newPromptWorld(),
+			Telemetry:   newTelemetryWorld(),
 			Blob:        newBlobWorld(),
+			Secrets:     newSecretsWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
@@ -57,6 +60,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSQL(sc)
 	registerPrompt(sc)
 	registerBlob(sc)
+	registerTelemetry(sc)
 	registerFlowCompile(sc)
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)

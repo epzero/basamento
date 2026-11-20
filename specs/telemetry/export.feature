@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component @profile:cloud
+@wp:WP-L1-07 @level:component @profile:cloud
 Feature: The cloud profile exports over OTLP and never lets export break the work
   In the cloud profile, spans, metrics and log records go to the collector over
   OTLP. Telemetry observes the work; it never makes it wait, fail or change its
