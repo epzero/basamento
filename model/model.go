@@ -9,7 +9,9 @@
 // in model/chat maps them to eino's types; the embedding adapter here maps
 // Request.Texts to an eino Embedder. Registry holds the part every adapter owes
 // regardless of protocol: idempotent starts, the ordered event log, the
-// result, cancellation and lookup.
+// result, cancellation and lookup. It forgets ended invocations past a
+// retention window and an ended bound, so an adapter's memory does not grow
+// with every call it ever served (REQ-MODEL-088).
 //
 // Provider construction (vendor SDKs, eino-ext, OpenAI-compatible endpoints for
 // MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping is
@@ -178,7 +180,9 @@ type Result struct {
 // of ctx; handles are valid only for the tenant that started the invocation.
 type Invoker interface {
 	Describe(ctx context.Context) ([]Descriptor, error)
-	// Start begins an invocation and returns at once. It is idempotent per ClientRef.
+	// Start begins an invocation and returns at once. It is idempotent per ClientRef
+	// while the provider's registry retains that invocation: after the client ref is
+	// evicted, a start begins a new invocation (REQ-MODEL-088).
 	Start(ctx context.Context, r Request) (Handle, error)
 	// Events delivers partial output with Seq > after; the channel closes when the invocation ends.
 	Events(ctx context.Context, h Handle, after int64) (<-chan Event, error)

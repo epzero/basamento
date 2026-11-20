@@ -86,6 +86,7 @@ func Initialize(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	registerModel(sc)
+	registerModelRetention(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

@@ -4,10 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/epzero/basamento/core"
 )
+
+// DefaultRetention is how long a registry keeps an ended invocation when no
+// retention window is set: one hour after the invocation ends.
+const DefaultRetention = time.Hour
+
+// DefaultMaxEnded is how many ended invocations a registry keeps when no ended
+// bound is set.
+const DefaultMaxEnded = 10_000
 
 // Registry keeps the live invocations of one adapter, scoped to the tenant
 // carried by each call's context. It supplies what every adapter owes the
@@ -16,15 +26,36 @@ import (
 // result that waits for the end, cancellation and lookup (REQ-MODEL-001,
 // ADR-0006). Adapters own the vendor call and publish into a Run.
 //
-// A Registry is safe for concurrent use. It never forgets an invocation, so a
-// retried Start with the same client ref in the same tenant returns the
-// original handle and its events and result stay readable. Bounding memory for
-// ended invocations is not part of this work package and is ticketed as EP0-140.
+// A Registry is safe for concurrent use. It keeps an ended invocation for its
+// retention window after its end and no longer, and while it holds more ended
+// invocations than its ended bound it evicts them oldest-ended first; it never
+// evicts a running invocation (REQ-MODEL-088). An evicted client ref answers
+// exactly as one the registry never held: Lookup finds no invocation, Events,
+// Result and Cancel answer not_found, and Begin opens a new invocation. The
+// sweep runs inline in those methods, on the registry's core.Clock, so what a
+// caller observes depends only on end times and clock readings: no timer and
+// no goroutine per invocation (design R3).
 type Registry struct {
-	provider string
+	provider  string
+	clock     core.Clock
+	retention time.Duration
+	maxEnded  int
 
 	mu    sync.Mutex
 	byRef map[invocationKey]*Run
+	// ended holds ended invocations in end-time order; ended[head:] are the
+	// ones still held. An ending invocation is inserted at its time position,
+	// after any entry with an equal end time, so two invocations that end at
+	// the same instant keep the order in which they ended (design R2).
+	ended []endedInvocation
+	head  int
+}
+
+// endedInvocation is one ended invocation in the registry's retention queue.
+type endedInvocation struct {
+	key invocationKey
+	run *Run
+	at  time.Time
 }
 
 type invocationKey struct {
@@ -32,9 +63,72 @@ type invocationKey struct {
 	ref    string
 }
 
-// NewRegistry returns an empty registry for the named provider.
-func NewRegistry(provider string) *Registry {
-	return &Registry{provider: provider, byRef: map[invocationKey]*Run{}}
+// Option configures a Registry at construction.
+type Option func(*registryOptions) error
+
+type registryOptions struct {
+	clock     core.Clock
+	retention time.Duration
+	maxEnded  int
+}
+
+// WithClock sets the clock the retention window and end times are read on. It
+// is required: a registry never falls back to the system clock, so the gate
+// cannot depend on wall time by omission.
+func WithClock(clock core.Clock) Option {
+	return func(o *registryOptions) error {
+		if clock == nil {
+			return core.NewError(core.CodeInvalidArgument, "registry: WithClock needs a clock", nil)
+		}
+		o.clock = clock
+		return nil
+	}
+}
+
+// WithRetention sets both retention bounds. window is how long an ended
+// invocation is kept after its end; maxEnded is how many ended invocations are
+// kept. A zero window or a zero maxEnded keeps that bound's default
+// (DefaultRetention, DefaultMaxEnded); a negative one is invalid_argument.
+// There is no value that means unbounded.
+func WithRetention(window time.Duration, maxEnded int) Option {
+	return func(o *registryOptions) error {
+		if window < 0 || maxEnded < 0 {
+			return core.NewError(core.CodeInvalidArgument,
+				"registry: WithRetention must not be negative", nil)
+		}
+		if window > 0 {
+			o.retention = window
+		}
+		if maxEnded > 0 {
+			o.maxEnded = maxEnded
+		}
+		return nil
+	}
+}
+
+// NewRegistry returns an empty registry for the named provider. It requires
+// WithClock and fails with invalid_argument without one, naming the option; an
+// invalid bound fails the same way.
+func NewRegistry(provider string, opts ...Option) (*Registry, error) {
+	o := registryOptions{retention: DefaultRetention, maxEnded: DefaultMaxEnded}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(&o); err != nil {
+			return nil, err
+		}
+	}
+	if o.clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "registry: WithClock is required", nil)
+	}
+	return &Registry{
+		provider:  provider,
+		clock:     o.clock,
+		retention: o.retention,
+		maxEnded:  o.maxEnded,
+		byRef:     map[invocationKey]*Run{},
+	}, nil
 }
 
 // Provider is the provider name the registry stamps on every handle.
@@ -61,12 +155,15 @@ func (g *Registry) Begin(ctx context.Context, clientRef string) (*Run, bool, err
 	key := invocationKey{tenant: tid, ref: clientRef}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.sweepLocked()
 	if r, ok := g.byRef[key]; ok {
 		return r, true, nil
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Run{
 		handle:  Handle{Provider: g.provider, ID: clientRef, ClientRef: clientRef},
+		reg:     g,
+		key:     key,
 		ctx:     runCtx,
 		cancel:  cancel,
 		changed: make(chan struct{}),
@@ -127,6 +224,7 @@ func (g *Registry) Lookup(ctx context.Context, clientRef string) (*Handle, error
 		return nil, core.NewError(core.CodeInvalidArgument, "client ref required", nil)
 	}
 	g.mu.Lock()
+	g.sweepLocked()
 	r, ok := g.byRef[invocationKey{tenant: tid, ref: clientRef}]
 	g.mu.Unlock()
 	if !ok {
@@ -150,6 +248,7 @@ func (g *Registry) run(ctx context.Context, h Handle) (*Run, error) {
 		return nil, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
 	}
 	g.mu.Lock()
+	g.sweepLocked()
 	r, ok := g.byRef[invocationKey{tenant: tid, ref: h.ClientRef}]
 	g.mu.Unlock()
 	if !ok {
@@ -160,12 +259,84 @@ func (g *Registry) run(ctx context.Context, h Handle) (*Run, error) {
 	return r, nil
 }
 
+// sweepLocked evicts the ended invocations that left their retention window,
+// then the oldest ended ones past the ended bound. The queue is in end-time
+// order, so both rules pop its head; two invocations that ended at the same
+// instant leave in the order they ended. It must be called with g.mu held and
+// never looks at a run's own lock, so an invocation ending under r.mu can
+// report itself to g.mu without a lock inversion (design R3).
+func (g *Registry) sweepLocked() {
+	now := g.clock.Now()
+	for g.head < len(g.ended) && !g.ended[g.head].at.Add(g.retention).After(now) {
+		g.forgetLocked(g.head)
+		g.head++
+	}
+	for len(g.ended)-g.head > g.maxEnded {
+		g.forgetLocked(g.head)
+		g.head++
+	}
+	// Compact once the consumed prefix is half the queue. A burst leaves a
+	// backing array sized for its peak; when the live entries are far below
+	// that capacity, a right-sized copy replaces the slice so the peak array
+	// can be collected. Otherwise the copy stays in place, and a steady state
+	// then keeps a capacity of at most twice the live entries.
+	if g.head > 0 && g.head*2 >= len(g.ended) {
+		live := len(g.ended) - g.head
+		if cap(g.ended) > 2*live {
+			kept := make([]endedInvocation, live)
+			copy(kept, g.ended[g.head:])
+			g.ended = kept
+		} else {
+			n := copy(g.ended, g.ended[g.head:])
+			clear(g.ended[n:])
+			g.ended = g.ended[:n]
+		}
+		g.head = 0
+	}
+}
+
+// forgetLocked drops the ended invocation at the queue's head: its client ref
+// no longer resolves and the slot stops holding its event log, so the run is
+// free to be collected even before the next compaction.
+func (g *Registry) forgetLocked(i int) {
+	e := g.ended[i]
+	g.ended[i] = endedInvocation{}
+	if cur, ok := g.byRef[e.key]; ok && cur == e.run {
+		delete(g.byRef, e.key)
+	}
+}
+
+// runEnded inserts a run that just ended into the retention queue in end-time
+// order, stamped with the registry's clock. It inserts after every entry with
+// an equal end time, so a tie keeps the order in which its invocations ended
+// even when the clock steps back between them (design R2). The sweep that
+// follows evicts on the next registry method call, never in this one, so it
+// only reads the queue.
+func (g *Registry) runEnded(key invocationKey, run *Run) {
+	g.mu.Lock()
+	at := g.clock.Now()
+	live := g.ended[g.head:]
+	i := len(live)
+	if n := len(live); n > 0 && live[n-1].at.After(at) {
+		// First entry that ends strictly after at; an equal end stays before
+		// the insertion point, so it keeps its end order.
+		i = sort.Search(n, func(j int) bool { return live[j].at.After(at) })
+	}
+	g.ended = append(g.ended, endedInvocation{})
+	pos := g.head + i
+	copy(g.ended[pos+1:], g.ended[pos:])
+	g.ended[pos] = endedInvocation{key: key, run: run, at: at}
+	g.mu.Unlock()
+}
+
 // Run is one live invocation. An adapter publishes its vendor output as
 // events and ends it with Succeed, Fail or Cancel.
 type Run struct {
 	handle Handle
 	ctx    context.Context
 	cancel context.CancelFunc
+	reg    *Registry
+	key    invocationKey
 
 	mu      sync.Mutex
 	events  []Event
@@ -258,6 +429,9 @@ func (r *Run) finishLocked(res Result) {
 	r.result = res
 	r.notifyLocked()
 	close(r.done)
+	if r.reg != nil {
+		r.reg.runEnded(r.key, r)
+	}
 }
 
 // notifyLocked wakes every waiter. It must be called with r.mu held.

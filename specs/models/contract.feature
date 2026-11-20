@@ -38,7 +38,7 @@ Feature: One invocation contract
     Then the caller receives 3 text events in order
     And the result message text is "Hello there"
 
-  @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-01
+  @REQ-MODEL-088 @wp:WP-L3-01 @id:MODEL-088-01
   Scenario: An ended invocation stays readable inside the retention window
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a registry with a retention window of 1 hour
@@ -48,7 +48,7 @@ Feature: One invocation contract
     And following its events from the start yields 2 text events
     And its result has state "succeeded"
 
-  @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-02
+  @REQ-MODEL-088 @wp:WP-L3-01 @id:MODEL-088-02
   Scenario: An ended invocation is gone once the retention window has passed
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a registry with a retention window of 1 hour
@@ -59,7 +59,7 @@ Feature: One invocation contract
     And waiting for its result fails with code "not_found"
     And cancelling it fails with code "not_found"
 
-  @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-03
+  @REQ-MODEL-088 @wp:WP-L3-01 @id:MODEL-088-03
   Scenario: A start with an evicted client ref starts a new invocation
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a registry with a retention window of 1 hour
@@ -69,7 +69,7 @@ Feature: One invocation contract
     Then the provider accepted 2 invocations
     And the lookup of "ref-1" finds its invocation
 
-  @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-04
+  @REQ-MODEL-088 @wp:WP-L3-01 @id:MODEL-088-04
   Scenario: The ended bound evicts the oldest ended invocation
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a registry with a retention window of 1 hour and an ended bound of 2
@@ -82,7 +82,7 @@ Feature: One invocation contract
     And the lookup of "ref-2" finds its invocation
     And the lookup of "ref-3" finds its invocation
 
-  @REQ-MODEL-088 @planned @wp:WP-L3-01 @id:MODEL-088-05
+  @REQ-MODEL-088 @wp:WP-L3-01 @id:MODEL-088-05
   Scenario: A running invocation is never evicted
     Given the clock is frozen at "2026-10-01T09:00:00Z"
     And a registry with a retention window of 1 hour and an ended bound of 2

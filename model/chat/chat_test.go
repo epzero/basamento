@@ -6,13 +6,21 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/model"
 )
+
+// testClock is a fake clock frozen at a fixed instant, so no chat test reads
+// wall time.
+func testClock() *coretest.FakeClock {
+	return coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+}
 
 func testCtx(t *testing.T) context.Context {
 	t.Helper()
@@ -174,6 +182,7 @@ func chatConfig(m einomodel.BaseChatModel) Config {
 			Protocol: model.ProtocolStream,
 		}},
 		Model: m,
+		Clock: testClock(),
 	}
 }
 
@@ -521,6 +530,11 @@ func TestNewValidatesItsConfig(t *testing.T) {
 	}
 	if _, err := New(Config{Provider: "sim"}); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("missing model code = %q", core.CodeOf(err))
+	}
+	noClock := chatConfig(&fakeChat{})
+	noClock.Clock = nil
+	if _, err := New(noClock); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("missing clock code = %q", core.CodeOf(err))
 	}
 	cfg := chatConfig(&fakeChat{})
 	cfg.Descriptors = []model.Descriptor{{ID: "x", Caps: []model.Capability{model.CapEmbed}}}
