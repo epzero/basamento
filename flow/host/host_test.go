@@ -145,7 +145,44 @@ func (d *fakeDC) wake() {
 func (d *fakeDC) record(c call) {
 	d.calls = append(d.calls, c)
 	d.parked = true
-	d.wake()
+	d.cond.Broadcast()
+}
+
+type runHandle struct {
+	done   chan struct{}
+	result json.RawMessage
+	err    error
+}
+
+func (d *fakeDC) startRun(h *host.Host, ref runtime.FlowRef, input json.RawMessage) *runHandle {
+	rh := &runHandle{done: make(chan struct{})}
+	go func() {
+		rh.result, rh.err = h.Run(d, ref, input)
+		d.mu.Lock()
+		d.finished = true
+		d.parked = false
+		d.cond.Broadcast()
+		d.mu.Unlock()
+		close(rh.done)
+	}()
+	return rh
+}
+
+func (d *fakeDC) settle() {
+	d.mu.Lock()
+	for !d.parked && !d.finished {
+		d.cond.Wait()
+	}
+	d.mu.Unlock()
+}
+
+func (rh *runHandle) finished() bool {
+	select {
+	case <-rh.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *fakeDC) appendJournal(e journalEntry) {
@@ -457,24 +494,6 @@ func (d *fakeDC) copyJournal() []journalEntry {
 	return append([]journalEntry(nil), d.journal...)
 }
 
-func (d *fakeDC) waitUntil(cond func() bool) {
-	for {
-		d.mu.Lock()
-		done := d.finished
-		d.mu.Unlock()
-		if done || cond() {
-			return
-		}
-		d.mu.Lock()
-		d.parked = true
-		d.cond.Broadcast()
-		d.cond.Wait()
-		d.parked = false
-		d.cond.Broadcast()
-		d.mu.Unlock()
-	}
-}
-
 func decodeArgument(in any) json.RawMessage {
 	switch value := in.(type) {
 	case nil:
@@ -649,24 +668,21 @@ func TestWaitRunsAsTimer(t *testing.T) {
 	ref := cat.register(def)
 	h := host.New(cat)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-		done <- err
-	}()
-	waitFor(t, dc, func() bool { return len(dc.callLog()) == 1 })
+	rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+	waitFor(t, dc, func(d *fakeDC) bool { return len(d.calls) == 1 })
 	if calls := dc.callLog(); calls[0].kind != "timer" || calls[0].duration != 30*time.Second {
 		t.Fatalf("calls %+v, want one 30s timer", calls)
 	}
 	dc.advance(29 * time.Second)
-	select {
-	case err := <-done:
-		t.Fatalf("run finished after 29s: %v", err)
-	default:
+	dc.settle()
+	if rh.finished() {
+		t.Fatalf("run finished after 29s: %v", rh.err)
 	}
 	dc.advance(1 * time.Second)
-	if err := <-done; err != nil {
-		t.Fatalf("run after 30s: %v", err)
+	dc.settle()
+	<-rh.done
+	if rh.err != nil {
+		t.Fatalf("run after 30s: %v", rh.err)
 	}
 }
 
@@ -679,20 +695,18 @@ func TestGateWaitsAndCompletesWithPayload(t *testing.T) {
 	ref := cat.register(def)
 	h := host.New(cat)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-		done <- err
-	}()
-	waitFor(t, dc, func() bool { return len(dc.callLog()) == 1 })
+	rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+	waitFor(t, dc, func(d *fakeDC) bool { return len(d.calls) == 1 })
 	spec := dc.callLog()[0].gate
 	if spec.Name != "approve" || spec.AcceptIf != "input.approved" || spec.Timeout != 72*time.Hour {
 		t.Fatalf("gate spec %+v", spec)
 	}
 	assertJSON(t, spec.Schema, `"review.json"`)
 	dc.resolveGate("approve", json.RawMessage(`{"approved":true}`))
-	if err := <-done; err != nil {
-		t.Fatalf("run: %v", err)
+	dc.settle()
+	<-rh.done
+	if rh.err != nil {
+		t.Fatalf("run: %v", rh.err)
 	}
 }
 
@@ -705,15 +719,13 @@ func TestGateTimeoutFailsRun(t *testing.T) {
 	ref := cat.register(def)
 	h := host.New(cat)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-		done <- err
-	}()
-	waitFor(t, dc, func() bool { return len(dc.callLog()) == 1 })
+	rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+	waitFor(t, dc, func(d *fakeDC) bool { return len(d.calls) == 1 })
 	dc.advance(72 * time.Hour)
-	if err := <-done; core.CodeOf(err) != core.CodeTimeout {
-		t.Fatalf("code %v (%v), want timeout", core.CodeOf(err), err)
+	dc.settle()
+	<-rh.done
+	if core.CodeOf(rh.err) != core.CodeTimeout {
+		t.Fatalf("code %v (%v), want timeout", core.CodeOf(rh.err), rh.err)
 	}
 }
 
@@ -880,14 +892,12 @@ func TestNodeFailurePayloadDoesNotLeakCauseOrDuplicateCode(t *testing.T) {
 				def.Nodes["g"] = node("gate", `{"schema":"r.json","accept_if":"true","timeout":"1s"}`, "", "")
 				addLinear(def, "g")
 				ref := cat.register(def)
-				done := make(chan error, 1)
-				go func() {
-					_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-					done <- err
-				}()
-				waitFor(t, dc, func() bool { return len(dc.callLog()) == 1 })
+				rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+				waitFor(t, dc, func(d *fakeDC) bool { return len(d.calls) == 1 })
 				dc.advance(time.Second)
-				return <-done
+				dc.settle()
+				<-rh.done
+				return rh.err
 			},
 		},
 		{
@@ -1167,25 +1177,22 @@ func TestSuperstepStartsEveryCallBeforeWaiting(t *testing.T) {
 	ref := cat.register(def)
 	h := host.New(cat)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
-		done <- err
-	}()
-	waitFor(t, dc, func() bool { return len(dc.callLog()) == 2 })
+	rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+	waitFor(t, dc, func(d *fakeDC) bool { return len(d.calls) == 2 })
 	calls := dc.callLog()
 	if calls[0].duration != 10*time.Second || calls[1].duration != 30*time.Second {
 		t.Fatalf("timers %+v, want 10s then 30s in node-id order", calls)
 	}
 	dc.advance(10 * time.Second)
-	select {
-	case err := <-done:
-		t.Fatalf("run finished with a timer pending: %v", err)
-	default:
+	dc.settle()
+	if rh.finished() {
+		t.Fatalf("run finished with a timer pending: %v", rh.err)
 	}
 	dc.advance(20 * time.Second)
-	if err := <-done; err != nil {
-		t.Fatalf("run: %v", err)
+	dc.settle()
+	<-rh.done
+	if rh.err != nil {
+		t.Fatalf("run: %v", rh.err)
 	}
 }
 
@@ -1238,54 +1245,88 @@ func TestReplayCoversChildGateAndMap(t *testing.T) {
 	def := newFlow("replay-mix")
 	def.State.Schema = json.RawMessage(`{"type":"object","properties":{"items":{"type":"array"},"childOut":{"type":"object"}}}`)
 	def.Nodes["sub"] = node("subflow", `{"flow":"child"}`, "", "childOut")
+	def.Nodes["hold"] = node("gate", `{"schema":"r.json","accept_if":"true","timeout":"1h"}`, "", "")
 	def.Nodes["pause"] = node("wait", `{"duration":"1s"}`, "", "")
 	def.Nodes["fan"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"work"}`)}
 	def.Nodes["work"] = node("tool", `{"tool":"w1"}`, "", "")
 	def.Edges = []flow.Edge{
 		{From: ir.Start, To: "sub"},
-		{From: "sub", To: "pause"},
+		{From: "sub", To: "hold"},
+		{From: "hold", To: "pause"},
 		{From: "pause", To: "fan"},
 		{From: "fan", To: "work"},
 	}
 	dc := newFakeDC()
-	dc.instant = true
 	dc.steps["child:child"] = scripted{result: json.RawMessage(`{"child":1}`)}
 	dc.steps["w1"] = scripted{result: json.RawMessage(`"x"`)}
 	cat := newCatalog()
 	ref := cat.register(def)
 	h := host.New(cat)
-	if _, err := h.Run(dc, ref, json.RawMessage(`{"items":["a","b"]}`)); err != nil {
-		t.Fatalf("first run: %v", err)
+	rh := dc.startRun(h, ref, json.RawMessage(`{"items":["a","b"]}`))
+	waitFor(t, dc, func(d *fakeDC) bool {
+		for _, c := range d.calls {
+			if c.kind == "gate" {
+				return true
+			}
+		}
+		return false
+	})
+	dc.resolveGate("hold", json.RawMessage(`{"ok":true}`))
+	dc.settle()
+	dc.advance(time.Second)
+	dc.settle()
+	<-rh.done
+	if rh.err != nil {
+		t.Fatalf("first run: %v", rh.err)
 	}
-	gotKinds := map[string]bool{}
-	for _, c := range dc.callLog() {
-		gotKinds[c.kind] = true
-	}
-	for _, kind := range []string{"child", "timer", "step"} {
-		if !gotKinds[kind] {
-			t.Fatalf("first run missing %s call, got %+v", kind, gotKinds)
+	wantFP := callFingerprints(dc.callLog())
+	for _, kind := range []string{"child", "gate", "timer", "step"} {
+		if !slicesContainsKind(wantFP, kind) {
+			t.Fatalf("first run missing %s, fingerprints %v", kind, wantFP)
 		}
 	}
 	journal := dc.copyJournal()
-	idCount := 0
-	for _, e := range journal {
-		if e.kind == "id" {
-			idCount++
+	t.Run("replay matches journal", func(t *testing.T) {
+		replay := replayFakeDC(journal)
+		if _, err := h.Run(replay, ref, json.RawMessage(`{"items":["a","b"]}`)); err != nil {
+			t.Fatalf("replay: %v", err)
 		}
-	}
-	if idCount < 1 {
-		t.Fatalf("want child NewID in journal, got %d id entries", idCount)
-	}
-	replay := replayFakeDC(journal)
-	if _, err := h.Run(replay, ref, json.RawMessage(`{"items":["a","b"]}`)); err != nil {
-		t.Fatalf("replay: %v", err)
-	}
-	if replay.diverged != nil {
-		t.Fatalf("diverged: %v", replay.diverged)
-	}
-	if len(replay.callLog()) != len(dc.callLog()) {
-		t.Fatalf("call count replay %d, first %d", len(replay.callLog()), len(dc.callLog()))
-	}
+		if replay.diverged != nil {
+			t.Fatalf("diverged: %v", replay.diverged)
+		}
+		got := callFingerprints(replay.callLog())
+		if fmt.Sprint(got) != fmt.Sprint(wantFP) {
+			t.Fatalf("replay fingerprints %v, want %v", got, wantFP)
+		}
+	})
+	t.Run("gate spec mismatch diverges", func(t *testing.T) {
+		bad := append([]journalEntry(nil), journal...)
+		for i := range bad {
+			if bad[i].kind == "gate" {
+				bad[i].gate.Timeout = bad[i].gate.Timeout + time.Second
+				break
+			}
+		}
+		replay := replayFakeDC(bad)
+		_, err := h.Run(replay, ref, json.RawMessage(`{"items":["a","b"]}`))
+		if core.CodeOf(err) != core.CodeDeterminismBroken && replay.diverged == nil {
+			t.Fatalf("want determinism broken, got %v diverged=%v", err, replay.diverged)
+		}
+	})
+	t.Run("child id mismatch diverges", func(t *testing.T) {
+		bad := append([]journalEntry(nil), journal...)
+		for i := range bad {
+			if bad[i].kind == "child" {
+				bad[i].childOpts.ID = "changed"
+				break
+			}
+		}
+		replay := replayFakeDC(bad)
+		_, err := h.Run(replay, ref, json.RawMessage(`{"items":["a","b"]}`))
+		if core.CodeOf(err) != core.CodeDeterminismBroken && replay.diverged == nil {
+			t.Fatalf("want determinism broken, got %v diverged=%v", err, replay.diverged)
+		}
+	})
 }
 
 func TestReplayDetectsStepNameMismatch(t *testing.T) {
@@ -1356,38 +1397,25 @@ func TestCompletionOrderDoesNotChangeTheResult(t *testing.T) {
 			dc.steps[id] = scripted{manual: true}
 		}
 		h := host.New(cat)
-		done := make(chan json.RawMessage, 1)
-		errs := make(chan error, 1)
-		go func() {
-			out, err := h.Run(dc, ref, json.RawMessage(`{}`))
-			if err != nil {
-				errs <- err
-				return
-			}
-			done <- out
-		}()
-		waitFor(t, dc, func() bool {
-			dc.mu.Lock()
-			defer dc.mu.Unlock()
-			return len(dc.manual) == 3
-		})
+		rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+		waitFor(t, dc, func(d *fakeDC) bool { return len(d.manual) == 3 })
 		order := []string{"a", "b", "c"}
 		rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 		for _, id := range order {
 			payload, _ := json.Marshal(id)
 			dc.resolveStep(id, payload, nil)
+			dc.settle()
 		}
-		select {
-		case err := <-errs:
-			t.Fatalf("round %d: %v", round, err)
-		case out := <-done:
-			if want == nil {
-				want = out
-				continue
-			}
-			if !jsonEqual(want, out) {
-				t.Fatalf("round %d: state %s, want %s", round, out, want)
-			}
+		<-rh.done
+		if rh.err != nil {
+			t.Fatalf("round %d: %v", round, rh.err)
+		}
+		if want == nil {
+			want = rh.result
+			continue
+		}
+		if !jsonEqual(want, rh.result) {
+			t.Fatalf("round %d: state %s, want %s", round, rh.result, want)
 		}
 	}
 }
@@ -1558,6 +1586,37 @@ func TestRepairCostGuardFailsAfterTwoHandlerVisits(t *testing.T) {
 	}
 }
 
+func callFingerprints(calls []call) []string {
+	out := make([]string, 0, len(calls))
+	for _, c := range calls {
+		switch c.kind {
+		case "step":
+			out = append(out, fmt.Sprintf("step:%s:%s", c.name, c.stepOpts.IdempotencyKey))
+		case "child":
+			out = append(out, fmt.Sprintf("child:%s:%s", c.child.Name, c.childOpts.ID))
+		case "gate":
+			out = append(out, fmt.Sprintf("gate:%s", c.gate.Name))
+		case "timer":
+			out = append(out, fmt.Sprintf("timer:%s", c.duration))
+		case "id":
+			out = append(out, "id:"+c.childOpts.ID)
+		default:
+			out = append(out, c.kind)
+		}
+	}
+	return out
+}
+
+func slicesContainsKind(fps []string, kind string) bool {
+	prefix := kind + ":"
+	for _, fp := range fps {
+		if fp == kind || strings.HasPrefix(fp, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func kinds(calls []call) []string {
 	out := make([]string, len(calls))
 	for i, c := range calls {
@@ -1575,11 +1634,20 @@ func kinds(calls []call) []string {
 	return out
 }
 
-func waitFor(t *testing.T, dc *fakeDC, condition func() bool) {
+func waitFor(t *testing.T, dc *fakeDC, condition func(*fakeDC) bool) {
 	t.Helper()
-	dc.waitUntil(condition)
-	if !condition() {
-		t.Fatal("condition not met before run finished")
+	dc.mu.Lock()
+	for {
+		if dc.finished {
+			dc.mu.Unlock()
+			t.Fatal("run finished before condition")
+			return
+		}
+		if condition(dc) {
+			dc.mu.Unlock()
+			return
+		}
+		dc.cond.Wait()
 	}
 }
 
