@@ -122,6 +122,15 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		if cfg.Price != nil {
 			cost = cfg.Price(usage)
 		}
+		// The outcome is decided after validation: an attempt whose output
+		// arrived but missed the schema did not succeed (REQ-MODEL-044,
+		// REQ-MODEL-062), and the call log, recording and result must all say
+		// so before the ladder moves on.
+		validAnswer := json.RawMessage(nil)
+		schemaOK := attemptErr == nil && !timedOut
+		if schemaOK && spec != nil {
+			validAnswer, schemaOK = spec.Validate(res.Message)
+		}
 		rec := AttemptRecord{
 			Number: attempt, Rung: rung, ClientRef: ref,
 			Start: started, End: ended, Usage: usage, CostMpts: cost, Events: events,
@@ -133,6 +142,9 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		case attemptErr != nil:
 			rec.Outcome = OutcomeFailed
 			rec.Code = core.CodeOf(attemptErr)
+		case !schemaOK:
+			rec.Outcome = OutcomeFailed
+			rec.Code = core.CodeInvalidArgument
 		default:
 			rec.Outcome = OutcomeSucceeded
 		}
@@ -166,8 +178,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		}
 
 		if spec != nil {
-			answer, ok := spec.Validate(res.Message)
-			if !ok {
+			if !schemaOK {
 				lastAnswer = res.Message
 				if rungIdx+1 < len(rungs) {
 					rungIdx++
@@ -180,7 +191,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 				}
 				continue
 			}
-			return e.done(res, answer, nil)
+			return e.done(res, validAnswer, nil)
 		}
 		return e.done(res, nil, nil)
 	}
