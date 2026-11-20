@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -58,7 +59,10 @@ func parseGoImports(path string) ([]string, error) {
 	}
 	imports := make([]string, 0, len(f.Imports))
 	for _, spec := range f.Imports {
-		imp := strings.Trim(spec.Path.Value, `"`)
+		imp, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 		imports = append(imports, imp)
 	}
 	return imports, nil
