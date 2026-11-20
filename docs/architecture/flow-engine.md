@@ -153,8 +153,9 @@ are identical. Fuzzing covers the IR decoder and CEL inputs.
 
 The machine decides; the **host** (`flow/host`, ADR-0011) acts. It is the one
 `runtime.FlowHost`, so it runs unchanged on every runtime. It checks the pinned
-definition hash after load, builds step idempotency keys from the superstep
-sequence, stops handler calls in a superstep after the first failure, ends
+definition hash after load, builds step idempotency keys from the loaded
+definition's name and pinned hash together with the superstep sequence, stops
+handler calls in a superstep after the first failure, ends
 the run on the first failing future in a superstep (in `Select` order), copies
 each handler's settled milli-points into `node_completed` and `node_failed`
 events, and may lower the map fan-out limit with `WithMaxFanout`.

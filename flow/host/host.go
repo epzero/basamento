@@ -246,7 +246,7 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 			}
 			switch node.Kind {
 			case "tool", "task", "subflow":
-				call, err := h.runNode(dc, ref, snapshot, command, node)
+				call, err := h.runNode(dc, def, ref, snapshot, command, node)
 				if err != nil {
 					return nil, nil, nil, err
 				}
@@ -329,6 +329,8 @@ func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *fl
 			// A timer or gate that fails (timeout, cancellation) is a failed
 			// node like any other.
 			event = failedEvent(call.command.Node, call.command.Attempt, err, 0)
+		} else {
+			event.Payload = payload
 		}
 		next, end, err := feedEvents(m, snapshot, []flow.Event{event})
 		if err != nil {
@@ -368,7 +370,7 @@ func feedEvents(m *machine.Machine, snapshot *flow.Snapshot, events []flow.Event
 // runNode starts the Future-returning durable call for a run_node command: a
 // step for a tool or task node, a child run for a subflow node. Handler kinds
 // are run by superstep after the batch has started.
-func (h *Host) runNode(dc runtime.DurableContext, ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command, node flow.Node) (pendingCall, error) {
+func (h *Host) runNode(dc runtime.DurableContext, def *flow.IR, ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command, node flow.Node) (pendingCall, error) {
 	switch node.Kind {
 	case "tool", "task":
 		name, err := nameOf(node, command.Node)
@@ -378,7 +380,7 @@ func (h *Host) runNode(dc runtime.DurableContext, ref runtime.FlowRef, snapshot 
 		return pendingCall{
 			command: command,
 			future: dc.Step(name, jsonArgument(command.Input), runtime.StepOptions{
-				IdempotencyKey: idempotencyKey(ref, snapshot, command),
+				IdempotencyKey: idempotencyKey(def, ref, snapshot, command),
 			}),
 			event: "node_completed",
 		}, nil
@@ -470,12 +472,12 @@ func emitType(command flow.Command) string {
 	return "flow.event"
 }
 
-func idempotencyKey(ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command) string {
+func idempotencyKey(def *flow.IR, ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command) string {
 	var seq int64
 	if snapshot != nil {
 		seq = snapshot.Seq
 	}
-	return fmt.Sprintf("%s@%s/%s#%d@%d", ref.Name, ref.Hash, command.Node, command.Attempt, seq)
+	return fmt.Sprintf("%s@%s/%s#%d@%d", def.Name, ref.Hash, command.Node, command.Attempt, seq)
 }
 
 // jsonArgument passes an empty input as nil so a runtime stores no payload for
