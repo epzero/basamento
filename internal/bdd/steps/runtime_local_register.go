@@ -25,4 +25,7 @@ func registerLocal(sc *godog.ScenarioContext) {
 	registerLocalChildren(sc)
 	registerLocalTenant(sc)
 	registerLocalShutdown(sc)
+	registerLocalStartIDs(sc)
+	registerLocalChildIDs(sc)
+	registerLocalClock(sc)
 }

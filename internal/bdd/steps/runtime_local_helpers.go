@@ -124,23 +124,36 @@ func (w *localWorld) setChildFlow(name, out string) {
 	})
 }
 
-// setParentFlow scripts a parent that starts a child with the given id. With
-// await it waits for and records the child's output; otherwise it returns at
-// once so the close policy is the only thing that ends the child.
-func (w *localWorld) setParentFlow(name, child, childID, policy string, await bool) {
-	w.setFlow(name, func(e *localExec, dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
-		options := runtime.ChildOptions{ID: childID, ParentClose: policy}
-		future := dc.Child(runtime.FlowRef{Name: child}, nil, options)
-		if !await {
-			return json.RawMessage(`{}`), nil
-		}
-		var out json.RawMessage
-		if err := future.Get(&out); err != nil {
-			return nil, err
-		}
-		e.update(func() { e.childOut = out })
-		return out, nil
+// setChildGateFlow registers a child flow that waits at gate before completing.
+func (w *localWorld) setChildGateFlow(name, gate string) {
+	w.setFlow(name, w.gateFlow(gate))
+}
+
+// startRun starts a run with optional idempotency key and records Start outcome.
+func (w *localWorld) startRun(ctx context.Context, tenant, runID, flow, idem string, recordAsFirst bool) error {
+	before := w.execCount(flow)
+	rt := w.runtime(ctx)
+	ref, err := rt.Start(w.ctx(tenant), runtime.StartRequest{
+		Flow:           runtime.FlowRef{Name: flow},
+		RunID:          runID,
+		IdempotencyKey: idem,
 	})
+	w.lastStart, w.lastErr = ref, err
+	if recordAsFirst && err == nil {
+		w.mu.Lock()
+		w.firstStartRef = ref
+		w.mu.Unlock()
+	}
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.current = ref
+	w.mu.Unlock()
+	if w.execCount(flow) == before {
+		return nil
+	}
+	return w.waitRunState(ctx, ref, "completed")
 }
 
 // serve starts Serve in the background with a cancelable context.

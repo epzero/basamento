@@ -96,7 +96,7 @@ Feature: The local runtime
     Then the wait returns index 1
     And step "b" was executed 1 time
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-011 @id:RT-011-04
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-011 @id:RT-011-04
   Scenario: An operation that completed strictly first wins even when a lower index also becomes ready
     Given the clock is frozen at "2026-11-17T09:00:00Z"
     And a flow is waiting on the first of a "2h" timer and a "1h" timer, in that order
@@ -408,14 +408,14 @@ Feature: The local runtime
   # start within its tenant only, and a child id can be re-attached only to the
   # same child. All three are per-tenant, like the other local lookups.
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-046 @id:RT-046-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-046 @id:RT-046-01
   Scenario: Starting a run with a run id already used in the same tenant fails with conflict
     Given tenant "acme" has run "r1" of flow "review" waiting at gate "approve"
     When run "r1" of "review" is started with context tenant "acme" and an empty request tenant
     Then starting the run fails with code "conflict"
     And tenant "acme" describes run "r1" as "running"
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-01
   Scenario: Starting twice with the same start idempotency key in one tenant returns the first run
     Given flow "work" calls step "render" that returns {"ok": true}
     And tenant "acme" starts run "r1" of "work" with start idempotency key "k1"
@@ -424,7 +424,7 @@ Feature: The local runtime
     And tenant "acme" lists 1 run of flow "work"
     And step "render" was executed 1 time
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-02
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-047 @id:RT-047-02
   Scenario: Starting twice with an empty start idempotency key creates two runs
     Given flow "work" calls step "render" that returns {"ok": true}
     When tenant "acme" starts run "r1" of "work" with an empty start idempotency key
@@ -432,7 +432,7 @@ Feature: The local runtime
     Then tenant "acme" lists 2 runs of flow "work"
     And step "render" was executed 2 times
 
-  @planned @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-048 @id:RT-048-01
+  @wp:WP-L5-01 @security @runtime:local @level:component @REQ-RT-048 @id:RT-048-01
   Scenario: The same start idempotency key in two tenants starts two runs
     Given flow "work" calls step "render" that returns {"ok": true}
     When tenant "acme" starts run "a1" of "work" with start idempotency key "k1"
@@ -441,7 +441,7 @@ Feature: The local runtime
     And tenant "globex" lists 1 run for tenant "globex" with run id "g1"
     And step "render" was executed 2 times
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-049 @id:RT-049-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-049 @id:RT-049-01
   Scenario: Reattaching a child by its id returns the existing child of the same parent and flow
     Given parent flow "parent" starts child flow "child" with child run id "child-1" and close policy "abandon"
     And flow "child" waits at gate "approve"
@@ -451,14 +451,14 @@ Feature: The local runtime
     And tenant "acme" describes run "child-1" as "running"
     And child flow "child" was started 1 time
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-01
   Scenario: Reusing a child run id for a different flow fails with conflict
     Given tenant "acme" has parent run "parent-1" with child run "child-1" of flow "child"
     When parent "parent-1" starts child flow "other" with child run id "child-1"
     Then starting the child fails with code "conflict"
     And tenant "acme" describes run "child-1" as "running"
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-02
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-02
   Scenario: Reusing a child run id of a different parent fails with conflict
     Given tenant "acme" has parent run "parent-1" with child run "child-1" of flow "child"
     And tenant "acme" has parent run "parent-2" of flow "parent"
@@ -467,7 +467,7 @@ Feature: The local runtime
     And tenant "acme" describes run "child-1" as "running"
     And child flow "child" was started 1 time
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-03
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-050 @id:RT-050-03
   Scenario: Reusing a top-level run id as a child run id fails with conflict
     Given tenant "acme" has run "existing-1" of flow "review" waiting at gate "approve"
     And tenant "acme" has parent run "parent-1" of flow "parent"
@@ -506,7 +506,7 @@ Feature: The local runtime
     Then listing runs fails with code "invalid_argument"
     And tenant "globex" describes run "g1" as "running"
 
-  @planned @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-054 @id:RT-054-01
+  @wp:WP-L5-01 @runtime:local @level:component @REQ-RT-054 @id:RT-054-01
   Scenario: Constructing the local runtime with a clock that is not a timer clock fails
     Given a clock that is not a timer clock
     When the local runtime is constructed with that clock

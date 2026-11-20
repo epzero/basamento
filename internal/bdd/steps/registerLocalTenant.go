@@ -99,6 +99,7 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 		w := localStepWorld(ctx)
 		runs, _, err := w.runtime(ctx).List(w.ctx(tenant), runtime.RunQuery{Flow: flow})
 		w.lastList, w.lastErr = runs, err
+		w.haveListed = true
 		return nil
 	})
 	sc.Step(`^tenant "([^"]*)" lists (\d+) runs? for tenant "([^"]*)" with run id "([^"]*)"$`,
@@ -107,10 +108,18 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			if w.lastErr != nil {
 				return w.lastErr
 			}
-			if len(w.lastList) != want {
-				return fmt.Errorf("tenant %q lists %d runs, want %d", caller, len(w.lastList), want)
+			runs := w.lastList
+			if !w.haveListed {
+				var err error
+				runs, _, err = w.runtime(ctx).List(w.ctx(caller), runtime.RunQuery{})
+				if err != nil {
+					return err
+				}
 			}
-			for _, run := range w.lastList {
+			if len(runs) != want {
+				return fmt.Errorf("tenant %q lists %d runs, want %d", caller, len(runs), want)
+			}
+			for _, run := range runs {
 				if run.Ref.RunID != runID || string(run.Ref.TenantID) != tenant {
 					return fmt.Errorf("listed run is %q of tenant %q, want %q of tenant %q", run.Ref.RunID, run.Ref.TenantID, runID, tenant)
 				}
@@ -215,6 +224,7 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			w := localStepWorld(ctx)
 			runs, _, err := w.runtime(ctx).List(w.ctx(contextTenant), runtime.RunQuery{Flow: flow, TenantID: core.TenantID(requestTenant)})
 			w.lastList, w.lastErr = runs, err
+			w.haveListed = true
 			return nil
 		})
 	sc.Step(`^runs of flow "([^"]*)" are listed with context tenant "([^"]*)" and an empty query tenant$`,
@@ -222,6 +232,7 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			w := localStepWorld(ctx)
 			runs, _, err := w.runtime(ctx).List(w.ctx(contextTenant), runtime.RunQuery{Flow: flow})
 			w.lastList, w.lastErr = runs, err
+			w.haveListed = true
 			return nil
 		})
 	sc.Step(`^runs of flow "([^"]*)" are listed without a context tenant and with query tenant "([^"]*)"$`,
@@ -229,6 +240,7 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			w := localStepWorld(ctx)
 			runs, _, err := w.runtime(ctx).List(w.ctx(""), runtime.RunQuery{Flow: flow, TenantID: core.TenantID(queryTenant)})
 			w.lastList, w.lastErr = runs, err
+			w.haveListed = true
 			return nil
 		})
 	sc.Step(`^listing runs fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {

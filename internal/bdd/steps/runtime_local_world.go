@@ -65,10 +65,17 @@ type localExec struct {
 	first, second json.RawMessage
 	childOut      json.RawMessage
 	stepErr       error
+
+	childCalls []localChildCall
+	commands   chan localChildCommand
 }
 
 func newLocalExec(name string) *localExec {
-	return &localExec{name: name, changed: make(chan struct{})}
+	return &localExec{
+		name:     name,
+		changed:  make(chan struct{}),
+		commands: make(chan localChildCommand, 1),
+	}
 }
 
 func (e *localExec) update(fn func()) {
@@ -219,6 +226,10 @@ type localWorld struct {
 	serveDone     chan error
 	shutdownError error
 	clockBefore   time.Time
+
+	parentRegs    map[string]parentChildReg
+	haveListed    bool
+	firstStartRef runtime.RunRef
 }
 
 func newLocalWorld() *localWorld {
