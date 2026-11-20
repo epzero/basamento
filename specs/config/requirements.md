@@ -1,10 +1,10 @@
 # Config: configuration, profiles and `kit serve`
 
-Status: **Planned** (WP-L1-05). Design: ADR-0001, ADR-0004 and
-[`design.md`](design.md). This capability covers how `kit` reads its
-configuration, validates it, chooses a profile and a port implementation by
-URL, and how `kit serve` starts and stops. The behavior of the ports behind
-those URLs belongs to `specs/sql`, `specs/blob`, `specs/bus` and
+Status: **Implemented** (WP-L1-05, `internal/config` and `cmd/kit`). Design:
+ADR-0001, ADR-0004 and [`design.md`](design.md). This capability covers how
+`kit` reads its configuration, validates it, chooses a profile and a port
+implementation by URL, and how `kit serve` starts and stops. The behavior of
+the ports behind those URLs belongs to `specs/sql`, `specs/blob`, `specs/bus` and
 `specs/secrets`; authentication modes belong to `specs/auth`.
 
 ### REQ-CONFIG-001 — Precedence

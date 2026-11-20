@@ -1,6 +1,6 @@
 # Config: design
 
-**Status:** draft, WP-L1-05, spec review pending.
+**Status:** implemented (WP-L1-05).
 
 Decisions the implementer of WP-L1-05 must follow. They refine the
 requirements; where this file and the requirements disagree, the requirements
