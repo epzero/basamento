@@ -29,6 +29,8 @@ type World struct {
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
 	Machine     *machineWorld
+	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
+	Host runOutcome
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -69,6 +71,7 @@ func Initialize(sc *godog.ScenarioContext) {
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+	registerSharedRunOutcomeSteps(sc)
 }
 
 func assertCallFailsWithCode(ctx context.Context, code string) error {
