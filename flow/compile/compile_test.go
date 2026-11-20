@@ -145,8 +145,8 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 		{kind: "gate", spec: `{"accept_if":null}`, subject: `node "check" gate accept_if`},
 		{kind: "gate", spec: `{"accept_if":{"expr":"state.done"}}`, subject: `node "check" gate accept_if`},
 		{kind: "gate", spec: `{"accept_if":["state.done"]}`, subject: `node "check" gate accept_if`},
-		{kind: "map", spec: `{"over":["state.items"]}`, subject: `node "check" map over`},
-		{kind: "map", spec: `{"over":null}`, subject: `node "check" map over`},
+		{kind: "map", spec: `{"over":["state.items"],"node":"impl"}`, subject: `node "check" map over`},
+		{kind: "map", spec: `{"over":null,"node":"impl"}`, subject: `node "check" map over`},
 	}
 	for _, test := range tests {
 		f := typedFlow()
@@ -154,6 +154,10 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 		node.Kind = test.kind
 		node.Spec = json.RawMessage(test.spec)
 		f.Nodes["check"] = node
+		if test.kind == "map" {
+			f.Nodes["impl"] = flow.Node{Kind: "task"}
+			f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
+		}
 		requireInvalid(t, errOf(t, f), test.subject, "not a string")
 	}
 }
@@ -162,13 +166,17 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 func TestCompileAcceptsEmptySpecExpressions(t *testing.T) {
 	for _, test := range []struct{ kind, spec string }{
 		{kind: "gate", spec: `{"accept_if":""}`},
-		{kind: "map", spec: `{"over":""}`},
+		{kind: "map", spec: `{"over":"","node":"impl"}`},
 	} {
 		f := typedFlow()
 		node := f.Nodes["check"]
 		node.Kind = test.kind
 		node.Spec = json.RawMessage(test.spec)
 		f.Nodes["check"] = node
+		if test.kind == "map" {
+			f.Nodes["impl"] = flow.Node{Kind: "task"}
+			f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
+		}
 		if _, err := Compile(f); err != nil {
 			t.Fatalf("%s %s: %v", test.kind, test.spec, err)
 		}
