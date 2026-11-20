@@ -137,9 +137,11 @@ func kitCachedPath(cacheRoot, key string) string {
 func buildCachedKit(moduleRoot, cacheRoot, key string) (string, error) {
 	dir := filepath.Join(cacheRoot, key)
 	path := filepath.Join(dir, "kit")
-	// An untrusted entry is removed, never executed. If it cannot be removed
-	// this fails instead of running foreign code.
-	if err := os.RemoveAll(dir); err != nil {
+	// An untrusted binary is removed, never executed. Only the binary goes:
+	// the key directory also holds the temp files of concurrent builds, which
+	// must survive this process's reset. If the binary cannot be removed this
+	// fails instead of running foreign code.
+	if err := os.RemoveAll(path); err != nil {
 		return "", fmt.Errorf("reset kit cache entry: %w", err)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -291,9 +293,13 @@ func packageFiles(pkg *goListPackage) []string {
 func goListDeps(moduleRoot string) ([]byte, error) {
 	cmd := exec.Command("go", "list", "-deps", "-json", "./cmd/kit")
 	cmd.Dir = moduleRoot
-	out, err := cmd.CombinedOutput()
+	// Output keeps stdout clean for the JSON decoder: go list writes progress
+	// and warnings such as "go: downloading ..." to stderr.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("go list ./cmd/kit: %w: %s", err, out)
+		return nil, fmt.Errorf("go list ./cmd/kit: %w: %s", err, stderr.Bytes())
 	}
 	return out, nil
 }

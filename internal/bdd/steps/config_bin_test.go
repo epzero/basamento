@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -185,6 +186,56 @@ func TestCachedKitBinaryRebuildsLooseEntry(t *testing.T) {
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
 		t.Fatalf("rebuilt entry mode = %o, want a regular file not group/other writable", info.Mode().Perm())
+	}
+}
+
+func TestCachedKitBinaryRebuildKeepsConcurrentTemps(t *testing.T) {
+	moduleRoot := fakeKitModule(t)
+	cacheRoot := t.TempDir()
+	builds := 0
+	useFakeKitBuilder(t, &builds)
+
+	path, err := cachedKitBinaryIn(moduleRoot, cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	concurrent := filepath.Join(filepath.Dir(path), "kit-other.tmp")
+	if err := os.WriteFile(concurrent, []byte("partial build"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cachedKitBinaryIn(moduleRoot, cacheRoot); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 2 {
+		t.Fatalf("builds = %d, want the loose entry rebuilt", builds)
+	}
+	if _, err := os.Stat(concurrent); err != nil {
+		t.Fatalf("rebuilding removed another process's temp file: %v", err)
+	}
+}
+
+func TestGoListDepsKeepsStderrOutOfJSON(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"echo 'go: downloading example.com/x' >&2\n" +
+		"printf '%s\\n' '{\"ImportPath\":\"example.com/kit\"}'\n"
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := goListDeps(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg goListPackage
+	if err := json.Unmarshal(out, &pkg); err != nil {
+		t.Fatalf("go list output is not clean JSON: %v: %s", err, out)
+	}
+	if pkg.ImportPath != "example.com/kit" {
+		t.Fatalf("ImportPath = %q, want example.com/kit", pkg.ImportPath)
 	}
 }
 
