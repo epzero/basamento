@@ -29,12 +29,43 @@ func TestEncodeDecodeListCursor(t *testing.T) {
 	}
 }
 
-func TestListCursorRejectsNonCanonical(t *testing.T) {
+func nonCanonicalListCursor(t *testing.T, rawJSON string) string {
+	t.Helper()
+	tok := base64.RawURLEncoding.EncodeToString([]byte(rawJSON))
+	var probe listCursorPayload
+	if err := json.Unmarshal([]byte(rawJSON), &probe); err != nil {
+		t.Fatalf("probe decode %q: %v", rawJSON, err)
+	}
+	canonical, err := encodeListCursor(core.TenantID(probe.Tenant), probe.Pos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical == tok {
+		t.Fatalf("test token is already canonical: %q", tok)
+	}
+	return tok
+}
+
+func TestListCursorRejectsNonCanonicalJSON(t *testing.T) {
+	cases := []string{
+		`{"pos":0,"tenant":"acme","v":1}`,
+		`{"v":1, "tenant": "acme", "pos": 0}`,
+		`{"v":1,"tenant":"acme","pos":0,"extra":1}`,
+	}
+	for _, raw := range cases {
+		tok := nonCanonicalListCursor(t, raw)
+		if _, err := parseListCursor(tok, "acme", 3); codeOf(err) != "invalid_argument" {
+			t.Fatalf("token from %q = %v, want invalid_argument", raw, err)
+		}
+	}
+}
+
+func TestListCursorRejectsNonCanonicalBase64(t *testing.T) {
 	raw, _ := json.Marshal(listCursorPayload{V: 1, Tenant: "acme", Pos: 0})
-	// Pad base64 breaks canonical form (RawURLEncoding has no padding).
-	padded := base64.URLEncoding.EncodeToString(raw)
+	// Standard base64 with padding decodes via RawURLEncoding but is not the canonical token.
+	padded := base64.StdEncoding.EncodeToString(raw)
 	if _, err := parseListCursor(padded, "acme", 3); codeOf(err) != "invalid_argument" {
-		t.Fatalf("non-canonical = %v, want invalid_argument", err)
+		t.Fatalf("non-canonical base64 = %v, want invalid_argument", err)
 	}
 }
 
