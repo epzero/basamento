@@ -12,14 +12,17 @@ import (
 	"github.com/cucumber/godog"
 )
 
+// timeSink lets shared "N pass" steps advance scenario time on a domain fake.
 type timeSink interface {
 	timePassed(context.Context, time.Duration) error
 }
 
+// registerSharedPassStep wires elapsed-time steps used by blob and flow-host scenarios.
 func registerSharedPassStep(sc *godog.ScenarioContext) {
 	sc.Step(`^([^"]+) pass$`, stepElapsedPasses)
 }
 
+// stepElapsedPasses advances the core fake clock and any host fake timer state.
 func stepElapsedPasses(ctx context.Context, elapsed string) error {
 	d, err := parseElapsed(elapsed)
 	if err != nil {
