@@ -57,6 +57,7 @@ type hostHandlerCall struct {
 
 type hostBehavior struct {
 	output   json.RawMessage
+	costMpts int64
 	err      error
 	blocking bool
 	released bool
@@ -188,7 +189,45 @@ func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return host.NodeResult{Output: b.output}, b.err
+	return host.NodeResult{Output: b.output, CostMpts: b.costMpts}, b.err
+}
+
+func (w *hostWorld) declared() bool {
+	return w.flow != nil
+}
+
+func (w *hostWorld) startDeclared() error {
+	return w.start(`{}`)
+}
+
+func (w *hostWorld) started() bool {
+	return w.done != nil
+}
+
+func (w *hostWorld) nodeRuns(node string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.behaviors[node] == nil {
+		return 0, fmt.Errorf("node %q has no handler behavior in the host world", node)
+	}
+	n := 0
+	for _, c := range w.handlerCalls {
+		if c.node == node {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (w *hostWorld) failure() (code, message string, ok bool) {
+	if w.err == nil {
+		return "", "", false
+	}
+	var pe *core.Error
+	if errors.As(w.err, &pe) {
+		return string(pe.Code), pe.Message, true
+	}
+	return string(core.CodeOf(w.err)), w.err.Error(), true
 }
 
 func (w *hostWorld) handlerReturns(node, output string) error {
@@ -1087,10 +1126,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 		return world(ctx).Host.start(input)
 	})
 
-	sc.Step(`^a run of the flow has started$`, func(ctx context.Context) error {
-		return world(ctx).Host.start(`{}`)
-	})
-
 	sc.Step(`^the run made exactly one step, named "([^"]*)", with input (\{.*\})$`,
 		func(ctx context.Context, name, want string) error {
 			w := world(ctx).Host
@@ -1122,6 +1157,41 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			}
 			w.registerHandledKind(kind)
 			w.behavior(node)
+			return nil
+		})
+
+	sc.Step(`^a flow whose node "([^"]*)" of kind "set" precedes node "([^"]*)" of kind "agent" with a registered node handler$`,
+		func(ctx context.Context, verify, repair string) error {
+			w := world(ctx).Host
+			def := w.newFlow("repair-loop", 1)
+			def.State.Schema = json.RawMessage(`{"type":"object","properties":{"failed":{"type":"integer"}}}`)
+			w.addNode(verify, "set", `{"verified":true}`, "", "")
+			w.addNode(repair, "agent", `{"agent":"repair"}`, "", "failed")
+			w.addEdge(ir.Start, verify, "")
+			w.addEdge(verify, repair, "")
+			w.registerHandledKind("agent")
+			w.behavior(repair)
+			return nil
+		})
+
+	sc.Step(`^node "([^"]*)" has a guard of (\d+) milli-points and routes back to node "([^"]*)"$`,
+		func(ctx context.Context, node string, guard int, back string) error {
+			w := world(ctx).Host
+			def := w.ensureFlow()
+			n := def.Nodes[node]
+			n.Guard = &flow.Guard{CostMpts: int64(guard)}
+			def.Nodes[node] = n
+			w.addEdge(node, back, "")
+			return nil
+		})
+
+	sc.Step(`^the node handler of "([^"]*)" returns (\{.*\}) with a settled cost of (\d+) milli-points$`,
+		func(ctx context.Context, node, output string, cost int) error {
+			b := world(ctx).Host.behavior(node)
+			if err := json.Unmarshal([]byte(output), &b.output); err != nil {
+				return fmt.Errorf("handler output %q: %w", output, err)
+			}
+			b.costMpts = int64(cost)
 			return nil
 		})
 

@@ -35,6 +35,49 @@ func stepElapsedPasses(ctx context.Context, elapsed string) error {
 	return nil
 }
 
+// runStarter is how a domain world starts a run with empty input from the
+// shared sentence "a run of the flow has started".
+type runStarter interface {
+	declared() bool
+	startDeclared() error
+}
+
+func pickRunStarter(ctx context.Context) (runStarter, error) {
+	w := world(ctx)
+	var hostRS, machineRS runStarter
+	hostOK, machineOK := false, false
+	if w.Host != nil {
+		if rs, ok := any(w.Host).(runStarter); ok && rs.declared() {
+			hostRS, hostOK = rs, true
+		}
+	}
+	if w.Machine != nil {
+		if rs, ok := any(w.Machine).(runStarter); ok && rs.declared() {
+			machineRS, machineOK = rs, true
+		}
+	}
+	if hostOK && machineOK {
+		return nil, fmt.Errorf("both host and machine worlds have a declared flow")
+	}
+	if hostOK {
+		return hostRS, nil
+	}
+	if machineOK {
+		return machineRS, nil
+	}
+	return nil, fmt.Errorf("no flow declared")
+}
+
+func registerSharedRunStartStep(sc *godog.ScenarioContext) {
+	sc.Step(`^a run of the flow has started$`, func(ctx context.Context) error {
+		rs, err := pickRunStarter(ctx)
+		if err != nil {
+			return err
+		}
+		return rs.startDeclared()
+	})
+}
+
 // runOutcome is what a domain world reports about the run a scenario started,
 // for the sentences that flow machine and flow host scenarios share.
 type runOutcome interface {

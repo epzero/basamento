@@ -76,6 +76,7 @@ func Initialize(sc *godog.ScenarioContext) {
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+	registerSharedRunStartStep(sc)
 	registerSharedRunOutcomeSteps(sc)
 	registerSharedPassStep(sc)
 }
