@@ -212,14 +212,14 @@ func probeFailureCostMpts(w *hostWorld, failingNode string, want int64, scenario
 		return fmt.Errorf("delta=0 probe run succeeded, want failure")
 	}
 	if code0 != scenarioCode {
-		return fmt.Errorf("delta=0 probe code %s, want scenario %s (%v)", code0, scenarioCode, err0)
+		return fmt.Errorf("delta=0 probe code %s, want scenario %s: %w", code0, scenarioCode, err0)
 	}
 	code1, msg1, err1 := runProbe(1)
 	if err1 == nil {
 		return fmt.Errorf("delta=1 probe run succeeded, want overflow failure")
 	}
 	if code1 != core.CodeInvalidArgument || !strings.Contains(msg1, "cost_mpts overflow") {
-		return fmt.Errorf("delta=1 probe %v (%s), want invalid_argument with cost_mpts overflow", err1, msg1)
+		return fmt.Errorf("delta=1 probe %s: %w, want invalid_argument with cost_mpts overflow", msg1, err1)
 	}
 	return nil
 }

@@ -45,8 +45,7 @@ type hostWorld struct {
 	err         error
 	callsAtDone int
 
-	firstJournal  []hostJournalEntry
-	replayJournal []hostJournalEntry
+	firstJournal []hostJournalEntry
 
 	replayAcceptsFailure bool
 }
