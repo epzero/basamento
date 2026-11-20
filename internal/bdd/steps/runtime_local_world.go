@@ -228,9 +228,10 @@ type localWorld struct {
 	shutdownError error
 	clockBefore   time.Time
 
-	parentRegs    map[string]parentChildReg
-	haveListed    bool
-	firstStartRef runtime.RunRef
+	parentRegs        map[string]parentChildReg
+	haveListed        bool
+	firstStartRef     runtime.RunRef
+	constructionClock core.Clock
 }
 
 func newLocalWorld() *localWorld {

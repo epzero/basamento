@@ -22,11 +22,17 @@ func (c clockNowOnly) Now() time.Time { return c.now }
 
 func registerLocalClock(sc *godog.ScenarioContext) {
 	sc.Step(`^a clock that is not a timer clock$`, func(ctx context.Context) error {
+		w := localStepWorld(ctx)
+		w.constructionClock = clockNowOnly{now: world(ctx).Core.clock.Now()}
 		return nil
 	})
 	sc.Step(`^the local runtime is constructed with that clock$`, func(ctx context.Context) error {
-		_, err := local.New(local.Options{Clock: clockNowOnly{now: world(ctx).Core.clock.Now()}})
-		localStepWorld(ctx).lastErr = err
+		w := localStepWorld(ctx)
+		if w.constructionClock == nil {
+			return fmt.Errorf("no clock was stored for construction")
+		}
+		_, err := local.New(local.Options{Clock: w.constructionClock})
+		w.lastErr = err
 		return nil
 	})
 	sc.Step(`^construction fails with an error$`, func(ctx context.Context) error {

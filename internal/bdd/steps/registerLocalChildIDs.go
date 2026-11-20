@@ -11,11 +11,11 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 	sc.Step(`^a run of "([^"]*)" for tenant "([^"]*)" has child run "([^"]*)" waiting at gate "([^"]*)"$`,
 		func(ctx context.Context, parent, tenant, childID, gate string) error {
 			w := localStepWorld(ctx)
-			w.setChildGateFlow("child", gate)
 			reg, ok := w.parentReg(parent)
 			if !ok {
-				reg = parentChildReg{child: "child", id: childID, policy: "abandon"}
+				reg = parentChildReg{child: localDefaultParentFlow, id: childID, policy: localDefaultClosePolicy}
 			}
+			w.setChildGateFlow(reg.child, gate)
 			w.setCommandParent(parent, &reg)
 			ref, exec, err := w.start(ctx, tenant, "", parent)
 			if err != nil {
@@ -46,10 +46,13 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 			if exec == nil {
 				return fmt.Errorf("no parent run has started")
 			}
-			reg, _ := w.parentReg("parent")
+			reg, ok := w.parentReg(exec.name)
+			if !ok {
+				return fmt.Errorf("no registration for parent flow %q", exec.name)
+			}
 			policy := reg.policy
 			if policy == "" {
-				policy = "abandon"
+				policy = localDefaultClosePolicy
 			}
 			want := childCallCount(exec) + 1
 			if err := exec.sendChildCommand(localChildCommand{flow: child, id: childID, parentClose: policy}); err != nil {
@@ -85,7 +88,7 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 		}
 		tenant := string(w.current.TenantID)
 		if tenant == "" {
-			tenant = "acme"
+			return fmt.Errorf("no tenant is recorded for the parent run")
 		}
 		state, err := w.stateOf(ctx, tenant, childID)
 		if err != nil {
@@ -107,10 +110,10 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 		func(ctx context.Context, tenant, parentID, childID, childFlow string) error {
 			w := localStepWorld(ctx)
 			w.setChildGateFlow(childFlow, "approve")
-			w.setCommandParent("parent", &parentChildReg{
-				child: childFlow, id: childID, policy: "abandon",
+			w.setCommandParent(localDefaultParentFlow, &parentChildReg{
+				child: childFlow, id: childID, policy: localDefaultClosePolicy,
 			})
-			ref, exec, err := w.start(ctx, tenant, parentID, "parent")
+			ref, exec, err := w.start(ctx, tenant, parentID, localDefaultParentFlow)
 			if err != nil {
 				return err
 			}
@@ -141,15 +144,22 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 			return nil
 		})
 	sc.Step(`^parent "([^"]*)" starts child flow "([^"]*)" with child run id "([^"]*)"$`,
-		func(ctx context.Context, _parentID, child, childID string) error {
+		func(ctx context.Context, parentID, child, childID string) error {
 			w := localStepWorld(ctx)
-			exec := w.currentExec
-			if exec == nil {
-				return fmt.Errorf("no parent run has started")
+			tenant := string(w.current.TenantID)
+			if tenant == "" {
+				return fmt.Errorf("no tenant is recorded for the parent run")
 			}
-			w.setChildGateFlow(child, "approve")
+			exec, err := w.execForRun(tenant, parentID)
+			if err != nil {
+				return err
+			}
+			policy := localDefaultClosePolicy
+			if reg, ok := w.parentReg(exec.name); ok && reg.policy != "" {
+				policy = reg.policy
+			}
 			want := childCallCount(exec) + 1
-			if err := exec.sendChildCommand(localChildCommand{flow: child, id: childID, parentClose: "abandon"}); err != nil {
+			if err := exec.sendChildCommand(localChildCommand{flow: child, id: childID, parentClose: policy}); err != nil {
 				return err
 			}
 			if err := w.waitRecordedChildCalls(exec, want, "the parent to record the child command"); err != nil {
@@ -158,6 +168,9 @@ func registerLocalChildIDs(sc *godog.ScenarioContext) {
 			if got := childCallCount(exec); got < want {
 				return fmt.Errorf("the parent recorded %d child calls, want %d", got, want)
 			}
+			w.mu.Lock()
+			w.currentExec = exec
+			w.mu.Unlock()
 			return nil
 		})
 	sc.Step(`^starting the child fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {

@@ -7,6 +7,12 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+// Defaults used only when the scenario text does not name a value (see local.feature RT-049…050).
+const (
+	localDefaultParentFlow  = "parent"
+	localDefaultClosePolicy = "abandon"
+)
+
 // localChildCall records one dc.Child invocation from the parent flow goroutine.
 type localChildCall struct {
 	flow     string

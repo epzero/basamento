@@ -35,7 +35,8 @@ func registerLocalChildren(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^flow "([^"]*)" waits at gate "([^"]*)"$`, func(ctx context.Context, name, gate string) error {
-		localStepWorld(ctx).setFlow(name, localStepWorld(ctx).gateFlow(gate))
+		w := localStepWorld(ctx)
+		w.setFlow(name, w.gateFlow(gate))
 		return nil
 	})
 	sc.Step(`^a run of "([^"]*)" completes without waiting for "([^"]*)"$`, func(ctx context.Context, flow, childID string) error {
