@@ -88,6 +88,27 @@ func localLastError(w *localWorld, code string) error {
 	return nil
 }
 
+// localListFailure requires a failed List that returned no runs (REQ-RT-052/053).
+func localListFailure(w *localWorld, code string) error {
+	if err := localLastError(w, code); err != nil {
+		return err
+	}
+	if len(w.lastList) != 0 {
+		return fmt.Errorf("listing returned %d runs on error, want none", len(w.lastList))
+	}
+	return nil
+}
+
+func (w *localWorld) execForRun(tenant, runID string) (*localExec, error) {
+	w.mu.Lock()
+	exec := w.byRun[localRunKey{tenant: core.TenantID(tenant), id: runID}]
+	w.mu.Unlock()
+	if exec == nil {
+		return nil, fmt.Errorf("run %q of tenant %q is not known to the scenario", runID, tenant)
+	}
+	return exec, nil
+}
+
 func localStartWithTenants(ctx context.Context, runID, flow, contextTenant, requestTenant string) error {
 	w := localStepWorld(ctx)
 	ref, err := w.runtime(ctx).Start(w.ctx(contextTenant), runtime.StartRequest{
@@ -131,7 +152,6 @@ func (w *localWorld) setChildGateFlow(name, gate string) {
 
 // startRun starts a run with optional idempotency key and records Start outcome.
 func (w *localWorld) startRun(ctx context.Context, tenant, runID, flow, idem string, recordAsFirst bool) error {
-	before := w.execCount(flow)
 	rt := w.runtime(ctx)
 	ref, err := rt.Start(w.ctx(tenant), runtime.StartRequest{
 		Flow:           runtime.FlowRef{Name: flow},
@@ -150,9 +170,6 @@ func (w *localWorld) startRun(ctx context.Context, tenant, runID, flow, idem str
 	w.mu.Lock()
 	w.current = ref
 	w.mu.Unlock()
-	if w.execCount(flow) == before {
-		return nil
-	}
 	return w.waitRunState(ctx, ref, "completed")
 }
 
