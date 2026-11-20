@@ -6,7 +6,8 @@
 // this package never imports package runtime (ADR-0011). This is what lets the same flow run on
 // every runtime with identical results (REQ-FLOW-*). See ADR-0003.
 //
-// Status: contract only (WP-L4-*).
+// Status: IR, compiler and Go builder implemented (WP-L4-01, WP-L4-03);
+// Machine contract only (WP-L4-02).
 package flow
 
 import "encoding/json"
@@ -37,7 +38,8 @@ type Node struct {
 	Guard *Guard          `json:"guard,omitempty"`
 }
 
-// Guard bounds cycles and spend. Every cycle must pass through a guarded node.
+// Guard bounds cycles and spend. A cycle needs a node on it whose guard carries
+// a positive MaxVisits or CostMpts; a While condition alone does not bound it.
 type Guard struct {
 	MaxVisits int    `json:"max_visits,omitempty"`
 	CostMpts  int64  `json:"cost_mpts,omitempty"`

@@ -559,3 +559,87 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/94
         human:
             status: pending
+    FLOW-047-01:
+        hash: sha256:5cbf31641dd44389f8f1d7e879ca7fc3a07b3519f2d555cef2388aebabd8ec32
+        reqs:
+            - REQ-FLOW-047
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-047-02:
+        hash: sha256:b61aec21c75b6c0c8644f25e6eb304d8ab5dbb236517ed5b861c38ff3dd0e1aa
+        reqs:
+            - REQ-FLOW-047
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-048-01:
+        hash: sha256:d218ed7a4ff5148ea6d366e098ba943fae8564bb745abd82e97a26f5d09fc5d5
+        reqs:
+            - REQ-FLOW-048
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-048-02:
+        hash: sha256:7c7e494a87652f8e9b53ca6563665a761fde99a4def846e4843b184bf3926cbb
+        reqs:
+            - REQ-FLOW-048
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-049-01:
+        hash: sha256:572b2a88775a337e44264746ce6f4993f9ec1fcdaa347d16782335be7e7e8615
+        reqs:
+            - REQ-FLOW-049
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-049-02:
+        hash: sha256:c4dd56418e6d9f567a7c2ce09bf30c74a3d4f4a4c0ec16b4eb34476219c69dc5
+        reqs:
+            - REQ-FLOW-049
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-050-01:
+        hash: sha256:2bc4c8c62d25063dca70b332739287237c30625706339670880cffbfc4f09806
+        reqs:
+            - REQ-FLOW-050
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending

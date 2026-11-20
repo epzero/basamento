@@ -17,14 +17,18 @@ type worldKey struct{}
 
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
-	Core      *coreWorld
-	Schema    *schemaWorld
-	Expr      *exprWorld
-	SQL       *sqlWorld
-	Prompt    *promptWorld
-	Telemetry *telemetryWorld
-	Blob      *blobWorld
-	Secrets   *secretsWorld
+	Core        *coreWorld
+	Schema      *schemaWorld
+	Expr        *exprWorld
+	SQL         *sqlWorld
+	Prompt      *promptWorld
+	Telemetry   *telemetryWorld
+	Blob        *blobWorld
+	Secrets     *secretsWorld
+	Credentials *credentialsWorld
+	Flow        *flowWorld
+	FlowBuilder *builderWorld
+	Catalog     *catalogWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -33,14 +37,17 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:      newCoreWorld(),
-			Schema:    newSchemaWorld(),
-			Expr:      &exprWorld{bindings: map[string]any{}},
-			SQL:       newSQLWorld(),
-			Prompt:    newPromptWorld(),
-			Telemetry: newTelemetryWorld(),
-			Blob:      newBlobWorld(),
-			Secrets:   newSecretsWorld(),
+			Core:        newCoreWorld(),
+			Schema:      newSchemaWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Telemetry:   newTelemetryWorld(),
+			Blob:        newBlobWorld(),
+			Secrets:     newSecretsWorld(),
+			Flow:        newFlowWorld(),
+			FlowBuilder: newBuilderWorld(),
+			Catalog:     newCatalogWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -50,10 +57,15 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerPrompt(sc)
 	registerBlob(sc)
 	registerTelemetry(sc)
+	registerFlowCompile(sc)
+	registerFlowLimits(sc)
+	registerFlowBuilder(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
 	registerOpeningSteps(sc)
+	registerCredentials(sc)
+	registerCatalog(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {

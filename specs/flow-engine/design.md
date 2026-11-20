@@ -68,6 +68,14 @@ every CEL or jq expression — edge `when` conditions, node `in` mappings, `set`
 assignments, guard `while` conditions and gate `accept_if` conditions
 (REQ-FLOW-004). The builder keeps expressions in the IR as written.
 
+A jq `in` or `over` mapping is parsed, checked for reserved names and measured
+against the expression size limit, but it cannot be type-checked against the
+state schema: a jq mapping has no `state` binding, so REQ-FLOW-004's schema
+check binds CEL in practice, and `over` is only required to be an expression
+whose result shape is the `map` node's business. Checking what a node's input
+must be, per kind, against the state schema is the machine's (WP-L4-02) and the
+host's (WP-L4-04) work, because only they know the kind's contract.
+
 **Determinism** (REQ-FLOW-011): nodes go into `flow.IR.Nodes` and reducers
 into `flow.IR.State.Reducers`, both maps whose keys the canonical JSON form
 (`core/schema`, RFC 8785) sorts, so their declaration order does not reach the
@@ -96,17 +104,19 @@ exists in the state schema's properties.
 ## 2. Compiler and machine
 
 WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
-requirements REQ-FLOW-001 … 006 and 045 … 046, scenarios `compile.feature`,
+requirements REQ-FLOW-001 … 006, 045 … 049, scenarios `compile.feature`,
 `routing.feature` and `runs.feature`.
 
 ### 2.1 Bounded cycles (REQ-FLOW-003)
 
 A cycle terminates only if something it passes through is consumed on every
-lap. `guard.max_visits` counts the visits of its node and `guard.cost_mpts`
-counts the milli-points spent there; either is a finite number in the IR, so a
+lap. `guard.max_visits` counts the visits of its node, and `guard.cost_mpts`
+bounds the run's settled milli-points (`Snapshot.Cost`, CEL `run.cost`) at the
+moment the node is about to start — it is a budget for the run, not for the
+milli-points spent inside that node; either is a finite number in the IR, so a
 bound exists for the machine to enforce. What a run does when a guard is
-reached is the machine's behavior (`specs/glossary.md`, "Repair guard"), not
-the compiler's. One of the two is enough: a node on the cycle with
+reached is the machine's behavior (§2.4, `specs/glossary.md` "Repair guard"),
+not the compiler's. One of the two is enough: a node on the cycle with
 `{max_visits: 3}` and a node on it with `{cost_mpts: 5000}` both bound the
 cycle.
 
@@ -142,7 +152,9 @@ by REQ-FLOW-003 rather than by the range check. A **negative** value is
 contradictory and rejected wherever the guard appears, on a cycle or not. The
 error is `*core.Error` with code `invalid_argument` naming the node, the field
 and the maximum, for example
-`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`.
+`flow: node "repair": guard max_visits 1000001 is above the maximum 1000000`,
+and, for a negative value,
+`flow: node "repair": guard max_visits -1 is negative; the maximum is 1000000`.
 
 The check is per guard field. A node whose guard carries only `cost_mpts`
 bounds a cycle; its `max_visits` stays absent.
@@ -153,14 +165,21 @@ bounds a cycle; its `max_visits` stays absent.
 | --- | --- | --- |
 | Node count | **4,096** nodes | The recursive cycle search follows the longest path, and the measured cost of validation was 0.95 s at 20,000 nodes (quadratic before the linearization in WP-L4-01's pull request) and 15 s at 80,000, with stack exhaustion on multi-million-node chains. 4,096 is five times below the first measurement and about a thousandth of the chain that exhausts the stack. Real flows have tens of nodes; fan-out is a `map` or `parallel` node. |
 | Edge count | **16,384** edges | Four edges per node at the node maximum: enough for if/else ladders on many nodes. Routing scans a node's outgoing edges (REQ-FLOW-001), and reachability scans the edge list, so this bounds both the compile and the run cost of routing. |
-| Expression size | **16,384 bytes** | The UTF-8 length of one expression in the IR: an edge `when`, a node `in` mapping (CEL or jq), a `set` assignment, a guard `while` or a gate `accept_if`. A hand-written condition is a few hundred bytes, so this is two orders of magnitude of headroom. The parser and type-checker run once per expression, and every node and edge may carry one, so a single expression must not consume the definition's budget. |
+| Expression size | **16,384 bytes** | The UTF-8 length of one expression in the IR: an edge `when`, a node `in` mapping (CEL or jq), a guard `while`, a gate's `accept_if` or a map's `over`. A hand-written condition is a few hundred bytes, so this is two orders of magnitude of headroom. The parser and type-checker run once per expression, and every node and edge may carry one, so a single expression must not consume the definition's budget. |
 | Definition size | **1,048,576 bytes** (1 MiB) | The canonical JSON bytes, because those are what is hashed, pinned and stored, independent of the YAML or JSON spelling. 1 MiB repeats the repository's message-size precedent (REQ-BUS-011) and the expression output limit (REQ-EXPR-020). A flow at the node and edge maxima is about 0.6 MiB, so the graph limits are reachable inside it. |
 
 The limits are requirements, not implementation guidance: REQ-FLOW-046 makes
 each one a rejection with code `invalid_argument` naming the limit and its
-maximum, for example `flow: 4097 nodes is above the maximum 4096`. They are
-constants in `flow/ir`, not configuration, and apply to an IR built in Go as
-well as to one decoded from YAML or JSON.
+maximum, for example `flow: node count limit of 4096 nodes exceeded: 4097
+nodes`. An expression rejection also names where the expression sits, for
+example `flow: expression size limit of 16384 bytes exceeded: edge "verify" ->
+"repair" when is 16385 bytes`. They are constants in `flow/ir`, not
+configuration, and apply to an IR built in Go as well as to one decoded from
+YAML or JSON.
+
+The IR has no field for a `set` node's assignments yet (Open questions), so
+`flow/ir` measures the expressions that do exist: an edge `when`, a node `in`,
+a guard `while`, a gate's `accept_if` and a map's `over`.
 
 `core/schema`'s untrusted-JSON limits (WP-L2-02) bound the nesting depth and
 the number literals of one JSON value, not the size of a document; they do not
@@ -176,14 +195,64 @@ before type-checking expressions; `ir.Canonical` and `ir.Hash` are then never
 asked to hash a definition the compiler would reject. A definition over
 several limits reports the first check in that order, deterministically.
 
+### 2.4 Guard budgets at run time (REQ-FLOW-047)
+
+`max_visits` and `cost_mpts` are enforced by the machine at the moment a node
+is about to start, before a command for that node exists. **Reached** means
+`>=`: a cost or a visit count one below its budget still lets the node start.
+
+- `max_visits`: the node may start while `Snapshot.Visit[node]` is below the
+  budget. A guard of 3 lets the node run 3 times and refuses the fourth start,
+  so the run still does the work its last allowed visit pays for. Scenario
+  `FLOW-047-01`.
+- `cost_mpts`: the budget is compared with the run's settled milli-points
+  (`Snapshot.Cost`, which is the `run.cost` CEL sees), not with a per-node
+  total: a budget protects the run, and the node that spends is not always the
+  guarded one. The node may start while `Snapshot.Cost` is below `cost_mpts`;
+  at or above it, the start fails. A `cost_mpts` of 80 with 40 milli-points
+  settled per visit therefore stops the run before the third visit: `40` after
+  the first, `80` after the second, refused before the third. Scenario
+  `FLOW-047-02`; the per-visit number is the cost the node's event carries, §3.
+
+A refused start returns the machine's `fail` command with code
+`budget_exceeded` and a message naming the node and the budget, for example
+`flow: node "repair": visit budget 3 reached` and
+`flow: node "repair": cost budget 80 milli-points reached with 80 settled`.
+The host turns that command into the run's error (REQ-FLOW-035), so the run
+ends `failed` with `budget_exceeded`, as `specs/glossary.md` ("Repair guard")
+and the preset scenarios already state. A guard field that is absent or 0 is
+no budget (§2.2) and never refuses a start.
+
+### 2.5 Map fan-out limit (REQ-FLOW-048)
+
+A `map` node fans out to one command per item of its collection. `flow/machine`
+exports `DefaultMaxFanout = 10000`, the most items one `map` node may fan out
+to in a run, and a collection with more items than that fails the run with
+code `budget_exceeded` before the machine returns any fan-out command for the
+node, so the host creates no step and no child run for it. The message names
+the node, the item count and the limit, for example
+`flow: node "impl": fan-out limit 10000 items exceeded: 10001 items`, and the
+`fail` command carries no state data: the run fails at the start of the
+superstep, before any item's result could be merged.
+
+A collection of exactly the limit is not over it, so every item fans out
+(scenario `FLOW-048-02`). `WithMaxFanout(n)` lowers the limit for the runs the
+host starts (§3); it never raises it above the default.
+
+`max_parallel` in a `map` node's spec is the host's throttle on how many of the
+node's items are in flight at once. It bounds neither the superstep nor the
+size of the collection: REQ-FLOW-046 limits the definition — its nodes, edges,
+expressions and canonical bytes — not the number of items a run's collection
+holds, which is data the run receives and not part of the definition.
+
 ## 3. Flow host (WP-L4-04)
 
 `flow/host` is the layer ADR-0011 defines (`layering.yaml`): it may import
 `core`, `expr`, `flow` and `runtime`, never a durable-execution vendor, and it
 imports no node handler. It provides the one `runtime.FlowHost`
 (`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
-owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038 and 044, scenarios
-`host.feature`.
+owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038, 044 and 050,
+scenarios `host.feature`.
 
 ```go
 // NodeHandler is the flow code of one effectful node kind (ADR-0011).
@@ -193,11 +262,15 @@ type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawM
 // catalog and registered node handlers.
 type Host struct{ /* unexported */ }
 
-func New(catalog DefinitionCatalog) *Host
+func New(catalog DefinitionCatalog, opts ...Option) *Host
 // RegisterHandler registers the handler for a node kind. The composition root
 // calls it before the host is registered with a runtime.
 func (h *Host) RegisterHandler(kind string, handler NodeHandler)
 func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.RawMessage) (json.RawMessage, error)
+
+// WithMaxFanout lowers the map fan-out limit for the runs the host starts
+// (REQ-FLOW-048, design.md §2.5); the machine's DefaultMaxFanout is the cap.
+func WithMaxFanout(limit int) Option
 
 // DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
 type DefinitionCatalog interface {
@@ -255,6 +328,34 @@ non-`*core.Error` becomes `internal`). Handing `node_failed` to the machine is
 the host's whole decision; when the machine returns `fail`, the host returns a
 `*core.Error` with that code.
 
+**Node cost (REQ-FLOW-049, REQ-FLOW-050).** The host reports a finished node's
+settled cost to the machine in `flow.Event.CostMpts`: an additive field of
+`flow.Event`, an `int64` of milli-points, non-negative, set only on
+`node_completed` and `node_failed` and left zero on every other event. The
+machine adds it to `Snapshot.Cost` with the node's other updates, when it
+applies the event (REQ-FLOW-049), so the edges out of that node and every later
+expression see it in `run.cost`, which is what a guard's `cost_mpts` compares
+against (§2.4). The number is part of the node's recorded result — the amount
+the node's step, node handler or child run returned — and never a value
+read from a ledger, a price table or a meter while replaying: the event the
+host feeds back already carries it, so replaying the same history accrues the
+same cost and reaches the same guard verdicts (REQ-FLOW-037). A `node_failed`
+accrues the settled cost of the pending step the event names, once: applying it
+removes that pending step. For a node whose result carries no cost the host
+reports `0`, and a pure `set` node, a wait node and a gate node cost nothing, so
+their completions carry no cost. The field is non-negative by contract —
+settlement charges a non-negative number of
+milli-points (`specs/models/design.md` §C3 and §C5) — so the machine never has
+to read a negative cost as a refund.
+
+The exact shape in which a result carries its cost — for example a result type
+that pairs the node's output with the settled milli-points — is the host
+design owner's decision (Saber, EP0-29). This spec fixes only the carrier's
+destination and its properties. `model/node` (WP-L3-03) is where reservation
+and settlement happen (`specs/models/design.md` §C4 and §C5,
+`docs/architecture/model-layer.md` §4), so its handler's result is the natural
+carrier for the cost of a model or agent node.
+
 **Replay and state (REQ-FLOW-037, 038).** The host keeps no state between calls
 other than local variables of the `FlowHost` call and the machine `Snapshot`
 it carries: the snapshot is fed back to `Machine.Apply` from the bookkeeping of
@@ -294,8 +395,9 @@ given literally in its step, so no scenario derives a number.
   around node transitions, nor their exact `Data` JSON shape (deferred to
   WP-L6-01 / `specs/streaming`).
 - **Shapes that the compiler does not yet fix**: the node-spec fields
-  `duration` (`wait`), `schema`, `accept_if` and `timeout` (`gate`) and `flow`
+  `duration` (`wait`), `schema` and `timeout` (`gate`) and `flow`
   (`subflow`) are read from the node spec as the scenarios write them; the
-  compiler (WP-L4-01) does not check their shape yet. The `subflow` child's
+  compiler (WP-L4-01) checks the expression in `accept_if` (`gate`) and `over`
+  (`map`) but not the shape of the rest of the spec. The `subflow` child's
   run id and parent-close policy are not specified here.
 - **Compiler (`WP-L4-01`) coverage of `START` and `FAIL` edge ends**: `docs/architecture/flow-engine.md` §1 uses `START` as the entry edge source and `FAIL` as the failure edge target in the IR, and `WP-L4-03` (`REQ-FLOW-014`) specifies that `flow/builder` emits them, but `specs/flow-engine/compile.feature` (`WP-L4-01`) has no explicit requirement or scenario yet stating that `flow/compile` accepts `"START"` as an edge source and `"FAIL"` as an edge target without declaring nodes of those names.

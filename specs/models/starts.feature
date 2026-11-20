@@ -26,6 +26,15 @@ Feature: Starting paid invocations safely
     Then the run waits at gate "ambiguous_start"
     And the provider accepted 1 invocation
 
+  @REQ-MODEL-005 @cost @id:MODEL-005-03
+  Scenario: An ambiguous start whose lookup finds nothing opens a gate
+    Given a simulated video provider that accepts the invocation but drops the start response
+    And the provider supports lookup by client ref
+    And the invocation's retention window passes before the model node looks it up
+    When a run invokes "video.generate" on it
+    Then the run waits at gate "ambiguous_start"
+    And the provider accepted 1 invocation
+
   @REQ-MODEL-010 @id:MODEL-010-01
   Scenario: Invalid parameters fail before the start
     Given a model "sim-video" whose parameter schema requires "duration_s" between 1 and 10

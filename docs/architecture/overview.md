@@ -112,6 +112,7 @@ flowchart TD
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
+| `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |
 | `flow` | IR, compiler, builder and the pure `Machine`. Imports no runtime. |

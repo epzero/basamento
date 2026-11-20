@@ -13,6 +13,7 @@ import (
 type schemaType struct {
 	schema   map[string]any
 	defs     map[string]map[string]any
+	path     string // schema path used to name the object types it declares
 	typeName string // struct object type name when applicable
 	rootDef  string // $defs entry name when the variable schema is a local $ref
 	celType  *cel.Type
@@ -35,6 +36,7 @@ func parseSchema(raw json.RawMessage, varName string) (*schemaType, error) {
 		return &schemaType{celType: cel.DynType}, nil
 	case map[string]any:
 		st.schema = v
+		st.path = varName
 		if defs, ok := v["$defs"].(map[string]any); ok {
 			st.defs = make(map[string]map[string]any, len(defs))
 			for k, d := range defs {
@@ -59,26 +61,40 @@ func parseSchema(raw json.RawMessage, varName string) (*schemaType, error) {
 }
 
 func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
-	def, names, err := defRefChain(ref, st.defs)
+	def, names, cycle, err := defRefChain(ref, st.defs)
 	if err != nil {
 		return nil, err
+	}
+	if cycle != "" {
+		// Every definition in the chain refers back to itself, so the chain
+		// declares no type: the type at that point is dyn (design.md §2). The
+		// schema document stays so NewEnv still registers the objects nested in
+		// it, entered by the name the chain started from.
+		return &schemaType{
+			schema:  st.schema,
+			defs:    st.defs,
+			path:    varName + "." + names[0],
+			rootDef: names[0],
+			celType: cel.DynType,
+		}, nil
 	}
 	visiting := make(map[string]bool, len(names))
 	for _, n := range names {
 		visiting[n] = true
 	}
-	child := &schemaType{schema: def, defs: st.defs}
+	child := &schemaType{schema: def, defs: st.defs, path: varName + "." + names[0]}
 	t, objName, err := child.mapSchemaVisit(def, varName+"."+names[0], visiting)
 	if err != nil {
 		return nil, err
 	}
 	child.rootDef = names[len(names)-1]
 	if objName != "" {
-		doc, defName, err := objectSchemaForBuild(def, child)
+		doc, defName, docPath, err := objectSchemaForBuild(def, child, child.path)
 		if err != nil {
 			return nil, err
 		}
 		child.schema = doc
+		child.path = docPath
 		if defName != "" {
 			child.rootDef = defName
 		}
@@ -88,28 +104,30 @@ func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
 	return child, nil
 }
 
-// defRefChain follows a #/$defs reference chain and returns the final
-// document with the definition names it passed through.
-func defRefChain(ref string, defs map[string]map[string]any) (map[string]any, []string, error) {
-	var names []string
+// defRefChain follows a "#/$defs/" reference chain one hop at a time and
+// returns the document that ends it with the definition names it passed
+// through. When the chain refers back to a name it already passed, it stops
+// there and reports that name in cycle: the type at that point is dyn
+// (design.md §2).
+func defRefChain(ref string, defs map[string]map[string]any) (doc map[string]any, names []string, cycle string, err error) {
 	seen := map[string]bool{}
 	for {
 		if !strings.HasPrefix(ref, "#/$defs/") {
-			return nil, nil, fmt.Errorf("external reference %q", ref)
+			return nil, nil, "", fmt.Errorf("external reference %q", ref)
 		}
 		name := strings.TrimPrefix(ref, "#/$defs/")
 		if seen[name] {
-			return nil, nil, fmt.Errorf("cyclic reference %q", ref)
+			return nil, names, name, nil
 		}
 		def, ok := defs[name]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing definition for reference %q", ref)
+			return nil, nil, "", fmt.Errorf("missing definition for reference %q", ref)
 		}
 		seen[name] = true
 		names = append(names, name)
 		next, ok := def["$ref"].(string)
 		if !ok {
-			return def, names, nil
+			return def, names, "", nil
 		}
 		ref = next
 	}

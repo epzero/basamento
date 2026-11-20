@@ -8,7 +8,9 @@ the same change that first uses it.
 | **Flow** | A versioned definition (IR) of nodes and edges, stored as data and identified by its content hash. |
 | **Run** | One execution of a flow with an input. Has a run id, a tenant and a state: running, completed, failed, cancelled, terminated. |
 | **Node** | One step of a flow: `set`, `task`, `model`, `agent`, `tool`, `map`, `parallel`, `subflow`, `gate`, `wait`. |
-| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (milli-points spent there). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Guard budget** | The finite bound a node's guard puts on a cycle: `max_visits` (visits of the node) or `cost_mpts` (the run's settled milli-points, `run.cost`, when the node is about to start, not a per-node total). A guard's `while` condition narrows when the cycle exits but does not bound it. |
+| **Settled cost** | The milli-points a run has been charged so far: the machine's `Snapshot.Cost`, visible to CEL as `run.cost`, increased by the cost each finished node's recorded result carries. |
+| **Fan-out limit** | The most items one `map` node may fan out to in a run: `DefaultMaxFanout`, 10,000, lowered for a host with `WithMaxFanout`. A larger collection fails the run with `budget_exceeded` before any item starts. |
 | **Edge endpoint** | The two ends of an edge: a node, or one of the reserved endpoints `START` (the flow's entry, only an edge source) and `FAIL` (its failure exit, only an edge target). `START` and `FAIL` are not nodes. |
 | **Flow host** | The flow code that drives a flow: it feeds the flow machine events and turns its commands into durable calls. The same host runs on every runtime. |
 | **Node handler** | The flow code of one effectful node kind (`model`, `agent`), registered with the flow host. Its side effects are steps. |
@@ -53,6 +55,7 @@ the same change that first uses it.
 | **Idle-exit time** | How long a worker waits without a lease before it leaves its pool and exits. |
 | **Credential** | A named secret of a tenant, such as a vendor API key, kept in the vault and used by reference (`cred://<name>`). The tenant is the caller's, from the context; names are 1 to 128 characters from `A`–`Z`, `a`–`z`, `0`–`9`, `.`, `_`, `-` and `/`, made of `/`-separated segments none of which is empty, `.` or `..` (REQ-CRED-006, REQ-CRED-007). |
 | **Client ref** | The idempotency key of an invocation, stable across retries of one logical invocation (including retries of an unacknowledged start). |
+| **Invocation registry** | The in-process store of one provider's invocations: it answers a client ref with the invocation, its event log from a cursor and its result. It keeps an ended invocation for its **retention window** after its end and holds at most its **ended bound** of ended invocations, evicting the oldest ended first and never a running one; an evicted client ref behaves as one it never held. |
 | **Ambiguous start** | A start whose acceptance by the provider is unknown (for example a timeout after sending). |
 | **Milli-point** | The unit of cost: prices, budgets, reservations and charges are whole numbers of milli-points. A point's value in a currency is set per deployment. |
 | **Price table** | The rate rules of each model (rates per token, image or second, with the condition under which they apply), shipped with the binary and overridden per deployment and tenant. |

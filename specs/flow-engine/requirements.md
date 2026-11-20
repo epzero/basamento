@@ -1,6 +1,6 @@
 # Flow engine: flows as data
 
-Status: **Planned** (WP-L4-01, WP-L4-02). Design: ADR-0003, `docs/architecture/flow-engine.md`.
+Status: **In progress** (IR and compiler implemented, WP-L4-01; machine, builder and host planned, WP-L4-02, WP-L4-03, WP-L4-04). Design: ADR-0003, `docs/architecture/flow-engine.md`.
 
 ### REQ-FLOW-001 — Conditional edges
 When a node completes, the flow machine shall follow the first outgoing edge whose condition holds, in declaration order, and otherwise the edge without a condition.
@@ -19,6 +19,19 @@ When a flow definition changes, runs that already started shall continue with th
 
 ### REQ-FLOW-006 — Gate payload validation
 If a gate payload does not satisfy the gate's schema or acceptance condition, then the system shall reject it with code `invalid_argument` and keep the gate open.
+
+## Flow machine (WP-L4-02)
+
+The machine enforces the bounds the compiler accepted (REQ-FLOW-003, REQ-FLOW-045) and the fan-out limit of `design.md` §2.5 at run time. Scenarios: `routing.feature`.
+
+### REQ-FLOW-047 — Guard budgets at run time
+While the run's settled cost is at least the positive `cost_mpts` of a node's guard, or the node has had at least the positive `max_visits` visits that guard allows, the flow machine shall not start that node and shall fail the run with code `budget_exceeded`, naming the node and the budget it reached.
+
+### REQ-FLOW-048 — The map fan-out limit
+If the collection a `map` node fans out over holds more items than the fan-out limit of `design.md` §2.5, then the flow machine shall fail the run with code `budget_exceeded` before it creates any fan-out for that node, naming the node, the item count and the limit, and the failure shall carry no state data.
+
+### REQ-FLOW-049 — A finished node's settled cost accrues to the run
+When the flow machine applies a `node_completed` or `node_failed` event carrying a node's settled cost, the flow machine shall add that cost, in milli-points, to the run's settled cost, which later expressions read as `run.cost`.
 
 ## Compiler limits (WP-L4-01)
 
@@ -144,3 +157,6 @@ When the flow machine completes a run, the flow host shall complete the run with
 
 ### REQ-FLOW-044 — Concurrent superstep commands
 When the flow machine returns multiple commands in one superstep, the flow host shall start every durable call in that superstep before waiting for any of them to complete.
+
+### REQ-FLOW-050 — The cost is part of the node's recorded result
+When the flow host reports a finished node to the flow machine, the flow host shall report the node settled cost in milli-points, taken from the result the node step, node handler or child run returned for this run; a gate or wait node completion carries no cost.

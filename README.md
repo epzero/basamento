@@ -9,8 +9,9 @@ pure-Go binary** that embeds everything for self-hosting, and swaps to cloud
 services for SaaS.
 
 > Status: **foundation stage.** Contracts, conventions, specs and the gate are in
-> place; `core` identifiers and JSON Schema (`core/schema`, WP-L2-02) are
-> implemented. Everything else is specified and planned in
+> place; `core` identifiers, JSON Schema (`core/schema`, WP-L2-02) and the flow
+> IR and compiler (`flow/ir`, `flow/compile`, WP-L4-01) are implemented.
+> Everything else is specified and planned in
 > [`docs/roadmap/`](docs/roadmap/README.md).
 
 ## How this repository works
@@ -39,6 +40,7 @@ make bdd                           # run scenarios
 go tool gate wp               # every work package: done, in-progress, ready or blocked
 go tool gate spec queue       # specs awaiting human review, P0 first
 go tool gate spec trace       # requirement → scenario matrix
+go tool gate nightly          # scheduled nightly ok, failed or stale (gh JSON on stdin)
 ```
 
 ## Layout

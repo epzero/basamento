@@ -22,7 +22,7 @@ While an invocation produces partial output, the model layer shall publish it as
 The model node shall start every attempt of one logical invocation with the same client ref.
 
 ### REQ-MODEL-005 — Ambiguous starts are never repeated blindly
-If the outcome of a start is unknown, then the model node shall look the invocation up by client ref before starting it again, and if the provider cannot answer, shall open a gate instead of starting it again.
+If the outcome of a start is unknown, then the model node shall look the invocation up by client ref before starting it again; and when the lookup finds no invocation or the provider cannot answer, the model node shall open a gate instead of starting it again.
 
 ### REQ-MODEL-006 — Reserve, then settle
 Before starting a paid invocation, the system shall reserve the cost estimated by the model's price formula; when the invocation ends, the system shall charge the actual cost or release the reservation.
@@ -41,6 +41,23 @@ If an invocation's parameters do not satisfy the model's parameter schema, then 
 
 ### REQ-MODEL-011 — Machine-local models
 While the profile is `cloud`, the model router shall not select a model whose locality is `machine_local`.
+
+## Retention
+
+A registry is the in-process memory of one provider's invocations: it answers
+a client ref with the invocation, its event log from a cursor and its result.
+It cannot grow without bound, so it forgets ended invocations within limits its
+constructor sets, and nothing else.
+
+The window bounds only what the registry remembers. The model node derives the
+client ref from the run, the node path, the visit and the input
+(`docs/architecture/model-layer.md` §4), and each attempt's ref from that call
+ref and the attempt number (REQ-MODEL-054); it calls `Begin` inside one activity
+attempt, and records the result durably before that attempt acknowledges, so a
+late retry replays the recorded result and never reaches `Begin`.
+
+### REQ-MODEL-088 — Ended invocations are forgotten within a window and a bound
+When an invocation ends, the registry shall keep it for its retention window after its end and no longer, and, while it holds more ended invocations than its ended bound, shall evict ended invocations from the oldest first; it shall never evict a running invocation, and shall answer for an evicted client ref exactly as for one it never held: lookup finds no invocation, events, result and cancel answer `not_found`, and a start begins a new invocation.
 
 ## Workers
 
@@ -278,3 +295,18 @@ The default token formula shall count every reasoning token of the call exactly 
 
 ### REQ-MODEL-082 — Usage with more cached than input tokens fails pricing
 If a call's usage reports more cached tokens than input tokens, then the price table shall fail pricing the call with code `invalid_argument`.
+
+### REQ-MODEL-083 — A rate condition that errors fails pricing
+If a rate rule's `when` condition fails to evaluate or yields a value that is not a boolean, then the price table shall fail pricing the call with code `invalid_argument` and shall not try a later rate rule.
+
+### REQ-MODEL-084 — Rates are never negative
+When any layer of the price table, or the shipped snapshot as it loads, sets a rate below zero, the price table shall refuse it with code `invalid_argument`, naming the model id and the rate key.
+
+### REQ-MODEL-085 — Usage counts are never negative
+If a call's usage reports a negative input, output, cached or reasoning token count, then the price table shall fail pricing the call with code `invalid_argument` before it evaluates any formula, naming the model id and the offending count.
+
+### REQ-MODEL-086 — A priced amount is never negative
+If a price formula returns an amount below zero, then the price table shall fail pricing the call with code `invalid_argument`; an amount of zero shall be a valid price.
+
+### REQ-MODEL-087 — A model's own formula returns whole milli-points
+If a model's own formula returns a floating-point amount that is not an exact integer of magnitude at most 2^53, then the price table shall fail pricing the call with code `invalid_argument`, naming the model id.
