@@ -51,17 +51,17 @@ func (f *flags) options(stdin io.Reader) config.Options {
 		}
 	})
 	path := *f.configPath
+	auto := ""
 	if path == "" {
-		if _, err := os.Stat("kit.yaml"); err == nil {
-			path = "kit.yaml"
-		}
+		auto = "kit.yaml"
 	} else {
 		set["config"] = path
 	}
 	return config.Options{
-		File:  path,
-		Env:   os.Environ(),
-		Stdin: stdin,
-		Flags: set,
+		File:     path,
+		AutoFile: auto,
+		Env:      os.Environ(),
+		Stdin:    stdin,
+		Flags:    set,
 	}
 }

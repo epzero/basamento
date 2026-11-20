@@ -4,7 +4,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/epzero/basamento/core"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -145,5 +148,94 @@ func TestLoadEscapesDataDirInDefaultURLs(t *testing.T) {
 		if u.Path != wantPath || u.Fragment != "" {
 			t.Fatalf("%s = %q parses to path %q fragment %q, want path %q with no fragment", key, v, u.Path, u.Fragment, wantPath)
 		}
+	}
+}
+
+func TestLoadRejectsDuplicateSettingPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		key  string
+	}{
+		{
+			name: "nested and literal sql.url",
+			body: "sql:\n  url: sqlite:///one\n\"sql.url\": sqlite:///two\n",
+			key:  "sql.url",
+		},
+		{
+			name: "nested and literal log.level",
+			body: "log:\n  level: info\n\"log.level\": debug\n",
+			key:  "log.level",
+		},
+		{
+			name: "scalar prefix and child",
+			body: "sql: sqlite:///one\n\"sql.url\": sqlite:///two\n",
+			key:  "sql.url",
+		},
+		{
+			name: "same literal key twice",
+			body: "\"log.level\": info\n\"log.level\": debug\n",
+			key:  "log.level",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(Options{File: writeConfig(t, tc.body)})
+			if err == nil {
+				t.Fatal("Load accepted duplicate setting paths")
+			}
+			if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+				t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("error does not name %q: %v", tc.key, err)
+			}
+		})
+	}
+}
+
+func TestLoadExplicitFileIsStrict(t *testing.T) {
+	_, err := Load(Options{File: filepath.Join(t.TempDir(), "missing.yaml")})
+	if err == nil {
+		t.Fatal("Load accepted a missing explicit configuration file")
+	}
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+	}
+}
+
+func TestLoadAutoFileIsOptional(t *testing.T) {
+	if _, err := Load(Options{AutoFile: filepath.Join(t.TempDir(), "missing.yaml")}); err != nil {
+		t.Fatalf("absent auto-discovered file is an error: %v", err)
+	}
+}
+
+func TestLoadAutoFileIsLoaded(t *testing.T) {
+	path := writeConfig(t, "log:\n  level: debug\n")
+	got, err := Load(Options{AutoFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, src, _ := got.Setting("log.level"); v != "debug" || src != SourceFile {
+		t.Fatalf("log.level = %q from %q, want debug from file", v, src)
+	}
+}
+
+func TestLoadAutoFileReportsDiscoveryErrors(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+	if err := os.Symlink(b, a); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	if err := os.Symlink(a, b); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	_, err := Load(Options{AutoFile: a})
+	if err == nil {
+		t.Fatal("Load ignored a symlink loop in auto-discovery")
+	}
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
 	}
 }

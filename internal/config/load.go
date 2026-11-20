@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
+	yamlv3 "gopkg.in/yaml.v3"
 )
 
 // Result is an effective configuration and the source of each key.
@@ -34,10 +35,11 @@ func (r Result) Setting(key string) (string, Source, bool) {
 
 // Options are the sources Load reads. Every field is optional.
 type Options struct {
-	File  string            // configuration file path; empty = none, "-" = stdin
-	Env   []string          // os.Environ() form
-	Stdin io.Reader         // for YAML from stdin ("-"), optional
-	Flags map[string]string // flags actually set on the command line
+	File     string            // explicit configuration file path; empty = none, "-" = stdin
+	AutoFile string            // file a command discovers when --config is absent; optional
+	Env      []string          // os.Environ() form
+	Stdin    io.Reader         // for YAML from stdin ("-"), optional
+	Flags    map[string]string // flags actually set on the command line
 }
 
 // Load reads the sources in precedence order and returns the effective
@@ -115,37 +117,120 @@ func Load(opts Options) (Result, error) {
 }
 
 // loadFile reads the YAML configuration file, if one applies. A file the
-// operator did not name is optional: it is used when present.
+// operator named with --config is strict: missing or unreadable is an error.
+// A file a command discovers is optional only when it is absent; any other
+// discovery error (a symlink loop, a directory, a permission problem) is an
+// error too.
 func loadFile(opts Options) (*koanf.Koanf, error) {
-	path := opts.File
-	if path == "" {
+	if opts.File != "" {
+		if opts.File == "-" {
+			if opts.Stdin == nil {
+				return nil, invalidFile("configuration file could not be read", opts.File)
+			}
+			b, err := io.ReadAll(opts.Stdin)
+			if err != nil {
+				return nil, invalidFile("configuration file could not be read", opts.File)
+			}
+			return parseConfigFile(b, opts.File)
+		}
+		b, err := os.ReadFile(opts.File)
+		if err != nil {
+			return nil, invalidFile("configuration file could not be read", opts.File)
+		}
+		return parseConfigFile(b, opts.File)
+	}
+	if opts.AutoFile == "" {
 		return nil, nil
 	}
-	explicit := opts.Flags["config"] != "" || path == "-"
-	k := koanf.New(".")
-	if path == "-" {
-		if opts.Stdin == nil {
-			return nil, invalidFile("configuration file could not be read", path)
-		}
-		b, err := io.ReadAll(opts.Stdin)
-		if err != nil {
-			return nil, invalidFile("configuration file could not be read", path)
-		}
-		if err := k.Load(rawbytes.Provider(b), yaml.Parser()); err != nil {
-			return nil, invalidFile("configuration file could not be parsed", path)
-		}
-		return k, nil
-	}
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) && !explicit {
+	b, err := os.ReadFile(opts.AutoFile)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, invalidFile("configuration file could not be read", path)
+		return nil, invalidFile("configuration file could not be read", opts.AutoFile)
 	}
-	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
+	return parseConfigFile(b, opts.AutoFile)
+}
+
+func parseConfigFile(b []byte, path string) (*koanf.Koanf, error) {
+	if err := rejectDuplicateSettingPaths(b); err != nil {
+		return nil, err
+	}
+	k := koanf.New(".")
+	if err := k.Load(rawbytes.Provider(b), yaml.Parser()); err != nil {
 		return nil, invalidFile("configuration file could not be parsed", path)
 	}
 	return k, nil
+}
+
+// rejectDuplicateSettingPaths rejects a file in which one setting path is
+// written more than once, as in a nested "sql: {url: ...}" plus a literal
+// "sql.url", or a scalar at a path that also has children. koanf's unflatten
+// step iterates a Go map, so without this check such a file would resolve
+// nondeterministically (CR-07).
+func rejectDuplicateSettingPaths(data []byte) error {
+	var doc yamlv3.Node
+	if err := yamlv3.Unmarshal(data, &doc); err != nil {
+		// The loader reports the syntax error; duplicate detection needs a tree.
+		return nil
+	}
+	seen := map[string]bool{}
+	leaves := map[string]bool{}
+	duplicate := ""
+	var walk func(*yamlv3.Node, string)
+	walk = func(n *yamlv3.Node, prefix string) {
+		if duplicate != "" || n == nil {
+			return
+		}
+		switch n.Kind {
+		case yamlv3.DocumentNode:
+			for _, child := range n.Content {
+				walk(child, prefix)
+			}
+		case yamlv3.MappingNode:
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				keyNode, valueNode := n.Content[i], n.Content[i+1]
+				if keyNode.Kind != yamlv3.ScalarNode {
+					continue
+				}
+				key := strings.TrimSpace(keyNode.Value)
+				if key == "" {
+					continue
+				}
+				full := key
+				if prefix != "" {
+					full = prefix + "." + key
+				}
+				if seen[full] {
+					duplicate = full
+					return
+				}
+				seen[full] = true
+				if valueNode.Kind == yamlv3.MappingNode {
+					walk(valueNode, full)
+					continue
+				}
+				leaves[full] = true
+			}
+		}
+	}
+	walk(&doc, "")
+	if duplicate != "" {
+		return invalidSetting(duplicate, "is defined more than once in the configuration file")
+	}
+	keys := make([]string, 0, len(leaves))
+	for path := range leaves {
+		keys = append(keys, path)
+	}
+	sort.Strings(keys)
+	for _, path := range keys {
+		for i := 0; i < len(path); i++ {
+			if path[i] == '.' && leaves[path[:i]] {
+				return invalidSetting(path, fmt.Sprintf("conflicts with setting %q in the configuration file", path[:i]))
+			}
+		}
+	}
+	return nil
 }
 
 func invalidFile(reason, path string) error {
