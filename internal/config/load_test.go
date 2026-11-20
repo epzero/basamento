@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -107,6 +108,42 @@ func TestLoadCloudHasNoPortDefaults(t *testing.T) {
 	for _, key := range []string{"sql.url", "blob.url", "bus.url", "secrets.url"} {
 		if v, _, _ := got.Setting(key); v != "" {
 			t.Fatalf("%s = %q, want no default in cloud", key, v)
+		}
+	}
+}
+
+func TestLoadDoesNotExpandDataDirInExplicitURLs(t *testing.T) {
+	got, err := Load(Options{Env: []string{
+		"KIT_DATA_DIR=/srv/kit",
+		"KIT_SQL_URL=sqlite:///tmp/$(data.dir)/kit.db",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "sqlite:///tmp/$(data.dir)/kit.db"
+	if v, _, _ := got.Setting("sql.url"); v != want {
+		t.Fatalf("sql.url = %q, want %q", v, want)
+	}
+}
+
+func TestLoadEscapesDataDirInDefaultURLs(t *testing.T) {
+	got, err := Load(Options{Env: []string{"KIT_DATA_DIR=/tmp/a#b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, wantPath := range map[string]string{
+		"sql.url":     "/tmp/a#b/kit.db",
+		"blob.url":    "/tmp/a#b/blobs",
+		"bus.url":     "/tmp/a#b/nats",
+		"secrets.url": "/tmp/a#b/secrets.key",
+	} {
+		v, _, _ := got.Setting(key)
+		u, err := url.Parse(v)
+		if err != nil {
+			t.Fatalf("%s = %q: %v", key, v, err)
+		}
+		if u.Path != wantPath || u.Fragment != "" {
+			t.Fatalf("%s = %q parses to path %q fragment %q, want path %q with no fragment", key, v, u.Path, u.Fragment, wantPath)
 		}
 	}
 }

@@ -105,25 +105,25 @@ var settings = []setting{
 	},
 	{
 		key:          "sql.url",
-		defaultValue: embeddedDefault("sqlite://$(data.dir)/kit.db"),
+		defaultValue: embeddedURLDefault("sqlite", "kit.db"),
 		validate:     portRule("sql.url", PortSQL),
 		apply:        func(c *Config, v string) { c.SQL.URL = v },
 	},
 	{
 		key:          "blob.url",
-		defaultValue: embeddedDefault("file://$(data.dir)/blobs"),
+		defaultValue: embeddedURLDefault("file", "blobs"),
 		validate:     portRule("blob.url", PortBlob),
 		apply:        func(c *Config, v string) { c.Blob.URL = v },
 	},
 	{
 		key:          "bus.url",
-		defaultValue: embeddedDefault("nats-embedded://$(data.dir)/nats"),
+		defaultValue: embeddedURLDefault("nats-embedded", "nats"),
 		validate:     portRule("bus.url", PortBus),
 		apply:        func(c *Config, v string) { c.Bus.URL = v },
 	},
 	{
 		key:          "secrets.url",
-		defaultValue: embeddedDefault("localsecrets://$(data.dir)/secrets.key"),
+		defaultValue: embeddedURLDefault("localsecrets", "secrets.key"),
 		validate:     portRule("secrets.url", PortSecrets),
 		apply:        func(c *Config, v string) { c.Secrets.URL = v },
 	},
@@ -143,15 +143,17 @@ func staticDefault(v string) func(string, string) string {
 	return func(string, string) string { return v }
 }
 
-// embeddedDefault returns a default only for the embedded profile; the cloud
-// profile has no default port URL (REQ-CONFIG-010). $(data.dir) expands after
-// loading, so changing data.dir moves every default port URL with it.
-func embeddedDefault(v string) func(string, string) string {
+// embeddedURLDefault returns a default only for the embedded profile; the
+// cloud profile has no default port URL (REQ-CONFIG-010). The URL is built
+// with url.URL so a data directory containing '#' or '?' becomes a path, not
+// a fragment or query (CR-02).
+func embeddedURLDefault(scheme, leaf string) func(string, string) string {
 	return func(profile, dataDir string) string {
 		if profile != ProfileEmbedded {
 			return ""
 		}
-		return strings.ReplaceAll(v, "$(data.dir)", dataDir)
+		u := url.URL{Scheme: scheme, Path: filepath.ToSlash(filepath.Join(dataDir, leaf))}
+		return u.String()
 	}
 }
 

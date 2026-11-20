@@ -95,9 +95,6 @@ func Load(opts Options) (Result, error) {
 	res := Result{Sources: map[string]Source{}, values: map[string]string{}}
 	for _, s := range settings {
 		v := k.String(s.key)
-		if isPortKey(s.key) {
-			v = strings.ReplaceAll(v, "$(data.dir)", absDataDir)
-		}
 		s.apply(&res.Config, v)
 		switch {
 		case hasKey(flagValues, s.key):
