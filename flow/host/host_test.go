@@ -1791,6 +1791,69 @@ func TestRepairCostGuardFailsAfterTwoHandlerVisits(t *testing.T) {
 	}
 }
 
+func TestWithMaxFanoutClampsAboveDefault(t *testing.T) {
+	items := make([]int, 10001)
+	for i := range items {
+		items[i] = i
+	}
+	payload, _ := json.Marshal(map[string]any{"items": items})
+	def := newFlow("clamp-map")
+	def.State.Schema = json.RawMessage(`{"type":"object","properties":{"items":{"type":"array"}}}`)
+	def.Nodes["fill"] = node("set", string(payload), "", "")
+	def.Nodes["impl"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"work"}`)}
+	def.Nodes["work"] = node("tool", `{"tool":"w1"}`, "", "")
+	def.Edges = []flow.Edge{
+		{From: ir.Start, To: "fill"},
+		{From: "fill", To: "impl"},
+		{From: "impl", To: "work"},
+	}
+	cat := newCatalog()
+	ref := cat.register(def)
+	dc := newFakeDC()
+	h := host.New(cat, host.WithMaxFanout(20000))
+	_, err := h.Run(dc, ref, json.RawMessage(`{}`))
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("map of 10001: %v, want budget_exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "impl") || !strings.Contains(err.Error(), "10001") || !strings.Contains(err.Error(), "10000") {
+		t.Fatalf("error %q, want node impl, count 10001 and limit 10000", err.Error())
+	}
+	if len(dc.callLog()) != 0 {
+		t.Fatalf("budget failure made durable calls: %+v", dc.callLog())
+	}
+}
+
+func TestSubflowStepCostIsZeroInRunCost(t *testing.T) {
+	child := newFlow("child")
+	child.Nodes["done"] = node("set", `{"v":1}`, "", "")
+	addLinear(child, "done")
+	cat := newCatalog()
+	cat.register(child)
+	def := newFlow("parent")
+	def.State.Schema = json.RawMessage(`{"type":"object","properties":{"childOut":{"type":"object"}}}`)
+	def.Nodes["sub"] = node("subflow", `{"flow":"child"}`, "", "childOut")
+	def.Nodes["probe"] = node("agent", "", "run.cost", "")
+	def.Edges = []flow.Edge{{From: ir.Start, To: "sub"}, {From: "sub", To: "probe"}}
+	ref := cat.register(def)
+	dc := newFakeDC()
+	dc.steps["child:child"] = scripted{result: json.RawMessage(`{"v":1}`)}
+	h := host.New(cat)
+	var gotCost int64
+	h.RegisterHandler("agent", func(_ runtime.DurableContext, node flow.Node, input json.RawMessage) (host.NodeResult, error) {
+		if node.Name != "probe" {
+			return host.NodeResult{}, fmt.Errorf("unexpected %q", node.Name)
+		}
+		_ = json.Unmarshal(input, &gotCost)
+		return host.NodeResult{}, nil
+	})
+	if _, err := h.Run(dc, ref, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if gotCost != 0 {
+		t.Fatalf("run.cost at probe %d, want 0 after subflow", gotCost)
+	}
+}
+
 func callFingerprints(calls []call) []string {
 	out := make([]string, 0, len(calls))
 	for _, c := range calls {

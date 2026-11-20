@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -43,4 +44,21 @@ func TestRunHandlersFailurePassesSettledCostToEvent(t *testing.T) {
 	if events[0].Attempt != 2 {
 		t.Fatalf("node_failed Attempt %d, want 2", events[0].Attempt)
 	}
+}
+
+func TestNodeFailedEventPayloadIsOnlyCodeAndMessage(t *testing.T) {
+	t.Run("core error", func(t *testing.T) {
+		err := core.NewError(core.CodeVendor, "vendor said no", map[string]any{"detail": "x"})
+		ev := failedEvent("n", 1, err, 0)
+		if string(ev.Payload) != `{"code":"vendor_error","message":"vendor said no"}` {
+			t.Fatalf("payload %s", ev.Payload)
+		}
+	})
+	t.Run("unclassified", func(t *testing.T) {
+		ev := failedEvent("plan", 1, errors.New("SEALED"), 0)
+		want := `{"code":"internal","message":"flow: node \"plan\" failed"}`
+		if string(ev.Payload) != want {
+			t.Fatalf("payload %s, want %s", ev.Payload, want)
+		}
+	})
 }
