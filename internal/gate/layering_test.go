@@ -97,6 +97,55 @@ func TestLayeringExternalTestImportViolation(t *testing.T) {
 	}
 }
 
+func TestLayeringSameViolationReportedOnce(t *testing.T) {
+	root := layeringModule(t, map[string]string{
+		"low/a/a.go":        "package a\n",
+		"high/b/b.go":       "package b\n",
+		"low/c/c.go":        "package c\n\nimport _ \"example.com/mod/high/b\"\n",
+		"low/a/a_test.go":   "package a\n\nimport _ \"example.com/mod/high/b\"\n",
+		"low/a/ext_test.go": "package a_test\n\nimport _ \"example.com/mod/high/b\"\n",
+	})
+	got, err := Layering(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"low/a (layer low, in a test) may not import high/b (layer high)",
+		"low/c (layer low) may not import high/b (layer high)",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestLayeringExcludedTestFileMayImportTestOnly(t *testing.T) {
+	root := layeringModule(t, map[string]string{
+		"low/a/a.go": "package a\n",
+		"support/h/h.go": `package h
+`,
+		"low/a/other_test.go": `//go:build windows
+
+package a
+
+import _ "example.com/mod/support/h"
+`,
+		"low/a/prod_tagged.go": `//go:build windows
+
+package a
+
+import _ "example.com/mod/support/h"
+`,
+	})
+	got, err := Layering(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"low/a (layer low, in an excluded file prod_tagged.go) imports test-only package support/h"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func TestLayeringTestOnly(t *testing.T) {
 	root := layeringModule(t, map[string]string{
 		"low/a/a.go":      "package a\n\nimport _ \"example.com/mod/support/h\"\n",
