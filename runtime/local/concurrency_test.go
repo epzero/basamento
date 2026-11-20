@@ -51,4 +51,3 @@ func TestConcurrentStepsOverlap(t *testing.T) {
 		t.Fatalf("peak concurrent steps = %d, want 3", got)
 	}
 }
-

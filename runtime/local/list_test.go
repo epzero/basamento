@@ -140,4 +140,3 @@ func TestListCursorDoesNotWidenTenantVisibility(t *testing.T) {
 		t.Fatalf("second acme page = %#v, %q, %v", page, next, err)
 	}
 }
-

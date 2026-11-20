@@ -133,4 +133,3 @@ func payFlow(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, err
 	}
 	return out, nil
 }
-

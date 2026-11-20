@@ -176,4 +176,3 @@ func TestConcurrentGateResolutionHasOneWinner(t *testing.T) {
 	}
 	f.waitState(t, "acme", "r1", stateCompleted)
 }
-

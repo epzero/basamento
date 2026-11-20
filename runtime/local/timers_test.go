@@ -33,4 +33,3 @@ func TestTimerOnlyCompletesWhenClockReachesIt(t *testing.T) {
 	f.clock.Advance(time.Minute)
 	f.waitState(t, "acme", "r1", stateCompleted)
 }
-

@@ -137,4 +137,3 @@ func (e *localExec) finish(out json.RawMessage, err error) {
 		e.err = err
 	})
 }
-

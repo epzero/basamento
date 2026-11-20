@@ -117,4 +117,3 @@ func TestTenantFieldMustAgreeWithContext(t *testing.T) {
 		t.Fatalf("List without tenant = %v, want invalid_argument", err)
 	}
 }
-

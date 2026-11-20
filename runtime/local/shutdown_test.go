@@ -79,4 +79,3 @@ func TestShutdownCancelsStepsBeforeReturning(t *testing.T) {
 		t.Fatalf("run after shutdown = %s, want running", got)
 	}
 }
-

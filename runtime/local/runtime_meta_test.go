@@ -47,4 +47,3 @@ func TestErrorsArePlatformErrors(t *testing.T) {
 		t.Fatalf("error %q does not name the run", msg)
 	}
 }
-
