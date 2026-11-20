@@ -1,26 +1,36 @@
 package blob
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
 
-func TestValidateTenantSegment(t *testing.T) {
+	"github.com/epzero/basamento/core"
+)
+
+func TestStoreRejectsInvalidTenantBeforeBucket(t *testing.T) {
 	t.Parallel()
-	ok := []string{"acme", "globex", "tenant-1"}
-	for _, tid := range ok {
-		if err := validateTenantSegment(tid); err != nil {
-			t.Errorf("%q: %v", tid, err)
-		}
+	var ops int
+	drv := newTestBucket(0, 0)
+	drv.onOp = func(_, _ string) { ops++ }
+	st := openStoreWithTestBucket(t, drv)
+	bad := []core.TenantID{
+		"",
+		" acme",
+		"acme ",
+		"\xff\xfe",
+		"a/b",
+		".",
 	}
-	bad := []string{"", ".", "..", "a/b", `a\.part`, "a\x00b", string([]byte{127})}
 	for _, tid := range bad {
-		if err := validateTenantSegment(tid); err == nil {
-			t.Errorf("%q should be rejected", tid)
+		ops = 0
+		ctx := core.WithTenant(context.Background(), tid)
+		err := st.Put(ctx, ContentKeyOf([]byte("x")), strings.NewReader("x"), "text/plain")
+		if core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("Put(%q): code=%v err=%v", tid, core.CodeOf(err), err)
 		}
-	}
-	long := make([]byte, 129)
-	for i := range long {
-		long[i] = 'a'
-	}
-	if err := validateTenantSegment(string(long)); err == nil {
-		t.Fatal("long tenant should fail")
+		if ops != 0 {
+			t.Fatalf("Put(%q): bucket ops=%d", tid, ops)
+		}
 	}
 }

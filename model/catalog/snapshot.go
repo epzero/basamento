@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,8 +35,8 @@ func parseSnapshot(data []byte) (map[string]Price, error) {
 	if prices == nil {
 		prices = map[string]Price{}
 	}
-	for modelID, p := range prices {
-		if err := validatePrice(modelID, p); err != nil {
+	for _, modelID := range slices.Sorted(maps.Keys(prices)) {
+		if err := validatePrice(modelID, prices[modelID]); err != nil {
 			return nil, err
 		}
 	}

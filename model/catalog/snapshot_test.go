@@ -165,3 +165,96 @@ func TestEmbeddedSnapshotLoadsViaNew(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 }
+
+// multiInvalidSnapshotYAML has eight invalid entries whose YAML order does not
+// match lexicographic model id order (m-a is smallest).
+const multiInvalidSnapshotYAML = `
+m-h:
+  rules:
+    - rates:
+        zebra: -1
+m-c:
+  rules:
+    - rates:
+        middle: -1
+m-a:
+  rules:
+    - rates:
+        alpha: -1
+m-f:
+  rules:
+    - rates:
+        fox: -1
+m-b:
+  rules:
+    - rates:
+        beta: -1
+m-g:
+  rules:
+    - rates:
+        gamma: -1
+m-d:
+  rules:
+    - rates:
+        delta: -1
+m-e:
+  rules:
+    - rates:
+        epsilon: -1
+`
+
+func TestParseSnapshotInvalidEntryOrderIsDeterministic(t *testing.T) {
+	raw := []byte(multiInvalidSnapshotYAML)
+	wantModel := `model "m-a": rate "alpha" must not be negative`
+	for i := 0; i < 200; i++ {
+		_, err := parseSnapshot(raw)
+		if err == nil || !strings.Contains(err.Error(), wantModel) {
+			t.Fatalf("run %d: err=%v want substring %q", i, err, wantModel)
+		}
+		var pe *core.Error
+		if !errors.As(err, &pe) {
+			t.Fatalf("run %d: not core.Error: %v", i, err)
+		}
+		if pe.Details["model"] != "m-a" || pe.Details["rate"] != "alpha" {
+			t.Fatalf("run %d: details=%v", i, pe.Details)
+		}
+	}
+}
+
+const multiBadFormulaSnapshotYAML = `
+m-h:
+  formula: "usage.input_tokens *"
+m-c:
+  formula: "usage.?"
+m-a:
+  formula: "not a valid expr"
+m-f:
+  formula: "usage.input_tokens +"
+m-b:
+  formula: "1 / 0 syntax"
+m-g:
+  formula: "params.foo[["
+m-d:
+  formula: "usage..tokens"
+m-e:
+  formula: "]]"
+`
+
+func TestNewWithSnapshotPrecompileOrderIsDeterministic(t *testing.T) {
+	clock := coretest.NewFakeClock(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	raw := []byte(multiBadFormulaSnapshotYAML)
+	want := `price model "m-a":`
+	for i := 0; i < 200; i++ {
+		_, err := NewWithSnapshot(clock, raw)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("run %d: err=%v want substring %q", i, err, want)
+		}
+		var pe *core.Error
+		if !errors.As(err, &pe) {
+			t.Fatalf("run %d: not core.Error: %v", i, err)
+		}
+		if pe.Details["model"] != "m-a" {
+			t.Fatalf("run %d: details=%v", i, pe.Details)
+		}
+	}
+}

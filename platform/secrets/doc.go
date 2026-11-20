@@ -7,11 +7,9 @@
 // master key and encrypts runtime payloads with the tenant's primary data key,
 // authenticating tenant and key id.
 //
-// core.TenantFrom (merged in EP0-52, REQ-CORE-005) is the single place that
-// decides whether a context carries a valid tenant; Encode, Decode, and rotation
-// read the tenant from the context. ValidateTenant still validates tenant strings
-// for the keyset store port; EP0-84 will make this package use core's grammar
-// instead of its local copy.
+// REQ-CORE-005 tenant grammar is enforced only by core.TenantFrom. Encode,
+// Decode, and rotation read the tenant from the context; tenant strings passed
+// to the keyset store and framing helpers are checked the same way.
 //
 // Each Encode performs one keyset store read; when the stored revision matches
 // the in-memory cache, no master-key unwrap runs.
@@ -19,4 +17,11 @@
 // After a master-key rotation, another process or a partially failed rotation
 // may leave records on an old master id; rerun the rotation before removing
 // the previous master from configuration (idempotent).
+//
+// Master-key rotation retires replaced KeyService values without closing them;
+// Codec.Close closes the ring and every retired key once. Deferred close lets
+// calls that hold a snapshot of the ring finish. Close must not run concurrently
+// with Encode, Decode, RotateMasterKey or RotateDataKey (stop those callers
+// first); if it does, nothing is closed twice and no key leaks, but the racing
+// call may fail with an error from the closed key.
 package secrets
