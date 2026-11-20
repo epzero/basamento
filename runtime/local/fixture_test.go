@@ -72,6 +72,8 @@ func (f *fixture) start(t *testing.T, tenant, runID, flow string, in string) run
 // hang guard fails it; waits end as soon as their condition holds.
 const waitBound = 10 * time.Second
 
+// pollUntil spins on cond with Gosched between attempts until it holds or the
+// hang guard expires; use when the condition has no notification channel.
 func pollUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitBound)

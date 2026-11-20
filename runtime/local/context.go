@@ -235,23 +235,20 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
 	}
 	r := dc.run
-	snaps := r.snapshotLocalFutures(fs)
-	if i, ok := lowestReadyAtCall(fs, snaps); ok {
+	if i, ok := r.lowestReady(fs); ok {
 		return i, nil
 	}
 	for {
 		// Subscribe before scanning: a completion cannot land between the
 		// check and the wait without also closing this wake channel.
 		changed := r.wake()
-		snaps = r.snapshotLocalFutures(fs)
-		if index := firstCompletedFromSnap(fs, snaps); index >= 0 {
+		if index := r.firstCompleted(fs); index >= 0 {
 			return index, nil
 		}
 		select {
 		case <-changed:
 		case <-r.ctx.Done():
-			snaps = r.snapshotLocalFutures(fs)
-			if i, ok := lowestReadyAtCall(fs, snaps); ok {
+			if i, ok := r.lowestReady(fs); ok {
 				return i, nil
 			}
 			return 0, cancelledErr("select cancelled")
@@ -259,9 +256,8 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	}
 }
 
-// firstCompleted returns the index of the ready future with the earliest
-// completion seq, or -1 when none are ready. Run-owned futures are read under
-// r.mu via snapshotLocalFutures; callers should prefer that path in hot loops.
+// firstCompleted returns the earliest-ready index by completion seq, or -1 when
+// none are ready; locals are snapshotted under r.mu, foreign Ready() outside it.
 func (r *run) firstCompleted(fs []runtime.Future) int {
 	return firstCompletedFromSnap(fs, r.snapshotLocalFutures(fs))
 }

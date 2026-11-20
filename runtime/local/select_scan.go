@@ -34,8 +34,8 @@ func (r *run) snapshotLocalFutures(fs []runtime.Future) []localFutureSnap {
 	return out
 }
 
-// lowestReadyAtCall returns the lowest index that is already ready when Select
-// is entered, using snaps for local futures and Ready() for foreign ones.
+// lowestReadyAtCall is the pure at-call scan: lowest ready index from a prior
+// snapshot for local futures, and Ready() for foreign ones outside r.mu.
 func lowestReadyAtCall(fs []runtime.Future, snaps []localFutureSnap) (int, bool) {
 	for i, f := range fs {
 		if snaps[i].isLocal {
@@ -51,8 +51,8 @@ func lowestReadyAtCall(fs []runtime.Future, snaps []localFutureSnap) (int, bool)
 	return 0, false
 }
 
-// firstCompletedFromSnap picks the ready future with the earliest completion
-// seq; equal seqs keep the lowest index. A ready foreign future wins at once.
+// firstCompletedFromSnap is the pure by-seq scan: earliest completion seq from
+// a prior snapshot for locals; foreign Ready() runs outside r.mu and wins at once.
 func firstCompletedFromSnap(fs []runtime.Future, snaps []localFutureSnap) int {
 	index := -1
 	var earliest uint64
@@ -71,4 +71,10 @@ func firstCompletedFromSnap(fs []runtime.Future, snaps []localFutureSnap) int {
 		}
 	}
 	return index
+}
+
+// lowestReady returns the lowest index with a ready future and true, or (_, false).
+// It snapshots local futures under r.mu, then runs lowestReadyAtCall.
+func (r *run) lowestReady(fs []runtime.Future) (int, bool) {
+	return lowestReadyAtCall(fs, r.snapshotLocalFutures(fs))
 }
