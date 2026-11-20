@@ -1,6 +1,6 @@
 # Flow engine: flows as data
 
-Status: **In progress** (IR and compiler implemented, WP-L4-01; machine, builder and host planned, WP-L4-02, WP-L4-03, WP-L4-04). Design: ADR-0003, `docs/architecture/flow-engine.md`.
+Status: **In progress** (IR and compiler WP-L4-01, machine WP-L4-02, builder WP-L4-03, host WP-L4-04 implemented). Design: ADR-0003, `docs/architecture/flow-engine.md`.
 
 ### REQ-FLOW-001 — Conditional edges
 When a node completes, the flow machine shall follow the first outgoing edge whose condition holds, in declaration order, and otherwise the edge without a condition.
@@ -228,8 +228,8 @@ The caller that starts a top-level run shall resolve the flow's name through the
 ### REQ-FLOW-056 — Negative durations are rejected when the node runs
 If a `wait` node's duration or a `gate` node's timeout is negative, then the flow host shall fail the run with code `invalid_argument` when the node runs, before making any durable call for that node, and shall neither wait zero nor panic.
 
-### REQ-FLOW-057 — A node failure carries only the error code and message
-When a node fails, the flow host shall put only the error's platform code and message in the `node_failed` event's payload, carrying no error details, node input or state; where the error is not a `*core.Error`, the host shall report code `internal` with the message `flow: node "<id>" failed` and shall not report the original error text.
+### REQ-FLOW-057 — A node failure fails the run with only the error code and message
+When a node fails, the flow host shall fail the run with an error carrying only the failure's platform code and message, carrying no error details, node input or state; where the error is not a `*core.Error`, the host shall fail the run with code `internal` and the message `flow: node "<id>" failed` and shall not report the original error text.
 
 ### REQ-FLOW-058 — A step's idempotency key identifies one logical step
 When the flow host runs a `tool` or `task` node as a step, the host shall give the step the idempotency key `<definition name>@<hash>/<node>#<attempt>@<superstep sequence>`, formed from the loaded definition's name, the run's pinned hash, the node id, the step's attempt and the machine's superstep sequence (the snapshot's `Seq`), so that the same logical step keeps its key across a retry and a second visit of a node in a loop issues a different key.

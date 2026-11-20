@@ -46,10 +46,14 @@ Ports are selected by URL in configuration (see `platform/platform.go`).
 ## 3. Layers
 
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The
-module map below is generated from it (an arrow means "may import"; arrows
-implied by longer paths are omitted). Build tooling (`tools/gate`,
-`internal/gate`, `internal/bdd`) is not shown; other product layers under
-`internal/` appear when the graph names them.
+checker reads every direct import in production files, tests (`_test.go`),
+and build-excluded sources the active tags omit, so the result does not depend
+on GOOS or build tags on the host (`ADR-0018`). Every `deny_external` and
+`test_only_allowed_from` key must name a layer in the same file. The module
+map below is generated from it (an arrow means "may import"; arrows implied by
+longer paths are omitted). Build tooling (`tools/gate`, `internal/gate`,
+`internal/bdd`) is not shown; other product layers under `internal/` appear
+when the graph names them.
 
 <!-- BEGIN GENERATED: modules (go tool gate docs -write) -->
 ```mermaid

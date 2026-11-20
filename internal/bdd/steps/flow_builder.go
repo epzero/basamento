@@ -105,6 +105,12 @@ func registerFlowBuilder(sc *godog.ScenarioContext) {
 		return w.declare(rest)
 	})
 	sc.Step(`^a flow with node ("[^"]*" of kind "[^"]*".*)$`, func(ctx context.Context, rest string) error {
+		// EP0-100: host replay flows share this step text; route instead of a
+		// second registration godog would reject as ambiguous.
+		full := "a flow with node " + rest
+		if m := replayFlowStep.FindStringSubmatch(full); m != nil {
+			return declareReplayFlow(ctx, m[1], m[2], m[3], m[4], m[5], m[6])
+		}
 		w := builderCtx(ctx)
 		w.resetFlow()
 		return w.declare(rest)

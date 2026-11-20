@@ -32,9 +32,9 @@ type World struct {
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
+	Model       *modelWorld
 	Machine     *machineWorld
-	// Host is set by flow-host scenarios when that domain lands; nil in machine-only runs.
-	Host any
+	Host        *hostWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -55,7 +55,9 @@ func Initialize(sc *godog.ScenarioContext) {
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
+			Model:       newModelWorld(),
 			Machine:     newMachineWorld(),
+			Host:        newHostWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -69,6 +71,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)
 	registerFlowMachine(sc)
+	registerFlowHost(sc)
 	registerBus(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
@@ -82,12 +85,14 @@ func Initialize(sc *godog.ScenarioContext) {
 		world(ctx).Config.teardown()
 		return ctx, nil
 	})
+	registerModel(sc)
 }
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
 	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+	registerSharedRunStartStep(sc)
 	registerSharedRunOutcomeSteps(sc)
 }
 
@@ -121,6 +126,9 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 		case w.Config.after <- w.Core.clock.Now():
 		default:
 		}
+	}
+	if sink, ok := any(w.Host).(timeSink); ok {
+		return sink.timePassed(ctx, d)
 	}
 	return nil
 }

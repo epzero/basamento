@@ -45,7 +45,9 @@ check every change against this page. Tools enforce what they can
   imported by path (`github.com/epzero/basamento/flow`); there is no `pkg/` prefix.
 - **Interfaces belong to the consumer** and stay small. Return concrete types.
 - **`context.Context` comes first** in any function that does I/O, waits or can
-  be cancelled. Never store a context in a struct.
+  be cancelled. Do not store a context in a struct unless the contract requires
+  that type to own the context and its cancel for a lifetime longer than the
+  call that created it, as `model.Run` does for an invocation (ADR-0005).
 - **Errors:**
   - Return `*core.Error` with a code from `core` at package boundaries.
   - Wrap with `%w`, and add context once per layer.
