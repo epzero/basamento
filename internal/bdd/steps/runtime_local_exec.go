@@ -1,9 +1,9 @@
 package steps
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	goruntime "runtime"
 	"sync"
 	"time"
 
@@ -11,19 +11,20 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
-const localSpinBudget = 100_000
+// waitBound is the maximum wall-clock time a step wait may spend before the hang
+// guard fails it; waits end as soon as their condition holds.
+const waitBound = 10 * time.Second
 
-func recvWithin[T any](ch <-chan T, budget int, what string) (T, error) {
+func recvWithin[T any](ch <-chan T, what string) (T, error) {
 	var zero T
-	for i := 0; i < budget; i++ {
-		select {
-		case v := <-ch:
-			return v, nil
-		default:
-			goruntime.Gosched()
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	select {
+	case v := <-ch:
+		return v, nil
+	case <-ctx.Done():
+		return zero, fmt.Errorf("timed out receiving %s after %v", what, waitBound)
 	}
-	return zero, fmt.Errorf("timed out receiving %s after %d yields", what, budget)
 }
 
 // localRunKey identifies a run in the step world.
@@ -113,7 +114,9 @@ func (e *localExec) update(fn func()) {
 
 // wait blocks until ok holds; ok runs under the exec's lock.
 func (e *localExec) wait(what string, ok func() bool) error {
-	for i := 0; i < localSpinBudget; i++ {
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	for {
 		e.mu.Lock()
 		done := ok()
 		changed := e.changed
@@ -123,11 +126,10 @@ func (e *localExec) wait(what string, ok func() bool) error {
 		}
 		select {
 		case <-changed:
-		default:
-			goruntime.Gosched()
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for %s after %v", what, waitBound)
 		}
 	}
-	return fmt.Errorf("timed out waiting for %s after %d yields", what, localSpinBudget)
 }
 
 func (e *localExec) finish(out json.RawMessage, err error) {

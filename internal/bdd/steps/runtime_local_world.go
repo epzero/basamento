@@ -192,8 +192,8 @@ func (w *localWorld) start(ctx context.Context, tenant, runID, flow string) (run
 	return ref, exec, nil
 }
 
-// waitRunState waits for a run's observable state. It yields instead of
-// sleeping; the deadline only turns a hang into a failing step.
+// waitRunState waits for a run's observable state via Describe, polling until
+// the state matches or the hang guard (waitBound) fires.
 func (w *localWorld) waitRunState(ctx context.Context, ref runtime.RunRef, want string) error {
 	var last string
 	err := w.spin("run "+ref.RunID+" to reach "+want, func() bool {
@@ -227,15 +227,21 @@ func (w *localWorld) waitRunClosed(ctx context.Context, ref runtime.RunRef) erro
 	return nil
 }
 
-// spin polls a scenario fact, yielding the processor between checks.
+// spin polls a scenario fact until ok holds or the hang guard fires.
 func (w *localWorld) spin(what string, ok func() bool) error {
-	for i := 0; i < localSpinBudget; i++ {
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	for {
 		if ok() {
 			return nil
 		}
-		goruntime.Gosched()
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for %s after %v", what, waitBound)
+		default:
+			goruntime.Gosched()
+		}
 	}
-	return fmt.Errorf("timed out waiting for %s after %d yields", what, localSpinBudget)
 }
 
 func (w *localWorld) stateOf(ctx context.Context, tenant, id string) (string, error) {

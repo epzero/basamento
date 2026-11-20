@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -200,16 +199,15 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 		return fmt.Errorf("the local runtime is not serving")
 	}
 	cancel()
-	for i := 0; i < localSpinBudget; i++ {
-		select {
-		case err := <-done:
-			w.shutdownError = err
-			return nil
-		default:
-			goruntime.Gosched()
-		}
+	guard, stopGuard := context.WithTimeout(ctx, waitBound)
+	defer stopGuard()
+	select {
+	case err := <-done:
+		w.shutdownError = err
+		return nil
+	case <-guard.Done():
+		return fmt.Errorf("the local runtime did not shut down after %v", waitBound)
 	}
-	return fmt.Errorf("the local runtime did not shut down after %d yields", localSpinBudget)
 }
 
 // timePassed waits until every timer the scripted flow registered with watchTimer
@@ -261,7 +259,7 @@ func (w *localWorld) cleanup() {
 			_ = runtimeUnderTest.Serve(ctx)
 			close(done)
 		}(rt)
-		if _, err := recvWithin(done, localSpinBudget, "runtime shutdown"); err != nil {
+		if _, err := recvWithin(done, "runtime shutdown"); err != nil {
 			panic(err)
 		}
 	}
