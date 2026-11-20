@@ -154,6 +154,20 @@ func TestRepairFixesTypographicQuotes(t *testing.T) {
 	}
 }
 
+func TestRepairPreservesTypographicQuotesInsideStrings(t *testing.T) {
+	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}},"required":["note"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := spec.Repair(replyWith(t, "{\"note\":\"it\u2019s\",\"syntax\":true,}"))
+	if !ok {
+		t.Fatal("Repair did not accept the answer")
+	}
+	if string(got) != "{\"note\":\"it\u2019s\",\"syntax\":true}" {
+		t.Fatalf("Repair = %s, want the string value untouched", got)
+	}
+}
+
 func TestRepairEscapesAnInvalidEscape(t *testing.T) {
 	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`), []Rung{RungJSONMode})
 	if err != nil {

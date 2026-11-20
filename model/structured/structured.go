@@ -300,14 +300,46 @@ func repairJSON(s string) ([]byte, bool) {
 	return out.Bytes(), true
 }
 
-// normalizeQuotes turns typographic quotes into JSON's straight ones. They
-// are syntax, not content: a model that answers with curly quotes meant a
-// JSON string.
+// normalizeQuotes turns typographic double quotes that delimit a JSON string
+// into straight ones. Only delimiters change: inside a string opened by a
+// straight quote, every byte is content and stays as the model wrote it
+// (REQ-MODEL-065). Typographic single quotes are content too, never syntax.
 func normalizeQuotes(s string) string {
-	return strings.NewReplacer(
-		"\u201c", `"`, "\u201d", `"`,
-		"\u2018", `'`, "\u2019", `'`,
-	).Replace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	inString, curlyDelim, escaped := false, false, false
+	for _, r := range s {
+		if inString {
+			switch {
+			case escaped:
+				b.WriteRune(r)
+				escaped = false
+			case r == '\\':
+				b.WriteRune(r)
+				escaped = true
+			case !curlyDelim && r == '"':
+				b.WriteRune(r)
+				inString = false
+			case curlyDelim && r == '\u201d':
+				b.WriteByte('"')
+				inString = false
+			default:
+				b.WriteRune(r)
+			}
+			continue
+		}
+		switch r {
+		case '\u201c', '\u201d':
+			b.WriteByte('"')
+			inString, curlyDelim = true, true
+		case '"':
+			b.WriteRune(r)
+			inString, curlyDelim = true, false
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // escapeInvalidEscapes doubles a backslash that starts no JSON escape, so a
