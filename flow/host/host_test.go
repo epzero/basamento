@@ -19,6 +19,18 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+const maxHandlerGuardRuns = 100
+
+func checkHandlerRunLimit(node string, counts map[string]int) error {
+	counts[node]++
+	if counts[node] > maxHandlerGuardRuns {
+		return core.NewError(core.CodeInternal,
+			fmt.Sprintf("flow host test: node %q ran more than %d times: a guard did not stop the loop", node, maxHandlerGuardRuns),
+			nil)
+	}
+	return nil
+}
+
 // --- a recording, scripted DurableContext ---------------------------------
 
 type call struct {
@@ -108,6 +120,7 @@ type fakeDC struct {
 	instant      bool
 	stepRun      map[string]int
 	childRun     map[string]scripted
+	// selectPrefer is the index Select returns when that future is ready; the default 0 is the first-ready behavior.
 	selectPrefer int
 }
 
@@ -1633,7 +1646,8 @@ func TestWithMaxFanoutLimitsMapAndRejectsZero(t *testing.T) {
 	}
 }
 
-func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
+// Failed-handler settled cost through Run is pinned in TestRunHandlersFailurePassesSettledCostToEvent (REQ-FLOW-049).
+func TestNodeCostAccruesOnCompletedHandlers(t *testing.T) {
 	t.Run("success path reaches guard after accrual", func(t *testing.T) {
 		def := newFlow("cost-sum")
 		def.Nodes["a"] = node("agent", "", "", "")
@@ -1646,7 +1660,11 @@ func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
 		cat := newCatalog()
 		ref := cat.register(def)
 		h := host.New(cat)
+		runs := map[string]int{}
 		h.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
+			if err := checkHandlerRunLimit(n.Name, runs); err != nil {
+				return host.NodeResult{}, err
+			}
 			switch n.Name {
 			case "a":
 				return host.NodeResult{Output: json.RawMessage(`{}`), CostMpts: 40}, nil
@@ -1663,7 +1681,7 @@ func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
 			t.Fatalf("guard refusal made durable calls: %+v", dc.callLog())
 		}
 	})
-	t.Run("failed handler still accrues settled cost", func(t *testing.T) {
+	t.Run("failing handler ends the run with its error", func(t *testing.T) {
 		def := newFlow("cost-fail-repair")
 		def.State.Schema = json.RawMessage(`{"type":"object","properties":{"failed":{"type":"integer"}}}`)
 		def.Nodes["verify"] = node("set", `{"verified":true}`, "", "")
@@ -1682,10 +1700,14 @@ func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
 		cat := newCatalog()
 		ref := cat.register(def)
 		h := host.New(cat)
+		runs := map[string]int{}
 		var repairCalls int
 		h.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
 			if n.Name != "repair" {
 				return host.NodeResult{}, nil
+			}
+			if err := checkHandlerRunLimit(n.Name, runs); err != nil {
+				return host.NodeResult{}, err
 			}
 			repairCalls++
 			if repairCalls == 1 {
@@ -1702,23 +1724,6 @@ func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
 		}
 		if repairCalls != 2 {
 			t.Fatalf("repair ran %d times, want 2", repairCalls)
-		}
-		dc2 := newFakeDC()
-		var repairs int
-		h2 := host.New(cat)
-		h2.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
-			if n.Name != "repair" {
-				return host.NodeResult{}, nil
-			}
-			repairs++
-			return host.NodeResult{Output: json.RawMessage(`{"fixed":true}`), CostMpts: 2500}, nil
-		})
-		_, err2 := h2.Run(dc2, ref, json.RawMessage(`{"failed":1}`))
-		if repairs != 2 {
-			t.Fatalf("control repairs %d, want 2", repairs)
-		}
-		if core.CodeOf(err2) != core.CodeBudgetExceeded {
-			t.Fatalf("control run %v, want budget_exceeded at 5000 settled", err2)
 		}
 	})
 	t.Run("negative settled cost", func(t *testing.T) {
@@ -1759,16 +1764,20 @@ func TestRepairCostGuardFailsAfterTwoHandlerVisits(t *testing.T) {
 	ref := cat.register(def)
 	h := host.New(cat)
 	var repairRuns int
+	runs := map[string]int{}
 	h.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
 		if n.Name != "repair" {
 			return host.NodeResult{}, nil
+		}
+		if err := checkHandlerRunLimit(n.Name, runs); err != nil {
+			return host.NodeResult{}, err
 		}
 		repairRuns++
 		return host.NodeResult{Output: json.RawMessage(`{"fixed":true}`), CostMpts: 2500}, nil
 	})
 	_, err := h.Run(dc, ref, json.RawMessage(`{"failed":1}`))
 	if repairRuns != 2 {
-		t.Fatalf("repair ran %d times, want 2", repairRuns)
+		t.Fatalf("repair ran %d times, want 2: %v", repairRuns, err)
 	}
 	if core.CodeOf(err) != core.CodeBudgetExceeded {
 		t.Fatalf("code %v (%v), want budget_exceeded", core.CodeOf(err), err)

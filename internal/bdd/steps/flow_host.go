@@ -22,6 +22,8 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+const maxHandlerGuardRuns = 100
+
 // hostWorld drives the flow host against a recording fake DurableContext. The
 // fake records every durable call in order, replays a scripted history and
 // advances only with the scenario's clock, so host.feature can read a run's
@@ -148,6 +150,18 @@ func (w *hostWorld) behavior(node string) *hostBehavior {
 func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (host.NodeResult, error) {
 	w.mu.Lock()
 	b := w.behaviors[node.Name]
+	runs := 0
+	for _, c := range w.handlerCalls {
+		if c.node == node.Name {
+			runs++
+		}
+	}
+	if runs >= maxHandlerGuardRuns {
+		w.mu.Unlock()
+		return host.NodeResult{}, core.NewError(core.CodeInternal,
+			fmt.Sprintf("flow host test: node %q ran more than %d times: a guard did not stop the loop", node.Name, maxHandlerGuardRuns),
+			nil)
+	}
 	w.handlerCalls = append(w.handlerCalls, hostHandlerCall{node: node.Name, input: append(json.RawMessage(nil), input...)})
 	if b != nil {
 		b.called = true

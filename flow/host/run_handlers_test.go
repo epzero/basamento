@@ -9,6 +9,8 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+// REQ-FLOW-049: failed-node settled cost is wired in runHandlers and consumed by the machine;
+// it is not observable through Host.Run, so this test pins the call site.
 func TestRunHandlersFailurePassesSettledCostToEvent(t *testing.T) {
 	def := &flow.IR{
 		Name:    "repair",
