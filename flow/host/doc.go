@@ -23,7 +23,9 @@
 // DurableContext.Select reports ends the run. A failed node handler ends the
 // superstep without running later handlers in the batch. Node handlers report
 // settled milli-points on NodeResult; other node kinds accrue no cost through
-// the host. WithMaxFanout lowers the map fan-out limit for runs the host starts.
+// the host. WithMaxFanout lowers the map fan-out limit for runs the host
+// starts; values above the default are clamped, and values below 1 fail each
+// run at start with invalid_argument.
 //
 // Status: implemented (WP-L4-04).
 package host

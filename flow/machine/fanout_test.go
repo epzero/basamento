@@ -57,9 +57,13 @@ func TestWithMaxFanoutLowersLimit(t *testing.T) {
 }
 
 func TestWithMaxFanoutRejectsZero(t *testing.T) {
-	_, err := New(triageFlow(), WithMaxFanout(0))
+	m, err := New(triageFlow(), WithMaxFanout(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = m.Start(json.RawMessage(`{}`))
 	if core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("error %v, want invalid_argument", err)
+		t.Fatalf("Start error %v, want invalid_argument", err)
 	}
 }
 

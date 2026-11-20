@@ -169,6 +169,9 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 // not set. A run whose entry edge reaches FAIL completes at once. On error the
 // returned snapshot is zero.
 func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, error) {
+	if m.maxFanout < 1 {
+		return flow.Snapshot{}, nil, invalid("flow: max fanout must be at least 1", nil)
+	}
 	state, err := m.initialState(input)
 	if err != nil {
 		return flow.Snapshot{}, nil, err

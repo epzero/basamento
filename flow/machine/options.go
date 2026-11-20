@@ -19,12 +19,10 @@ const DefaultMaxPureSupersteps = 100_000
 type Option func(*Machine) error
 
 // WithMaxFanout sets the map fan-out limit. The host may lower it but never
-// raise it above DefaultMaxFanout; n must be at least 1.
+// raise it above DefaultMaxFanout. Values below 1 are stored as given; the
+// machine rejects them when a run starts (REQ-FLOW-061).
 func WithMaxFanout(n int) Option {
 	return func(m *Machine) error {
-		if n < 1 {
-			return core.NewError(core.CodeInvalidArgument, "flow: max fanout must be at least 1", nil)
-		}
 		if n > DefaultMaxFanout {
 			n = DefaultMaxFanout
 		}

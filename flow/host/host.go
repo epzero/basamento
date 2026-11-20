@@ -31,6 +31,13 @@ type NodeResult struct {
 // usually Step. The host calls it directly, one command at a time.
 type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (NodeResult, error)
 
+// FlowEventRecorder is optional on DurableContext; test fakes implement it to
+// observe machine events and settled cost without changing production runtimes.
+type FlowEventRecorder interface {
+	RecordNodeFailure(node string, costMpts int64)
+	RecordRunSettledCost(costMpts int64)
+}
+
 // DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
 // Loading is not a durable step: the host loads once at the start of a run and
 // keeps the definition for that execution (REQ-FLOW-027).
@@ -123,6 +130,11 @@ func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.Ra
 			return nil, err
 		}
 		if outcome.done {
+			if outcome.err == nil {
+				if rec, ok := dc.(FlowEventRecorder); ok {
+					rec.RecordRunSettledCost(snapshot.Cost)
+				}
+			}
 			return outcome.state, outcome.err
 		}
 		commands = outcome.next
@@ -279,6 +291,9 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 		node.Name = command.Node
 		result, err := handler(dc, node, command.Input)
 		if err != nil {
+			if rec, ok := dc.(FlowEventRecorder); ok {
+				rec.RecordNodeFailure(command.Node, result.CostMpts)
+			}
 			events = append(events, failedEvent(command.Node, command.Attempt, err, result.CostMpts))
 			return events, nil
 		}

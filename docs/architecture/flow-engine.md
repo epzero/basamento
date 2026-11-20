@@ -158,7 +158,10 @@ definition's name and pinned hash together with the superstep sequence, stops
 handler calls in a superstep after the first failure, ends
 the run on the first failing future in a superstep (in `Select` order), copies
 each handler's settled milli-points into `node_completed` and `node_failed`
-events, and may lower the map fan-out limit with `WithMaxFanout`.
+events, and may lower the map fan-out limit with `WithMaxFanout` (values above
+`DefaultMaxFanout` are clamped; values below 1 make every run fail with
+`invalid_argument` before any durable call, without error from the option
+itself).
 
 | Node kinds | Run by |
 | --- | --- |
