@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -45,14 +47,14 @@ func New(clock core.Clock) (*Catalog, error) {
 	return NewWithSnapshot(clock, snapshotYAML)
 }
 
-// NewWithSnapshot returns a catalog whose snapshot layer is snapshotYAML
-// instead of the bytes embedded in the binary. A deployment build may pass its
-// own generated snapshot at startup.
-func NewWithSnapshot(clock core.Clock, snapshotYAML []byte) (*Catalog, error) {
+// NewWithSnapshot returns a catalog whose snapshot layer is yamlText instead
+// of the bytes embedded in the binary. A deployment build may pass its own
+// generated snapshot at startup.
+func NewWithSnapshot(clock core.Clock, yamlText []byte) (*Catalog, error) {
 	if clock == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "catalog needs a clock", nil)
 	}
-	snapshot, err := parseSnapshot(snapshotYAML)
+	snapshot, err := parseSnapshot(yamlText)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +71,8 @@ func NewWithSnapshot(clock core.Clock, snapshotYAML []byte) (*Catalog, error) {
 		env:         env,
 		programs:    map[string]*expr.Program{},
 	}
-	for modelID, p := range snapshot {
-		if err := c.precompilePrice(modelID, p); err != nil {
+	for _, modelID := range slices.Sorted(maps.Keys(snapshot)) {
+		if err := c.precompilePrice(modelID, snapshot[modelID]); err != nil {
 			return nil, err
 		}
 	}
