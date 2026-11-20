@@ -2,6 +2,7 @@ package local
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -26,9 +27,24 @@ func newFuture(r *run) *future {
 
 // complete records the outcome. The first completion wins; later ones are
 // ignored, which is what makes cancellation and a race with a result safe.
+// The completion seq is allocated under f.mu immediately before done closes,
+// so Select never observes a seq without a matching Ready().
 func (f *future) complete(result json.RawMessage, err error) bool {
+	f.mu.Lock()
+	select {
+	case <-f.done:
+		f.mu.Unlock()
+		return false
+	default:
+	}
 	seq := f.run.seqs.Add(1)
-	return f.completeWithSeq(seq, result, err, true)
+	f.result = append(json.RawMessage(nil), result...)
+	f.err = err
+	f.seq = seq
+	close(f.done)
+	f.mu.Unlock()
+	f.run.notify()
+	return true
 }
 
 // completeWithSeq records the outcome using an already-allocated completion
@@ -113,6 +129,27 @@ func flowPanicErr(recovered any) error {
 		cause = fmt.Errorf("%v", x)
 	}
 	e := core.NewError(core.CodeInternal, "local: the flow host panicked", nil)
+	e.Cause = cause
+	return e
+}
+
+// stepPanicErr turns a recovered step panic into a non-retryable step error. The
+// recovered value is kept as Cause only for logging inside the runtime;
+// Describe, List and RunStatus never surface it.
+func isStepPanic(err error) bool {
+	var platform *core.Error
+	return errors.As(err, &platform) && platform.Message == "local: the step panicked"
+}
+
+func stepPanicErr(step string, recovered any) error {
+	var cause error
+	switch x := recovered.(type) {
+	case error:
+		cause = x
+	default:
+		cause = fmt.Errorf("%v", x)
+	}
+	e := core.NewError(core.CodeInternal, "local: the step panicked", map[string]any{"step": step})
 	e.Cause = cause
 	return e
 }

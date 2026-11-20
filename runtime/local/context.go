@@ -84,7 +84,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 	go func() {
 		defer r.rt.wg.Done()
 		defer r.stepWG.Done()
-		r.runStep(f, registered.fn, raw, options)
+		r.runStep(f, name, registered.fn, raw, options)
 	}()
 	return f
 }
@@ -92,7 +92,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 // runStep executes a step's attempts on the step's own goroutine. Attempts run
 // immediately, back to back, and the step closes with the last attempt's error
 // when the limit is reached.
-func (r *run) runStep(f *future, fn runtime.StepFunc, in json.RawMessage, opts runtime.StepOptions) {
+func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMessage, opts runtime.StepOptions) {
 	attempts := opts.MaxAttempts
 	if attempts <= 0 {
 		attempts = defaultAttempts
@@ -103,9 +103,22 @@ func (r *run) runStep(f *future, fn runtime.StepFunc, in json.RawMessage, opts r
 			f.complete(nil, cancelledErr("step cancelled"))
 			return
 		}
-		out, err := fn(r.ctx, in)
+		var out json.RawMessage
+		var err error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = stepPanicErr(step, recovered)
+				}
+			}()
+			out, err = fn(r.ctx, in)
+		}()
 		if err == nil {
 			f.complete(out, nil)
+			return
+		}
+		if isStepPanic(err) {
+			f.complete(nil, err)
 			return
 		}
 		last = err
@@ -215,26 +228,26 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 // Select waits for the first pending operation to complete (REQ-RT-011).
 //
 // At call time, the lowest index among futures that are already Ready wins.
-// While the run is blocked in Select, the first operation to become ready wins.
-// When several operations become ready from the same trigger (one clock advance
-// that fires multiple timers, one gate resolution), the lowest index among them
-// wins. When steps complete independently, completion order is the order in
-// which they took the run's lock—that is the only deterministic order the local
-// runtime has and it is not replayable across processes.
+// While the run is blocked in Select, the ready future with the earliest
+// completion seq wins; equal seqs keep the lowest index (one timer batch).
+// When steps complete independently, completion order is the order in which
+// they closed done—that is the only deterministic order the local runtime has
+// and it is not replayable across processes.
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	if len(fs) == 0 {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
 	}
 	r := dc.run
-	marked := r.seqs.Load()
 	for i, f := range fs {
 		if f.Ready() {
 			return i, nil
 		}
 	}
 	for {
+		// Subscribe before scanning: a completion cannot land between the
+		// check and the wait without also closing this wake channel.
 		changed := r.wake()
-		if index := r.firstCompletedSince(fs, marked); index >= 0 {
+		if index := r.firstCompleted(fs); index >= 0 {
 			return index, nil
 		}
 		select {
@@ -250,11 +263,11 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	}
 }
 
-// firstCompletedSince returns the index of the future that completed after
-// marked with the earliest completion seq, or -1 when none did. When several
-// futures share the same seq (one timer batch), the lowest index among them
-// wins because only a strictly smaller seq updates the candidate.
-func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
+// firstCompleted returns the index of the ready future with the earliest
+// completion seq, or -1 when none are ready. A foreign future that is already
+// Ready is returned at once. Equal seqs keep the lowest index because only a
+// strictly smaller seq updates the candidate.
+func (r *run) firstCompleted(fs []runtime.Future) int {
 	index := -1
 	var earliest uint64
 	for i, f := range fs {
@@ -266,7 +279,7 @@ func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
 			continue
 		}
 		seq, done := local.completedSeq()
-		if !done || seq <= marked {
+		if !done {
 			continue
 		}
 		if index < 0 || seq < earliest {

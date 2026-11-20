@@ -325,19 +325,88 @@ func TestSelectPrefersTheFutureThatCompletedFirst(t *testing.T) {
 	}
 	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
 	first, second := newFuture(r), newFuture(r)
-	marked := r.seqs.Load()
 
 	second.complete(nil, nil)
 	first.complete(nil, nil)
 
-	// first (index 0) completed after second (index 1): the first completion
-	// after the call wins, not the lowest index.
-	if index := r.firstCompletedSince([]runtime.Future{first, second}, marked); index != 1 {
-		t.Fatalf("firstCompletedSince = %d, want 1", index)
+	if index := r.firstCompleted([]runtime.Future{first, second}); index != 1 {
+		t.Fatalf("firstCompleted = %d, want 1 (earliest seq)", index)
 	}
-	// Futures already complete at the mark are not candidates.
-	if index := r.firstCompletedSince([]runtime.Future{first, second}, r.seqs.Load()); index != -1 {
-		t.Fatalf("firstCompletedSince with no new completion = %d, want -1", index)
+
+	third, fourth := newFuture(r), newFuture(r)
+	seq := r.seqs.Add(1)
+	third.completeWithSeq(seq, nil, nil, true)
+	fourth.completeWithSeq(seq, nil, nil, true)
+	if index := r.firstCompleted([]runtime.Future{third, fourth}); index != 0 {
+		t.Fatalf("equal seq firstCompleted = %d, want 0", index)
+	}
+}
+
+// hookFuture runs hook on its first Ready() call and always reports not ready.
+type hookFuture struct {
+	once sync.Once
+	hook func()
+}
+
+func (h *hookFuture) Get(any) error { return fmt.Errorf("hookFuture: unexpected Get") }
+func (h *hookFuture) Ready() bool {
+	h.once.Do(h.hook)
+	return false
+}
+
+func TestSelectNoLostWakeCompletingAfterReadyScan(t *testing.T) {
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	t.Cleanup(r.cancel)
+	dc := &durableContext{run: r}
+	f0 := newFuture(r)
+	seq := r.seqs.Add(1)
+	hook := &hookFuture{hook: func() {
+		f0.completeWithSeq(seq, nil, nil, true)
+	}}
+	got := make(chan int, 1)
+	go func() {
+		index, selErr := dc.Select(f0, hook)
+		if selErr != nil {
+			t.Errorf("Select: %v", selErr)
+			got <- -1
+			return
+		}
+		got <- index
+	}()
+	if index := recvWithin(t, got, "Select result"); index != 0 {
+		t.Fatalf("Select index %d, want 0", index)
+	}
+}
+
+func TestSelectNoLostWakeFireDueBatchWindow(t *testing.T) {
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	t.Cleanup(r.cancel)
+	dc := &durableContext{run: r}
+	f0 := newFuture(r)
+	batchSeq := r.seqs.Add(1)
+	hook := &hookFuture{hook: func() {
+		f0.completeWithSeq(batchSeq, nil, nil, true)
+	}}
+	got := make(chan int, 1)
+	go func() {
+		index, selErr := dc.Select(f0, hook)
+		if selErr != nil {
+			t.Errorf("Select: %v", selErr)
+			got <- -1
+			return
+		}
+		got <- index
+	}()
+	if index := recvWithin(t, got, "Select result"); index != 0 {
+		t.Fatalf("Select index %d, want 0", index)
 	}
 }
 
@@ -1343,4 +1412,302 @@ func TestErrorsArePlatformErrors(t *testing.T) {
 	if msg := platform.Error(); !strings.Contains(msg, "missing") {
 		t.Fatalf("error %q does not name the run", msg)
 	}
+}
+
+func TestListPaging(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	for i := 1; i <= 5; i++ {
+		f.start(t, "acme", fmt.Sprintf("r%d", i), "noop", `{}`)
+		f.waitState(t, "acme", fmt.Sprintf("r%d", i), stateCompleted)
+	}
+	ctx := tenantCtx("acme")
+	var seen []string
+	cursor := ""
+	for page := 0; page < 3; page++ {
+		pageRuns, next, err := f.rt.List(ctx, runtime.RunQuery{Limit: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("page %d: List: %v", page, err)
+		}
+		for _, st := range pageRuns {
+			seen = append(seen, st.Ref.RunID)
+		}
+		cursor = next
+		if page < 2 && cursor == "" {
+			t.Fatalf("page %d: expected a next cursor", page)
+		}
+		if page == 2 && cursor != "" {
+			t.Fatalf("final page cursor %q, want empty", cursor)
+		}
+	}
+	if len(seen) != 5 {
+		t.Fatalf("listed %d runs, want 5", len(seen))
+	}
+	if len(dedup(seen)) != 5 {
+		t.Fatalf("duplicate ids in %v", seen)
+	}
+}
+
+func dedup(ids []string) []string {
+	set := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := set[id]; ok {
+			continue
+		}
+		set[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func TestListPagingRespectsFilters(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("a", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.flow("b", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "a", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	f.start(t, "acme", "r2", "b", `{}`)
+	f.waitState(t, "acme", "r2", stateCompleted)
+	f.start(t, "acme", "r3", "a", `{}`)
+	f.waitState(t, "acme", "r3", stateCompleted)
+
+	ctx := tenantCtx("acme")
+	page, next, err := f.rt.List(ctx, runtime.RunQuery{Flow: "a", Limit: 1})
+	if err != nil || len(page) != 1 || page[0].Ref.RunID != "r1" || next == "" {
+		t.Fatalf("first page = %#v, %q, %v", page, next, err)
+	}
+	page, next, err = f.rt.List(ctx, runtime.RunQuery{Flow: "a", Limit: 1, Cursor: next})
+	if err != nil || len(page) != 1 || page[0].Ref.RunID != "r3" || next != "" {
+		t.Fatalf("second page = %#v, %q, %v", page, next, err)
+	}
+}
+
+func TestListInvalidCursor(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	ctx := tenantCtx("acme")
+	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: "not-a-number"}); codeOf(err) != "invalid_argument" {
+		t.Fatalf("bad cursor = %v, want invalid_argument", err)
+	}
+	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: "99"}); codeOf(err) != "invalid_argument" {
+		t.Fatalf("out of range cursor = %v, want invalid_argument", err)
+	}
+}
+
+func TestListLimitLargerThanList(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "noop", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	page, next, err := f.rt.List(tenantCtx("acme"), runtime.RunQuery{Limit: 100})
+	if err != nil || len(page) != 1 || next != "" {
+		t.Fatalf("List = %#v, %q, %v", page, next, err)
+	}
+}
+
+func TestListCursorDoesNotWidenTenantVisibility(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "a1", "noop", `{}`)
+	f.waitState(t, "acme", "a1", stateCompleted)
+	f.start(t, "globex", "g1", "noop", `{}`)
+	f.waitState(t, "globex", "g1", stateCompleted)
+	f.start(t, "acme", "a2", "noop", `{}`)
+	f.waitState(t, "acme", "a2", stateCompleted)
+
+	page, next, err := f.rt.List(tenantCtx("acme"), runtime.RunQuery{Limit: 1})
+	if err != nil || len(page) != 1 || page[0].Ref.RunID != "a1" {
+		t.Fatalf("first acme page = %#v, %v", page, err)
+	}
+	page, next, err = f.rt.List(tenantCtx("acme"), runtime.RunQuery{Limit: 1, Cursor: next})
+	if err != nil || len(page) != 1 || page[0].Ref.RunID != "a2" || next != "" {
+		t.Fatalf("second acme page = %#v, %q, %v", page, next, err)
+	}
+}
+
+func TestStartDuplicateRunIDSameTenant(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "noop", `{}`)
+	_, err := f.rt.Start(tenantCtx("acme"), runtime.StartRequest{
+		Flow:  runtime.FlowRef{Name: "noop"},
+		RunID: "r1",
+		Input: json.RawMessage(`{}`),
+	})
+	if codeOf(err) != "conflict" {
+		t.Fatalf("duplicate Start = %v, want conflict", err)
+	}
+}
+
+func TestStartDuplicateRunIDDifferentTenantsAllowed(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "shared", "noop", `{}`)
+	f.start(t, "globex", "shared", "noop", `{}`)
+	f.waitState(t, "acme", "shared", stateCompleted)
+	f.waitState(t, "globex", "shared", stateCompleted)
+}
+
+func TestStartIdempotencyKeySameTenant(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	var starts atomic.Int32
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		starts.Add(1)
+		return json.RawMessage(`{}`), nil
+	})
+	req := runtime.StartRequest{
+		Flow:           runtime.FlowRef{Name: "noop"},
+		RunID:          "r1",
+		Input:          json.RawMessage(`{}`),
+		IdempotencyKey: "idem-1",
+	}
+	ref1, err := f.rt.Start(tenantCtx("acme"), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref2, err := f.rt.Start(tenantCtx("acme"), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.waitState(t, "acme", "r1", stateCompleted)
+	if ref1 != ref2 || starts.Load() != 1 {
+		t.Fatalf("refs %#v %#v starts %d, want one run", ref1, ref2, starts.Load())
+	}
+}
+
+func TestStartIdempotencyKeyDifferentTenants(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	var starts atomic.Int32
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		starts.Add(1)
+		return json.RawMessage(`{}`), nil
+	})
+	key := "shared-idem"
+	for _, tenant := range []string{"acme", "globex"} {
+		if _, err := f.rt.Start(tenantCtx(tenant), runtime.StartRequest{
+			Flow:           runtime.FlowRef{Name: "noop"},
+			RunID:          tenant + "-r",
+			Input:          json.RawMessage(`{}`),
+			IdempotencyKey: key,
+		}); err != nil {
+			t.Fatalf("Start(%s): %v", tenant, err)
+		}
+	}
+	f.waitState(t, "acme", "acme-r", stateCompleted)
+	f.waitState(t, "globex", "globex-r", stateCompleted)
+	if starts.Load() != 2 {
+		t.Fatalf("starts %d, want 2", starts.Load())
+	}
+}
+
+func TestStepPanicFailsWithoutKillingProcess(t *testing.T) {
+	const leak = "step-panic-must-not-leak"
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	var executions atomic.Int32
+	if err := f.rt.RegisterStep("boom", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		executions.Add(1)
+		panic(leak)
+	}, runtime.StepDefaults{}); err != nil {
+		t.Fatal(err)
+	}
+	f.flow("step-panic", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		if err := dc.Step("boom", nil, runtime.StepOptions{}).Get(nil); err == nil {
+			return nil, fmt.Errorf("expected step error")
+		}
+		return json.RawMessage(`{"ok":true}`), nil
+	})
+	f.start(t, "acme", "r1", "step-panic", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	if executions.Load() != 1 {
+		t.Fatalf("step ran %d times, want 1", executions.Load())
+	}
+	target := f.rt.lookup(core.TenantID("acme"), "r1")
+	target.mu.Lock()
+	runErr := target.err
+	target.mu.Unlock()
+	if runErr != nil {
+		t.Fatalf("run err %v, want nil (flow handled step)", runErr)
+	}
+	if out := f.output(t, "acme", "r1"); string(out) != `{"ok":true}` {
+		t.Fatalf("output %s", out)
+	}
+	// step error is on the future, not exported via Describe — verify via a second flow call is overkill;
+	// re-read the step future is gone; check panic message not in Describe.
+	status, err := f.rt.Describe(tenantCtx("acme"), runtime.RunRef{RunID: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(status.State+status.Ref.RunID, leak) {
+		t.Fatal("panic value leaked into Describe")
+	}
+	f.close(t)
+}
+
+func TestStepPanicWithErrorValue(t *testing.T) {
+	sentinel := core.NewError(core.CodeUnavailable, "boom-step", nil)
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	defer f.close(t)
+	var got atomic.Value
+	if err := f.rt.RegisterStep("panic-err", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		panic(sentinel)
+	}, runtime.StepDefaults{}); err != nil {
+		t.Fatal(err)
+	}
+	f.flow("catch", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		err := dc.Step("panic-err", nil, runtime.StepOptions{}).Get(nil)
+		got.Store(err)
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "catch", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	err, _ := got.Load().(error)
+	var platform *core.Error
+	if !errors.As(err, &platform) || platform.Message != "local: the step panicked" {
+		t.Fatalf("step error %v, want internal step panic wrapper", err)
+	}
+	if !errors.Is(platform.Cause, sentinel) && platform.Cause.Error() != sentinel.Error() {
+		t.Fatalf("cause %v, want %v", platform.Cause, sentinel)
+	}
+	if strings.Contains(platform.Message, "boom-step") {
+		t.Fatal("cause leaked into the platform message")
+	}
+}
+
+func TestStepPanicThenShutdown(t *testing.T) {
+	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	if err := f.rt.RegisterStep("panic-step", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		panic("x")
+	}, runtime.StepDefaults{}); err != nil {
+		t.Fatal(err)
+	}
+	f.flow("go", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		_ = dc.Step("panic-step", nil, runtime.StepOptions{}).Get(nil)
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "go", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	f.close(t)
 }

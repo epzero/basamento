@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"sync"
 	"time"
 
@@ -69,9 +70,8 @@ type Runtime struct {
 	order []*run
 	idem  map[idemKey]*run
 
-	serving bool
-	closed  bool
-	wg      sync.WaitGroup
+	closed bool
+	wg     sync.WaitGroup
 }
 
 type registeredStep struct {
@@ -278,7 +278,14 @@ func (r *Runtime) Describe(ctx context.Context, ref runtime.RunRef) (runtime.Run
 }
 
 // List returns the calling tenant's runs, optionally filtered by flow and
-// state (REQ-RT-026, REQ-RT-043).
+// state (REQ-RT-026, REQ-RT-043). Limit zero means no limit. When more
+// matching runs remain after a limited page, the second return value is an
+// opaque cursor: the decimal index in this runtime's start-ordered run list
+// where the next page should begin. Cursors are only meaningful for the
+// runtime instance that issued them. A cursor that is not a non-negative
+// decimal integer, or that is past the end of the list, is invalid_argument.
+// The index always walks the full ordered list; it never widens tenant
+// visibility—only runs of the calling tenant that pass the filters appear.
 func (r *Runtime) List(ctx context.Context, q runtime.RunQuery) ([]runtime.RunStatus, string, error) {
 	tenant, err := r.tenant(ctx, q.TenantID)
 	if err != nil {
@@ -288,21 +295,44 @@ func (r *Runtime) List(ctx context.Context, q runtime.RunQuery) ([]runtime.RunSt
 	runs := append([]*run(nil), r.order...)
 	r.mu.Unlock()
 
-	out := make([]runtime.RunStatus, 0, len(runs))
-	for _, candidate := range runs {
+	start := 0
+	if q.Cursor != "" {
+		idx, parseErr := strconv.Atoi(q.Cursor)
+		if parseErr != nil || idx < 0 || idx > len(runs) {
+			return nil, "", invalidErr("local: invalid list cursor", map[string]any{"cursor": q.Cursor})
+		}
+		start = idx
+	}
+
+	matches := func(candidate *run) bool {
 		status := candidate.status()
 		if status.Ref.TenantID != tenant {
-			continue
+			return false
 		}
 		if q.Flow != "" && candidate.flow.Name != q.Flow {
-			continue
+			return false
 		}
 		if q.State != "" && status.State != q.State {
+			return false
+		}
+		return true
+	}
+
+	out := make([]runtime.RunStatus, 0, len(runs))
+	for i := start; i < len(runs); i++ {
+		candidate := runs[i]
+		if !matches(candidate) {
 			continue
 		}
-		out = append(out, status)
+		out = append(out, candidate.status())
 		if q.Limit > 0 && len(out) >= q.Limit {
-			break
+			next := i + 1
+			for j := next; j < len(runs); j++ {
+				if matches(runs[j]) {
+					return out, strconv.Itoa(next), nil
+				}
+			}
+			return out, "", nil
 		}
 	}
 	return out, "", nil
@@ -319,7 +349,6 @@ func (r *Runtime) Serve(ctx context.Context) error {
 		r.wg.Wait()
 		return nil
 	}
-	r.serving = true
 	r.mu.Unlock()
 
 	<-ctx.Done()

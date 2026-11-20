@@ -78,3 +78,21 @@ Settings for the embedded profile:
 
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.
+
+## 6. Local runtime: behaviours the specs leave open
+
+These are implementation choices for `runtime/local` (WP-L5-01). Where a row
+names a requirement or scenario id, the gate exercises it; otherwise the
+behaviour is spec-silent and covered only by unit tests or this document.
+
+| Behaviour | Spec coverage |
+| --- | --- |
+| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` breaks ties by lowest index | RT-008 / RT-011 scenarios (timer batching via flow stubs) |
+| Duplicate `Start` with the same `RunID` in one tenant → `conflict` | spec-silent (unit tests) |
+| `IdempotencyKey` deduplication scoped per tenant | RT-044 (tenant isolation); per-tenant key scope spec-silent |
+| Panic in the flow host → failed run, process survives | spec-silent (unit tests) |
+| Panic in a registered step → `internal` step error, not retried, process survives | spec-silent (unit tests) |
+| `Child` re-attach: same parent run and flow returns the existing child; otherwise `conflict` | partial (child scenarios); re-attach rule spec-silent |
+| `List` cursor paging: opaque decimal index into start order; invalid or out-of-range cursor → `invalid_argument`; cursor does not widen tenant visibility | RT-026 lists runs; paging semantics spec-silent |
+| Every started run stays in memory (no retention) | RT-006 / design §Local |
+| `New` requires a clock that implements `After` | spec-silent (unit test) |

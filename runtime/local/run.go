@@ -282,13 +282,13 @@ func (r *run) timerOutcome(timer *runTimer) (json.RawMessage, error) {
 // deadline, so a wake from After cannot be lost against Now().
 func (r *run) fireDue(signaled *runTimer) {
 	r.mu.Lock()
-	if signaled != nil && signaled.future.Ready() {
+	if signaled.future.Ready() {
 		r.mu.Unlock()
 		return
 	}
 	now := r.rt.clock.Now()
 	seq := r.seqs.Add(1)
-	var any bool
+	var completed bool
 	complete := func(timer *runTimer, force bool) {
 		if timer.future.Ready() {
 			return
@@ -298,12 +298,10 @@ func (r *run) fireDue(signaled *runTimer) {
 		}
 		out, err := r.timerOutcome(timer)
 		if timer.future.completeWithSeq(seq, out, err, false) {
-			any = true
+			completed = true
 		}
 	}
-	if signaled != nil {
-		complete(signaled, true)
-	}
+	complete(signaled, true)
 	kept := r.timers[:0]
 	for _, timer := range r.timers {
 		if timer == signaled {
@@ -320,7 +318,7 @@ func (r *run) fireDue(signaled *runTimer) {
 	}
 	r.timers = kept
 	r.mu.Unlock()
-	if any {
+	if completed {
 		r.notify()
 	}
 }
