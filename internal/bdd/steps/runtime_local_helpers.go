@@ -214,6 +214,30 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 
 // cleanup releases the scenario's runtimes so no goroutine outlives it. Serving
 // with an already-cancelled context cancels every run, children included.
+// yieldAfterAdvance lets local timer helper goroutines run fireDue after a fake
+// clock Advance under CPU load, so back-to-back duration-pass steps cannot batch
+// distinct timer wakes into one completion seq before Select observes them.
+func (w *localWorld) yieldAfterAdvance() {
+	if w.rt == nil {
+		return
+	}
+	w.mu.Lock()
+	exec := w.currentExec
+	w.mu.Unlock()
+	if exec == nil {
+		return
+	}
+	exec.mu.Lock()
+	running := !exec.done
+	exec.mu.Unlock()
+	if !running {
+		return
+	}
+	for i := 0; i < localSpinBudget; i++ {
+		goruntime.Gosched()
+	}
+}
+
 func (w *localWorld) cleanup() {
 	w.mu.Lock()
 	runtimes := append([]*local.Runtime(nil), w.retired...)

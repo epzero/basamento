@@ -120,6 +120,9 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 		return err
 	}
 	world(ctx).Core.clock.Advance(d)
+	if local := world(ctx).Local; local != nil {
+		local.yieldAfterAdvance()
+	}
 	if sink, ok := any(world(ctx).Host).(timeSink); ok {
 		return sink.timePassed(ctx, d)
 	}

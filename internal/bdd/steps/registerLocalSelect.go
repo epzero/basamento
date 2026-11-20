@@ -23,11 +23,13 @@ func registerLocalSelect(sc *godog.ScenarioContext) {
 			w.setFlow("select", func(e *localExec, dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 				timer := dc.Sleep(d)
 				wait := dc.Await(runtime.GateSpec{Name: gate})
-				e.update(func() {
-					e.waiting = true
-					e.atGate = gate
-				})
-				index, err := dc.Select(timer, wait)
+				probe := &selectProbe{began: func() {
+					e.update(func() {
+						e.waiting = true
+						e.atGate = gate
+					})
+				}}
+				index, err := dc.Select(timer, wait, probe)
 				if err != nil {
 					return nil, err
 				}
@@ -47,7 +49,7 @@ func registerLocalSelect(sc *godog.ScenarioContext) {
 			if err != nil {
 				return err
 			}
-			return exec.wait("the run to await its gate", func() bool { return exec.atGate != "" })
+			return exec.wait("the run to await its gate", func() bool { return exec.waiting })
 		})
 	sc.Step(`^a flow is waiting on the first of a "([^"]*)" timer and a "([^"]*)" timer, in that order$`,
 		func(ctx context.Context, first, second string) error {
@@ -63,8 +65,10 @@ func registerLocalSelect(sc *godog.ScenarioContext) {
 			w.setFlow("select", func(e *localExec, dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 				firstTimer := dc.Sleep(one)
 				secondTimer := dc.Sleep(two)
-				e.update(func() { e.waiting = true })
-				index, err := dc.Select(firstTimer, secondTimer)
+				probe := &selectProbe{began: func() {
+					e.update(func() { e.waiting = true })
+				}}
+				index, err := dc.Select(firstTimer, secondTimer, probe)
 				if err != nil {
 					return nil, err
 				}
