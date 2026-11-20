@@ -166,6 +166,7 @@ func (r *vRuntime) advance(d time.Duration) {
 func (r *vRuntime) advanceTo(target time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.pruneTimersLocked()
 	for {
 		r.waitParkedLocked()
 		if r.finished || r.closed {
@@ -219,6 +220,7 @@ func (r *vRuntime) nextTimerLocked(target time.Time) *vTimer {
 }
 
 func (r *vRuntime) nextDueLocked() (time.Time, bool) {
+	r.pruneTimersLocked()
 	var next time.Time
 	found := false
 	for _, t := range r.timers {
@@ -235,6 +237,19 @@ func (r *vRuntime) nextDueLocked() (time.Time, bool) {
 		found = true
 	}
 	return next, found
+}
+
+// pruneTimersLocked drops stopped timers so a long scenario's timer list does
+// not grow with every timeout that fired. Callers hold r.mu.
+func (r *vRuntime) pruneTimersLocked() {
+	live := r.timers[:0]
+	for _, t := range r.timers {
+		if !t.stopped {
+			live = append(live, t)
+		}
+	}
+	clear(r.timers[len(live):])
+	r.timers = live
 }
 
 func (r *vRuntime) moveClockLocked(target time.Time) {
