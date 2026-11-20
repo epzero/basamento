@@ -20,13 +20,14 @@ with `make tools`, which pins their versions in the `Makefile`.
 
 `gate hygiene` enforces the mechanical rules before review:
 
-- **Test determinism.** Tests, test-only packages and BDD steps take time from
-  `core/coretest`: no `time.Now`, `time.Since`, `time.Until`, `time.Sleep`,
-  `time.After`, `time.AfterFunc`, `time.NewTimer`, `time.NewTicker`,
-  `time.Tick`, `crypto/rand` or the global `math/rand` functions.
-  `context.WithTimeout` and `context.WithDeadline` stay allowed: they read the
-  wall clock, but a test uses them only as a hang guard, never as a source of
-  time.
+- **Test determinism.** `*_test.go` files and packages listed in
+  `layering.yaml`'s `test_only` take time from `core/coretest`: no `time.Now`,
+  `time.Since`, `time.Until`, `time.Sleep`, `time.After`, `time.AfterFunc`,
+  `time.NewTimer`, `time.NewTicker`, `time.Tick`, `crypto/rand` or the global
+  `math/rand` functions. `test_only_allowed_from` is an import permission, not
+  a test-only package list. `context.WithTimeout` and `context.WithDeadline`
+  stay allowed: they read the wall clock, but a test uses them only as a hang
+  guard, never as a source of time.
 - **Production isolation.** Production code does not import `testing` or
   `testing/*`, and exports no identifier whose name matches `ForTest…`. The
   check is by name (`ForTest`, `ForTests`, `ForTesting`), so a hook under

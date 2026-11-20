@@ -54,19 +54,6 @@ func h() {
 	_ = IntN(5)
 }
 `,
-		"internal/bdd/steps/bad.go": `package steps
-
-import (
-	"crypto/rand"
-	"time"
-)
-
-func step() {
-	_ = time.Now()
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-}
-`,
 		"core/coretest/bad_fake.go": `package coretest
 
 import "time"
@@ -114,8 +101,6 @@ func ok() {
 		"pkg/bad_randv1_crypto_test.go:9: test uses global rand.Intn",
 		`pkg/bad_dot_test.go:4: test must not dot-import "math/rand/v2"`,
 		`pkg/bad_dot_test.go:5: test must not dot-import "time"`,
-		`internal/bdd/steps/bad.go:4: test imports "crypto/rand"`,
-		"internal/bdd/steps/bad.go:9: test uses time.Now",
 		"core/coretest/bad_fake.go:5: test uses time.Now",
 	} {
 		if !hasErr(errs, want) {
@@ -124,6 +109,45 @@ func ok() {
 	}
 	if hasErr(errs, "pkg/good_test.go") {
 		t.Errorf("good_test.go with time.Date, seeded rand.New and shadowed locals must pass:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly proves that
+// test_only_allowed_from is an import permission only: a package listed there
+// (shaped like internal/bdd) may use crypto/rand in non-test files, while a
+// package listed in test_only is still subject to the determinism rules.
+func TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"layering.yaml": "module: m\ntest_only: [core/coretest]\ntest_only_allowed_from: [internal/bdd]\n",
+		"internal/bdd/sqltest/pgserver.go": `package sqltest
+
+import "crypto/rand"
+
+func password() []byte {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return b[:]
+}
+`,
+		"core/coretest/bad_fake.go": `package coretest
+
+import "crypto/rand"
+
+func BadEntropy() {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+}
+`,
+	})
+	errs, err := CheckCodeHygiene(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasErr(errs, "internal/bdd") {
+		t.Errorf("test_only_allowed_from package must not get test-determinism rules:\n%s", strings.Join(errs, "\n"))
+	}
+	if !hasErr(errs, `core/coretest/bad_fake.go:3: test imports "crypto/rand"`) {
+		t.Errorf("test_only package must still fail on crypto/rand:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

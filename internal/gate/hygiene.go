@@ -72,7 +72,8 @@ var bannedTestRandFuncs = map[string]bool{
 // AGENTS.md and workflow rule violations before human or agent code review:
 //   - test determinism: no wall clock, sleeps or timers, crypto/rand, or
 //     global math/rand in *_test.go or test-only packages (layering.yaml's
-//     test_only and test_only_allowed_from);
+//     test_only; test_only_allowed_from is an import permission, not a
+//     package classification);
 //   - production isolation: no "testing" / "testing/*" import or exported
 //     *ForTest* hooks in production Go files (matched by name);
 //   - merge conflict markers in any tracked text file (qa-gate.md § Conflict
@@ -119,13 +120,15 @@ func untrackedFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// loadTestOnlyPrefixes returns package prefixes that are test-only (from
-// layering.yaml's test_only and test_only_allowed_from when present, falling
-// back to the repository defaults for minimal test fixtures).
+// loadTestOnlyPrefixes returns package prefixes classified as test-only in
+// layering.yaml's test_only. test_only_allowed_from is not included: it names
+// importers that may use test-only packages (layering.go), not test-only
+// packages themselves. When layering.yaml is absent, the repository default
+// (core/coretest) is returned for minimal test fixtures.
 func loadTestOnlyPrefixes(root string) ([]string, error) {
 	b, err := os.ReadFile(filepath.Join(root, "layering.yaml"))
 	if os.IsNotExist(err) {
-		return []string{"core/coretest", "internal/bdd"}, nil
+		return []string{"core/coretest"}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -134,9 +137,8 @@ func loadTestOnlyPrefixes(root string) ([]string, error) {
 	if err := yaml.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("layering.yaml: %w", err)
 	}
-	out := make([]string, 0, len(r.TestOnly)+len(r.TestOnlyOK))
-	out = append(out, r.TestOnly...)
-	out = append(out, r.TestOnlyOK...)
+	out := make([]string, len(r.TestOnly))
+	copy(out, r.TestOnly)
 	return out, nil
 }
 
