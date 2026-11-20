@@ -30,7 +30,7 @@ import ` + "`unterminated" + `
 `),
 	})
 	quotedWant := "low/a (layer low, in an excluded file quoted.go) may not import high/b (layer high)"
-	rawModWant := quotedWant[:strings.Index(quotedWant, "quoted")] + "rawmod.go) may not import high/b (layer high)"
+	rawModWant := "low/a (layer low, in an excluded file rawmod.go) may not import high/b (layer high)"
 	vendorWant := "low/a (layer low, in an excluded file vendor.go) may not import evil.com/pkg/extra"
 
 	got, err := Layering(root)
