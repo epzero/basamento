@@ -298,7 +298,7 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		w.after = make(chan time.Time, 1)
+		w.shutdown = newShutdownTimer()
 		w.inFlight = make(chan struct{})
 		w.release = make(chan struct{})
 		w.request = make(chan requestResult, 1)
@@ -325,7 +325,7 @@ func registerConfigServe(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		srv := config.NewServer(ln, mux, ports, timeout, channelTimer{ch: w.after})
+		srv := config.NewServer(ln, mux, ports, timeout, w.shutdown)
 		w.serveCode = make(chan int, 1)
 		go func() { w.serveCode <- srv.Serve(ctx) }()
 		w.listen = ln.Addr().String()
@@ -468,6 +468,47 @@ func errorKeysIn(text string) []string {
 	return keys
 }
 
-type channelTimer struct{ ch chan time.Time }
+// shutdownTimer is the fake config.Timer of CONFIG-023-01 and -024-01. It
+// fires After(d) only once the scenario has advanced the fake clock by at
+// least d, so an advance shorter than shutdown.timeout does not end the
+// drain (F7). advance is synchronous and records the elapsed time, so an
+// advance that arrives before the server calls After is not lost.
+type shutdownTimer struct {
+	mu      sync.Mutex
+	elapsed time.Duration
+	waiters []*shutdownWaiter
+}
 
-func (c channelTimer) After(time.Duration) <-chan time.Time { return c.ch }
+type shutdownWaiter struct {
+	after time.Duration
+	fire  chan time.Time
+}
+
+func newShutdownTimer() *shutdownTimer { return &shutdownTimer{} }
+
+func (t *shutdownTimer) After(d time.Duration) <-chan time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	if t.elapsed >= d {
+		ch <- time.Time{}
+		return ch
+	}
+	t.waiters = append(t.waiters, &shutdownWaiter{after: d, fire: ch})
+	return ch
+}
+
+func (t *shutdownTimer) advance(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.elapsed += d
+	kept := t.waiters[:0]
+	for _, w := range t.waiters {
+		if t.elapsed >= w.after {
+			w.fire <- time.Time{}
+			continue
+		}
+		kept = append(kept, w)
+	}
+	t.waiters = kept
+}

@@ -121,12 +121,9 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 	w := world(ctx)
 	w.Core.clock.Advance(d)
 	// A component server times its shutdown drain from the same frozen clock;
-	// firing its timer here is what "the seconds pass" means.
-	if w.Config != nil && w.Config.after != nil {
-		select {
-		case w.Config.after <- w.Core.clock.Now():
-		default:
-		}
+	// advancing its timer here is what "the seconds pass" means.
+	if w.Config != nil && w.Config.shutdown != nil {
+		w.Config.shutdown.advance(d)
 	}
 	if sink, ok := any(w.Host).(timeSink); ok {
 		return sink.timePassed(ctx, d)

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/epzero/basamento/internal/config"
 	"gopkg.in/yaml.v3"
@@ -41,7 +40,7 @@ type configWorld struct {
 	servePorts    []*fakeClosable
 	serveCode     chan int
 	serveExit     *int
-	after         chan time.Time
+	shutdown      *shutdownTimer
 	inFlight      chan struct{}
 	release       chan struct{}
 	releaseOnce   sync.Once

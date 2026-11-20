@@ -3,6 +3,7 @@ package steps
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServeArgsKeepsTheCommandFlags(t *testing.T) {
@@ -30,5 +31,33 @@ func TestServeArgsRejectsAnotherCommand(t *testing.T) {
 		if _, err := serveArgs(command); err == nil {
 			t.Errorf("serveArgs(%q) accepted it", command)
 		}
+	}
+}
+
+func TestShutdownTimerFiresOnlyAfterItsDuration(t *testing.T) {
+	timer := newShutdownTimer()
+	fired := timer.After(5 * time.Second)
+	timer.advance(time.Second)
+	select {
+	case <-fired:
+		t.Fatal("the timer fired after 1s of a 5s timeout")
+	default:
+	}
+	timer.advance(4 * time.Second)
+	select {
+	case <-fired:
+	default:
+		t.Fatal("the timer did not fire after 5s")
+	}
+}
+
+func TestShutdownTimerFiresWhenTheAdvanceComesFirst(t *testing.T) {
+	timer := newShutdownTimer()
+	timer.advance(5 * time.Second)
+	fired := timer.After(5 * time.Second)
+	select {
+	case <-fired:
+	default:
+		t.Fatal("an advance before After was lost")
 	}
 }
