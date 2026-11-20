@@ -441,9 +441,7 @@ so a non-`*core.Error` becomes `internal`). A non-`*core.Error` is reported as
 code `internal` with the message `flow: node "<id>" failed`. Handing
 `node_failed` to the machine is the host's whole decision; when the machine
 returns `fail`, the host returns a `*core.Error` with that code and message,
-which is the error the caller of the run observes. That run's error carries no
-node handler error text, node input or state, and the original error text of a
-non-`*core.Error` is not reported (REQ-FLOW-057).
+which is the error the caller of the run observes. That run's error carries only that code and message — no error details, no node input and no state — and the original error text of a non-`*core.Error` is not reported (REQ-FLOW-057).
 
 Unit-level invariant (not observable by a scenario): the `node_failed` event the
 host feeds `machine.Apply` carries only the code and message in its payload — no
