@@ -27,6 +27,14 @@ func newFuture(r *run) *future {
 // complete records the outcome. The first completion wins; later ones are
 // ignored, which is what makes cancellation and a race with a result safe.
 func (f *future) complete(result json.RawMessage, err error) bool {
+	seq := f.run.seqs.Add(1)
+	return f.completeWithSeq(seq, result, err, true)
+}
+
+// completeWithSeq records the outcome using an already-allocated completion
+// sequence. notify is false while batching timer completions; the caller
+// notifies once after the batch.
+func (f *future) completeWithSeq(seq uint64, result json.RawMessage, err error, notify bool) bool {
 	f.mu.Lock()
 	select {
 	case <-f.done:
@@ -36,10 +44,12 @@ func (f *future) complete(result json.RawMessage, err error) bool {
 	}
 	f.result = append(json.RawMessage(nil), result...)
 	f.err = err
-	f.seq = f.run.seqs.Add(1)
+	f.seq = seq
 	close(f.done)
 	f.mu.Unlock()
-	f.run.notify()
+	if notify {
+		f.run.notify()
+	}
 	return true
 }
 
@@ -91,6 +101,9 @@ func invalidErr(message string, details map[string]any) error {
 	return core.NewError(core.CodeInvalidArgument, message, details)
 }
 
+// flowPanicErr turns a recovered host panic into a failed run. The recovered
+// value is kept as Cause only for logging inside the runtime; Describe, List
+// and RunStatus never surface it.
 func flowPanicErr(recovered any) error {
 	var cause error
 	switch x := recovered.(type) {

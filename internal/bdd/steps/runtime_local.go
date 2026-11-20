@@ -17,7 +17,20 @@ import (
 	"github.com/epzero/basamento/runtime/local"
 )
 
-const localSpinBudget = 500_000
+const localSpinBudget = 100_000
+
+func recvWithin[T any](ch <-chan T, budget int, what string) (T, error) {
+	var zero T
+	for i := 0; i < budget; i++ {
+		select {
+		case v := <-ch:
+			return v, nil
+		default:
+			goruntime.Gosched()
+		}
+	}
+	return zero, fmt.Errorf("timed out receiving %s after %d yields", what, budget)
+}
 
 // localRunKey identifies a run in the step world.
 type localRunKey struct {
@@ -945,20 +958,17 @@ func registerLocal(sc *godog.ScenarioContext) {
 		})
 	sc.Step(`^the run has completed (\d+) timers?$`, func(ctx context.Context, want int) error {
 		w := localStepWorld(ctx)
-		if w.current.RunID == "" {
+		exec := w.currentExec
+		if exec == nil {
 			return fmt.Errorf("no run has started")
 		}
-		state, err := w.stateOf(ctx, string(w.current.TenantID), w.current.RunID)
-		if err != nil {
-			return err
+		exec.mu.Lock()
+		got := exec.timers
+		exec.mu.Unlock()
+		if got != want {
+			return fmt.Errorf("the run completed %d timers, want %d", got, want)
 		}
-		if want == 0 {
-			if state != "running" {
-				return fmt.Errorf("the run is %q with %d completed timers, want running and 0", state, want)
-			}
-			return nil
-		}
-		return fmt.Errorf("unsupported completed-timer count %d", want)
+		return nil
 	})
 
 	// Runs and their state.
@@ -1921,14 +1931,8 @@ func (w *localWorld) cleanup() {
 			_ = runtimeUnderTest.Serve(ctx)
 			close(done)
 		}(rt)
-		for i := 0; i < localSpinBudget; i++ {
-			select {
-			case <-done:
-				goto cleaned
-			default:
-				goruntime.Gosched()
-			}
+		if _, err := recvWithin(done, localSpinBudget, "runtime shutdown"); err != nil {
+			panic(err)
 		}
-	cleaned:
 	}
 }

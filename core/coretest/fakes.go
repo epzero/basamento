@@ -40,8 +40,7 @@ func (c *FakeClock) Set(t time.Time) {
 }
 
 // Advance moves the clock forward by d. It wakes every waiter whose deadline
-// has been reached, in deadline order, so a runtime waiting on a timer proceeds
-// without sleeping.
+// has been reached; the wake order is unspecified and must not be relied on.
 func (c *FakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

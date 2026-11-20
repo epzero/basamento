@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"sync/atomic"
@@ -58,11 +59,12 @@ type step struct {
 
 // gate is the journal entry of one gate name in a run (REQ-RT-009, REQ-RT-010).
 type gate struct {
-	spec        runtime.GateSpec
-	future      *future
-	resolved    bool
-	payload     json.RawMessage
-	timeoutStop chan struct{}
+	spec         runtime.GateSpec
+	future       *future
+	resolved     bool
+	payload      json.RawMessage
+	timeoutStop  chan struct{}
+	timeoutTimer *runTimer
 }
 
 // childLink ties a parent run to a child run it started (REQ-RT-014,
@@ -73,13 +75,13 @@ type childLink struct {
 	future *future
 }
 
-// runTimer is one pending Sleep. Any timer goroutine of the run that wakes
-// completes every timer whose deadline the clock has already reached, so a
-// clock jump completes due timers together and Select sees the lowest index.
+// runTimer is one pending clock wait (a Sleep or a gate timeout). Helpers wake
+// on wake and call fireDue; they never complete the future themselves.
 type runTimer struct {
 	deadline time.Time
 	future   *future
 	wake     <-chan time.Time
+	gate     *gate // set for gate timeouts so fireDue can emit CodeTimeout
 }
 
 func newRun(rt *Runtime, tenant core.TenantID, id string, flow runtime.FlowRef, input json.RawMessage, parent context.Context) *run {
@@ -225,8 +227,6 @@ func (r *run) shutdown() {
 	r.notify()
 }
 
-// completeWaitsLocked ends every pending gate wait, timer and child wait with
-// err. It is a no-op for waits that already completed.
 func (g *gate) stopTimeout() {
 	if g.timeoutStop != nil {
 		close(g.timeoutStop)
@@ -234,6 +234,8 @@ func (g *gate) stopTimeout() {
 	}
 }
 
+// completeWaitsLocked ends every pending gate wait, timer and child wait with
+// err. It is a no-op for waits that already completed.
 func (r *run) completeWaitsLocked(err error) {
 	for _, g := range r.gates {
 		g.stopTimeout()
@@ -250,14 +252,63 @@ func (r *run) completeWaitsLocked(err error) {
 	}
 }
 
-// fireDueTimers completes every timer of the run whose deadline the clock has
-// reached. The first timer goroutine to wake after a clock jump completes them
-// all, so due timers become ready together (REQ-RT-008, REQ-RT-011).
-func (r *run) fireDueTimers() {
-	r.mu.Lock()
-	now := r.rt.clock.Now()
+func (r *run) removeTimer(target *runTimer) {
 	kept := r.timers[:0]
 	for _, timer := range r.timers {
+		if timer != target {
+			kept = append(kept, timer)
+		}
+	}
+	r.timers = kept
+}
+
+func (r *run) timerOutcome(timer *runTimer) (json.RawMessage, error) {
+	if timer.gate == nil {
+		return nil, nil
+	}
+	g := timer.gate
+	if g.resolved {
+		return nil, nil
+	}
+	return nil, core.NewError(core.CodeTimeout,
+		fmt.Sprintf("local: gate %q timed out", g.spec.Name),
+		map[string]any{"gate": g.spec.Name})
+}
+
+// fireDue completes the signaled timer and every other pending timer whose
+// deadline the clock has reached, all with one completion seq (REQ-RT-008,
+// REQ-RT-011). It is idempotent when the signaled timer already completed.
+// The signaled timer is always completed even when Now() is still before its
+// deadline, so a wake from After cannot be lost against Now().
+func (r *run) fireDue(signaled *runTimer) {
+	r.mu.Lock()
+	if signaled != nil && signaled.future.Ready() {
+		r.mu.Unlock()
+		return
+	}
+	now := r.rt.clock.Now()
+	seq := r.seqs.Add(1)
+	var any bool
+	complete := func(timer *runTimer, force bool) {
+		if timer.future.Ready() {
+			return
+		}
+		if !force && timer.deadline.After(now) {
+			return
+		}
+		out, err := r.timerOutcome(timer)
+		if timer.future.completeWithSeq(seq, out, err, false) {
+			any = true
+		}
+	}
+	if signaled != nil {
+		complete(signaled, true)
+	}
+	kept := r.timers[:0]
+	for _, timer := range r.timers {
+		if timer == signaled {
+			continue
+		}
 		if timer.future.Ready() {
 			continue
 		}
@@ -265,10 +316,13 @@ func (r *run) fireDueTimers() {
 			kept = append(kept, timer)
 			continue
 		}
-		timer.future.complete(nil, nil)
+		complete(timer, false)
 	}
 	r.timers = kept
 	r.mu.Unlock()
+	if any {
+		r.notify()
+	}
 }
 
 // completeWaitersLocked delivers this run's outcome to the parents waiting on
@@ -295,6 +349,10 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 		return core.NewError(core.CodeConflict, "local: the gate was already resolved", map[string]any{"gate": name, "run": r.id})
 	}
 	g.stopTimeout()
+	if g.timeoutTimer != nil {
+		r.removeTimer(g.timeoutTimer)
+		g.timeoutTimer = nil
+	}
 	g.resolved = true
 	g.payload = append(json.RawMessage(nil), payload...)
 	g.future.complete(g.payload, nil)

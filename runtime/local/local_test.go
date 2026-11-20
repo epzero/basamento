@@ -73,7 +73,22 @@ func (f *fixture) start(t *testing.T, tenant, runID, flow string, in string) run
 	return ref
 }
 
-const spinBudget = 500_000
+const spinBudget = 100_000
+
+func recvWithin[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	for i := 0; i < spinBudget; i++ {
+		select {
+		case v := <-ch:
+			return v
+		default:
+			goruntime.Gosched()
+		}
+	}
+	t.Fatalf("timed out receiving %s after %d yields", what, spinBudget)
+	var zero T
+	return zero
+}
 
 func waitGateTimeouts(t *testing.T, r *run, want int32) {
 	t.Helper()
@@ -260,17 +275,7 @@ func TestSelectReturnsLowestReadyIndex(t *testing.T) {
 	f.start(t, "acme", "r1", "select", `{}`)
 	waitOn(t, "the timers to register", started)
 	f.clock.Advance(time.Hour)
-	var result outcome
-	for i := 0; i < spinBudget; i++ {
-		select {
-		case result = <-got:
-			goto gotSelect
-		default:
-			goruntime.Gosched()
-		}
-	}
-	t.Fatal("Select did not return after the 1h timer")
-gotSelect:
+	result := recvWithin(t, got, "Select result")
 	if result.err != nil || result.index != 1 {
 		t.Fatalf("Select = (%d, %v), want (1, nil)", result.index, result.err)
 	}
@@ -336,14 +341,55 @@ func TestSelectPrefersTheFutureThatCompletedFirst(t *testing.T) {
 	}
 }
 
-func TestSelectSameAdvanceReturnsLowestIndex(t *testing.T) {
+func TestFireDueBatchSameSeq(t *testing.T) {
+	rt, err := New(Options{Clock: coretest.NewFakeClock(time.Unix(1_700_000_000, 0)), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRun(rt, "acme", "r1", runtime.FlowRef{Name: "x"}, nil, context.Background())
+	first, second := newFuture(r), newFuture(r)
+	deadline := rt.clock.Now()
+	timers := []*runTimer{
+		{deadline: deadline, future: first},
+		{deadline: deadline, future: second},
+	}
+	r.mu.Lock()
+	r.timers = timers
+	r.mu.Unlock()
+	r.fireDue(timers[1])
+
+	s0, ok0 := first.completedSeq()
+	s1, ok1 := second.completedSeq()
+	if !ok0 || !ok1 {
+		t.Fatal("futures not complete")
+	}
+	if s0 != s1 {
+		t.Fatalf("seq %d and %d, want the same batch seq", s0, s1)
+	}
+	index, err := (&durableContext{run: r}).Select(first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index != 0 {
+		t.Fatalf("Select index %d, want 0", index)
+	}
+}
+
+func testSelectSameAdvanceOrder(t *testing.T, longFirst bool) {
+	t.Helper()
 	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 	defer f.close(t)
 	got := make(chan int, 1)
 	started := make(chan struct{})
 	f.flow("select", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
-		first := dc.Sleep(2 * time.Hour)
-		second := dc.Sleep(time.Hour)
+		var first, second runtime.Future
+		if longFirst {
+			first = dc.Sleep(2 * time.Hour)
+			second = dc.Sleep(time.Hour)
+		} else {
+			second = dc.Sleep(2 * time.Hour)
+			first = dc.Sleep(time.Hour)
+		}
 		close(started)
 		index, err := dc.Select(first, second)
 		if err != nil {
@@ -355,19 +401,45 @@ func TestSelectSameAdvanceReturnsLowestIndex(t *testing.T) {
 	f.start(t, "acme", "r1", "select", `{}`)
 	waitOn(t, "timers", started)
 	f.clock.Advance(2 * time.Hour)
-	var index int
-	for i := 0; i < spinBudget; i++ {
-		select {
-		case index = <-got:
-			goto gotBoth
-		default:
-			goruntime.Gosched()
-		}
-	}
-	t.Fatal("Select did not return")
-gotBoth:
+	index := recvWithin(t, got, "Select result")
 	if index != 0 {
 		t.Fatalf("Select index %d, want 0 (lowest when both timers fire together)", index)
+	}
+}
+
+func TestSelectSameAdvanceReturnsLowestIndex(t *testing.T) {
+	t.Run("long_first", func(t *testing.T) { testSelectSameAdvanceOrder(t, true) })
+	t.Run("long_second", func(t *testing.T) { testSelectSameAdvanceOrder(t, false) })
+}
+
+func TestSelectSameAdvanceLowestIndexUnderSchedulerNoise(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for trial := 0; trial < 200; trial++ {
+		f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+		got := make(chan int, 1)
+		started := make(chan struct{})
+		f.flow("select", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+			first := dc.Sleep(2 * time.Hour)
+			second := dc.Sleep(time.Hour)
+			close(started)
+			index, err := dc.Select(first, second)
+			if err != nil {
+				return nil, err
+			}
+			got <- index
+			return json.RawMessage(`{}`), nil
+		})
+		f.start(t, "acme", "r1", "select", `{}`)
+		waitOn(t, "timers", started)
+		f.clock.Advance(2 * time.Hour)
+		for i := 0; i < rng.IntN(20)+1; i++ {
+			goruntime.Gosched()
+		}
+		index := recvWithin(t, got, "Select result")
+		f.close(t)
+		if index != 0 {
+			t.Fatalf("trial %d: Select index %d, want 0", trial, index)
+		}
 	}
 }
 
@@ -553,17 +625,7 @@ func TestCancelEndsPendingWaitsWithCancelled(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.waitState(t, "acme", "r1", stateCancelled)
-			var err error
-			for i := 0; i < spinBudget; i++ {
-				select {
-				case err = <-failed:
-					goto gotCancel
-				default:
-					goruntime.Gosched()
-				}
-			}
-			t.Fatal("the wait did not end with cancellation")
-		gotCancel:
+			err := recvWithin(t, failed, "cancelled wait error")
 			if codeOf(err) != "cancelled" {
 				t.Fatalf("wait error = %v, want cancelled", err)
 			}
@@ -791,17 +853,7 @@ func TestStartAfterShutdownIsUnavailable(t *testing.T) {
 	f.start(t, "acme", "r1", "timer", `{}`)
 	waitOn(t, "the timer to register", sleeping)
 	cancel()
-	var err error
-	for i := 0; i < spinBudget; i++ {
-		select {
-		case err = <-done:
-			goto serveDone
-		default:
-			goruntime.Gosched()
-		}
-	}
-	t.Fatal("Serve did not return")
-serveDone:
+	err := recvWithin(t, done, "Serve return")
 	if err != nil {
 		t.Fatalf("Serve: %v", err)
 	}

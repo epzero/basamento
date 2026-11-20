@@ -160,7 +160,7 @@ func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 		defer r.rt.wg.Done()
 		select {
 		case <-timer.wake:
-			r.fireDueTimers()
+			r.fireDue(timer)
 		case <-r.ctx.Done():
 			f.complete(nil, cancelledErr("timer cancelled"))
 		}
@@ -188,7 +188,11 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 	if spec.Timeout > 0 {
 		stop := make(chan struct{})
 		g.timeoutStop = stop
+		deadline := r.rt.clock.Now().Add(spec.Timeout)
 		wake := r.rt.after(spec.Timeout)
+		timer := &runTimer{deadline: deadline, future: g.future, wake: wake, gate: g}
+		g.timeoutTimer = timer
+		r.timers = append(r.timers, timer)
 		r.gateTimeouts.Add(1)
 		r.rt.wg.Add(1)
 		go func() {
@@ -196,12 +200,7 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 			defer r.gateTimeouts.Add(-1)
 			select {
 			case <-wake:
-				r.mu.Lock()
-				if !g.resolved && !g.future.Ready() {
-					g.future.complete(nil, core.NewError(core.CodeTimeout,
-						fmt.Sprintf("local: gate %q timed out", spec.Name), map[string]any{"gate": spec.Name}))
-				}
-				r.mu.Unlock()
+				r.fireDue(timer)
 			case <-stop:
 				return
 			case <-r.ctx.Done():
@@ -252,7 +251,9 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 }
 
 // firstCompletedSince returns the index of the future that completed after
-// marked with the earliest completion seq, or -1 when none did.
+// marked with the earliest completion seq, or -1 when none did. When several
+// futures share the same seq (one timer batch), the lowest index among them
+// wins because only a strictly smaller seq updates the candidate.
 func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
 	index := -1
 	var earliest uint64
