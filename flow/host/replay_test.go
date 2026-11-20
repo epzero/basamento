@@ -22,7 +22,7 @@ func TestReplayMakesTheSameCallsWithoutExecutingHandlerStepsAgain(t *testing.T) 
 
 	first := newFakeDC()
 	first.instant = true
-	first.steps["a"] = scripted{failTimes: 4, failCode: core.CodeUnavailable, result: json.RawMessage(`{"t":1}`)}
+	first.steps["a"] = scripted{failTimes: 4, result: json.RawMessage(`{"t":1}`)}
 	first.steps["c_step"] = scripted{result: json.RawMessage(`{"ok":true}`)}
 
 	cat := newCatalog()

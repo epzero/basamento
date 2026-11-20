@@ -49,7 +49,6 @@ type scripted struct {
 	result    json.RawMessage
 	err       error
 	manual    bool
-	failCode  core.Code
 	failTimes int
 }
 
@@ -109,7 +108,6 @@ type fakeDC struct {
 	nextID       int
 	instant      bool
 	stepRun      map[string]int
-	childRun     map[string]scripted
 	// selectPrefer is the index Select returns when that future is ready; the default 0 is the first-ready behavior.
 	selectPrefer int
 	ctx          context.Context
@@ -125,12 +123,11 @@ type timedFuture struct {
 
 func newFakeDC() *fakeDC {
 	d := &fakeDC{
-		now:      time.Unix(1_700_000_000, 0).UTC(),
-		steps:    map[string]scripted{},
-		gates:    map[string]*future{},
-		manual:   map[string]*future{},
-		stepRun:  map[string]int{},
-		childRun: map[string]scripted{},
+		now:     time.Unix(1_700_000_000, 0).UTC(),
+		steps:   map[string]scripted{},
+		gates:   map[string]*future{},
+		manual:  map[string]*future{},
+		stepRun: map[string]int{},
 	}
 	d.cond = sync.NewCond(&d.mu)
 	d.ctx = context.Background()
@@ -318,7 +315,7 @@ func (d *fakeDC) Child(flowRef runtime.FlowRef, in any, o runtime.ChildOptions) 
 			return &future{dc: d, done: true, err: err}
 		}
 		if e.kind != "child" || e.child.Name != flowRef.Name || e.child.Hash != flowRef.Hash ||
-			!jsonEqual(e.input, raw) || e.childOpts.ID != o.ID {
+			!jsonEqual(e.input, raw) || e.childOpts.ID != o.ID || e.childOpts.ParentClose != o.ParentClose {
 			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: child call mismatch", nil)
 			return &future{dc: d, done: true, err: d.diverged}
 		}
