@@ -209,6 +209,7 @@ func testSelectSameAdvanceOrder(t *testing.T, longFirst bool) {
 	defer f.close(t)
 	got := make(chan int, 1)
 	started := make(chan struct{})
+	selectEntered := make(chan struct{})
 	f.flow("select", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 		var first, second runtime.Future
 		if longFirst {
@@ -218,8 +219,9 @@ func testSelectSameAdvanceOrder(t *testing.T, longFirst bool) {
 			second = dc.Sleep(2 * time.Hour)
 			first = dc.Sleep(time.Hour)
 		}
+		probe := &hookFuture{hook: func() { close(selectEntered) }}
 		close(started)
-		index, err := dc.Select(first, second)
+		index, err := dc.Select(first, second, probe)
 		if err != nil {
 			return nil, err
 		}
@@ -228,6 +230,7 @@ func testSelectSameAdvanceOrder(t *testing.T, longFirst bool) {
 	})
 	f.start(t, "acme", "r1", "select", `{}`)
 	waitOn(t, "timers", started)
+	waitOn(t, "select entered", selectEntered)
 	f.clock.Advance(2 * time.Hour)
 	index := recvWithin(t, got, "Select result")
 	if index != 0 {
@@ -246,11 +249,13 @@ func TestSelectSameAdvanceLowestIndexUnderSchedulerNoise(t *testing.T) {
 		f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 		got := make(chan int, 1)
 		started := make(chan struct{})
+		selectEntered := make(chan struct{})
 		f.flow("select", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 			first := dc.Sleep(2 * time.Hour)
 			second := dc.Sleep(time.Hour)
+			probe := &hookFuture{hook: func() { close(selectEntered) }}
 			close(started)
-			index, err := dc.Select(first, second)
+			index, err := dc.Select(first, second, probe)
 			if err != nil {
 				return nil, err
 			}
@@ -259,6 +264,7 @@ func TestSelectSameAdvanceLowestIndexUnderSchedulerNoise(t *testing.T) {
 		})
 		f.start(t, "acme", "r1", "select", `{}`)
 		waitOn(t, "timers", started)
+		waitOn(t, "select entered", selectEntered)
 		f.clock.Advance(2 * time.Hour)
 		for i := 0; i < rng.IntN(20)+1; i++ {
 			goruntime.Gosched()
