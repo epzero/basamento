@@ -355,3 +355,22 @@ func TestOpenLocalSecretsExpandsHomeInKeyPath(t *testing.T) {
 		t.Fatalf("a literal ~ directory was created: %v", err)
 	}
 }
+
+func TestOpenLocalSecretsRejectsSymlinkedKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.key")
+	if err := os.WriteFile(target, testKey(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "secrets.key")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := openLocalSecrets(context.Background(), "localsecrets://"+link)
+	if err == nil {
+		t.Fatal("openLocalSecrets followed a symlinked key file")
+	}
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+	}
+}

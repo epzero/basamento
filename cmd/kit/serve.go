@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -352,10 +354,10 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	if path == "" {
 		return nil, invalidSecretKey("secrets key path is empty")
 	}
-	if info, err := os.Lstat(path); err == nil {
-		return readKeyFile(path, info)
+	if key, err := readKeyFile(path); err == nil {
+		return key, nil
 	} else if !os.IsNotExist(err) {
-		return nil, invalidSecretKey("secrets key file could not be read")
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, invalidSecretKey("secrets key directory could not be created")
@@ -366,10 +368,8 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		if os.IsExist(err) {
-			if info, statErr := os.Lstat(path); statErr == nil {
-				return readKeyFile(path, info)
-			}
+		if errors.Is(err, fs.ErrExist) {
+			return readKeyFile(path)
 		}
 		return nil, invalidSecretKey("secrets key file could not be written")
 	}
@@ -385,14 +385,31 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	return key, nil
 }
 
-func readKeyFile(path string, info os.FileInfo) ([]byte, error) {
+// readKeyFile opens the key without following a symlink, checks the mode of
+// the open file and reads from that same descriptor, so a path swapped
+// between a check and the read cannot redirect it (F9). A missing file keeps
+// its not-exist error so the caller can create it; every other failure is
+// invalid_argument.
+func readKeyFile(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, err
+		}
+		return nil, invalidSecretKey("secrets key file could not be read")
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, invalidSecretKey("secrets key file could not be read")
+	}
 	if !info.Mode().IsRegular() {
 		return nil, invalidSecretKey("secrets key file must be a regular file")
 	}
 	if info.Mode().Perm()&0o077 != 0 {
 		return nil, invalidSecretKey("secrets key file must not be accessible by group or others")
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, invalidSecretKey("secrets key file could not be read")
 	}
