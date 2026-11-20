@@ -2,7 +2,7 @@
 
 Status: IR, compiler and Go builder in `flow/ir`, `flow/compile` and
 `flow/builder` (WP-L4-01, WP-L4-03); the machine in `flow/machine` (WP-L4-02);
-contracts in `flow/flow.go`; host **Planned** (WP-L4-04).
+the host in `flow/host` (WP-L4-04); contracts in `flow/flow.go`.
 Decisions: ADR-0003, ADR-0011. Specs: `specs/flow-engine`.
 
 ## 1. IR
@@ -108,7 +108,8 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   existing node whose kind is one the host runs (not `set`, `map` or `parallel`),
   must not carry a guard, and must not be shared by two map nodes.
 - **Node kinds**: `set` nodes and routing are evaluated in the machine with no
-  command (REQ-FLOW-036). A `parallel` node starts every node named by its
+  command (REQ-FLOW-036). A node with no `in` mapping receives the run's input
+  as its command input. A `parallel` node starts every node named by its
   outgoing edges in one superstep. A `map` node evaluates `spec.over` to an
   array and starts the node named by `spec.node` once per element, carrying the
   element as input and the one-based index as the attempt, up to
@@ -151,7 +152,19 @@ are identical. Fuzzing covers the IR decoder and CEL inputs.
 ## 4. Host and node handlers
 
 The machine decides; the **host** (`flow/host`, ADR-0011) acts. It is the one
-`runtime.FlowHost`, so it runs unchanged on every runtime.
+`runtime.FlowHost`, so it runs unchanged on every runtime. It checks the pinned
+definition hash after load, builds step idempotency keys from the loaded
+definition's name and pinned hash together with the superstep sequence, stops
+handler calls in a superstep after the first failure, ends
+the run on the first failing future in a superstep (in `Select` order), copies
+each handler's settled milli-points into `node_completed` and `node_failed`
+events, and may lower the map fan-out limit with `WithMaxFanout` (values above
+`DefaultMaxFanout` are clamped; values below 1 make every run fail with
+`invalid_argument` before any durable call, without error from the option
+itself). It checks the run context before each superstep, each handler call
+and each wait on futures; when the context is done the run ends with
+`cancelled`, or with `timeout` when the deadline has passed, which is a run
+outcome and not a node failure.
 
 | Node kinds | Run by |
 | --- | --- |

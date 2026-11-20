@@ -1,3 +1,5 @@
+// Step texts that more than one capability's scenarios use are registered once
+// in this file; EP0-100 will grow a registry to replace ad hoc routing.
 package steps
 
 import (
@@ -5,9 +7,58 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 )
+
+// timeSink lets shared "N pass" steps advance scenario time on a domain fake.
+type timeSink interface {
+	timePassed(context.Context, time.Duration) error
+}
+
+// runStarter is how a domain world starts a run with empty input from the
+// shared sentence "a run of the flow has started".
+type runStarter interface {
+	declared() bool
+	startDeclared() error
+}
+
+func pickRunStarter(ctx context.Context) (runStarter, error) {
+	w := world(ctx)
+	var hostRS, machineRS runStarter
+	hostOK, machineOK := false, false
+	if w.Host != nil {
+		if rs, ok := any(w.Host).(runStarter); ok && rs.declared() {
+			hostRS, hostOK = rs, true
+		}
+	}
+	if w.Machine != nil {
+		if rs, ok := any(w.Machine).(runStarter); ok && rs.declared() {
+			machineRS, machineOK = rs, true
+		}
+	}
+	if hostOK && machineOK {
+		return nil, fmt.Errorf("both host and machine worlds have a declared flow")
+	}
+	if hostOK {
+		return hostRS, nil
+	}
+	if machineOK {
+		return machineRS, nil
+	}
+	return nil, fmt.Errorf("no flow declared")
+}
+
+func registerSharedRunStartStep(sc *godog.ScenarioContext) {
+	sc.Step(`^a run of the flow has started$`, func(ctx context.Context) error {
+		rs, err := pickRunStarter(ctx)
+		if err != nil {
+			return err
+		}
+		return rs.startDeclared()
+	})
+}
 
 // runOutcome is what a domain world reports about the run a scenario started,
 // for the sentences that flow machine and flow host scenarios share.
@@ -28,7 +79,7 @@ func pickRunOutcome(ctx context.Context) (runOutcome, error) {
 		}
 	}
 	if w.Host != nil {
-		if ro, ok := w.Host.(runOutcome); ok && ro.started() {
+		if ro, ok := any(w.Host).(runOutcome); ok && ro.started() {
 			return ro, nil
 		}
 	}
