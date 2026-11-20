@@ -169,10 +169,10 @@ func (w *hostWorld) handle(dc runtime.DurableContext, node flow.Node, input json
 	if b.blocking && w.dc != nil {
 		dc := w.dc
 		for {
+			dc.mu.Lock()
 			w.mu.Lock()
 			released := b.released
 			w.mu.Unlock()
-			dc.mu.Lock()
 			if released || dc.finished {
 				dc.parked = false
 				dc.cond.Broadcast()
@@ -292,8 +292,8 @@ func (w *hostWorld) startRef(ref runtime.FlowRef, input string) error {
 	go func() {
 		w.result, w.err = w.host.Run(w.dc, ref, json.RawMessage(input))
 		w.callsAtDone = len(w.dc.callLog())
-		w.dc.markFinished()
 		close(w.done)
+		w.dc.markFinished()
 	}()
 	return w.settle()
 }
@@ -313,15 +313,20 @@ func (w *hostWorld) settle() error {
 }
 
 func (w *hostWorld) waitDone() error {
+	if w.done == nil {
+		return fmt.Errorf("no run in progress")
+	}
 	if w.dc != nil {
-		w.dc.waitFinished()
+		w.dc.waitParkedOrFinished()
+		w.dc.mu.Lock()
+		finished := w.dc.finished
+		w.dc.mu.Unlock()
+		if !finished {
+			return fmt.Errorf("run is waiting")
+		}
 	}
-	select {
-	case <-w.done:
-		return nil
-	default:
-		return fmt.Errorf("run did not finish")
-	}
+	<-w.done
+	return nil
 }
 
 // abortInFlightRun ends a background Run left waiting (for example at "the run is
@@ -382,7 +387,6 @@ type hostScript struct {
 	result    json.RawMessage
 	err       error
 	failTimes int
-	failCode  core.Code
 }
 
 type hostFuture struct {
@@ -597,9 +601,6 @@ func (d *hostFake) Step(name string, in any, o runtime.StepOptions) runtime.Futu
 	if script.failTimes > 0 {
 		for i := 0; i < script.failTimes; i++ {
 			d.executed[name]++
-			if script.failCode != "" {
-				_ = script.failCode
-			}
 		}
 		result = append(json.RawMessage(nil), script.result...)
 	} else {
@@ -1474,7 +1475,6 @@ func registerFlowHost(sc *godog.ScenarioContext) {
 			w.dc.steps[tool] = hostScript{
 				result:    json.RawMessage(toolResult),
 				failTimes: attempts,
-				failCode:  core.Code(code),
 			}
 			w.dc.steps[step] = hostScript{result: json.RawMessage(stepResult)}
 			if err := w.start(`{}`); err != nil {
