@@ -133,6 +133,16 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   to `Snapshot.Cost`. A `node_failed` accrues its cost once, for the pending
   step it names. Reserving and settling is the model node's work
   (`model-layer.md` §4), because the machine does no I/O.
+- **Guards at run time**: a node does not start once the run's settled cost
+  (`Snapshot.Cost`, CEL `run.cost`) has reached its guard's `cost_mpts`, or
+  once it has had the guard's `max_visits` visits; the run then fails with code
+  `budget_exceeded` (REQ-FLOW-047). A finished node's settled cost arrives with
+  its event, in `flow.Event.CostMpts` (REQ-FLOW-049), so a replay accrues the
+  same cost instead of reading a ledger.
+- **Fan-out bound**: a `map` node over more than `DefaultMaxFanout` (10,000)
+  items fails the run with `budget_exceeded` before any fan-out, carrying no
+  state data (REQ-FLOW-048). `max_parallel` throttles the host; it does not
+  bound the collection.
 - **Large values** are blob references in state.
 
 Property tests generate random completion orders and check the final snapshots
