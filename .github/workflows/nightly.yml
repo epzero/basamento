@@ -49,11 +49,28 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
+      GATE_STRICT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Postgres bundle cache location and version
+        run: |
+          echo "BDD_POSTGRES_CACHE_DIR=$RUNNER_TEMP/embedded-postgres-cache" >> "$GITHUB_ENV"
+          echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
+
+      - name: Postgres bundle cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
+          key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prefetch Postgres bundles
+        run: make pg-prefetch
+
       - run: go test -race -count=10 -timeout 90m ./...
 
   slow-lanes:
@@ -61,12 +78,29 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
+      GATE_STRICT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -count=1 ./internal/bdd/
+      - name: Postgres bundle cache location and version
+        run: |
+          echo "BDD_POSTGRES_CACHE_DIR=$RUNNER_TEMP/embedded-postgres-cache" >> "$GITHUB_ENV"
+          echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
+
+      - name: Postgres bundle cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
+          key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prefetch Postgres bundles
+        run: make pg-prefetch
+
+      - run: go test -count=1 -timeout 30m ./internal/bdd/
         env:
           BDD_TAGS: "@slow && ~@planned && ~@quarantine"
 
