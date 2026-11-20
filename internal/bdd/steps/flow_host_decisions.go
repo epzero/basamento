@@ -157,7 +157,7 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 		}
 		if !strings.Contains(w.err.Error(), fmt.Sprintf("%q", name)) &&
 			(pe == nil || pe.Details["flow"] == nil) {
-			return fmt.Errorf("error %v does not name flow %q", w.err, name)
+			return fmt.Errorf("error %w does not name flow %q", w.err, name)
 		}
 		return nil
 	})
@@ -198,7 +198,7 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 				return nil
 			}
 			if string(core.CodeOf(w.err)) != code || !strings.Contains(w.err.Error(), wantMsg) {
-				return fmt.Errorf("error %v, want code %s message %q", w.err, code, wantMsg)
+				return fmt.Errorf("error %w, want code %s message %q", w.err, code, wantMsg)
 			}
 			return nil
 		})
