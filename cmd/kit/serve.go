@@ -311,7 +311,7 @@ func keyFilePath(rest string) (string, error) {
 		if err != nil {
 			return "", invalidSecretKey("secrets key path has an invalid percent escape")
 		}
-		return path, nil
+		return expandHome(path)
 	}
 	u, err := url.Parse(rest)
 	if err != nil || u.Scheme != "file" {
@@ -332,6 +332,20 @@ func keyFilePath(rest string) (string, error) {
 		path = abs
 	}
 	return path, nil
+}
+
+// expandHome expands a leading ~/ in a plain key path. A configuration value
+// is not a shell word, so the home-relative form is the only one expanded; a
+// file:// URL and a bare ~ are left alone.
+func expandHome(path string) (string, error) {
+	if !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", invalidSecretKey("secrets key path home directory cannot be resolved")
+	}
+	return filepath.Join(home, path[2:]), nil
 }
 
 func loadOrCreateKey(path string) ([]byte, error) {

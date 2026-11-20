@@ -337,3 +337,21 @@ func TestWireEmbeddedBusUsesTheBusURLNotTheDataDir(t *testing.T) {
 		t.Fatalf("the bus store was also created under data.dir: %v", err)
 	}
 }
+
+func TestOpenLocalSecretsExpandsHomeInKeyPath(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Chdir(work)
+	t.Setenv("HOME", home)
+	_, err := openLocalSecrets(context.Background(), "localsecrets://~/keys/secrets.key")
+	if err != nil {
+		t.Fatalf("openLocalSecrets(~): %v", err)
+	}
+	keyPath := filepath.Join(home, "keys", "secrets.key")
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("the key was not created under the home directory %q: %v", keyPath, err)
+	}
+	if _, err := os.Stat("~"); !os.IsNotExist(err) {
+		t.Fatalf("a literal ~ directory was created: %v", err)
+	}
+}
