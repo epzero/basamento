@@ -804,6 +804,9 @@ func TestLoadedDefinitionHashMismatchFailsBeforeAnyCall(t *testing.T) {
 	dc := newFakeDC()
 	h := host.New(cat)
 	_, err := h.Run(dc, ref, json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("run succeeded with mismatched pinned definition, want failure before any durable call")
+	}
 	if core.CodeOf(err) != core.CodeInternal {
 		t.Fatalf("code %v, want internal", core.CodeOf(err))
 	}
@@ -1286,6 +1289,15 @@ func TestReplayCoversChildGateAndMap(t *testing.T) {
 		}
 	}
 	journal := dc.copyJournal()
+	idCount := 0
+	for _, e := range journal {
+		if e.kind == "id" {
+			idCount++
+		}
+	}
+	if idCount < 1 {
+		t.Fatalf("journal has %d id entries, want at least one for subflow NewID", idCount)
+	}
 	t.Run("replay matches journal", func(t *testing.T) {
 		replay := replayFakeDC(journal)
 		if _, err := h.Run(replay, ref, json.RawMessage(`{"items":["a","b"]}`)); err != nil {
