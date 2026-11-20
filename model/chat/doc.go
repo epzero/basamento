@@ -12,5 +12,7 @@
 // Media outputs (images, audio files) are the media adapters' (WP-L3-04).
 //
 // Provider construction lives in WP-L3-04; every eino-ext chat model, and the
-// official SDKs wrapped by it, satisfies Config.Model.
+// official SDKs wrapped by it, satisfies Config.Model. Config.Clock is required:
+// it stamps the end times and drives the retention window of the adapter's
+// registry, which forgets ended invocations within bounds (REQ-MODEL-088).
 package chat

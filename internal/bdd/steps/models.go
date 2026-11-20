@@ -24,11 +24,19 @@ type modelWorld struct {
 	streamChunks int
 	hold         bool
 
+	// retention is the registry the REQ-MODEL-088 scenarios bound and drive
+	// directly. Its reg is nil until such a scenario builds one.
+	retention *retentionWorld
+
+	// accepted counts the starts a simulated adapter passed to its vendor, so
+	// "the provider accepted N invocations" answers for them.
+	accepted int
+
 	events []model.Event
 	result model.Result
 }
 
-func newModelWorld() *modelWorld { return &modelWorld{} }
+func newModelWorld() *modelWorld { return &modelWorld{retention: newRetentionWorld()} }
 
 func (w *modelWorld) tenantCtx(ctx context.Context) context.Context {
 	if _, ok := core.TenantFrom(ctx); ok {
@@ -39,12 +47,12 @@ func (w *modelWorld) tenantCtx(ctx context.Context) context.Context {
 
 func registerModel(sc *godog.ScenarioContext) {
 	sc.Step(`^a simulated "([^"]*)" provider whose vendor protocol is "([^"]*)"$`, func(ctx context.Context, capability, protocol string) error {
-		return world(ctx).Model.provider(capability, protocol)
+		return world(ctx).Model.provider(ctx, capability, protocol)
 	})
 	sc.Step(`^a simulated "([^"]*)" provider that streams "([^"]*)" in (\d+) events$`, func(ctx context.Context, capability, text string, chunks int) error {
 		w := world(ctx).Model
 		w.streamText, w.streamChunks = text, chunks
-		return w.provider(capability, "streamed reply")
+		return w.provider(ctx, capability, "streamed reply")
 	})
 	sc.Step(`^a caller starts an invocation and follows its events$`, func(ctx context.Context) error {
 		return world(ctx).Model.follow(ctx)
@@ -122,7 +130,7 @@ func registerModel(sc *godog.ScenarioContext) {
 // provider builds the adapter the scenario's capability needs. Chat and
 // embeddings go through the production adapters, over a simulated eino model;
 // the other capabilities use a protocol simulator.
-func (w *modelWorld) provider(capability, protocol string) error {
+func (w *modelWorld) provider(ctx context.Context, capability, protocol string) error {
 	proto, err := parseProtocol(protocol)
 	if err != nil {
 		return err
@@ -144,6 +152,7 @@ func (w *modelWorld) provider(capability, protocol string) error {
 			Provider:    "sim",
 			Descriptors: []model.Descriptor{desc},
 			Model:       &simChatModel{chunks: chatChunks(w.streamText, w.streamChunks)},
+			Clock:       world(ctx).Core.clock,
 		})
 		if err != nil {
 			return err
@@ -154,19 +163,25 @@ func (w *modelWorld) provider(capability, protocol string) error {
 			Provider:    "sim",
 			Descriptors: []model.Descriptor{desc},
 			Embedder:    &simEmbedder{},
+			Clock:       world(ctx).Core.clock,
 		})
 		if err != nil {
 			return err
 		}
 		w.invoker = adapter
 	default:
+		runs, err := model.NewRegistry("sim", model.WithClock(world(ctx).Core.clock))
+		if err != nil {
+			return err
+		}
 		w.invoker = &simProvider{
-			desc:    desc,
-			runs:    model.NewRegistry("sim"),
-			hold:    &w.hold,
-			text:    w.streamText,
-			chunks:  w.streamChunks,
-			vectors: [][]float32{{0.25, 0.5}},
+			desc:     desc,
+			runs:     runs,
+			accepted: &w.accepted,
+			hold:     &w.hold,
+			text:     w.streamText,
+			chunks:   w.streamChunks,
+			vectors:  [][]float32{{0.25, 0.5}},
 		}
 	}
 	return nil
@@ -332,12 +347,13 @@ func (*simEmbedder) EmbedStrings(_ context.Context, texts []string, _ ...einoEmb
 // so the contract's start, events, result, cancel and lookup are the ones the
 // adapters give.
 type simProvider struct {
-	desc    model.Descriptor
-	runs    *model.Registry
-	hold    *bool
-	text    string
-	chunks  int
-	vectors [][]float32
+	desc     model.Descriptor
+	runs     *model.Registry
+	accepted *int // one per start that opens a new invocation
+	hold     *bool
+	text     string
+	chunks   int
+	vectors  [][]float32
 }
 
 var _ model.Invoker = (*simProvider)(nil)
@@ -359,6 +375,9 @@ func (p *simProvider) Start(ctx context.Context, r model.Request) (model.Handle,
 	}
 	if existing {
 		return run.Handle(), nil
+	}
+	if p.accepted != nil {
+		*p.accepted++
 	}
 	go p.execute(run)
 	return run.Handle(), nil
