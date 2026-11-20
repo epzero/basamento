@@ -20,18 +20,22 @@ with `make tools`, which pins their versions in the `Makefile`.
 
 `gate hygiene` enforces the mechanical rules before review:
 
-- **Test determinism.** `*_test.go` files and packages listed in
-  `layering.yaml`'s `test_only` take time from `core/coretest`: no `time.Now`,
-  `time.Since`, `time.Until`, `time.Sleep`, `time.After`, `time.AfterFunc`,
-  `time.NewTimer`, `time.NewTicker`, `time.Tick`, `crypto/rand` or the global
-  `math/rand` functions. `test_only_allowed_from` is an import permission, not
-  a test-only package list. `context.WithTimeout` and `context.WithDeadline`
-  stay allowed: they read the wall clock, but a test uses them only as a hang
-  guard, never as a source of time.
+- **Test determinism.** `*_test.go` files and fake packages from
+  `layering.yaml`'s `test_only` (for example `core/coretest`) take time from
+  `core/coretest`: no `time.Now`, `time.Since`, `time.Until`, `time.Sleep`,
+  `time.After`, `time.AfterFunc`, `time.NewTimer`, `time.NewTicker`,
+  `time.Tick`, `crypto/rand` or the global `math/rand` functions.
+  `context.WithTimeout` and `context.WithDeadline` stay allowed: they read the
+  wall clock, but a test uses them only as a hang guard, never as a source of
+  time.
 - **Production isolation.** Production code does not import `testing` or
   `testing/*`, and exports no identifier whose name matches `ForTest…`. The
   check is by name (`ForTest`, `ForTests`, `ForTesting`), so a hook under
-  another name is still the reviewer's to find.
+  another name is still the reviewer's to find. Packages in
+  `test_only_allowed_from` (the BDD harness) are neither fakes nor production:
+  their non-test `.go` files skip both checks, so ADR-0015's `crypto/rand`
+  Postgres password and harness `ForTest` helpers are allowed.
+
 - **Spec/code separation**, with `-base <ref>`: a change that touches any file
   outside `specs/` and `docs/` does not edit `specs/<capability>/design.md`
   (`agent-workflow.md` §7.3). A design that turns out wrong or incomplete

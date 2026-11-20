@@ -71,11 +71,13 @@ var bannedTestRandFuncs = map[string]bool{
 // Hygiene runs deterministic repository hygiene checks that catch mechanical
 // AGENTS.md and workflow rule violations before human or agent code review:
 //   - test determinism: no wall clock, sleeps or timers, crypto/rand, or
-//     global math/rand in *_test.go or test-only packages (layering.yaml's
-//     test_only; test_only_allowed_from is an import permission, not a
-//     package classification);
+//     global math/rand in *_test.go or fake packages from layering.yaml's
+//     test_only (for example core/coretest);
 //   - production isolation: no "testing" / "testing/*" import or exported
-//     *ForTest* hooks in production Go files (matched by name);
+//     *ForTest* hooks in production Go files (matched by name). Packages in
+//     test_only_allowed_from (the BDD harness) are neither fakes nor
+//     production: non-test files there skip both checks so ADR-0015
+//     crypto/rand and harness ForTest helpers stay allowed;
 //   - merge conflict markers in any tracked text file (qa-gate.md § Conflict
 //     markers);
 //   - when base is non-empty, spec/code separation: a change to any file
@@ -120,32 +122,54 @@ func untrackedFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// loadTestOnlyPrefixes returns package prefixes classified as test-only in
-// layering.yaml's test_only. test_only_allowed_from is not included: it names
-// importers that may use test-only packages (layering.go), not test-only
-// packages themselves. When layering.yaml is absent, the repository default
-// (core/coretest) is returned for minimal test fixtures.
-func loadTestOnlyPrefixes(root string) ([]string, error) {
+// hygienePackageClasses holds the layering.yaml prefixes CheckCodeHygiene uses
+// to classify non-test .go files. *_test.go always gets determinism rules.
+type hygienePackageClasses struct {
+	// fakes are test_only prefixes that are not also test_only_allowed_from
+	// (for example core/coretest): non-test files get determinism rules.
+	fakes []string
+	// harness is test_only_allowed_from (for example internal/bdd): non-test
+	// files skip both determinism and production-isolation. After ADR-0018 the
+	// harness may also appear under test_only so production cannot import it;
+	// that does not make its helpers subject to fake or production rules.
+	harness []string
+}
+
+// loadHygienePackageClasses reads layering.yaml's test_only and
+// test_only_allowed_from. test_only_allowed_from is an import permission
+// (layering.go), never unioned into the fake set. When layering.yaml is
+// absent, the repository default (core/coretest as a fake) is returned.
+func loadHygienePackageClasses(root string) (hygienePackageClasses, error) {
 	b, err := os.ReadFile(filepath.Join(root, "layering.yaml"))
 	if os.IsNotExist(err) {
-		return []string{"core/coretest"}, nil
+		return hygienePackageClasses{fakes: []string{"core/coretest"}}, nil
 	}
 	if err != nil {
-		return nil, err
+		return hygienePackageClasses{}, err
 	}
 	var r LayeringRules
 	if err := yaml.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("layering.yaml: %w", err)
+		return hygienePackageClasses{}, fmt.Errorf("layering.yaml: %w", err)
 	}
-	out := make([]string, len(r.TestOnly))
-	copy(out, r.TestOnly)
-	return out, nil
+	allowedFrom := make(map[string]bool, len(r.TestOnlyOK))
+	for _, p := range r.TestOnlyOK {
+		allowedFrom[p] = true
+	}
+	fakes := make([]string, 0, len(r.TestOnly))
+	for _, p := range r.TestOnly {
+		if !allowedFrom[p] {
+			fakes = append(fakes, p)
+		}
+	}
+	harness := make([]string, len(r.TestOnlyOK))
+	copy(harness, r.TestOnlyOK)
+	return hygienePackageClasses{fakes: fakes, harness: harness}, nil
 }
 
 // CheckCodeHygiene parses Go files under root and reports violations of
 // AGENTS.md's test-determinism and production-isolation rules.
 func CheckCodeHygiene(root string) ([]string, error) {
-	testOnlyPrefixes, err := loadTestOnlyPrefixes(root)
+	classes, err := loadHygienePackageClasses(root)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +199,12 @@ func CheckCodeHygiene(root string) ([]string, error) {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		pkgDir := path.Dir(rel)
-		inTestOnlyPkg := matchLayer(pkgDir, testOnlyPrefixes) != ""
-		if strings.HasSuffix(rel, "_test.go") || inTestOnlyPkg {
+		switch {
+		case strings.HasSuffix(rel, "_test.go") || matchLayer(pkgDir, classes.fakes) != "":
 			errs = append(errs, checkTestFile(fset, f, rel)...)
-		} else {
+		case matchLayer(pkgDir, classes.harness) != "":
+			// BDD harness: neither fake nor production.
+		default:
 			errs = append(errs, checkProdFile(fset, f, rel)...)
 		}
 		return nil

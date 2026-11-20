@@ -112,24 +112,37 @@ func ok() {
 	}
 }
 
-// TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly proves that
-// test_only_allowed_from is an import permission only: a package listed there
-// (shaped like internal/bdd) may use crypto/rand in non-test files, while a
-// package listed in test_only is still subject to the determinism rules.
+// TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly proves that a package
+// listed in test_only_allowed_from (the BDD harness) is subject to neither
+// package-level test-determinism nor production isolation, even when ADR-0018
+// also lists it under test_only so production cannot import it. Pure fakes in
+// test_only alone still fail on crypto/rand.
 func TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"layering.yaml": "module: m\ntest_only: [core/coretest]\ntest_only_allowed_from: [internal/bdd]\n",
-		"internal/bdd/sqltest/pgserver.go": `package sqltest
+	for _, name := range []string{"allowed-from-only", "also-in-test-only"} {
+		t.Run(name, func(t *testing.T) {
+			yaml := "module: m\ntest_only: [core/coretest]\ntest_only_allowed_from: [internal/bdd]\n"
+			if name == "also-in-test-only" {
+				yaml = "module: m\ntest_only: [core/coretest, internal/bdd]\ntest_only_allowed_from: [internal/bdd]\n"
+			}
+			root := writeTree(t, map[string]string{
+				"layering.yaml": yaml,
+				"internal/bdd/sqltest/pgserver.go": `package sqltest
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+	"testing/fstest"
+)
+
+func ResetPostgresForTest() {}
 
 func password() []byte {
+	_ = fstest.MapFS{}
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return b[:]
 }
 `,
-		"core/coretest/bad_fake.go": `package coretest
+				"core/coretest/bad_fake.go": `package coretest
 
 import "crypto/rand"
 
@@ -138,16 +151,18 @@ func BadEntropy() {
 	_, _ = rand.Read(b[:])
 }
 `,
-	})
-	errs, err := CheckCodeHygiene(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasErr(errs, "internal/bdd") {
-		t.Errorf("test_only_allowed_from package must not get test-determinism rules:\n%s", strings.Join(errs, "\n"))
-	}
-	if !hasErr(errs, `core/coretest/bad_fake.go:3: test imports "crypto/rand"`) {
-		t.Errorf("test_only package must still fail on crypto/rand:\n%s", strings.Join(errs, "\n"))
+			})
+			errs, err := CheckCodeHygiene(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasErr(errs, "internal/bdd") {
+				t.Errorf("BDD harness must skip both hygiene package rules:\n%s", strings.Join(errs, "\n"))
+			}
+			if !hasErr(errs, `core/coretest/bad_fake.go:3: test imports "crypto/rand"`) {
+				t.Errorf("test_only fake must still fail on crypto/rand:\n%s", strings.Join(errs, "\n"))
+			}
+		})
 	}
 }
 
