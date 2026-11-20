@@ -34,7 +34,8 @@ const redactedURLMarker = "***"
 // credentialQueryKeys are query parameters that may carry a secret. The libpq
 // keys are the ones platform/sql already redacts (REQ-SQL-024); the others are
 // the token and signature parameters of the bus, secrets and object-store
-// URLs this configuration accepts.
+// URLs this configuration accepts, including the aws_* aliases some S3
+// clients use.
 var credentialQueryKeys = []string{
 	"password",
 	"passwd",
@@ -43,6 +44,8 @@ var credentialQueryKeys = []string{
 	"sv",
 	"access_key_id",
 	"secret_access_key",
+	"aws_access_key_id",
+	"aws_secret_access_key",
 	"session_token",
 	"sslpassword",
 	"passfile",
