@@ -73,7 +73,7 @@ func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
 		return &schemaType{
 			schema:  st.schema,
 			defs:    st.defs,
-			path:    varName + "." + names[0],
+			path:    joinSchemaPath(varName, names[0]),
 			rootDef: names[0],
 			celType: cel.DynType,
 		}, nil
@@ -82,8 +82,9 @@ func (st *schemaType) resolveRef(ref, varName string) (*schemaType, error) {
 	for _, n := range names {
 		visiting[n] = true
 	}
-	child := &schemaType{schema: def, defs: st.defs, path: varName + "." + names[0]}
-	t, objName, err := child.mapSchemaVisit(def, varName+"."+names[0], visiting)
+	rootPath := joinSchemaPath(varName, names[0])
+	child := &schemaType{schema: def, defs: st.defs, path: rootPath}
+	t, objName, err := child.mapSchemaVisit(def, rootPath, visiting)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func (st *schemaType) primitiveOrCompositeVisit(t string, s map[string]any, path
 			if !ok {
 				return cel.ListType(cel.DynType), "", nil
 			}
-			elem, objName, err := st.mapSchemaVisit(itemSchema, path+"[]", visiting)
+			elem, objName, err := st.mapSchemaVisit(itemSchema, joinSchemaPathArray(path), visiting)
 			if err != nil {
 				return nil, "", err
 			}
@@ -225,14 +226,14 @@ func (st *schemaType) objectType(s map[string]any, path string, visiting map[str
 	_, hasProps := s["properties"].(map[string]any)
 	_, hasAP := s["additionalProperties"]
 	if hasProps {
-		typeName := "expr.obj." + sanitizeTypeName(path)
+		typeName := objectTypeNameForSchemaPath(path)
 		return cel.ObjectType(typeName), typeName, nil
 	}
 	if hasAP {
 		ap := s["additionalProperties"]
 		switch apv := ap.(type) {
 		case map[string]any:
-			elem, _, err := st.mapSchemaVisit(apv, path+"*", visiting)
+			elem, _, err := st.mapSchemaVisit(apv, joinSchemaPathMapValue(path), visiting)
 			if err != nil {
 				return nil, "", err
 			}
@@ -315,8 +316,18 @@ func jsonTypeOf(v any) string {
 }
 
 func sanitizeTypeName(path string) string {
+	s := escapeSchemaPathSegment(path)
+	if s == "" {
+		return "root"
+	}
+	return s
+}
+
+// escapeSchemaPathSegment makes one schema path segment safe to join with "." so
+// a property name like "b.c" cannot collide with nested properties b and c.
+func escapeSchemaPathSegment(segment string) string {
 	var b strings.Builder
-	for _, r := range path {
+	for _, r := range segment {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
 		} else {
@@ -325,10 +336,27 @@ func sanitizeTypeName(path string) string {
 			b.WriteByte('_')
 		}
 	}
-	if b.Len() == 0 {
-		return "root"
-	}
 	return b.String()
+}
+
+func joinSchemaPath(parent, segment string) string {
+	esc := escapeSchemaPathSegment(segment)
+	if parent == "" {
+		return esc
+	}
+	return parent + "." + esc
+}
+
+func joinSchemaPathArray(parent string) string {
+	return parent + "[]"
+}
+
+func joinSchemaPathMapValue(parent string) string {
+	return parent + "*"
+}
+
+func objectTypeNameForSchemaPath(path string) string {
+	return "expr.obj." + sanitizeTypeName(path)
 }
 
 func formatCELType(t *cel.Type) string {

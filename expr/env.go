@@ -128,7 +128,7 @@ func (e *Env) objectFromSchema(st *schemaType, adapter *sortedAdapter) (*jsonObj
 // (design.md §2), so recursive definitions terminate instead of expanding
 // without end.
 func (e *Env) buildObjectType(doc map[string]any, path string, st *schemaType, adapter *sortedAdapter, visiting map[string]bool) (*jsonObjectType, error) {
-	typeName := "expr.obj." + sanitizeTypeName(path)
+	typeName := objectTypeNameForSchemaPath(path)
 	if obj := e.objects[typeName]; obj != nil {
 		return obj, nil
 	}
@@ -147,7 +147,7 @@ func (e *Env) buildObjectType(doc map[string]any, path string, st *schemaType, a
 		if !ok {
 			continue
 		}
-		fieldPath := path + "." + pname
+		fieldPath := joinSchemaPath(path, pname)
 		t, _, err := st.mapSchemaVisit(pm, fieldPath, visiting)
 		if err != nil {
 			return nil, exprErr(fmt.Sprintf("schema %q: %s", typeName+"."+pname, err.Error()), map[string]any{"variable": typeName})
@@ -197,11 +197,11 @@ func (e *Env) registerNestedObjects(doc map[string]any, path string, st *schemaT
 			return err
 		}
 		if ap, ok := doc["additionalProperties"].(map[string]any); ok {
-			return e.registerNestedObjects(ap, path+"*", st, adapter, visiting)
+			return e.registerNestedObjects(ap, joinSchemaPathMapValue(path), st, adapter, visiting)
 		}
 	case "array":
 		if items, ok := doc["items"].(map[string]any); ok {
-			return e.registerNestedObjects(items, path+"[]", st, adapter, visiting)
+			return e.registerNestedObjects(items, joinSchemaPathArray(path), st, adapter, visiting)
 		}
 	}
 	return nil
@@ -232,7 +232,7 @@ func objectSchemaForBuild(pm map[string]any, st *schemaType, path string) (map[s
 				return doc, defName, path, nil
 			}
 			doc = items
-			path += "[]"
+			path = joinSchemaPathArray(path)
 			continue
 		}
 		return doc, defName, path, nil
