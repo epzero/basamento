@@ -46,6 +46,9 @@ func TestRunHandlersFailurePassesSettledCostToEvent(t *testing.T) {
 	}
 }
 
+// TestNodeFailedEventPayloadIsOnlyCodeAndMessage is the only pin of the
+// node_failed event payload for REQ-FLOW-057: failedEvent is the single
+// constructor on every failure path (handler error, awaited future, timer/gate).
 func TestNodeFailedEventPayloadIsOnlyCodeAndMessage(t *testing.T) {
 	t.Run("core error", func(t *testing.T) {
 		err := core.NewError(core.CodeVendor, "vendor said no", map[string]any{"detail": "x"})

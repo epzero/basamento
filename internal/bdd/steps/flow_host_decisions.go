@@ -16,6 +16,11 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+// registerFlowHostDecisions wires scenario steps for host run outcomes. Steps that
+// check failure code, message or absent text (including FLOW-057-01) assert the
+// error Host.Run returned, not the node_failed event payload passed to the
+// machine; that payload is not observable through DurableContext and is pinned by
+// flow/host/run_handlers_test.go TestNodeFailedEventPayloadIsOnlyCodeAndMessage.
 func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 	sc.Step(`^a flow whose node "([^"]*)" of kind "([^"]*)" has no input mapping and the node spec (\{.*\})$`,
 		func(ctx context.Context, node, kind, spec string) error {
@@ -215,7 +220,7 @@ func registerFlowHostDecisions(sc *godog.ScenarioContext) {
 		if w.err == nil {
 			return fmt.Errorf("run succeeded, want failure")
 		}
-		if strings.Contains(hostFailureBlob(w.err), forbidden) {
+		if strings.Contains(hostRunErrorBlob(w.err), forbidden) {
 			return fmt.Errorf("failure payload contains forbidden text %q", forbidden)
 		}
 		return nil
@@ -413,7 +418,7 @@ func stepIdempotencyKeyFromCallLog(calls []hostCall, step string) (string, error
 	return "", fmt.Errorf("call log has no step %q", step)
 }
 
-func hostFailureBlob(err error) string {
+func hostRunErrorBlob(err error) string {
 	var parts []string
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		parts = append(parts, e.Error())
