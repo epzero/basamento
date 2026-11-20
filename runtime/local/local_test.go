@@ -1501,11 +1501,17 @@ func TestListPagingRespectsFilters(t *testing.T) {
 func TestListInvalidCursor(t *testing.T) {
 	f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 	defer f.close(t)
+	f.flow("noop", func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "noop", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
 	ctx := tenantCtx("acme")
-	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: "not-a-number"}); codeOf(err) != "invalid_argument" {
+	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: "not-a-token"}); codeOf(err) != "invalid_argument" {
 		t.Fatalf("bad cursor = %v, want invalid_argument", err)
 	}
-	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: "99"}); codeOf(err) != "invalid_argument" {
+	pastEnd := listCursorPositionForTests("acme", 1)
+	if _, _, err := f.rt.List(ctx, runtime.RunQuery{Cursor: pastEnd}); codeOf(err) != "invalid_argument" {
 		t.Fatalf("out of range cursor = %v, want invalid_argument", err)
 	}
 }

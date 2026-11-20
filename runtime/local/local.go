@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"strconv"
 	"sync"
 	"time"
 
@@ -279,37 +278,31 @@ func (r *Runtime) Describe(ctx context.Context, ref runtime.RunRef) (runtime.Run
 }
 
 // List returns the calling tenant's runs, optionally filtered by flow and
-// state (REQ-RT-026, REQ-RT-043). Limit zero means no limit. When more
-// matching runs remain after a limited page, the second return value is an
-// opaque cursor: the decimal index in this runtime's start-ordered run list
-// where the next page should begin. Cursors are only meaningful for the
-// runtime instance that issued them. A cursor that is not a non-negative
-// decimal integer, or that is past the end of the list, is invalid_argument.
-// The index always walks the full ordered list; it never widens tenant
-// visibility—only runs of the calling tenant that pass the filters appear.
+// state (REQ-RT-026, REQ-RT-043, REQ-RT-051…053). Limit zero means no limit.
+// When more matching runs remain after a limited page, the second return is an
+// opaque versioned paging token bound to the issuing tenant; clients must not
+// parse it. The token names the tenant ordinal in that tenant's start-ordered
+// run list where the next page begins. Invalid, out-of-range or foreign-tenant
+// cursors fail with invalid_argument before any run is read.
 func (r *Runtime) List(ctx context.Context, q runtime.RunQuery) ([]runtime.RunStatus, string, error) {
 	tenant, err := r.tenant(ctx, q.TenantID)
 	if err != nil {
 		return nil, "", err
 	}
 	r.mu.Lock()
-	runs := append([]*run(nil), r.order...)
+	tenantRuns := tenantRunSnapshot(r.order, tenant)
 	r.mu.Unlock()
 
 	start := 0
 	if q.Cursor != "" {
-		idx, parseErr := strconv.Atoi(q.Cursor)
-		if parseErr != nil || idx < 0 || idx > len(runs) {
-			return nil, "", invalidErr("local: invalid list cursor", map[string]any{"cursor": q.Cursor})
+		start, err = parseListCursor(q.Cursor, tenant, len(tenantRuns))
+		if err != nil {
+			return nil, "", err
 		}
-		start = idx
 	}
 
 	matches := func(candidate *run) bool {
 		status := candidate.status()
-		if status.Ref.TenantID != tenant {
-			return false
-		}
 		if q.Flow != "" && candidate.flow.Name != q.Flow {
 			return false
 		}
@@ -319,18 +312,21 @@ func (r *Runtime) List(ctx context.Context, q runtime.RunQuery) ([]runtime.RunSt
 		return true
 	}
 
-	out := make([]runtime.RunStatus, 0, len(runs))
-	for i := start; i < len(runs); i++ {
-		candidate := runs[i]
+	out := make([]runtime.RunStatus, 0, len(tenantRuns))
+	for i := start; i < len(tenantRuns); i++ {
+		candidate := tenantRuns[i]
 		if !matches(candidate) {
 			continue
 		}
 		out = append(out, candidate.status())
 		if q.Limit > 0 && len(out) >= q.Limit {
-			next := i + 1
-			for j := next; j < len(runs); j++ {
-				if matches(runs[j]) {
-					return out, strconv.Itoa(next), nil
+			for j := i + 1; j < len(tenantRuns); j++ {
+				if matches(tenantRuns[j]) {
+					tok, encErr := encodeListCursor(tenant, j)
+					if encErr != nil {
+						return nil, "", encErr
+					}
+					return out, tok, nil
 				}
 			}
 			return out, "", nil
