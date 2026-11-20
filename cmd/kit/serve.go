@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -157,44 +158,165 @@ func openBlob(ctx context.Context, raw string) (config.Port, error) {
 }
 
 // openLocalSecrets accepts either a base64 master key (the gocloud form) or a
-// path to a key file, as the embedded default names one. A missing key file is
-// created with 32 random bytes and mode 0600.
+// path to a key file, as the embedded default names one. The forms are
+// unambiguous: a value that is neither key material nor path-shaped is an
+// error, and a decode failure never falls back to creating a file. A missing
+// key file is created with 32 random bytes and mode 0600; an existing one must
+// be a regular file no group or other user can access (CR-05).
 func openLocalSecrets(ctx context.Context, raw string) (config.Port, error) {
-	rest := strings.TrimPrefix(raw, "localsecrets://")
-	if key, err := base64.StdEncoding.DecodeString(rest); err == nil && len(key) == 32 {
-		return secrets.OpenURL(ctx, raw)
+	const prefix = "localsecrets://"
+	if !strings.HasPrefix(raw, prefix) {
+		return nil, invalidSecretKey("secrets key URL must start with localsecrets://")
 	}
-	key, err := loadOrCreateKey(rest)
+	rest := strings.TrimPrefix(raw, prefix)
+	if rest == "" {
+		return nil, invalidSecretKey("secrets key is empty")
+	}
+	if key, ok := decodeMasterKey(rest); ok {
+		return secrets.OpenURL(ctx, prefix+base64.StdEncoding.EncodeToString(key))
+	}
+	if base64KeyCandidate(rest) {
+		return nil, invalidSecretKey("secrets key must be 32 bytes, base64 encoded")
+	}
+	if !looksLikeKeyPath(rest) {
+		return nil, invalidSecretKey("secrets key must be 32 bytes, base64 encoded, or a key file path")
+	}
+	path, err := keyFilePath(rest)
 	if err != nil {
 		return nil, err
 	}
-	return secrets.OpenURL(ctx, "localsecrets://"+base64.StdEncoding.EncodeToString(key))
+	key, err := loadOrCreateKey(path)
+	if err != nil {
+		return nil, err
+	}
+	return secrets.OpenURL(ctx, prefix+base64.StdEncoding.EncodeToString(key))
+}
+
+func invalidSecretKey(reason string) error {
+	return core.NewError(core.CodeInvalidArgument, reason, nil)
+}
+
+func decodeMasterKey(s string) ([]byte, bool) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding} {
+		if key, err := enc.DecodeString(s); err == nil && len(key) == 32 {
+			return key, true
+		}
+	}
+	return nil, false
+}
+
+// base64KeyCandidate reports whether a value has the shape of a base64 master
+// key (32 bytes encode to 43 or 44 characters). Such a value must decode to
+// exactly 32 bytes; it is never treated as a path, even when it contains '/'.
+func base64KeyCandidate(s string) bool {
+	if len(s) < 43 || len(s) > 44 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '+', r == '/', r == '=':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// looksLikeKeyPath is the explicit path form: file://, an absolute or relative
+// path, a value with a separator, or a name with an extension.
+func looksLikeKeyPath(s string) bool {
+	if strings.HasPrefix(s, "file://") ||
+		strings.HasPrefix(s, "/") ||
+		strings.HasPrefix(s, "./") ||
+		strings.HasPrefix(s, "../") ||
+		strings.HasPrefix(s, "~/") {
+		return true
+	}
+	if strings.ContainsAny(s, `/\\`) {
+		return true
+	}
+	return filepath.Ext(s) != ""
+}
+
+// keyFilePath resolves the explicit file:// form and leaves a plain path as is.
+func keyFilePath(rest string) (string, error) {
+	if !strings.HasPrefix(rest, "file://") {
+		return rest, nil
+	}
+	u, err := url.Parse(rest)
+	if err != nil || u.Scheme != "file" {
+		return "", invalidSecretKey("secrets key file URL cannot be parsed")
+	}
+	path := u.Path
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		path = filepath.Join(u.Host, path)
+	}
+	if path == "" {
+		return "", invalidSecretKey("secrets key file URL has no path")
+	}
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", invalidSecretKey("secrets key file path cannot be resolved")
+		}
+		path = abs
+	}
+	return path, nil
 }
 
 func loadOrCreateKey(path string) ([]byte, error) {
 	if path == "" {
-		return nil, core.NewError(core.CodeInvalidArgument, "secrets key path is empty", nil)
+		return nil, invalidSecretKey("secrets key path is empty")
 	}
-	if data, err := os.ReadFile(path); err == nil {
-		if len(data) == 32 {
-			return data, nil
-		}
-		if key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data))); err == nil && len(key) == 32 {
-			return key, nil
-		}
-		return nil, core.NewError(core.CodeInvalidArgument, "secrets key file must hold 32 bytes", nil)
+	if info, err := os.Lstat(path); err == nil {
+		return readKeyFile(path, info)
 	} else if !os.IsNotExist(err) {
-		return nil, core.NewError(core.CodeInvalidArgument, "secrets key file could not be read", nil)
+		return nil, invalidSecretKey("secrets key file could not be read")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, core.NewError(core.CodeInvalidArgument, "secrets key directory could not be created", nil)
+		return nil, invalidSecretKey("secrets key directory could not be created")
 	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, core.NewError(core.CodeInternal, "secrets key could not be generated", nil)
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
-		return nil, core.NewError(core.CodeInvalidArgument, "secrets key file could not be written", nil)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			if info, statErr := os.Lstat(path); statErr == nil {
+				return readKeyFile(path, info)
+			}
+		}
+		return nil, invalidSecretKey("secrets key file could not be written")
+	}
+	if _, err := f.Write(key); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, invalidSecretKey("secrets key file could not be written")
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, invalidSecretKey("secrets key file could not be written")
 	}
 	return key, nil
+}
+
+func readKeyFile(path string, info os.FileInfo) ([]byte, error) {
+	if !info.Mode().IsRegular() {
+		return nil, invalidSecretKey("secrets key file must be a regular file")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, invalidSecretKey("secrets key file must not be accessible by group or others")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, invalidSecretKey("secrets key file could not be read")
+	}
+	if len(data) == 32 {
+		return data, nil
+	}
+	if key, ok := decodeMasterKey(strings.TrimSpace(string(data))); ok {
+		return key, nil
+	}
+	return nil, invalidSecretKey("secrets key file must hold 32 bytes")
 }
