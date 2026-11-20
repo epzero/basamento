@@ -47,14 +47,14 @@ func New(clock core.Clock) (*Catalog, error) {
 	return NewWithSnapshot(clock, snapshotYAML)
 }
 
-// NewWithSnapshot returns a catalog whose snapshot layer is snapshotYAML
-// instead of the bytes embedded in the binary. A deployment build may pass its
-// own generated snapshot at startup.
-func NewWithSnapshot(clock core.Clock, snapshotYAML []byte) (*Catalog, error) {
+// NewWithSnapshot returns a catalog whose snapshot layer is yamlText instead
+// of the bytes embedded in the binary. A deployment build may pass its own
+// generated snapshot at startup.
+func NewWithSnapshot(clock core.Clock, yamlText []byte) (*Catalog, error) {
 	if clock == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "catalog needs a clock", nil)
 	}
-	snapshot, err := parseSnapshot(snapshotYAML)
+	snapshot, err := parseSnapshot(yamlText)
 	if err != nil {
 		return nil, err
 	}
