@@ -95,15 +95,22 @@ func dirPathSkipped(root, dir string) bool {
 	if err != nil {
 		return false
 	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || rel == "" {
+		return false
+	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
-	return relPathSkipped(filepath.ToSlash(rel))
+	return relPathSkipped(rel)
 }
 
-// sanitizeLayeringGoEnv returns a copy of environ safe for nested go list and
-// go list -m: ambient GOFLAGS (including -overlay and -tags), GOWORK and a user
-// GOENV file cannot change what packages and imports are visible.
+// sanitizeLayeringGoEnv copies environ for nested go list invocations. Ambient
+// GOWORK and GOFLAGS entries (including duplicates) are removed and replaced with
+// GOWORK=off and GOFLAGS=-mod=readonly so -overlay, -tags or workspace settings
+// cannot change import lists. GOENV is left unchanged: the go command uses process
+// environment variables before the user config file (go env -w), and we always set
+// GOFLAGS and GOWORK on the child, so nothing in that file can reintroduce overlays.
 func sanitizeLayeringGoEnv(environ []string) []string {
 	out := make([]string, 0, len(environ))
 	for _, e := range environ {
@@ -112,12 +119,12 @@ func sanitizeLayeringGoEnv(environ []string) []string {
 			out = append(out, e)
 			continue
 		}
-		if key == "GOWORK" || key == "GOFLAGS" || key == "GOENV" {
+		if key == "GOWORK" || key == "GOFLAGS" {
 			continue
 		}
 		out = append(out, e)
 	}
-	out = append(out, "GOWORK=off", "GOFLAGS=-mod=readonly", "GOENV=off")
+	out = append(out, "GOWORK=off", "GOFLAGS=-mod=readonly")
 	return out
 }
 
