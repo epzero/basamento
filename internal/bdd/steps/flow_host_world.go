@@ -49,8 +49,8 @@ type hostWorld struct {
 
 	replayAcceptsFailure bool
 
-	costObservedStep  string // node whose cost FLOW-059 observes via run.cost
-	costObserverNode  string // downstream handler that receives run.cost
+	costObservedStep string // node whose cost FLOW-059 observes via run.cost
+	costObserverNode string // downstream handler that receives run.cost
 }
 
 type hostHandlerCall struct {
