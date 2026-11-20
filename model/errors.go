@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/epzero/basamento/core"
 )
@@ -15,6 +16,9 @@ type Failure struct {
 	Code      core.Code `json:"code"`
 	Message   string    `json:"message"`
 	Retryable bool      `json:"retryable,omitempty"`
+	// RetryAfter is the provider's wait hint, carried so a caller that
+	// reconstructs the failure still honours REQ-MODEL-052.
+	RetryAfter time.Duration `json:"retry_after,omitempty"`
 }
 
 // FailureOf describes err as a Failure suitable for persisting on Result.Error.
@@ -29,7 +33,7 @@ func FailureOf(err error) Failure {
 	}
 	var pe *core.Error
 	if errors.As(err, &pe) {
-		return Failure{Code: pe.Code, Message: pe.Message, Retryable: pe.Retryable}
+		return Failure{Code: pe.Code, Message: pe.Message, Retryable: pe.Retryable, RetryAfter: pe.RetryAfter}
 	}
 	return Failure{Code: core.CodeVendor, Message: "vendor call failed"}
 }
