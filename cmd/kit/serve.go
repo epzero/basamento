@@ -240,19 +240,12 @@ func decodeMasterKey(s string) ([]byte, bool) {
 
 // base64KeyCandidate reports whether a value has the shape of a base64 master
 // key (32 bytes encode to 43 or 44 characters). Such a value must decode to
-// exactly 32 bytes; it is never treated as a path, even when it contains '/'.
+// exactly 32 bytes and is never treated as a path, even when it contains an
+// invalid character or '/': a mistyped key must not create a file. A dot-free
+// value of that length is always key material; a path that long uses an
+// extension or an explicit file:// URL.
 func base64KeyCandidate(s string) bool {
-	if len(s) < 43 || len(s) > 44 {
-		return false
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '+', r == '/', r == '=':
-		default:
-			return false
-		}
-	}
-	return true
+	return len(s) >= 43 && len(s) <= 44 && !strings.Contains(s, ".")
 }
 
 // looksLikeKeyPath is the explicit path form: file://, an absolute or relative

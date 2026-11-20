@@ -40,6 +40,31 @@ func TestOpenLocalSecretsRejectsMistypedBase64WithoutCreatingAFile(t *testing.T)
 	}
 }
 
+func TestOpenLocalSecretsRejectsMistypedKeyContainingSlash(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	// 44 characters, so it has the shape of a master key, but neither
+	// character set decodes it and it contains a path separator.
+	bad := strings.Repeat("A", 21) + "/" + strings.Repeat("B", 21) + "!"
+	if len(bad) != 44 {
+		t.Fatalf("test value has %d characters, want 44", len(bad))
+	}
+	_, err := openLocalSecrets(context.Background(), "localsecrets://"+bad)
+	if err == nil {
+		t.Fatal("openLocalSecrets accepted a mistyped 44-character key")
+	}
+	if code := core.CodeOf(err); code != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument: %v", code, err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a mistyped key created %d entries, want none", len(entries))
+	}
+}
+
 func TestOpenLocalSecretsRejectsAnInvalidPathEscape(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
