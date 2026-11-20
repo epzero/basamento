@@ -396,10 +396,7 @@ func registerFlowHostStepBasics(sc *godog.ScenarioContext) {
 		if w.err != nil {
 			return fmt.Errorf("run failed: %w", w.err)
 		}
-		if _, ok := w.nodeResult(node); ok {
-			return fmt.Errorf("node %q has a result, want none", node)
-		}
-		return nil
+		return w.nodeExpectsNoRunStateResult(node)
 	})
 
 	sc.Step(`^the run completed node "([^"]*)" with the result (\{.*\})$`, func(ctx context.Context, node, want string) error {
@@ -410,9 +407,9 @@ func registerFlowHostStepBasics(sc *godog.ScenarioContext) {
 		if w.err != nil {
 			return fmt.Errorf("run failed: %w", w.err)
 		}
-		got, ok := w.nodeResult(node)
-		if !ok {
-			return fmt.Errorf("node %q has no recorded result", node)
+		got, err := w.nodeStateResult(node)
+		if err != nil {
+			return err
 		}
 		if !jsonEquivalent(got, json.RawMessage(want)) {
 			return fmt.Errorf("node %q result %s, want %s", node, got, want)

@@ -264,12 +264,9 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 		if w.err != nil {
 			return fmt.Errorf("replayed run failed: %w", w.err)
 		}
-		got, ok, err := w.runStateNodeResult(node)
+		got, err := w.nodeStateResult(node)
 		if err != nil {
 			return err
-		}
-		if !ok {
-			return fmt.Errorf("replayed node %q has no result in the replay run state", node)
 		}
 		if !jsonEquivalent(got, json.RawMessage(want)) {
 			return fmt.Errorf("replayed node %q result %s, want %s", node, got, want)

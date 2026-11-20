@@ -104,7 +104,6 @@ type hostFake struct {
 	gates        map[string]*hostFuture
 	timers       []hostTimer
 	gateDone     map[string]json.RawMessage
-	childDone    map[string]json.RawMessage
 	emits        int
 	checks       int
 	instant      bool
@@ -121,12 +120,11 @@ type hostFake struct {
 
 func newHostFake() *hostFake {
 	d := &hostFake{
-		now:       time.Unix(1_700_000_000, 0).UTC(),
-		steps:     map[string]hostScript{},
-		gates:     map[string]*hostFuture{},
-		gateDone:  map[string]json.RawMessage{},
-		childDone: map[string]json.RawMessage{},
-		executed:  map[string]int{},
+		now:      time.Unix(1_700_000_000, 0).UTC(),
+		steps:    map[string]hostScript{},
+		gates:    map[string]*hostFuture{},
+		gateDone: map[string]json.RawMessage{},
+		executed: map[string]int{},
 	}
 	d.cond = sync.NewCond(&d.mu)
 	return d
@@ -305,7 +303,7 @@ func (d *hostFake) Child(ref runtime.FlowRef, in any, o runtime.ChildOptions) ru
 			return &hostFuture{dc: d, done: true, err: err}
 		}
 		if e.kind != "child" || e.child.Name != ref.Name || e.child.Hash != ref.Hash ||
-			!jsonEquivalent(e.input, raw) || e.childOpts.ID != o.ID {
+			!jsonEquivalent(e.input, raw) || e.childOpts.ID != o.ID || e.childOpts.ParentClose != o.ParentClose {
 			d.diverged = core.NewError(core.CodeDeterminismBroken, "replay: child call mismatch", nil)
 			return &hostFuture{dc: d, done: true, err: d.diverged}
 		}
@@ -318,9 +316,6 @@ func (d *hostFake) Child(ref runtime.FlowRef, in any, o runtime.ChildOptions) ru
 		kind: "child", child: ref, input: append(json.RawMessage(nil), raw...),
 		childOpts: o, result: append(json.RawMessage(nil), script.result...), err: script.err,
 	})
-	if len(script.result) > 0 && script.err == nil {
-		d.childDone[ref.Name] = script.result
-	}
 	d.executed["child:"+ref.Name]++
 	return &hostFuture{dc: d, done: true, result: script.result, err: script.err}
 }

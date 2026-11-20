@@ -38,63 +38,45 @@ func (w *hostWorld) gates() []hostCall {
 	return out
 }
 
-// runStateNodeResult is the replayed-run outcome from Host.Run final state only (no handler bookkeeping).
-func (w *hostWorld) runStateNodeResult(node string) (json.RawMessage, bool, error) {
+// nodeStateResult is the run outcome for a node: the value at state[node.Out] in
+// the run's final state. Nodes without Out cannot be read this way.
+func (w *hostWorld) nodeStateResult(node string) (json.RawMessage, error) {
 	if w.flow == nil {
-		return nil, false, nil
+		return nil, fmt.Errorf("flow host test: no flow declared")
 	}
 	n, ok := w.flow.Nodes[node]
-	if !ok || n.Out == "" {
-		return nil, false, fmt.Errorf("flow host test: node %q has no Out key for run-state result", node)
+	if !ok {
+		return nil, fmt.Errorf("flow host test: node %q is not in the flow", node)
+	}
+	if n.Out == "" {
+		return nil, fmt.Errorf("flow host test: node %q has no Out key for run-state result", node)
+	}
+	if w.result == nil {
+		return nil, fmt.Errorf("flow host test: run has no final state")
 	}
 	var state map[string]json.RawMessage
 	if err := json.Unmarshal(w.result, &state); err != nil {
-		return nil, false, fmt.Errorf("replayed run state %s: %w", w.result, err)
+		return nil, fmt.Errorf("run final state %s: %w", w.result, err)
 	}
 	value, ok := state[n.Out]
 	if !ok {
-		return nil, false, nil
+		return nil, fmt.Errorf("run final state has no key %q (Out of node %q)", n.Out, node)
 	}
-	return value, true, nil
+	return value, nil
 }
 
-// nodeResult reads the result a node completed with: the state key it writes,
-// the gate payload, the child run's result or a handler's output.
-func (w *hostWorld) nodeResult(node string) (json.RawMessage, bool) {
-	if w.flow != nil {
-		if n, ok := w.flow.Nodes[node]; ok {
-			if n.Out != "" {
-				var state map[string]json.RawMessage
-				if err := json.Unmarshal(w.result, &state); err == nil {
-					if value, ok := state[n.Out]; ok {
-						return value, true
-					}
-				}
-			}
-			if n.Kind == "subflow" {
-				var spec struct {
-					Flow string `json:"flow"`
-				}
-				if err := json.Unmarshal(n.Spec, &spec); err == nil {
-					w.dc.mu.Lock()
-					payload, ok := w.dc.childDone[spec.Flow]
-					w.dc.mu.Unlock()
-					if ok {
-						return payload, true
-					}
-				}
-			}
-		}
+func (w *hostWorld) nodeExpectsNoRunStateResult(node string) error {
+	if w.flow == nil {
+		return fmt.Errorf("flow host test: no flow declared")
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if b := w.behaviors[node]; b != nil && len(b.result) > 0 {
-		return b.result, true
+	n, ok := w.flow.Nodes[node]
+	if !ok {
+		return fmt.Errorf("flow host test: node %q is not in the flow", node)
 	}
-	if b := w.behaviors[node]; b != nil && len(b.output) > 0 && b.step == "" {
-		return b.output, true
+	if n.Out != "" {
+		return fmt.Errorf("flow host test: node %q has Out %q, want a node with no output mapping", node, n.Out)
 	}
-	return nil, false
+	return nil
 }
 
 func hasEdgeFrom(def *flow.IR, from, to string) bool {
@@ -170,6 +152,9 @@ func hostCallsEqual(a, b hostCall) error {
 	}
 	if a.stepOpts.IdempotencyKey != b.stepOpts.IdempotencyKey || a.childOpts.ID != b.childOpts.ID {
 		return fmt.Errorf("keys mismatch")
+	}
+	if a.childOpts.ParentClose != b.childOpts.ParentClose {
+		return fmt.Errorf("child ParentClose %q, want %q", a.childOpts.ParentClose, b.childOpts.ParentClose)
 	}
 	if a.gate.Name != b.gate.Name || a.gate.Timeout != b.gate.Timeout || a.gate.AcceptIf != b.gate.AcceptIf ||
 		!bytes.Equal(a.gate.Schema, b.gate.Schema) {
