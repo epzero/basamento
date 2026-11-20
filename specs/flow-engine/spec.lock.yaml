@@ -643,6 +643,66 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/111
         human:
             status: pending
+    FLOW-062-01:
+        hash: sha256:523ccb38d9cdd91e3de8c2cfa010c4023036ce5bf0c2efd0dc1d9feee81cfdf3
+        reqs:
+            - REQ-FLOW-062
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-063-01:
+        hash: sha256:9bd8566f93b8e70617bc143a5a6b9bd1cdda0d6316ed8a6c07f23f1181bb47f4
+        reqs:
+            - REQ-FLOW-063
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-064-01:
+        hash: sha256:9ba234dddeee72b57affef6aa739634180273b2782ae01b85fc1ef9dc2cd665f
+        reqs:
+            - REQ-FLOW-064
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-065-01:
+        hash: sha256:50bdc6982ad854c6c8cbef72dfe8f760a08a70ac652aa143faa9b0324efbff21
+        reqs:
+            - REQ-FLOW-065
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-066-01:
+        hash: sha256:420e4a52d403681a0aecc42878d8c3483f30060f1cb41e576d08824cdb3a9b10
+        reqs:
+            - REQ-FLOW-066
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
     FLOW-051-01:
         hash: sha256:b188ffbdc864abcffb21d857339f465e0cfb27fcaeee7b1d81a7c4bdf2349c93
         reqs:

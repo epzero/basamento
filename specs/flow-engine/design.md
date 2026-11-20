@@ -63,7 +63,8 @@ marked entry nodes, as the scenarios say.
 
 **Left to the compiler:** node spec shape and kind (an unknown kind is
 `invalid_argument` from the decoder or the compiler,
-`docs/architecture/flow-engine.md` §2), guarded cycles (REQ-FLOW-003), and
+`docs/architecture/flow-engine.md` §2), guarded cycles (REQ-FLOW-003), the
+`map` child errors of §2.6 (REQ-FLOW-062 … 066), and
 every CEL or jq expression — edge `when` conditions, node `in` mappings, `set`
 assignments, guard `while` conditions and gate `accept_if` conditions
 (REQ-FLOW-004). The builder keeps expressions in the IR as written.
@@ -104,8 +105,8 @@ exists in the state schema's properties.
 ## 2. Compiler and machine
 
 WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
-requirements REQ-FLOW-001 … 006, 045 … 049 and 051, scenarios `compile.feature`,
-`routing.feature`, `runs.feature` and `host.feature`.
+requirements REQ-FLOW-001 … 006, 045 … 049, 051 and 062 … 066, scenarios
+`compile.feature`, `routing.feature`, `runs.feature` and `host.feature`.
 
 ### 2.1 Bounded cycles (REQ-FLOW-003)
 
@@ -248,7 +249,61 @@ size of the collection: REQ-FLOW-046 limits the definition — its nodes, edges,
 expressions and canonical bytes — not the number of items a run's collection
 holds, which is data the run receives and not part of the definition.
 
-### 2.6 Default node input (REQ-FLOW-051)
+### 2.6 Definition errors the machine cannot repair (REQ-FLOW-062 … 066)
+
+`flow/ir.Validate` rejects five defects that leave a definition unrunnable — a
+`map` child that is not a declared node, a `map` child of a kind the machine
+runs itself (`set`, `parallel`, `map`), one child used by two `map` nodes, a
+`map` child carrying a guard, and a condition on the edge from `START` — with
+code `invalid_argument`, naming the `map` node and its child, both `map`
+nodes, or the edge. The `map` checks read the node spec's `over` and `node`
+fields the way `flow/machine` reads them (`parseMapSpec`), and they scan
+`IR.Nodes` in sorted id order, so two `map` nodes using one child always
+report them in the same order.
+
+- **A child that is not a node** (REQ-FLOW-062): the machine emits no `run_node`
+  command for the child, so the host would never run it. Message:
+  `flow: map node "fanout": child node "ghost" does not exist`.
+- **A kind the machine runs itself** (REQ-FLOW-063): `set` is evaluated by the
+  machine, `parallel` and `map` are expanded by it, so none of them produces a
+  `run_node` command for the host. Message:
+  `flow: map node "fanout": child node "fanout_item" has kind "set", which the machine runs itself`.
+- **One child for two `map` nodes** (REQ-FLOW-064): steps are identified by
+  `(node, attempt)` (REQ-FLOW-002, scenario FLOW-002-01), so both fan-outs
+  produce the same step identities and the canonical merge sees whichever
+  completed first. Message:
+  `flow: map nodes "fanout" and "review" both use child node "fanout_item"`.
+- **A `map` child with a guard** (REQ-FLOW-065): a guard bounds a cycle by
+  counting the visits of the nodes the machine routes to (REQ-FLOW-003, §2.1),
+  and the machine starts a `map` child once per element without routing to it,
+  so the count never advances. A `map` → child → `map` cycle that only the
+  child's `max_visits` bounds would pass the cycle check and never stop.
+  Message: `flow: map node "fanout": child node "fanout_item" has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element`.
+- **A condition on the edge from `START`** (REQ-FLOW-066): `START` is where a
+  run enters, before any node has routed, so the first superstep has no state
+  to route on and the machine never evaluates the condition — today it is
+  silently ignored. Message:
+  `flow: edge "START" -> "plan" takes no condition`.
+
+**Enforcement order.** `flow/ir.Validate` runs the `START`-edge check with the
+other edge checks, which have already established that exactly one edge leaves
+`START` (REQ-FLOW-043), and the `map` checks after the node and edge checks and
+before reachability and the cycle search. A `map` child with a guard is
+therefore reported as REQ-FLOW-065, not as a bounded cycle by REQ-FLOW-003.
+
+**Defence in depth.** These five are the checks `flow/machine.New` makes for
+itself before it compiles an expression, with the same code and the same
+wording; they stay there, because an IR can be built in Go without the
+compiler (ADR-0003) and a machine must refuse to run one it cannot run. The
+compiler adds them so the author sees the error when the flow is registered
+(`flow/compile.Compile`, `flow/ir.Validate`) rather than when a run starts.
+`flow/builder` keeps a node spec as written (REQ-FLOW-012) and has no `map`
+check of its own: it checks only what its declarations make knowable, and the
+compiler is the one validator — a second copy would be a second source of
+truth. A flow built in Go therefore meets these checks at compile time exactly
+as one written as data does.
+
+### 2.7 Default node input (REQ-FLOW-051)
 
 A node with no input mapping (`in`) receives the run's input as its command
 input; an empty run input becomes `{}`. This is the machine's `nodeInput`, so
@@ -264,7 +319,7 @@ routing.
 imports no node handler. It provides the one `runtime.FlowHost`
 (`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
 owns `flow/host`. Requirements REQ-FLOW-027 … 050 and 052 … 061 (REQ-FLOW-051
-is the machine's default node input, §2.6), scenarios `host.feature`.
+is the machine's default node input, §2.7), scenarios `host.feature`.
 
 ```go
 // NodeResult is what a node handler returns: the node's output and the
