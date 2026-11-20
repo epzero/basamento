@@ -58,12 +58,17 @@ func New(catalog DefinitionCatalog, opts ...Option) *Host {
 
 // RegisterHandler registers handler for a node kind. Calling it again for the
 // same kind replaces the handler; the composition root does it before the host
-// is used. RegisterHandler is not safe to call concurrently with Run: the
-// handler table is a plain map written here and read during runs once
-// registration has finished. The host itself imports no handler (ADR-0011).
+// is used. A nil handler removes the registration for kind. RegisterHandler is
+// not safe to call concurrently with Run: the handler table is a plain map
+// written here and read during runs once registration has finished. The host
+// itself imports no handler (ADR-0011).
 func (h *Host) RegisterHandler(kind string, handler NodeHandler) {
 	if h.handlers == nil {
 		h.handlers = map[string]NodeHandler{}
+	}
+	if handler == nil {
+		delete(h.handlers, kind)
+		return
 	}
 	h.handlers[kind] = handler
 }
@@ -138,7 +143,7 @@ func (h *Host) checkHandlers(def *flow.IR) error {
 		if node.Kind != "model" && node.Kind != "agent" {
 			continue
 		}
-		if _, ok := h.handlers[node.Kind]; ok {
+		if handler, ok := h.handlers[node.Kind]; ok && handler != nil {
 			continue
 		}
 		return core.NewError(core.CodeUnsupported,
@@ -271,7 +276,7 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 	for _, command := range commands {
 		node := def.Nodes[command.Node]
 		handler, ok := h.handlers[node.Kind]
-		if !ok {
+		if !ok || handler == nil {
 			return nil, core.NewError(core.CodeUnsupported,
 				fmt.Sprintf("flow: node %q: no node handler is registered for kind %q", command.Node, node.Kind),
 				map[string]any{"node": command.Node, "kind": node.Kind})
