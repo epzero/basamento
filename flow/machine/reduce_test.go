@@ -161,6 +161,29 @@ func TestSumAtMaxInt64StillWorks(t *testing.T) {
 	}
 }
 
+func TestSumFirstWriteRejectsNonNumber(t *testing.T) {
+	m := reducerMachine(t, map[string]string{"n": "sum"})
+	err := m.reduceKey(map[string]any{}, "n", "not-a-number")
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("error %v, want invalid_argument", err)
+	}
+	if !strings.Contains(err.Error(), `"n"`) {
+		t.Fatalf("error %q, want key name", err)
+	}
+}
+
+func TestSumFloatOverflowRejectsInf(t *testing.T) {
+	m := reducerMachine(t, map[string]string{"n": "sum"})
+	state := map[string]any{"n": json.Number("1.7976931348623157e+308")}
+	err := m.reduceKey(state, "n", json.Number("1.7976931348623157e+308"))
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("error %v, want invalid_argument", err)
+	}
+	if !strings.Contains(err.Error(), "overflow") || !strings.Contains(err.Error(), `"n"`) {
+		t.Fatalf("error %q, want overflow and key", err)
+	}
+}
+
 func TestSumAtMinInt64StillWorks(t *testing.T) {
 	m := reducerMachine(t, map[string]string{"n": "sum"})
 	state := map[string]any{"n": json.Number("-9223372036854775807")}

@@ -16,18 +16,17 @@ import (
 )
 
 // machineWorld holds the flow a machine scenario runs, its latest snapshot and
-// commands, and the snapshots already recorded for other completion orders.
+// commands.
 type machineWorld struct {
-	ir        *flow.IR
-	machine   *machine.Machine
-	snapshot  flow.Snapshot
-	commands  []flow.Command
-	lastErr   error
-	snapshots map[string]flow.Snapshot
+	ir       *flow.IR
+	machine  *machine.Machine
+	snapshot flow.Snapshot
+	commands []flow.Command
+	lastErr  error
 }
 
 func newMachineWorld() *machineWorld {
-	return &machineWorld{snapshots: map[string]flow.Snapshot{}}
+	return &machineWorld{}
 }
 
 func (w *machineWorld) start(input string) error {
@@ -179,7 +178,6 @@ func registerFlowMachine(sc *godog.ScenarioContext) {
 					return err
 				}
 			}
-			w.snapshots[strings.Join([]string{first, second, third}, ",")] = w.snapshot
 			return nil
 		})
 
