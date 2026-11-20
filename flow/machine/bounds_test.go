@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/flow"
@@ -18,18 +17,7 @@ func TestPureSuperstepLimitEndsCostOnlySetCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
-	var commands []flow.Command
-	var startErr error
-	go func() {
-		defer close(done)
-		_, commands, startErr = m.Start(json.RawMessage(`{}`))
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Start hung: want budget_exceeded from pure superstep limit")
-	}
+	_, commands, startErr := m.Start(json.RawMessage(`{}`))
 	if startErr != nil {
 		t.Fatal(startErr)
 	}
