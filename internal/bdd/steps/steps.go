@@ -89,6 +89,7 @@ func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
 	registerSharedRunStartStep(sc)
 	registerSharedRunOutcomeSteps(sc)
+	registerSharedResolutionFailStep(sc)
 }
 
 // matchPutOutcomeShared owns the put phrase for every capability, because godog

@@ -141,3 +141,16 @@ func assertRunFailsNamingNodeBudget(ctx context.Context, code, node, budgetKind 
 	}
 	return nil
 }
+
+func registerSharedResolutionFailStep(sc *godog.ScenarioContext) {
+	sc.Step(`^the resolution fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		w := world(ctx)
+		if w.Prompt != nil && w.Prompt.lastErr != nil {
+			return expectCode(w.Prompt.lastErr, code)
+		}
+		if w.Local != nil {
+			return localLastError(w.Local, code)
+		}
+		return fmt.Errorf("no resolution error to assert")
+	})
+}

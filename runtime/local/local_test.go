@@ -18,10 +18,6 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
-// waitLimit bounds how long a test waits for a goroutine to reach an observed
-// state. It is a liveness guard, never the thing that makes a test pass.
-const waitLimit = 10 * time.Second
-
 type flowFunc func(dc runtime.DurableContext, in json.RawMessage) (json.RawMessage, error)
 
 type testHost map[string]flowFunc
@@ -90,14 +86,18 @@ func waitGateTimeouts(t *testing.T, r *run, want int32) {
 	t.Fatalf("gate timeout helpers = %d, want %d after %d yields", r.gateTimeouts.Load(), want, spinBudget)
 }
 
-// waitOn waits for ch to close, failing after the liveness limit.
+// waitOn waits for ch to close, yielding until the liveness budget is exhausted.
 func waitOn(t *testing.T, what string, ch <-chan struct{}) {
 	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(waitLimit):
-		t.Fatalf("timed out waiting for %s", what)
+	for i := 0; i < spinBudget; i++ {
+		select {
+		case <-ch:
+			return
+		default:
+			goruntime.Gosched()
+		}
 	}
+	t.Fatalf("timed out waiting for %s after %d yields", what, spinBudget)
 }
 
 func (f *fixture) state(t *testing.T, tenant, runID string) string {
@@ -117,8 +117,7 @@ func (f *fixture) waitState(t *testing.T, tenant, runID, want string) {
 	if target == nil {
 		t.Fatalf("run %s not found", runID)
 	}
-	deadline := time.After(waitLimit)
-	for {
+	for i := 0; i < spinBudget; i++ {
 		target.mu.Lock()
 		state := target.state
 		target.mu.Unlock()
@@ -127,10 +126,14 @@ func (f *fixture) waitState(t *testing.T, tenant, runID, want string) {
 		}
 		select {
 		case <-target.wake():
-		case <-deadline:
-			t.Fatalf("timed out waiting for run %s to reach %s (still %s)", runID, want, state)
+		default:
+			goruntime.Gosched()
 		}
 	}
+	target.mu.Lock()
+	still := target.state
+	target.mu.Unlock()
+	t.Fatalf("timed out waiting for run %s to reach %s (still %s)", runID, want, still)
 }
 
 func (f *fixture) close(t *testing.T) {
@@ -257,13 +260,19 @@ func TestSelectReturnsLowestReadyIndex(t *testing.T) {
 	f.start(t, "acme", "r1", "select", `{}`)
 	waitOn(t, "the timers to register", started)
 	f.clock.Advance(time.Hour)
-	select {
-	case result := <-got:
-		if result.err != nil || result.index != 1 {
-			t.Fatalf("Select = (%d, %v), want (1, nil)", result.index, result.err)
+	var result outcome
+	for i := 0; i < spinBudget; i++ {
+		select {
+		case result = <-got:
+			goto gotSelect
+		default:
+			goruntime.Gosched()
 		}
-	case <-time.After(waitLimit):
-		t.Fatal("Select did not return after the 1h timer")
+	}
+	t.Fatal("Select did not return after the 1h timer")
+gotSelect:
+	if result.err != nil || result.index != 1 {
+		t.Fatalf("Select = (%d, %v), want (1, nil)", result.index, result.err)
 	}
 	f.waitState(t, "acme", "r1", stateCompleted)
 }
@@ -346,13 +355,19 @@ func TestSelectSameAdvanceReturnsLowestIndex(t *testing.T) {
 	f.start(t, "acme", "r1", "select", `{}`)
 	waitOn(t, "timers", started)
 	f.clock.Advance(2 * time.Hour)
-	select {
-	case index := <-got:
-		if index != 0 {
-			t.Fatalf("Select index %d, want 0 (lowest when both timers fire together)", index)
+	var index int
+	for i := 0; i < spinBudget; i++ {
+		select {
+		case index = <-got:
+			goto gotBoth
+		default:
+			goruntime.Gosched()
 		}
-	case <-time.After(waitLimit):
-		t.Fatal("Select did not return")
+	}
+	t.Fatal("Select did not return")
+gotBoth:
+	if index != 0 {
+		t.Fatalf("Select index %d, want 0 (lowest when both timers fire together)", index)
 	}
 }
 
@@ -538,13 +553,19 @@ func TestCancelEndsPendingWaitsWithCancelled(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.waitState(t, "acme", "r1", stateCancelled)
-			select {
-			case err := <-failed:
-				if codeOf(err) != "cancelled" {
-					t.Fatalf("wait error = %v, want cancelled", err)
+			var err error
+			for i := 0; i < spinBudget; i++ {
+				select {
+				case err = <-failed:
+					goto gotCancel
+				default:
+					goruntime.Gosched()
 				}
-			case <-time.After(waitLimit):
-				t.Fatal("the wait did not end with cancellation")
+			}
+			t.Fatal("the wait did not end with cancellation")
+		gotCancel:
+			if codeOf(err) != "cancelled" {
+				t.Fatalf("wait error = %v, want cancelled", err)
 			}
 		})
 	}
@@ -770,13 +791,19 @@ func TestStartAfterShutdownIsUnavailable(t *testing.T) {
 	f.start(t, "acme", "r1", "timer", `{}`)
 	waitOn(t, "the timer to register", sleeping)
 	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Serve: %v", err)
+	var err error
+	for i := 0; i < spinBudget; i++ {
+		select {
+		case err = <-done:
+			goto serveDone
+		default:
+			goruntime.Gosched()
 		}
-	case <-time.After(waitLimit):
-		t.Fatal("Serve did not return")
+	}
+	t.Fatal("Serve did not return")
+serveDone:
+	if err != nil {
+		t.Fatalf("Serve: %v", err)
 	}
 	if got := f.state(t, "acme", "r1"); got != stateRunning {
 		t.Fatalf("in-flight run after shutdown = %s, want running", got)

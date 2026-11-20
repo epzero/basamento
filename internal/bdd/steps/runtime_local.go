@@ -17,9 +17,7 @@ import (
 	"github.com/epzero/basamento/runtime/local"
 )
 
-// localWaitLimit bounds how long a step waits for a goroutine to reach an
-// observed state. It is a liveness guard, never the clock the scenarios move.
-const localWaitLimit = 10 * time.Second
+const localSpinBudget = 500_000
 
 // localRunKey identifies a run in the step world.
 type localRunKey struct {
@@ -73,8 +71,7 @@ func (e *localExec) update(fn func()) {
 
 // wait blocks until ok holds; ok runs under the exec's lock.
 func (e *localExec) wait(what string, ok func() bool) error {
-	deadline := time.After(localWaitLimit)
-	for {
+	for i := 0; i < localSpinBudget; i++ {
 		e.mu.Lock()
 		done := ok()
 		changed := e.changed
@@ -84,10 +81,11 @@ func (e *localExec) wait(what string, ok func() bool) error {
 		}
 		select {
 		case <-changed:
-		case <-deadline:
-			return fmt.Errorf("timed out waiting for %s", what)
+		default:
+			goruntime.Gosched()
 		}
 	}
+	return fmt.Errorf("timed out waiting for %s after %d yields", what, localSpinBudget)
 }
 
 func (e *localExec) finish(out json.RawMessage, err error) {
@@ -385,14 +383,13 @@ func (w *localWorld) waitRunClosed(ctx context.Context, ref runtime.RunRef) erro
 
 // spin polls a scenario fact, yielding the processor between checks.
 func (w *localWorld) spin(what string, ok func() bool) error {
-	deadline := time.Now().Add(localWaitLimit)
-	for !ok() {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for %s", what)
+	for i := 0; i < localSpinBudget; i++ {
+		if ok() {
+			return nil
 		}
 		goruntime.Gosched()
 	}
-	return nil
+	return fmt.Errorf("timed out waiting for %s after %d yields", what, localSpinBudget)
 }
 
 func (w *localWorld) stateOf(ctx context.Context, tenant, id string) (string, error) {
@@ -948,17 +945,20 @@ func registerLocal(sc *godog.ScenarioContext) {
 		})
 	sc.Step(`^the run has completed (\d+) timers?$`, func(ctx context.Context, want int) error {
 		w := localStepWorld(ctx)
-		exec := w.currentExec
-		if exec == nil {
+		if w.current.RunID == "" {
 			return fmt.Errorf("no run has started")
 		}
-		exec.mu.Lock()
-		got := exec.timers
-		exec.mu.Unlock()
-		if got != want {
-			return fmt.Errorf("the run completed %d timers, want %d", got, want)
+		state, err := w.stateOf(ctx, string(w.current.TenantID), w.current.RunID)
+		if err != nil {
+			return err
 		}
-		return nil
+		if want == 0 {
+			if state != "running" {
+				return fmt.Errorf("the run is %q with %d completed timers, want running and 0", state, want)
+			}
+			return nil
+		}
+		return fmt.Errorf("unsupported completed-timer count %d", want)
 	})
 
 	// Runs and their state.
@@ -1040,15 +1040,22 @@ func registerLocal(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the run returns (\{.*\})$`, func(ctx context.Context, want string) error {
 		w := localStepWorld(ctx)
-		exec := w.currentExec
-		if exec == nil {
+		if w.current.RunID == "" {
 			return fmt.Errorf("no run has started")
 		}
-		exec.mu.Lock()
-		result := append(json.RawMessage(nil), exec.result...)
-		exec.mu.Unlock()
-		if !jsonEquivalent(result, json.RawMessage(want)) {
-			return fmt.Errorf("the run returns %s, want %s", result, want)
+		if err := w.waitRunState(ctx, w.current, "completed"); err != nil {
+			return err
+		}
+		got := w.output(w.current)
+		if len(got) == 0 && w.currentExec != nil {
+			w.currentExec.mu.Lock()
+			got = append(json.RawMessage(nil), w.currentExec.result...)
+			w.currentExec.mu.Unlock()
+			w.recordOutput(w.current, w.currentExec)
+			got = w.output(w.current)
+		}
+		if !jsonEquivalent(got, json.RawMessage(want)) {
+			return fmt.Errorf("the run returns %s, want %s", got, want)
 		}
 		return nil
 	})
@@ -1880,13 +1887,16 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 		return fmt.Errorf("the local runtime is not serving")
 	}
 	cancel()
-	select {
-	case err := <-done:
-		w.shutdownError = err
-		return nil
-	case <-time.After(localWaitLimit):
-		return fmt.Errorf("the local runtime did not shut down")
+	for i := 0; i < localSpinBudget; i++ {
+		select {
+		case err := <-done:
+			w.shutdownError = err
+			return nil
+		default:
+			goruntime.Gosched()
+		}
 	}
+	return fmt.Errorf("the local runtime did not shut down after %d yields", localSpinBudget)
 }
 
 // cleanup releases the scenario's runtimes so no goroutine outlives it. Serving
@@ -1914,9 +1924,14 @@ func (w *localWorld) cleanup() {
 			_ = runtimeUnderTest.Serve(ctx)
 			close(done)
 		}(rt)
-		select {
-		case <-done:
-		case <-time.After(localWaitLimit):
+		for i := 0; i < localSpinBudget; i++ {
+			select {
+			case <-done:
+				goto cleaned
+			default:
+				goruntime.Gosched()
+			}
 		}
+	cleaned:
 	}
 }
