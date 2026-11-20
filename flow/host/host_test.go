@@ -106,8 +106,9 @@ type fakeDC struct {
 	checks       []runtime.SnapshotRef
 	nextID       int
 	instant      bool
-	stepRun      map[string]int
-	childRun     map[string]scripted
+	stepRun       map[string]int
+	childRun      map[string]scripted
+	selectPrefer  int
 }
 
 type timedFuture struct {
@@ -377,11 +378,22 @@ func (d *fakeDC) Select(futures ...runtime.Future) (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for {
+		var ready []int
 		for i, candidate := range futures {
 			f := candidate.(*future)
 			if f.done {
-				return i, nil
+				ready = append(ready, i)
 			}
+		}
+		if len(ready) > 0 {
+			if d.selectPrefer >= 0 {
+				for _, i := range ready {
+					if i == d.selectPrefer {
+						return i, nil
+					}
+				}
+			}
+			return ready[0], nil
 		}
 		d.parked = true
 		d.cond.Broadcast()
@@ -707,6 +719,7 @@ func TestGateWaitsAndCompletesWithPayload(t *testing.T) {
 	if rh.err != nil {
 		t.Fatalf("run: %v", rh.err)
 	}
+	assertJSON(t, rh.result, `{"out":{"approved":true}}`)
 }
 
 func TestGateTimeoutFailsRun(t *testing.T) {
@@ -987,6 +1000,11 @@ func TestIdempotencyKeysDifferAcrossVisitsAndMatchOnReplay(t *testing.T) {
 	if len(keys) != 2 || keys[0] == keys[1] {
 		t.Fatalf("visit keys %+v, want two distinct keys", keys)
 	}
+	want0 := fmt.Sprintf("loop@%s/work#0@1", ref.Hash)
+	want1 := fmt.Sprintf("loop@%s/work#0@2", ref.Hash)
+	if keys[0] != want0 || keys[1] != want1 {
+		t.Fatalf("keys %+v, want %q and %q", keys, want0, want1)
+	}
 	replay := replayFakeDC(journal)
 	if _, err := h.Run(replay, ref, json.RawMessage(`{}`)); core.CodeOf(err) != core.CodeBudgetExceeded {
 		t.Fatalf("replay: %v", err)
@@ -1030,6 +1048,115 @@ func TestMapFanOutUsesDistinctIdempotencyKeys(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("got %d keys, want 3", len(seen))
 	}
+}
+
+func TestIdempotencyKeyUsesDefinitionNameNotCallerRefName(t *testing.T) {
+	def := newFlow("real")
+	def.Nodes["work"] = node("tool", `{"tool":"w1"}`, "", "")
+	addLinear(def, "work")
+	dc := newFakeDC()
+	dc.steps["w1"] = scripted{result: json.RawMessage(`{}`)}
+	cat := newCatalog()
+	ref := cat.register(def)
+	alias := runtime.FlowRef{Name: "typo", Hash: ref.Hash}
+	h := host.New(cat)
+	if _, err := h.Run(dc, alias, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	wantPrefix := "real@" + ref.Hash + "/"
+	for _, c := range dc.callLog() {
+		if c.kind != "step" {
+			continue
+		}
+		k := c.stepOpts.IdempotencyKey
+		if !strings.HasPrefix(k, wantPrefix) {
+			t.Fatalf("key %q, want prefix %q", k, wantPrefix)
+		}
+		if strings.HasPrefix(k, "typo@") {
+			t.Fatalf("key %q uses caller ref name", k)
+		}
+	}
+}
+
+func TestIdempotencyKeyFormatPinned(t *testing.T) {
+	def := newFlow("fmt")
+	back := node("tool", `{"tool":"w1"}`, "", "")
+	back.Guard = &flow.Guard{MaxVisits: 2, While: `true`}
+	def.Nodes["first"] = node("tool", `{"tool":"w1"}`, "", "")
+	def.Nodes["back"] = back
+	def.Edges = []flow.Edge{
+		{From: ir.Start, To: "first"},
+		{From: "first", To: "back"},
+		{From: "back", To: "back"},
+	}
+	dc := newFakeDC()
+	dc.steps["w1"] = scripted{result: json.RawMessage(`{}`)}
+	cat := newCatalog()
+	ref := cat.register(def)
+	h := host.New(cat)
+	if _, err := h.Run(dc, ref, json.RawMessage(`{}`)); core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("run: %v", err)
+	}
+	var keys []string
+	for _, c := range dc.callLog() {
+		if c.kind == "step" {
+			keys = append(keys, c.stepOpts.IdempotencyKey)
+		}
+	}
+	if len(keys) != 3 {
+		t.Fatalf("step keys %+v, want 3", keys)
+	}
+	want := []string{
+		fmt.Sprintf("fmt@%s/first#0@1", ref.Hash),
+		fmt.Sprintf("fmt@%s/back#0@2", ref.Hash),
+		fmt.Sprintf("fmt@%s/back#0@3", ref.Hash),
+	}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("key[%d] %q, want %q", i, keys[i], want[i])
+		}
+	}
+}
+
+func TestSuperstepFailureUsesFirstSelectResult(t *testing.T) {
+	build := func() (*fakeDC, *host.Host, runtime.FlowRef) {
+		def := newFlow("pair")
+		def.Nodes["fan"] = flow.Node{Kind: "parallel"}
+		def.Nodes["left"] = node("tool", `{"tool":"left"}`, "", "")
+		def.Nodes["right"] = node("tool", `{"tool":"right"}`, "", "")
+		def.Edges = []flow.Edge{
+			{From: ir.Start, To: "fan"},
+			{From: "fan", To: "left"},
+			{From: "fan", To: "right"},
+		}
+		dc := newFakeDC()
+		dc.steps["left"] = scripted{manual: true}
+		dc.steps["right"] = scripted{manual: true}
+		cat := newCatalog()
+		ref := cat.register(def)
+		h := host.New(cat)
+		return dc, h, ref
+	}
+	runWithOrder := func(t *testing.T, prefer int, wantCode core.Code) {
+		t.Helper()
+		dc, h, ref := build()
+		dc.selectPrefer = prefer
+		rh := dc.startRun(h, ref, json.RawMessage(`{}`))
+		waitFor(t, dc, func(d *fakeDC) bool { return len(d.manual) == 2 })
+		dc.resolveStep("left", nil, core.NewError(core.CodeUnavailable, "left failed", nil))
+		dc.resolveStep("right", nil, core.NewError(core.CodeTimeout, "right failed", nil))
+		dc.settle()
+		<-rh.done
+		if core.CodeOf(rh.err) != wantCode {
+			t.Fatalf("select prefer %d: code %v (%v), want %s", prefer, core.CodeOf(rh.err), rh.err, wantCode)
+		}
+	}
+	t.Run("prefers_index_zero", func(t *testing.T) {
+		runWithOrder(t, 0, core.CodeUnavailable)
+	})
+	t.Run("prefers_index_one", func(t *testing.T) {
+		runWithOrder(t, 1, core.CodeTimeout)
+	})
 }
 
 func TestHandlerFailureFailsRunAndStopsLaterNodes(t *testing.T) {
@@ -1507,33 +1634,61 @@ func TestNodeCostAccruesOnCompleteAndFailedHandlers(t *testing.T) {
 		}
 	})
 	t.Run("failed handler still accrues settled cost", func(t *testing.T) {
-		def := newFlow("cost-fail")
-		def.Nodes["a"] = node("agent", "", "", "")
-		def.Nodes["b"] = node("agent", "", "", "")
-		probe := node("set", `{"v":1}`, "", "")
-		probe.Guard = &flow.Guard{CostMpts: 60}
-		def.Nodes["probe"] = probe
+		def := newFlow("cost-fail-repair")
+		def.State.Schema = json.RawMessage(`{"type":"object","properties":{"failed":{"type":"integer"}}}`)
+		def.Nodes["verify"] = node("set", `{"verified":true}`, "", "")
+		def.Nodes["repair"] = flow.Node{
+			Kind:  "agent",
+			Spec:  json.RawMessage(`{"agent":"repair"}`),
+			Out:   "failed",
+			Guard: &flow.Guard{CostMpts: 5000},
+		}
 		def.Edges = []flow.Edge{
-			{From: ir.Start, To: "a"},
-			{From: "a", To: "b"},
-			{From: "b", To: "probe"},
+			{From: ir.Start, To: "verify"},
+			{From: "verify", To: "repair"},
+			{From: "repair", To: "verify"},
 		}
 		dc := newFakeDC()
 		cat := newCatalog()
 		ref := cat.register(def)
 		h := host.New(cat)
+		var repairCalls int
 		h.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
-			switch n.Name {
-			case "a":
-				return host.NodeResult{Output: json.RawMessage(`{}`), CostMpts: 40}, nil
-			case "b":
-				return host.NodeResult{CostMpts: 25}, core.NewError(core.CodeVendor, "model failed", nil)
+			if n.Name != "repair" {
+				return host.NodeResult{}, nil
 			}
-			return host.NodeResult{}, nil
+			repairCalls++
+			if repairCalls == 1 {
+				return host.NodeResult{Output: json.RawMessage(`{"fixed":true}`), CostMpts: 2500}, nil
+			}
+			return host.NodeResult{
+				Output:   json.RawMessage(`{"fixed":false}`),
+				CostMpts: 2500,
+			}, core.NewError(core.CodeVendor, "model failed", nil)
 		})
-		_, err := h.Run(dc, ref, json.RawMessage(`{}`))
+		_, err := h.Run(dc, ref, json.RawMessage(`{"failed":1}`))
 		if core.CodeOf(err) != core.CodeVendor {
-			t.Fatalf("want vendor error from b, got %v", err)
+			t.Fatalf("want vendor error from repair, got %v", err)
+		}
+		if repairCalls != 2 {
+			t.Fatalf("repair ran %d times, want 2", repairCalls)
+		}
+		dc2 := newFakeDC()
+		var repairs int
+		h2 := host.New(cat)
+		h2.RegisterHandler("agent", func(_ runtime.DurableContext, n flow.Node, _ json.RawMessage) (host.NodeResult, error) {
+			if n.Name != "repair" {
+				return host.NodeResult{}, nil
+			}
+			repairs++
+			return host.NodeResult{Output: json.RawMessage(`{"fixed":true}`), CostMpts: 2500}, nil
+		})
+		_, err2 := h2.Run(dc2, ref, json.RawMessage(`{"failed":1}`))
+		if repairs != 2 {
+			t.Fatalf("control repairs %d, want 2", repairs)
+		}
+		if core.CodeOf(err2) != core.CodeBudgetExceeded {
+			t.Fatalf("control run %v, want budget_exceeded at 5000 settled", err2)
 		}
 	})
 	t.Run("negative settled cost", func(t *testing.T) {
