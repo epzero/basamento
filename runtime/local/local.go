@@ -17,8 +17,9 @@ import (
 // core.SystemClock and core.ULIDs in the binary, coretest.FakeClock and
 // coretest.SeqIds in the gate (see specs/runtime/design.md §Local runtime).
 type Options struct {
-	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. It must
-	// implement After(d) <-chan time.Time. nil means core.SystemClock.
+	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. It must be a
+	// timer clock (implement After(d) <-chan time.Time). nil means
+	// core.SystemClock.
 	Clock core.Clock
 	// IDs issues run ids when StartRequest.RunID is empty. nil means ULIDs
 	// over Clock.
@@ -89,7 +90,7 @@ func New(opts Options) (*Runtime, error) {
 	wake, ok := clock.(wakeClock)
 	if !ok {
 		return nil, core.NewError(core.CodeInvalidArgument,
-			"local: the clock must implement After(duration)", nil)
+			"local: the clock cannot schedule timers: it has no After(duration)", nil)
 	}
 	r := &Runtime{
 		clock: wake,

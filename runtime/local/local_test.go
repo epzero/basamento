@@ -1388,6 +1388,13 @@ func TestNewRejectsClockWithoutAfter(t *testing.T) {
 	if codeOf(err) != "invalid_argument" {
 		t.Fatalf("New = %v, want invalid_argument", err)
 	}
+	var platform *core.Error
+	if !errors.As(err, &platform) {
+		t.Fatalf("New = %v, want *core.Error", err)
+	}
+	if !strings.Contains(platform.Message, "cannot schedule timers") {
+		t.Fatalf("message %q, want substring %q", platform.Message, "cannot schedule timers")
+	}
 }
 
 func TestCapabilities(t *testing.T) {
