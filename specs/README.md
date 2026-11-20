@@ -39,7 +39,7 @@ Capabilities:
 | [`prompt`](prompt/requirements.md) | Implemented (WP-L3-05). |
 | [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
 | [`config`](config/requirements.md) | Planned (WP-L1-05). |
-| [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |
+| [`telemetry`](telemetry/requirements.md) | Implemented (WP-L1-07). |
 | [`schema`](schema/requirements.md) | Implemented (WP-L2-02, EP0-126). |
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
 | [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |

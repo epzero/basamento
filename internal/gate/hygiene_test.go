@@ -54,19 +54,6 @@ func h() {
 	_ = IntN(5)
 }
 `,
-		"internal/bdd/steps/bad.go": `package steps
-
-import (
-	"crypto/rand"
-	"time"
-)
-
-func step() {
-	_ = time.Now()
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-}
-`,
 		"core/coretest/bad_fake.go": `package coretest
 
 import "time"
@@ -114,8 +101,6 @@ func ok() {
 		"pkg/bad_randv1_crypto_test.go:9: test uses global rand.Intn",
 		`pkg/bad_dot_test.go:4: test must not dot-import "math/rand/v2"`,
 		`pkg/bad_dot_test.go:5: test must not dot-import "time"`,
-		`internal/bdd/steps/bad.go:4: test imports "crypto/rand"`,
-		"internal/bdd/steps/bad.go:9: test uses time.Now",
 		"core/coretest/bad_fake.go:5: test uses time.Now",
 	} {
 		if !hasErr(errs, want) {
@@ -124,6 +109,60 @@ func ok() {
 	}
 	if hasErr(errs, "pkg/good_test.go") {
 		t.Errorf("good_test.go with time.Date, seeded rand.New and shadowed locals must pass:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly proves that a package
+// listed in test_only_allowed_from (the BDD harness) is subject to neither
+// package-level test-determinism nor production isolation, even when ADR-0018
+// also lists it under test_only so production cannot import it. Pure fakes in
+// test_only alone still fail on crypto/rand.
+func TestCheckCodeHygieneTestOnlyAllowedFromIsNotTestOnly(t *testing.T) {
+	for _, name := range []string{"allowed-from-only", "also-in-test-only"} {
+		t.Run(name, func(t *testing.T) {
+			yaml := "module: m\ntest_only: [core/coretest]\ntest_only_allowed_from: [internal/bdd]\n"
+			if name == "also-in-test-only" {
+				yaml = "module: m\ntest_only: [core/coretest, internal/bdd]\ntest_only_allowed_from: [internal/bdd]\n"
+			}
+			root := writeTree(t, map[string]string{
+				"layering.yaml": yaml,
+				"internal/bdd/sqltest/pgserver.go": `package sqltest
+
+import (
+	"crypto/rand"
+	"testing/fstest"
+)
+
+func ResetPostgresForTest() {}
+
+func password() []byte {
+	_ = fstest.MapFS{}
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return b[:]
+}
+`,
+				"core/coretest/bad_fake.go": `package coretest
+
+import "crypto/rand"
+
+func BadEntropy() {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+}
+`,
+			})
+			errs, err := CheckCodeHygiene(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasErr(errs, "internal/bdd") {
+				t.Errorf("BDD harness must skip both hygiene package rules:\n%s", strings.Join(errs, "\n"))
+			}
+			if !hasErr(errs, `core/coretest/bad_fake.go:3: test imports "crypto/rand"`) {
+				t.Errorf("test_only fake must still fail on crypto/rand:\n%s", strings.Join(errs, "\n"))
+			}
+		})
 	}
 }
 
