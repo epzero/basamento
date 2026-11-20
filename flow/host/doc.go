@@ -16,5 +16,13 @@
 // child run, and every kind with a registered handler (model, agent today)
 // through that handler.
 //
+// After loading, a non-empty ref.Hash must match ir.Hash of the definition.
+// Step idempotency keys include the superstep sequence as well as node and
+// attempt. When several futures in one superstep fail, the first one
+// DurableContext.Select reports ends the run. A failed node handler ends the
+// superstep without running later handlers in the batch. Node handlers report
+// settled milli-points on NodeResult; other node kinds accrue no cost through
+// the host. WithMaxFanout lowers the map fan-out limit for runs the host starts.
+//
 // Status: implemented (WP-L4-04).
 package host
