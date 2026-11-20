@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -150,26 +149,11 @@ func openSQL(ctx context.Context, raw string) (config.Port, error) {
 }
 
 func openBlob(ctx context.Context, raw string) (config.Port, error) {
-	store, _, err := blob.Open(ctx, localBlobURL(raw), blob.Options{})
+	store, _, err := blob.Open(ctx, raw, blob.Options{})
 	if err != nil {
 		return nil, err
 	}
 	return store, nil
-}
-
-// localBlobURL turns file://./<path> and file://../<path> into an absolute
-// file URL. Go parses the leading dot as the URL host and the rest as an
-// absolute path, which would point at the filesystem root.
-func localBlobURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "file" || (u.Host != "." && u.Host != "..") {
-		return raw
-	}
-	abs, err := filepath.Abs(u.Host + u.Path)
-	if err != nil {
-		return raw
-	}
-	return "file://" + filepath.ToSlash(abs)
 }
 
 // openLocalSecrets accepts either a base64 master key (the gocloud form) or a

@@ -81,14 +81,16 @@ func ensureFileBlobNoTmpDir(u *url.URL) {
 
 func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 	if u.Scheme == "file" {
-		dir := u.Path
-		if dir == "" {
-			dir = u.Host
+		dir, err := fileDir(u)
+		if err != nil {
+			return nil, err
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, mapError(err)
 		}
-		u.Path = filepath.Clean(dir)
+		u.Host = ""
+		u.Path = dir
+		u.RawPath = ""
 		ensureFileBlobNoTmpDir(u)
 	}
 	b, err := blob.OpenBucket(ctx, u.String())
@@ -96,4 +98,23 @@ func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 		return nil, mapOpenError(err)
 	}
 	return b, nil
+}
+
+// fileDir returns the absolute filesystem directory of a file URL. Go parses
+// file://data/blobs with Host "data" and Path "/blobs"; fileblob uses only the
+// path, which would open /blobs. A host other than localhost is therefore the
+// first path segment and is joined with the path (CR-03).
+func fileDir(u *url.URL) (string, error) {
+	dir := u.Path
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		dir = filepath.Join(u.Host, dir)
+	}
+	if dir == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "file URL has no path", nil)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", mapError(err)
+	}
+	return abs, nil
 }
