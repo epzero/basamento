@@ -1,6 +1,6 @@
 # One entry point for agents, people and CI: `make gate`.
 # Optional tools are skipped locally when missing; CI sets GATE_STRICT=1.
-# BASE=<git ref> enables the red→green and `buf breaking` checks.
+# BASE=<git ref> enables red→green, `hygiene` spec/code separation, and `buf breaking`.
 
 GO   ?= go
 BASE ?=
@@ -25,7 +25,7 @@ define tool
 	else echo "gate: skip $(1) (not installed)"; fi
 endef
 
-.PHONY: gate tools static spec test bdd bdd-skips redgreen fmt vet build lint vuln licenses buf buf-breaking layering gomod release-check pg-prefetch
+.PHONY: gate tools static spec test bdd bdd-skips redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check pg-prefetch
 
 EP_EMBEDDED_POSTGRES ?= github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
 GATE_PG_BIN := .gate/bin/embedded-postgres
@@ -42,7 +42,7 @@ tools: ## install the pinned optional tools into $(go env GOPATH)/bin
 gate: static spec test redgreen ## everything the PR gate runs
 	@echo "gate: all checks passed"
 
-static: fmt vet build layering gomod lint vuln licenses buf ## G1
+static: fmt vet build layering hygiene gomod lint vuln licenses buf ## G1
 
 fmt:
 	@out="$$(git ls-files -co --exclude-standard '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -55,6 +55,9 @@ build:
 
 layering:
 	$(GATE) layering
+
+hygiene:
+	$(GATE) hygiene $(if $(BASE),-base '$(BASE)')
 
 gomod:
 	$(GATE) gomod

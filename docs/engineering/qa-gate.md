@@ -7,14 +7,38 @@ with `make tools`, which pins their versions in the `Makefile`.
 
 | Gate | Checks | Blocks | Where |
 | --- | --- | --- | --- |
-| **G1 Static** | `gofmt`, `go vet`, `golangci-lint`, `govulncheck` in every module root (`make vuln` / nightly **line** job, `ADR-0014`), `CGO_ENABLED=0 go build`, `gate layering` (production and test imports from `go list`, plus imports in build-excluded `.go` files under the module root, all against `layering.yaml`; `ADR-0018`; also fails when a `deny_external` or `test_only_allowed_from` key names no layer), `gate gomod` (every tracked `go.mod` names the same `go 1.M.P` line, `ADR-0014`), `go-licenses` (no forbidden or restricted licenses), `buf lint`, `buf breaking` against the base (after publication) | yes | `make gate` |
-| **G2 Spec integrity** | `gate spec lint` (format, tags, ids that match their primary requirement, traceability, no scenario on a retired requirement, expired quarantine); `gate spec lock` (approved at current text, valid identities, author ≠ reviewer, tier floors and notes, no human rejection, every human decision names a person); `gate docs` (generated module and roadmap diagrams are current) | yes | `make gate` |
+| **G1 Static** | `gofmt`, `go vet`, `golangci-lint`, `govulncheck` in every module root (`make vuln` / nightly **line** job, `ADR-0014`), `CGO_ENABLED=0 go build`, `gate layering` (production and test imports from `go list`, plus imports in build-excluded `.go` files under the module root, all against `layering.yaml`; `ADR-0018`; also fails when a `deny_external` or `test_only_allowed_from` key names no layer), `gate hygiene` (test determinism, production isolation and, with `BASE`, spec/code separation; see [Hygiene](#hygiene)), `gate gomod` (every tracked `go.mod` names the same `go 1.M.P` line, `ADR-0014`), `go-licenses` (no forbidden or restricted licenses), `buf lint`, `buf breaking` against the base (after publication) | yes | `make gate` |
+| **G2 Spec integrity** | `gate spec lint` (format, tags, ids that match their primary requirement, traceability, no scenario on a retired requirement, expired quarantine); `gate spec lock` (approved at current text, valid identities, author ≠ reviewer, tier floors and notes, no human rejection, every human decision names a person); `gate docs` (generated module and roadmap diagrams, `CODEOWNERS`, and `specs/README.md` capability statuses are current) | yes | `make gate` |
 | **G3 Behavior** | `go test -race ./...` including the BDD suite in strict mode; runtime and port conformance suites across the matrix (SQLite + Postgres, local + temporal-embedded, fileblob + S3-compatible) as they land; replay determinism over recorded histories; fuzz and property tests for the flow machine and CEL. Postgres for the SQL dialect pass: [ADR-0015](../adr/0015-how-the-pr-gate-runs-postgres.md) (`BDD_POSTGRES_URL`, embedded 16, `make pg-prefetch`). | yes | `make gate` (+ CI matrix) |
 | **G4 Red→green** | `gate redgreen -base <base>`: newly active scenarios fail at base and pass at head | yes | `make gate BASE=<ref>`: CI sets the base, agents and the lead use `BASE=main` |
 | **G5 Test strength** | Mutation testing on changed packages (e.g. gremlins) above threshold; diff coverage as a secondary signal | yes once enabled (WP-L0 follow-up); nightly before | CI |
 | **G6 System smoke** | Build the binary, start `kit serve --profile embedded` in a temp dir, run `@smoke` scenarios against the API | yes once `kit serve` exists (WP-L1-05) | CI |
 | **G7 Journeys** | `@journey` scenarios replayed by the browser runner from recordings | UI changes only | CI + nightly |
 | **G8 Review** | Agent code review by risk tier (`docs/engineering/code-review.md`): parallel finders, verified findings, important findings stop integration. High-tier changes need a person's approval before integration, P0 specs before a release (`agent-workflow.md` §5) | yes | The lead, or the pull request |
+
+## Hygiene
+
+`gate hygiene` enforces the mechanical rules before review:
+
+- **Test determinism.** `*_test.go` files and fake packages from
+  `layering.yaml`'s `test_only` (for example `core/coretest`) take time from
+  `core/coretest`: no `time.Now`, `time.Since`, `time.Until`, `time.Sleep`,
+  `time.After`, `time.AfterFunc`, `time.NewTimer`, `time.NewTicker`,
+  `time.Tick`, `crypto/rand` or the global `math/rand` functions.
+  `context.WithTimeout` and `context.WithDeadline` stay allowed: they read the
+  wall clock, but a test uses them only as a hang guard, never as a source of
+  time.
+- **Production isolation.** Production code does not import `testing` or
+  `testing/*`, and exports no identifier whose name matches `ForTest…`. The
+  check is by name (`ForTest`, `ForTests`, `ForTesting`), so a hook under
+  another name is still the reviewer's to find. Packages in
+  `test_only_allowed_from` (the BDD harness) are neither fakes nor production:
+  their non-test `.go` files skip both checks, so ADR-0015's `crypto/rand`
+  Postgres password and harness `ForTest` helpers are allowed.
+- **Spec/code separation**, with `-base <ref>`: a change that touches any file
+  outside `specs/` and `docs/` does not edit `specs/<capability>/design.md`
+  (`agent-workflow.md` §7.3). A design that turns out wrong or incomplete
+  during implementation goes back to the designer as a `specs-needed` ticket.
 
 Release only: `gate release-check` fails while any P0 scenario lacks a
 person's acceptance.
