@@ -466,6 +466,20 @@ func (d *fakeDC) resolveGate(name string, payload json.RawMessage) {
 	d.wake()
 }
 
+func (d *fakeDC) failManualSteps(errs map[string]error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for name, err := range errs {
+		f := d.manual[name]
+		if f == nil {
+			continue
+		}
+		f.done = true
+		f.err = err
+	}
+	d.wake()
+}
+
 func (d *fakeDC) resolveStep(name string, payload json.RawMessage, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1143,8 +1157,10 @@ func TestSuperstepFailureUsesFirstSelectResult(t *testing.T) {
 		dc.selectPrefer = prefer
 		rh := dc.startRun(h, ref, json.RawMessage(`{}`))
 		waitFor(t, dc, func(d *fakeDC) bool { return len(d.manual) == 2 })
-		dc.resolveStep("left", nil, core.NewError(core.CodeUnavailable, "left failed", nil))
-		dc.resolveStep("right", nil, core.NewError(core.CodeTimeout, "right failed", nil))
+		dc.failManualSteps(map[string]error{
+			"left":  core.NewError(core.CodeUnavailable, "left failed", nil),
+			"right": core.NewError(core.CodeTimeout, "right failed", nil),
+		})
 		dc.settle()
 		<-rh.done
 		if core.CodeOf(rh.err) != wantCode {
