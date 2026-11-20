@@ -68,46 +68,58 @@ func (f *fixture) start(t *testing.T, tenant, runID, flow string, in string) run
 	return ref
 }
 
-const spinBudget = 100_000
+// waitBound is the maximum wall-clock time a test wait may spend before the
+// hang guard fails it; waits end as soon as their condition holds.
+const waitBound = 10 * time.Second
 
-func recvWithin[T any](t *testing.T, ch <-chan T, what string) T {
+func pollUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	for i := 0; i < spinBudget; i++ {
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	for {
+		if cond() {
+			return
+		}
 		select {
-		case v := <-ch:
-			return v
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s after %v", what, waitBound)
 		default:
 			goruntime.Gosched()
 		}
 	}
-	t.Fatalf("timed out receiving %s after %d yields", what, spinBudget)
-	var zero T
-	return zero
+}
+
+func recvWithin[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	select {
+	case v := <-ch:
+		return v
+	case <-ctx.Done():
+		t.Fatalf("timed out receiving %s after %v", what, waitBound)
+		var zero T
+		return zero
+	}
 }
 
 func waitGateTimeouts(t *testing.T, r *run, want int32) {
 	t.Helper()
-	for i := 0; i < spinBudget; i++ {
-		if got := r.gateTimeouts.Load(); got == want {
-			return
-		}
-		goruntime.Gosched()
-	}
-	t.Fatalf("gate timeout helpers = %d, want %d after %d yields", r.gateTimeouts.Load(), want, spinBudget)
+	pollUntil(t, fmt.Sprintf("gate timeout helpers = %d", want), func() bool {
+		return r.gateTimeouts.Load() == want
+	})
 }
 
-// waitOn waits for ch to close, yielding until the liveness budget is exhausted.
+// waitOn waits for ch to close or send.
 func waitOn(t *testing.T, what string, ch <-chan struct{}) {
 	t.Helper()
-	for i := 0; i < spinBudget; i++ {
-		select {
-		case <-ch:
-			return
-		default:
-			goruntime.Gosched()
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for %s after %v", what, waitBound)
 	}
-	t.Fatalf("timed out waiting for %s after %d yields", what, spinBudget)
 }
 
 func (f *fixture) state(t *testing.T, tenant, runID string) string {
@@ -119,15 +131,17 @@ func (f *fixture) state(t *testing.T, tenant, runID string) string {
 	return status.State
 }
 
-// waitState waits for a run to reach a state by watching its completion
-// channel, not by polling.
+// waitState waits for a run to reach a state by blocking on its wake channel.
 func (f *fixture) waitState(t *testing.T, tenant, runID, want string) {
 	t.Helper()
 	target := f.rt.lookup(core.TenantID(tenant), runID)
 	if target == nil {
 		t.Fatalf("run %s not found", runID)
 	}
-	for i := 0; i < spinBudget; i++ {
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	for {
+		wake := target.wake()
 		target.mu.Lock()
 		state := target.state
 		target.mu.Unlock()
@@ -135,15 +149,14 @@ func (f *fixture) waitState(t *testing.T, tenant, runID, want string) {
 			return
 		}
 		select {
-		case <-target.wake():
-		default:
-			goruntime.Gosched()
+		case <-wake:
+		case <-ctx.Done():
+			target.mu.Lock()
+			still := target.state
+			target.mu.Unlock()
+			t.Fatalf("timed out waiting for run %s to reach %s (still %s) after %v", runID, want, still, waitBound)
 		}
 	}
-	target.mu.Lock()
-	still := target.state
-	target.mu.Unlock()
-	t.Fatalf("timed out waiting for run %s to reach %s (still %s)", runID, want, still)
 }
 
 func (f *fixture) close(t *testing.T) {
