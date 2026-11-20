@@ -106,9 +106,9 @@ type fakeDC struct {
 	checks       []runtime.SnapshotRef
 	nextID       int
 	instant      bool
-	stepRun       map[string]int
-	childRun      map[string]scripted
-	selectPrefer  int
+	stepRun      map[string]int
+	childRun     map[string]scripted
+	selectPrefer int
 }
 
 type timedFuture struct {
