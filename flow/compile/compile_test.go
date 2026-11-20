@@ -116,6 +116,8 @@ func TestCompileRejectsMapOverThatDoesNotTypeCheck(t *testing.T) {
 	node.Kind = "map"
 	node.Spec = json.RawMessage(`{"over":"state.nope","node":"impl"}`)
 	f.Nodes["check"] = node
+	f.Nodes["impl"] = flow.Node{Kind: "task"}
+	f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
 	requireInvalid(t, errOf(t, f), `node "check" map over`, "nope")
 }
 
@@ -187,6 +189,10 @@ func TestCompileAcceptsGateAcceptIfAndMapOver(t *testing.T) {
 		node.Kind = spec.kind
 		node.Spec = json.RawMessage(spec.spec)
 		f.Nodes["check"] = node
+		if spec.kind == "map" {
+			f.Nodes["impl"] = flow.Node{Kind: "task"}
+			f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
+		}
 		if _, err := Compile(f); err != nil {
 			t.Fatalf("%s spec %s: %v", spec.kind, spec.spec, err)
 		}
@@ -397,7 +403,7 @@ func TestDocumentedExampleCompiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the documented example does not compile: %v", err)
 	}
-	if c.Hash() == "" || len(c.IR().Nodes) != 5 {
+	if c.Hash() == "" || len(c.IR().Nodes) != 6 {
 		t.Fatalf("compiled the documented example to %d nodes", len(c.IR().Nodes))
 	}
 }

@@ -22,7 +22,7 @@ func TestStartEdgeWithConditionRejectedAtNew(t *testing.T) {
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("error %v, want invalid_argument", err)
 	}
-	if !strings.Contains(err.Error(), "the edge from START takes no condition") {
-		t.Fatalf("error %q, want START condition message", err)
+	if !strings.Contains(err.Error(), `edge "START" -> "work" takes no condition`) {
+		t.Fatalf("error %q, want START condition message naming the edge", err)
 	}
 }

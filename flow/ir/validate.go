@@ -28,8 +28,9 @@ var nodeKinds = map[string]bool{
 
 // Validate checks everything the compiler can know from the definition alone:
 // the compiler's limits, the state schema and its reducers, node names, kinds
-// and reserved names, edge endpoints, exactly one edge from START,
-// reachability and guarded cycles. Expression typing is flow/compile's job.
+// and reserved names, edge endpoints, exactly one unconditional edge from
+// START, map children the machine cannot run, reachability and guarded cycles.
+// Expression typing is flow/compile's job.
 //
 // The limits come first, so an over-limit definition is rejected before any
 // graph work and never reaches the cycle search (specs/flow-engine/design.md
@@ -57,6 +58,9 @@ func Validate(f *flow.IR) error {
 		return err
 	}
 	if err := validateEdges(f); err != nil {
+		return err
+	}
+	if err := validateMaps(f); err != nil {
 		return err
 	}
 	if err := validateReachable(f); err != nil {
@@ -198,6 +202,7 @@ func validateNodes(f *flow.IR) error {
 
 func validateEdges(f *flow.IR) error {
 	startEdges := 0
+	var startEdge flow.Edge
 	for _, edge := range f.Edges {
 		label := fmt.Sprintf("flow: edge %q -> %q", edge.From, edge.To)
 		details := map[string]any{"from": edge.From, "to": edge.To}
@@ -213,12 +218,78 @@ func validateEdges(f *flow.IR) error {
 		}
 		if edge.From == Start {
 			startEdges++
+			startEdge = edge
 		}
 	}
 	if startEdges != 1 {
 		return invalid(fmt.Sprintf("flow: flow needs exactly one edge from %q, got %d", Start, startEdges), map[string]any{"edges": startEdges})
 	}
+	// START is where a run enters, before any node has routed, so the first
+	// superstep has nothing to route on and the machine would ignore the
+	// condition (REQ-FLOW-066).
+	if startEdge.When != "" {
+		return invalid(fmt.Sprintf("flow: edge %q -> %q takes no condition", startEdge.From, startEdge.To),
+			map[string]any{"from": startEdge.From, "to": startEdge.To})
+	}
 	return nil
+}
+
+// validateMaps rejects the map definitions the machine cannot run once a run is
+// in flight (REQ-FLOW-062 to REQ-FLOW-065). Nodes are scanned in id order, so
+// two map nodes using one child always report them in the same order, and the
+// check runs before the cycle search: a guarded map child is REQ-FLOW-065, not
+// a cycle that looks bounded (design.md §2.6).
+func validateMaps(f *flow.IR) error {
+	owners := map[string]string{}
+	for _, id := range sortedKeys(f.Nodes) {
+		node := f.Nodes[id]
+		if node.Kind != "map" {
+			continue
+		}
+		child, ok := mapChild(node)
+		if !ok {
+			// A spec the compiler cannot read is reported when its
+			// expressions are checked; these five defects are not that.
+			continue
+		}
+		childNode, exists := f.Nodes[child]
+		if !exists {
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q does not exist", id, child),
+				map[string]any{"node": id, "child": child})
+		}
+		if childNode.Guard != nil {
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element", id, child),
+				map[string]any{"node": id, "child": child})
+		}
+		switch childNode.Kind {
+		case "set", "map", "parallel":
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q has kind %q, which the machine runs itself", id, child, childNode.Kind),
+				map[string]any{"node": id, "child": child, "kind": childNode.Kind})
+		}
+		if owner, ok := owners[child]; ok {
+			return invalid(fmt.Sprintf("flow: map nodes %q and %q both use child node %q", owner, id, child),
+				map[string]any{"maps": []string{owner, id}, "child": child})
+		}
+		owners[child] = id
+	}
+	return nil
+}
+
+// mapChild reads a map node's child the way flow/machine's parseMapSpec does:
+// the spec's over and node fields must both be non-empty strings. A spec that
+// does not read that way is left to the expression compiler and the machine.
+func mapChild(node flow.Node) (string, bool) {
+	var spec struct {
+		Over string `json:"over"`
+		Node string `json:"node"`
+	}
+	if len(node.Spec) == 0 || json.Unmarshal(node.Spec, &spec) != nil {
+		return "", false
+	}
+	if spec.Over == "" || spec.Node == "" {
+		return "", false
+	}
+	return spec.Node, true
 }
 
 func validateReachable(f *flow.IR) error {
