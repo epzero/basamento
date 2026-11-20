@@ -285,6 +285,24 @@ func (w *hostWorld) waitDone() error {
 	}
 }
 
+// abortInFlightRun ends a background Run left waiting (for example at "the run is
+// waiting") so the scenario goroutine cannot leak into the next scenario.
+func (w *hostWorld) abortInFlightRun() {
+	if w.done == nil {
+		return
+	}
+	select {
+	case <-w.done:
+		return
+	default:
+	}
+	if w.dc != nil {
+		w.dc.abort()
+		w.dc.waitFinished()
+	}
+	<-w.done
+}
+
 func (w *hostWorld) timePassed(_ context.Context, duration time.Duration) error {
 	if w.dc == nil || w.done == nil {
 		return nil
@@ -419,6 +437,27 @@ func (d *hostFake) markFinished() {
 }
 
 func (d *hostFake) wake() {
+	d.parked = false
+	d.cond.Broadcast()
+}
+
+func (d *hostFake) abort() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.finished = true
+	for _, f := range d.gates {
+		if f != nil && !f.done {
+			f.done = true
+			f.err = core.NewError(core.CodeCancelled, "scenario ended", nil)
+		}
+	}
+	for _, timer := range d.timers {
+		timer.future.done = true
+		if timer.gate {
+			timer.future.err = core.NewError(core.CodeCancelled, "scenario ended", nil)
+		}
+	}
+	d.timers = nil
 	d.parked = false
 	d.cond.Broadcast()
 }
@@ -815,6 +854,11 @@ func declareReplayFlow(ctx context.Context, first, firstSpec, second, duration, 
 // --- step definitions ------------------------------------------------------
 
 func registerFlowHost(sc *godog.ScenarioContext) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Host.abortInFlightRun()
+		return ctx, nil
+	})
+
 	sc.Step(`^a recording fake durable context$`, func(ctx context.Context) error {
 		w := world(ctx).Host
 		w.dc = newHostFake()
