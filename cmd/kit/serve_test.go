@@ -450,3 +450,31 @@ func TestLoadOrCreateKeyLeavesNoTemporaryFile(t *testing.T) {
 		t.Fatalf("directory holds %v, want only secrets.key", entries)
 	}
 }
+
+func TestLoadOrCreateKeyTightensAnExistingDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "secrets.key")
+	if _, err := loadOrCreateKey(path); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("key directory mode = %o, want 700", got)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("key file mode = %o, want 600", got)
+	}
+}

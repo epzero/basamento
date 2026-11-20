@@ -363,6 +363,11 @@ func loadOrCreateKey(path string) ([]byte, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, invalidSecretKey("secrets key directory could not be created")
 	}
+	// MkdirAll keeps the mode of a directory that already exists, so tighten
+	// it before the key is written, as platform/secrets does.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, invalidSecretKey("secrets key directory could not be secured")
+	}
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, core.NewError(core.CodeInternal, "secrets key could not be generated", nil)
