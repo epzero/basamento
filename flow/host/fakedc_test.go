@@ -399,10 +399,8 @@ func (d *fakeDC) Await(spec runtime.GateSpec) runtime.Future {
 
 func (d *fakeDC) Select(futures ...runtime.Future) (int, error) {
 	d.mu.Lock()
-	d.selectCalls++
-	d.mu.Unlock()
-	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.selectCalls++
 	for {
 		var ready []int
 		for i, candidate := range futures {
