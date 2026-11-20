@@ -35,7 +35,8 @@
 // spec's over expression to an array and runs the node named by its node field
 // once per element, carrying the element as the command input and the
 // one-based index as the attempt, up to DefaultMaxFanout (10 000) items per
-// superstep; the host may lower the limit with WithMaxFanout. max_parallel is
+// superstep; the host may lower the limit with WithMaxFanout but not raise it
+// above DefaultMaxFanout. max_parallel is
 // the host's throttle on how many map children run at once, not a cap on fan-out.
 // A map child must not carry a guard (the machine rejects it at New): guards
 // count routed nodes, but a map child is invoked once per element without

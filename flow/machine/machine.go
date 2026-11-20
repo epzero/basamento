@@ -350,12 +350,12 @@ func (m *Machine) expand(s *flow.Snapshot, targets []string) ([]flow.Step, *flow
 		if !ok {
 			return nil, nil, invalid(fmt.Sprintf("flow: node %q does not exist", id), map[string]any{"node": id})
 		}
-		skip, stopped, err := m.checkGuard(s, id, node)
+		skip, stopped, trip, err := m.checkGuard(s, id, node)
 		if err != nil {
 			return nil, nil, err
 		}
 		if stopped {
-			return nil, guardFailure(id, node), nil
+			return nil, guardFailure(id, node, s.Cost, trip), nil
 		}
 		if skip {
 			steps = append(steps, flow.Step{Node: id, Done: true, Skip: true})
@@ -500,31 +500,39 @@ func (m *Machine) edgeTarget(from, to string) ([]string, *flow.Command) {
 	return []string{to}, nil
 }
 
-func (m *Machine) checkGuard(s *flow.Snapshot, id string, node flow.Node) (skip, stopped bool, err error) {
+type guardTrip int
+
+const (
+	guardTripNone guardTrip = iota
+	guardTripVisit
+	guardTripCost
+)
+
+func (m *Machine) checkGuard(s *flow.Snapshot, id string, node flow.Node) (skip, stopped bool, trip guardTrip, err error) {
 	guard := node.Guard
 	if guard == nil {
-		return false, false, nil
+		return false, false, guardTripNone, nil
 	}
 	if condition := m.guards[id]; condition != nil {
 		state, err := decodedState(s)
 		if err != nil {
-			return false, false, err
+			return false, false, guardTripNone, err
 		}
 		holds, err := m.evalBool(condition, fmt.Sprintf("node %q guard", id), state, s)
 		if err != nil {
-			return false, false, err
+			return false, false, guardTripNone, err
 		}
 		if !holds {
-			return true, false, nil
+			return true, false, guardTripNone, nil
 		}
 	}
 	if guard.MaxVisits > 0 && s.Visit[id]+1 > guard.MaxVisits {
-		return false, true, nil
+		return false, true, guardTripVisit, nil
 	}
 	if guard.CostMpts > 0 && s.Cost >= guard.CostMpts {
-		return false, true, nil
+		return false, true, guardTripCost, nil
 	}
-	return false, false, nil
+	return false, false, guardTripNone, nil
 }
 
 func (m *Machine) fanout(id string) []string {
@@ -772,13 +780,13 @@ func failEndpoint(from string) *flow.Command {
 }
 
 func fanoutFailure(id string, count, limit int) *flow.Command {
-	message := fmt.Sprintf("flow: node %q map over has %d items, limit %d", id, count, limit)
+	message := fmt.Sprintf("flow: node %q: fan-out limit %d items exceeded: %d items", id, limit, count)
 	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
 	return &flow.Command{Type: "fail", Node: id, Input: payload}
 }
 
 func pureSuperstepFailure(id string, limit int64) *flow.Command {
-	message := fmt.Sprintf("flow: node %q: no declared bound can be counted for the cycle through this node (%d consecutive pure supersteps, limit %d)", id, limit, limit)
+	message := fmt.Sprintf("flow: node %q: no declared bound can be counted for the cycle through this node (limit %d consecutive pure supersteps)", id, limit)
 	payload, _ := json.Marshal(map[string]any{
 		"code":    string(core.CodeBudgetExceeded),
 		"message": message,
@@ -814,13 +822,15 @@ func computePureSuperstepLimit(def *flow.IR, floor int) int64 {
 	return limit
 }
 
-func guardFailure(id string, node flow.Node) *flow.Command {
-	message := fmt.Sprintf("flow: node %q reached its guard", id)
-	if node.Guard != nil && node.Guard.MaxVisits > 0 {
-		message = fmt.Sprintf("flow: node %q reached its guard of %d visits", id, node.Guard.MaxVisits)
-	}
-	if node.Guard != nil && node.Guard.CostMpts > 0 && node.Guard.MaxVisits == 0 {
-		message = fmt.Sprintf("flow: node %q reached its guard of %d milli-points", id, node.Guard.CostMpts)
+func guardFailure(id string, node flow.Node, settledCost int64, trip guardTrip) *flow.Command {
+	var message string
+	switch trip {
+	case guardTripVisit:
+		message = fmt.Sprintf("flow: node %q: visit budget %d reached", id, node.Guard.MaxVisits)
+	case guardTripCost:
+		message = fmt.Sprintf("flow: node %q: cost budget %d milli-points reached with %d settled", id, node.Guard.CostMpts, settledCost)
+	default:
+		message = fmt.Sprintf("flow: node %q reached its guard", id)
 	}
 	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
 	return &flow.Command{Type: "fail", Node: id, Input: payload}

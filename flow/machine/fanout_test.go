@@ -63,6 +63,55 @@ func TestWithMaxFanoutRejectsZero(t *testing.T) {
 	}
 }
 
+func TestWithMaxFanoutNeverRaisesAboveDefault(t *testing.T) {
+	def := mapFanoutFlow(DefaultMaxFanout + 1)
+	m, err := New(def, WithMaxFanout(DefaultMaxFanout*2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, commands, err := m.Start(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0].Type != "fail" {
+		t.Fatalf("commands %+v, want fail over default limit", commands)
+	}
+	if code := commandCode(t, commands[0]); code != string(core.CodeBudgetExceeded) {
+		t.Fatalf("code %q, want budget_exceeded", code)
+	}
+}
+
+func TestWithMaxFanoutLowersBelowDefault(t *testing.T) {
+	t.Run("six items fail", func(t *testing.T) {
+		def := mapFanoutFlow(6)
+		m, err := New(def, WithMaxFanout(5))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, commands, err := m.Start(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(commands) != 1 || commands[0].Type != "fail" {
+			t.Fatalf("commands %+v, want fail", commands)
+		}
+	})
+	t.Run("five items fan out", func(t *testing.T) {
+		def := mapFanoutFlow(5)
+		m, err := New(def, WithMaxFanout(5))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, commands, err := m.Start(json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(commands) != 5 {
+			t.Fatalf("commands %d, want 5", len(commands))
+		}
+	})
+}
+
 func mapFanoutFlow(n int) *flow.IR {
 	items := make([]int, n)
 	for i := range items {
