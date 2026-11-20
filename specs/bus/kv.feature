@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
+@wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: Read, put, swap, create and delete KV entries
   The KV store keeps small values such as cursors, locks and presence. Every
   change gives the entry a new revision, and a swap or a create succeeds only
