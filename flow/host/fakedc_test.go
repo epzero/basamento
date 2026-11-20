@@ -55,9 +55,13 @@ type future struct {
 	result json.RawMessage
 	err    error
 	dc     *fakeDC
+	onGet  func()
 }
 
 func (f *future) Get(out any) error {
+	if f.onGet != nil {
+		f.onGet()
+	}
 	f.dc.mu.Lock()
 	for !f.done {
 		f.dc.parked = true
@@ -105,6 +109,9 @@ type fakeDC struct {
 	childRun     map[string]scripted
 	// selectPrefer is the index Select returns when that future is ready; the default 0 is the first-ready behavior.
 	selectPrefer int
+	ctx          context.Context
+	selectCalls  int
+	onStepGet    map[string]func()
 }
 
 type timedFuture struct {
@@ -123,7 +130,14 @@ func newFakeDC() *fakeDC {
 		childRun: map[string]scripted{},
 	}
 	d.cond = sync.NewCond(&d.mu)
+	d.ctx = context.Background()
 	return d
+}
+
+func (d *fakeDC) bindContext(ctx context.Context) {
+	d.mu.Lock()
+	d.ctx = ctx
+	d.mu.Unlock()
 }
 
 func replayFakeDC(journal []journalEntry) *fakeDC {
@@ -202,7 +216,14 @@ func (d *fakeDC) matchStep(e journalEntry, name string, in json.RawMessage, o ru
 	return nil
 }
 
-func (d *fakeDC) Context() context.Context { return context.Background() }
+func (d *fakeDC) Context() context.Context {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ctx == nil {
+		return context.Background()
+	}
+	return d.ctx
+}
 func (d *fakeDC) Now() time.Time {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -257,6 +278,9 @@ func (d *fakeDC) Step(name string, in any, o runtime.StepOptions) runtime.Future
 	var execErr error
 	if script.manual {
 		f := &future{dc: d}
+		if d.onStepGet != nil {
+			f.onGet = d.onStepGet[name]
+		}
 		d.manual[name] = f
 		d.record(call{kind: "step", name: name, input: raw, stepOpts: o})
 		d.appendJournal(journalEntry{kind: "step", name: name, input: append(json.RawMessage(nil), raw...), stepOpts: o})
@@ -371,6 +395,9 @@ func (d *fakeDC) Await(spec runtime.GateSpec) runtime.Future {
 }
 
 func (d *fakeDC) Select(futures ...runtime.Future) (int, error) {
+	d.mu.Lock()
+	d.selectCalls++
+	d.mu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for {

@@ -161,7 +161,10 @@ each handler's settled milli-points into `node_completed` and `node_failed`
 events, and may lower the map fan-out limit with `WithMaxFanout` (values above
 `DefaultMaxFanout` are clamped; values below 1 make every run fail with
 `invalid_argument` before any durable call, without error from the option
-itself).
+itself). It checks the run context before each superstep, each handler call
+and each wait on futures; when the context is done the run ends with
+`cancelled`, or with `timeout` when the deadline has passed, which is a run
+outcome and not a node failure.
 
 | Node kinds | Run by |
 | --- | --- |

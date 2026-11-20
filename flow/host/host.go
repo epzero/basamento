@@ -123,6 +123,9 @@ func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.Ra
 		if len(commands) == 0 {
 			return nil, core.NewError(core.CodeInternal, "flow host: machine returned no command", map[string]any{"flow": def.Name})
 		}
+		if err := runContextError(dc.Context()); err != nil {
+			return nil, err
+		}
 		outcome, err := h.superstep(dc, m, def, ref, &snapshot, commands)
 		if err != nil {
 			return nil, err
@@ -274,6 +277,9 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []flow.Command) ([]flow.Event, error) {
 	events := make([]flow.Event, 0, len(commands))
 	for _, command := range commands {
+		if err := runContextError(dc.Context()); err != nil {
+			return nil, err
+		}
 		node := def.Nodes[command.Node]
 		handler, ok := h.handlers[node.Kind]
 		if !ok || handler == nil {
@@ -303,6 +309,9 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 // (REQ-FLOW-035).
 func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *flow.Snapshot, pending []pendingCall) (outcome, error) {
 	for len(pending) > 0 {
+		if err := runContextError(dc.Context()); err != nil {
+			return outcome{}, err
+		}
 		futures := make([]runtime.Future, len(pending))
 		for i := range pending {
 			futures[i] = pending[i].future
@@ -396,7 +405,7 @@ func (h *Host) runNode(dc runtime.DurableContext, def *flow.IR, ref runtime.Flow
 		}
 		return pendingCall{
 			command: command,
-			future:  dc.Child(child, jsonArgument(command.Input), runtime.ChildOptions{ID: dc.NewID("subflow"), ParentClose: "terminate"}),
+			future: dc.Child(child, jsonArgument(command.Input), runtime.ChildOptions{ID: dc.NewID("subflow"), ParentClose: "terminate"}),
 			event:   "node_completed",
 		}, nil
 	default:
