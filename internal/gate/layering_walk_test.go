@@ -97,3 +97,36 @@ func TestParseGoImportsTable(t *testing.T) {
 		t.Fatalf("backtick: got %v, want %v", got, want)
 	}
 }
+
+func TestDirPathSkippedSymlinkRoot(t *testing.T) {
+	real := t.TempDir()
+	pkg := filepath.Join(real, "pkg")
+	hidden := filepath.Join(real, ".hidden")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if dirPathSkipped(link, filepath.Join(real, "pkg")) {
+		t.Fatal("pkg under real path must not be skipped when root is symlink to real")
+	}
+	if !dirPathSkipped(link, filepath.Join(real, ".hidden")) {
+		t.Fatal("dot-prefixed directory must be skipped")
+	}
+	outside := t.TempDir()
+	if dirPathSkipped(link, outside) {
+		t.Fatal("directory outside module root must not be treated as skipped")
+	}
+	if dirPathSkipped(real, real) {
+		t.Fatal("root equal to dir must not skip")
+	}
+	missing := filepath.Join(real, "nope")
+	if dirPathSkipped(link, missing) {
+		t.Fatal("non-existent dir: cleanAbs fails so skip is false (package not checked via rel)")
+	}
+}
