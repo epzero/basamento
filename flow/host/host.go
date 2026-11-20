@@ -405,8 +405,10 @@ func (h *Host) runNode(dc runtime.DurableContext, def *flow.IR, ref runtime.Flow
 		}
 		return pendingCall{
 			command: command,
+			// REQ-RT-015: terminate — only this run needs the child output; a still-running
+			// child becomes terminated when the parent closes.
 			future: dc.Child(child, jsonArgument(command.Input), runtime.ChildOptions{ID: dc.NewID("subflow"), ParentClose: "terminate"}),
-			event:   "node_completed",
+			event:  "node_completed",
 		}, nil
 	default:
 		return pendingCall{}, core.NewError(core.CodeUnsupported,

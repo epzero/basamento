@@ -42,6 +42,9 @@ type journalEntry struct {
 	err       error
 }
 
+// scripted configures a step by name. failTimes without err bumps stepRun only,
+// simulating extra failed attempts while this execution returns result with no
+// error and journals a single successful entry.
 type scripted struct {
 	result    json.RawMessage
 	err       error

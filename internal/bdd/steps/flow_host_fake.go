@@ -41,6 +41,10 @@ type hostJournalEntry struct {
 	err       error
 }
 
+// hostScript configures a step (or child:*) by name. failTimes with err returns
+// err on the first failTimes executions, then result on later ones. failTimes
+// without err only raises executed[name] so scenarios can pretend earlier failed
+// attempts happened while this call still succeeds and journals once.
 type hostScript struct {
 	result    json.RawMessage
 	err       error
@@ -373,6 +377,8 @@ func (d *hostFake) Await(spec runtime.GateSpec) runtime.Future {
 		d.timers = append(d.timers, hostTimer{deadline: d.now.Add(spec.Timeout), future: f, gate: true})
 	}
 	d.record(hostCall{kind: "gate", gate: spec})
+	// One journal entry per Await while recording; replay advances journalIndex and
+	// does not append again.
 	d.appendJournal(hostJournalEntry{kind: "gate", gate: spec})
 	return f
 }

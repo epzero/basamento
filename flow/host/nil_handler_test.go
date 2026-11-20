@@ -27,10 +27,10 @@ type nilTestDC struct {
 	steps int32
 }
 
-func (d *nilTestDC) Context() context.Context                      { return context.Background() }
-func (d *nilTestDC) Now() time.Time                                  { return time.Unix(1, 0).UTC() }
-func (d *nilTestDC) NewID(string) string                             { return "id-1" }
-func (d *nilTestDC) Rand(string) *rand.Rand                          { return rand.New(rand.NewPCG(1, 2)) }
+func (d *nilTestDC) Context() context.Context { return context.Background() }
+func (d *nilTestDC) Now() time.Time           { return time.Unix(1, 0).UTC() }
+func (d *nilTestDC) NewID(string) string      { return "id-1" }
+func (d *nilTestDC) Rand(string) *rand.Rand   { return rand.New(rand.NewPCG(1, 2)) }
 func (d *nilTestDC) Step(string, any, runtime.StepOptions) runtime.Future {
 	atomic.AddInt32(&d.steps, 1)
 	return &nilTestFuture{}
@@ -38,17 +38,17 @@ func (d *nilTestDC) Step(string, any, runtime.StepOptions) runtime.Future {
 func (d *nilTestDC) Child(runtime.FlowRef, any, runtime.ChildOptions) runtime.Future {
 	return &nilTestFuture{}
 }
-func (d *nilTestDC) Sleep(time.Duration) runtime.Future              { return &nilTestFuture{} }
-func (d *nilTestDC) Await(runtime.GateSpec) runtime.Future             { return &nilTestFuture{} }
-func (d *nilTestDC) Select(...runtime.Future) (int, error)           { return 0, nil }
-func (d *nilTestDC) Emit(runtime.ProgressEvent) error                  { return nil }
-func (d *nilTestDC) Checkpoint(runtime.SnapshotRef) error              { return nil }
-func (d *nilTestDC) Capabilities() runtime.Caps                      { return runtime.Caps{} }
+func (d *nilTestDC) Sleep(time.Duration) runtime.Future    { return &nilTestFuture{} }
+func (d *nilTestDC) Await(runtime.GateSpec) runtime.Future { return &nilTestFuture{} }
+func (d *nilTestDC) Select(...runtime.Future) (int, error) { return 0, nil }
+func (d *nilTestDC) Emit(runtime.ProgressEvent) error      { return nil }
+func (d *nilTestDC) Checkpoint(runtime.SnapshotRef) error  { return nil }
+func (d *nilTestDC) Capabilities() runtime.Caps            { return runtime.Caps{} }
 
 type nilTestFuture struct{}
 
-func (f *nilTestFuture) Get(any) error  { return nil }
-func (f *nilTestFuture) Ready() bool    { return true }
+func (f *nilTestFuture) Get(any) error { return nil }
+func (f *nilTestFuture) Ready() bool   { return true }
 
 func agentOnlyFlow() *flow.IR {
 	return &flow.IR{

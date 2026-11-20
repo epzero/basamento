@@ -15,7 +15,7 @@ import (
 )
 
 func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
-	// FLOW-032: gates.
+	// FLOW-032 (REQ-FLOW-032): gates.
 	sc.Step(`^a flow whose node "([^"]*)" of kind "gate" has the node spec (\{.*\})$`,
 		func(ctx context.Context, node, spec string) error {
 			w := world(ctx).Host
@@ -52,7 +52,7 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 			return nil
 		})
 
-	// FLOW-033: subflows.
+	// FLOW-033 (REQ-FLOW-033): subflows.
 	sc.Step(`^a flow whose node "([^"]*)" of kind "subflow" has the node spec (\{(?:[^{}]|\{[^{}]*\})*\})$`,
 		func(ctx context.Context, node, spec string) error {
 			w := world(ctx).Host
@@ -89,7 +89,7 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 		return fmt.Errorf("run did not start child %q", name)
 	})
 
-	// FLOW-035: failures.
+	// FLOW-035 (REQ-FLOW-035): failures.
 	sc.Step(`^a flow whose node "([^"]*)" of kind "([^"]*)" has a registered node handler and precedes node "([^"]*)" of kind "([^"]*)" with node spec (\{.*\})$`,
 		func(ctx context.Context, first, firstKind, second, secondKind, spec string) error {
 			w := world(ctx).Host
@@ -151,7 +151,7 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 			return w.settle()
 		})
 
-	// FLOW-036: pure nodes.
+	// FLOW-036 (REQ-FLOW-036): pure nodes.
 	sc.Step(`^a flow routing node "([^"]*)" of kind "set" to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)" when "([^"]*)", otherwise to node "([^"]*)" of kind "set" setting "([^"]*)" to "([^"]*)"$`,
 		func(ctx context.Context, from, first, firstKey, firstValue, when, second, secondKey, secondValue string) error {
 			w := world(ctx).Host
@@ -288,7 +288,7 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	// FLOW-038: a set node completes the run.
+	// FLOW-038 (REQ-FLOW-038): a set node completes the run.
 	sc.Step(`^a flow whose node "([^"]*)" of kind "set" sets "([^"]*)" to "([^"]*)"$`,
 		func(ctx context.Context, node, key, value string) error {
 			w := world(ctx).Host
@@ -299,7 +299,7 @@ func registerFlowHostStepRuntime(sc *godog.ScenarioContext) {
 			return nil
 		})
 
-	// FLOW-044: parallel timers.
+	// FLOW-044 (REQ-FLOW-044): parallel timers.
 	sc.Step(`^a flow that runs node "([^"]*)" of kind "wait" for "([^"]*)" and node "([^"]*)" of kind "wait" for "([^"]*)" in parallel$`,
 		func(ctx context.Context, first, firstDuration, second, secondDuration string) error {
 			w := world(ctx).Host
