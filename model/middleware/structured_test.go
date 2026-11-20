@@ -182,6 +182,9 @@ func TestLocalRepairReturnsTheRepairedJSON(t *testing.T) {
 	if len(res.Attempts) != 2 || (*rungs)[0] != structured.RungJSONMode {
 		t.Fatalf("attempts = %d, rungs = %v, want 2 and JSON mode", len(res.Attempts), *rungs)
 	}
+	if res.Result.State != model.StateSucceeded {
+		t.Fatalf("result state = %q, want succeeded", res.Result.State)
+	}
 	if res.Attempts[1].Rung != structured.RungLocalRepair || !res.Attempts[1].LocalRepair {
 		t.Fatalf("attempt 2 = %+v, want the local repair", res.Attempts[1])
 	}

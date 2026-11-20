@@ -84,7 +84,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 				e.log(rec)
 				e.recordAttempt(rec)
 				e.appendAttempt(rec)
-				return e.done(model.Result{}, answer, nil)
+				return e.done(model.Result{State: model.StateSucceeded}, answer, nil)
 			}
 			rec.Outcome = OutcomeFailed
 			rec.Code = core.CodeInvalidArgument
