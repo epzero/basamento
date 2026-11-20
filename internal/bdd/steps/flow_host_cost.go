@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -183,8 +184,29 @@ func accruedCostAtObserverHandler(w *hostWorld, observer string) (int64, error) 
 		if call.node != observer {
 			continue
 		}
-		var asInt int64
-		if err := json.Unmarshal(call.input, &asInt); err != nil {
+		trimmed := bytes.TrimSpace(call.input)
+		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("{}")) {
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
+		}
+		dec := json.NewDecoder(bytes.NewReader(call.input))
+		dec.UseNumber()
+		var raw any
+		if err := dec.Decode(&raw); err != nil {
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
+		}
+		if raw == nil {
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
+		}
+		num, ok := raw.(json.Number)
+		if !ok {
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
+		}
+		lit := num.String()
+		if strings.ContainsAny(lit, ".eE") {
+			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
+		}
+		asInt, err := num.Int64()
+		if err != nil {
 			return 0, fmt.Errorf("handler input %q is not the run cost", string(call.input))
 		}
 		return asInt, nil
