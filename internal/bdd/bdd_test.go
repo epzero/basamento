@@ -1,6 +1,7 @@
 package bdd
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -70,22 +71,14 @@ func scenarioPaths() []string {
 }
 
 // bddGateProfiles returns dialect profiles to run in the component gate for one tag filter pass.
-func bddGateProfiles(postgresConfigured bool) []string {
-	out := []string{"embedded"}
-	if postgresConfigured {
-		out = append(out, "cloud")
-	}
-	return out
+func bddGateProfiles() []string {
+	return []string{"embedded", "cloud"}
 }
 
 func TestBDDGateProfiles(t *testing.T) {
-	got := bddGateProfiles(false)
-	if len(got) != 1 || got[0] != "embedded" {
-		t.Fatalf("without postgres: %v", got)
-	}
-	got = bddGateProfiles(true)
-	if len(got) != 2 || got[1] != "cloud" {
-		t.Fatalf("with postgres: %v", got)
+	got := bddGateProfiles()
+	if len(got) != 2 || got[0] != "embedded" || got[1] != "cloud" {
+		t.Fatalf("profiles: %v", got)
 	}
 }
 
@@ -93,34 +86,54 @@ func TestBDDGateProfiles(t *testing.T) {
 // pending steps fail. BDD_TAGS narrows the run (used by `gate redgreen`).
 // BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
+	sqltest.ResetSkipCounts()
+	failed := false
+	defer func() {
+		if err := WriteBDDReport(failed); err != nil {
+			t.Errorf("bdd report: %v", err)
+		}
+	}()
+	defer func() { _ = sqltest.ClosePostgres() }()
+
+	if err := sqltest.InitPostgres(context.Background()); err != nil {
+		failed = true
+		t.Fatal(err)
+	}
+	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
+		failed = true
+	}
+	enforceStrictNoPostgresSkips(t)
+
 	tags := scenarioTags()
-	configured := sqltest.PostgresConfigured()
 
-	if os.Getenv("BDD_PATHS") != "" {
-		for _, profile := range bddGateProfiles(configured) {
-			runSuite(t, tags, profile)
-		}
-		if !configured {
-			t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
-		}
-		return
-	}
-
+	// BDD_PATHS narrows the run to one subtree (blob conformance). The bus
+	// backend suites below always target specs/bus, so a narrowed run leaves
+	// them out; BDD_BUS_BACKEND restricts the run to one bus implementation.
+	narrowed := os.Getenv("BDD_PATHS") != ""
 	oneBus := os.Getenv("BDD_BUS_BACKEND")
-	if oneBus == "" || oneBus == "fake" {
-		for _, profile := range bddGateProfiles(configured) {
+	if narrowed || oneBus == "" || oneBus == "fake" {
+		for _, profile := range bddGateProfiles() {
 			runSuite(t, tags, profile)
+			if t.Failed() {
+				failed = true
+			}
 		}
 	}
-	for _, backend := range []string{"embedded", "cloud"} {
-		if oneBus != "" && oneBus != backend {
-			continue
+	if !narrowed {
+		for _, backend := range []string{"embedded", "cloud"} {
+			if oneBus != "" && oneBus != backend {
+				continue
+			}
+			runBusBackendSuite(t, tags, backend)
+			if t.Failed() {
+				failed = true
+			}
 		}
-		runBusBackendSuite(t, tags, backend)
 	}
-	if !configured {
-		t.Log("gate: skip BDD postgres pass (BDD_POSTGRES_URL not set)")
+	if sqltest.GateStrict() && sqltest.SkipTotal() > 0 {
+		failed = true
 	}
+	enforceStrictNoPostgresSkips(t)
 }
 
 func runBusBackendSuite(t *testing.T, tags, backend string) {
@@ -149,38 +162,23 @@ func runSuite(t *testing.T, tags, profile string) {
 	if profile != "" {
 		name = "basamento-" + profile
 	}
-	if profile != "" {
-		t.Run(profile, func(t *testing.T) {
+	t.Run(profile, func(t *testing.T) {
+		if profile != "" {
 			t.Setenv("BDD_SQL_PROFILE", profile)
-			suite := godog.TestSuite{
-				Name:                name,
-				ScenarioInitializer: steps.Initialize,
-				Options: &godog.Options{
-					Format:   "pretty",
-					Paths:    scenarioPaths(),
-					Tags:     tags,
-					Strict:   true,
-					TestingT: t,
-				},
-			}
-			if code := suite.Run(); code != 0 {
-				t.Fatalf("godog exited with status %d", code)
-			}
-		})
-		return
-	}
-	suite := godog.TestSuite{
-		Name:                name,
-		ScenarioInitializer: steps.Initialize,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    scenarioPaths(),
-			Tags:     tags,
-			Strict:   true,
-			TestingT: t,
-		},
-	}
-	if code := suite.Run(); code != 0 {
-		t.Fatalf("godog exited with status %d", code)
-	}
+		}
+		suite := godog.TestSuite{
+			Name:                name,
+			ScenarioInitializer: steps.Initialize,
+			Options: &godog.Options{
+				Format:   "pretty",
+				Paths:    scenarioPaths(),
+				Tags:     tags,
+				Strict:   true,
+				TestingT: t,
+			},
+		}
+		if code := suite.Run(); code != 0 {
+			t.Fatalf("godog exited with status %d", code)
+		}
+	})
 }

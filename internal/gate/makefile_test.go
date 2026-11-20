@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres/v2"
 )
 
 func makefileRoot(t *testing.T) string {
@@ -55,6 +57,18 @@ func TestMakefileGatePrereqsArePhony(t *testing.T) {
 	}
 }
 
+func TestMakefileRedgreenExportsHeadSupervisor(t *testing.T) {
+	body := makefileBody(t)
+	bdd := regexp.MustCompile(`(?ms)^bdd:.*?^\t.*EP_SUPERVISOR.*GATE_PG_BIN`)
+	red := regexp.MustCompile(`(?ms)^redgreen:.*?EP_SUPERVISOR.*GATE_PG_BIN`)
+	if !bdd.MatchString(body) {
+		t.Fatal("Makefile bdd: must export EP_SUPERVISOR when GATE_PG_BIN is executable")
+	}
+	if !red.MatchString(body) {
+		t.Fatal("Makefile redgreen: must export EP_SUPERVISOR when GATE_PG_BIN is executable (G4 parity)")
+	}
+}
+
 func TestMakefileVulnRecipeFailsClosed(t *testing.T) {
 	body := makefileBody(t)
 	if regexp.MustCompile(`module-roots\s*\|`).MatchString(body) {
@@ -62,6 +76,42 @@ func TestMakefileVulnRecipeFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(body, `roots="$$($(GATE) module-roots)" || exit 1`) {
 		t.Fatal("Makefile vuln: must capture module-roots exit status before scanning")
+	}
+}
+
+// TestMakefilePrefetchUsesPinnedBundle pins ADR-0015's single source for the
+// bundle: pg-prefetch must fetch the version the driver starts (V16), so the
+// strict error's "run make pg-prefetch" remedy cannot fetch a stale bundle.
+func TestMakefilePrefetchUsesPinnedBundle(t *testing.T) {
+	body := makefileBody(t)
+	want := "--postgres-version " + string(embeddedpostgres.V16)
+	recipe := regexp.MustCompile(`(?ms)^pg-prefetch:.*?(--postgres-version \S+)`)
+	m := recipe.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("Makefile pg-prefetch: must prefetch a pinned bundle")
+	}
+	if m[1] != want {
+		t.Fatalf("Makefile pg-prefetch: prefetches %q, the driver starts %q; update the literal", m[1], want)
+	}
+}
+
+// TestWorkflowCacheKeyDerivesModulePin pins ADR-0015's cache-key row: the key
+// carries the go.mod module version, never a hand-maintained copy, so a bump
+// cannot keep matching a stale entry.
+func TestWorkflowCacheKeyDerivesModulePin(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(makefileRoot(t), ".github", "workflows", "gate.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	if !strings.Contains(body, `go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2`) {
+		t.Fatal("gate.yml: the Postgres cache key must derive its version from the go.mod pin")
+	}
+	if !regexp.MustCompile(`key: embedded-postgres-\$\{\{ env\.PG_MODULE_VERSION \}\}-`).MatchString(body) {
+		t.Fatal("gate.yml: the cache key must use the derived module version")
+	}
+	if regexp.MustCompile(`embedded-postgres-v[0-9]`).MatchString(body) {
+		t.Fatal("gate.yml: a hand-written module version in the cache key drifts from go.mod")
 	}
 }
 

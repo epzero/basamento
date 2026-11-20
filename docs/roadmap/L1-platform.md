@@ -21,7 +21,7 @@ Embedded `nats-server` with JetStream ↔ NATS cluster; replay by sequence; KV w
 ### WP-L1-04 — Secrets and payload encryption
 Depends: WP-L0-01.
 Owns: `platform/secrets`.
-`gocloud.dev/secrets` (localsecrets ↔ KMS or Vault Transit) wrapping Tink data keys; the payload encryption the runtimes use.
+`gocloud.dev/secrets` (localsecrets ↔ KMS; Vault Transit via `hashivault://` per ADR-0017, driver in its own work package) wrapping Tink data keys; the payload encryption the runtimes use.
 
 ### WP-L1-05 — Configuration, profiles and `kit serve`
 Depends: WP-L1-01, WP-L1-02, WP-L1-03, WP-L1-04.
