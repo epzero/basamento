@@ -31,7 +31,7 @@ into `DurableContext` calls and feeds results back as events.
 
 | Runtime | Use | Notes |
 | --- | --- | --- |
-| `local` | tests, CLI, short interactive runs | Goroutines and an in-memory journal. Not durable by design. |
+| `local` | tests, CLI, short interactive runs | Goroutines and an in-memory journal. Not durable by design; finished runs and idempotency keys are never evicted—the process is expected to be short-lived. |
 | `temporal` | default for both profiles | `Step` = activity, `Await` = Update (validated synchronously), `Checkpoint` = ContinueAsNew, polyglot task queues. The embedded server follows `temporalio/cli` `internal/devserver`: `temporal.NewServer`, SQLite via `modernc.org/sqlite`, one history shard. It lives in its own Go module so library users do not inherit the server's dependencies. |
 
 `Caps` (durable, sync gate updates, ContinueAsNew, polyglot queues) lets callers
