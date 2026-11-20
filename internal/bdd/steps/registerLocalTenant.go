@@ -244,7 +244,7 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			return nil
 		})
 	sc.Step(`^listing runs fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return localLastError(localStepWorld(ctx), code)
+		return localListFailure(localStepWorld(ctx), code)
 	})
 	sc.Step(`^the run reference the start returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
 		w := localStepWorld(ctx)

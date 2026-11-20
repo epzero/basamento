@@ -14,11 +14,12 @@ import (
 
 // localPagingRecorder holds list paging outcomes for RT-051…053 scenarios.
 type localPagingRecorder struct {
-	pages      [][]runtime.RunStatus
-	cursors    []string
-	heldCursor string
-	listFlow   string
-	listLimit  int
+	pages        [][]runtime.RunStatus
+	cursors      []string
+	heldCursor   string
+	listFlow     string
+	listLimit    int
+	seededRunIDs []string
 }
 
 func (w *localWorld) pagingState() *localPagingRecorder {
@@ -46,33 +47,56 @@ func registerLocalPaging(sc *godog.ScenarioContext) {
 		listRunsWithHeldCursor)
 }
 
-func parseLocalRunIDList(phrase string) []string {
+func parseStrictRunIDList(phrase string) ([]string, error) {
 	phrase = strings.TrimSpace(phrase)
-	var ids []string
-	for {
-		i := strings.Index(phrase, `"`)
-		if i < 0 {
-			break
-		}
-		phrase = phrase[i+1:]
-		j := strings.Index(phrase, `"`)
-		if j < 0 {
-			break
-		}
-		ids = append(ids, phrase[:j])
-		phrase = phrase[j+1:]
-		phrase = strings.TrimSpace(phrase)
-		phrase = strings.TrimPrefix(phrase, ",")
-		phrase = strings.TrimPrefix(phrase, "and")
-		phrase = strings.TrimSpace(phrase)
+	if phrase == "" {
+		return nil, fmt.Errorf("run id list is empty")
 	}
-	return ids
+	var ids []string
+	rest := phrase
+	for {
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			break
+		}
+		if !strings.HasPrefix(rest, `"`) {
+			return nil, fmt.Errorf("run id list %q: expected a quoted id, got %q", phrase, rest)
+		}
+		rest = rest[1:]
+		j := strings.Index(rest, `"`)
+		if j < 0 {
+			return nil, fmt.Errorf("run id list %q: unclosed quote", phrase)
+		}
+		ids = append(ids, rest[:j])
+		rest = strings.TrimSpace(rest[j+1:])
+		if rest == "" {
+			break
+		}
+		switch {
+		case strings.HasPrefix(rest, "and "):
+			rest = strings.TrimPrefix(rest, "and ")
+		case strings.HasPrefix(rest, ","):
+			rest = strings.TrimPrefix(rest, ",")
+		default:
+			return nil, fmt.Errorf("run id list %q: unexpected text %q after id %q", phrase, rest, ids[len(ids)-1])
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("run id list %q: no run ids", phrase)
+	}
+	return ids, nil
 }
 
 func startRunsOfFlowWaitingAtGate(ctx context.Context, tenant, runIDs, flow, gate string) error {
 	w := localStepWorld(ctx)
+	ids, err := parseStrictRunIDList(runIDs)
+	if err != nil {
+		return err
+	}
+	ps := w.pagingState()
+	ps.seededRunIDs = append([]string(nil), ids...)
 	w.setFlow(flow, w.gateFlow(gate))
-	for _, runID := range parseLocalRunIDList(runIDs) {
+	for _, runID := range ids {
 		_, exec, err := w.start(ctx, tenant, runID, flow)
 		if err != nil {
 			return err
@@ -173,13 +197,27 @@ func listRunsWithDescribedCursor(ctx context.Context, tenant, flow, description 
 		w.lastList, w.lastErr = runs, err
 		return nil
 	case "a paging cursor past the last run":
+		ps := w.pagingState()
+		firstID := ""
+		if len(ps.seededRunIDs) > 0 {
+			firstID = ps.seededRunIDs[0]
+		} else {
+			all, _, err := w.runtime(ctx).List(w.ctx(tenant), runtime.RunQuery{Flow: flow})
+			if err != nil {
+				return fmt.Errorf("list runs to anchor cursor: %w", err)
+			}
+			if len(all) == 0 {
+				return fmt.Errorf("no runs of flow %q to anchor a past-the-end cursor", flow)
+			}
+			firstID = all[0].Ref.RunID
+		}
 		valid := craftListCursorToken(tenant, 0)
 		control, _, err := w.runtime(ctx).List(w.ctx(tenant), runtime.RunQuery{Flow: flow, Cursor: valid})
 		if err != nil {
 			return fmt.Errorf("control list at valid cursor: %w", err)
 		}
-		if len(control) != 1 || control[0].Ref.RunID != "r1" {
-			return fmt.Errorf("control list = %#v, want [r1]", control)
+		if len(control) != 1 || control[0].Ref.RunID != firstID {
+			return fmt.Errorf("control list = %v, want one run with id %q", runIDsOf(control), firstID)
 		}
 		beyond := craftListCursorToken(tenant, 99)
 		runs, _, err := w.runtime(ctx).List(w.ctx(tenant), runtime.RunQuery{Flow: flow, Cursor: beyond})
