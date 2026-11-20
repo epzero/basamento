@@ -83,9 +83,15 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerLocal(sc)
 }
 
+// durationPassStepPattern is the shared "N … pass" step. It is anchored on a
+// duration phrase parseElapsed accepts so godog's single step namespace is not
+// stolen from capabilities that own sentences ending in "pass" (for example a
+// runtime run start or a worker grace period).
+const durationPassStepPattern = `^(-?\d+ [a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
+
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
-	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
+	sc.Step(durationPassStepPattern, advanceClockByDurationPhrase)
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
 	registerSharedRunStartStep(sc)
 	registerSharedRunOutcomeSteps(sc)
