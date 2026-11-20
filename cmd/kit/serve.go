@@ -56,21 +56,19 @@ func runServe(args []string) {
 
 	ports, runtimeName := wire(result.Config)
 
-	opened := make([]config.Port, 0, len(ports))
-	for _, p := range ports {
-		port, err := p.open(context.Background())
-		if err != nil {
-			closePorts(opened)
-			fmt.Fprintf(os.Stderr, "port %q could not open: %v\n", p.name, err)
-			os.Exit(1)
-		}
-		opened = append(opened, port)
-	}
-
-	ln, err := net.Listen("tcp", result.Config.Listen.Addr)
+	// Install the handler before a port opens or the listener binds: a signal
+	// in that window must cancel the openers and close whatever is already
+	// open, not kill the process with a port left open (CR-04).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ln, opened, err := startPorts(ctx, ports, result.Config.Listen.Addr)
 	if err != nil {
-		closePorts(opened)
-		fmt.Fprintf(os.Stderr, "listen.addr %q could not be bound: %v\n", result.Config.Listen.Addr, err)
+		stop()
+		if ctx.Err() != nil {
+			// Terminated before ready: the openers were cancelled and their
+			// ports closed. There is nothing to serve.
+			os.Exit(0)
+		}
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
@@ -84,11 +82,44 @@ func runServe(args []string) {
 	}
 	_, _ = fmt.Fprintln(os.Stdout)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	srv := config.NewServer(ln, mux, opened, result.Config.Shutdown.Timeout, nil)
 	code := srv.Serve(ctx)
 	stop()
 	os.Exit(code)
+}
+
+// startPorts opens the ports in order and binds the listener, all under ctx.
+// On cancellation or the first failure it closes what it opened and returns
+// the error; the ready line is printed only after it returns successfully.
+func startPorts(ctx context.Context, ports []wirePort, addr string) (net.Listener, []config.Port, error) {
+	opened := make([]config.Port, 0, len(ports))
+	for _, p := range ports {
+		if err := ctx.Err(); err != nil {
+			closePorts(opened)
+			return nil, nil, err
+		}
+		port, err := p.open(ctx)
+		if err != nil {
+			closePorts(opened)
+			return nil, nil, fmt.Errorf("port %q could not open: %w", p.name, err)
+		}
+		opened = append(opened, port)
+	}
+	if err := ctx.Err(); err != nil {
+		closePorts(opened)
+		return nil, nil, err
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		closePorts(opened)
+		return nil, nil, fmt.Errorf("listen.addr %q could not be bound: %w", addr, err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = ln.Close()
+		closePorts(opened)
+		return nil, nil, err
+	}
+	return ln, opened, nil
 }
 
 func closePorts(ports []config.Port) {

@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/internal/config"
 )
 
 func testKey() []byte { return bytes.Repeat([]byte{0x42}, 32) }
@@ -116,4 +120,89 @@ func TestOpenLocalSecretsAcceptsFileURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+}
+
+type recordingPort struct{ closed bool }
+
+func (p *recordingPort) Close() error {
+	p.closed = true
+	return nil
+}
+
+func TestStartPortsClosesOpenedPortsWhenCancelledDuringOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	first := &recordingPort{}
+	ports := []wirePort{
+		{name: "sql", open: func(context.Context) (config.Port, error) { return first, nil }},
+		{name: "blob", open: func(context.Context) (config.Port, error) {
+			cancel()
+			return nil, context.Canceled
+		}},
+	}
+	ln, opened, err := startPorts(ctx, ports, "127.0.0.1:0")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("startPorts error = %v, want context.Canceled", err)
+	}
+	if ln != nil || opened != nil {
+		t.Fatalf("startPorts returned a listener or ports after cancellation: %v %v", ln, opened)
+	}
+	if !first.closed {
+		t.Fatal("already-opened port was not closed")
+	}
+}
+
+func TestStartPortsStopsBeforeListeningWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	port := &recordingPort{}
+	var seen context.Context
+	ports := []wirePort{{name: "sql", open: func(c context.Context) (config.Port, error) {
+		seen = c
+		cancel()
+		return port, nil
+	}}}
+	ln, _, err := startPorts(ctx, ports, "127.0.0.1:0")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("startPorts error = %v, want context.Canceled", err)
+	}
+	if seen != ctx {
+		t.Fatal("opener did not receive the server context")
+	}
+	if ln != nil {
+		t.Fatal("startPorts bound a listener after cancellation")
+	}
+	if !port.closed {
+		t.Fatal("port was not closed after cancellation")
+	}
+}
+
+func TestStartPortsNamesFailedPortAndClosesOpened(t *testing.T) {
+	first := &recordingPort{}
+	ports := []wirePort{
+		{name: "sql", open: func(context.Context) (config.Port, error) { return first, nil }},
+		{name: "blob", open: func(context.Context) (config.Port, error) { return nil, errors.New("boom") }},
+	}
+	_, _, err := startPorts(context.Background(), ports, "127.0.0.1:0")
+	if err == nil || !strings.Contains(err.Error(), `port "blob" could not open`) {
+		t.Fatalf("startPorts error = %v, want the failed port named", err)
+	}
+	if !first.closed {
+		t.Fatal("already-opened port was not closed")
+	}
+}
+
+func TestStartPortsClosesPortsWhenListenerCannotBind(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	port := &recordingPort{}
+	ports := []wirePort{{name: "sql", open: func(context.Context) (config.Port, error) { return port, nil }}}
+	_, _, err = startPorts(context.Background(), ports, held.Addr().String())
+	if err == nil || !strings.Contains(err.Error(), "listen.addr") || !strings.Contains(err.Error(), "could not be bound") {
+		t.Fatalf("startPorts error = %v, want listen.addr could not be bound", err)
+	}
+	if !port.closed {
+		t.Fatal("port was not closed after the listener failed")
+	}
 }
