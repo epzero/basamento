@@ -212,32 +212,31 @@ func (w *localWorld) shutdown(ctx context.Context) error {
 	return fmt.Errorf("the local runtime did not shut down after %d yields", localSpinBudget)
 }
 
-// cleanup releases the scenario's runtimes so no goroutine outlives it. Serving
-// with an already-cancelled context cancels every run, children included.
-// yieldAfterAdvance lets local timer helper goroutines run fireDue after a fake
-// clock Advance under CPU load, so back-to-back duration-pass steps cannot batch
-// distinct timer wakes into one completion seq before Select observes them.
-func (w *localWorld) yieldAfterAdvance() {
+// timePassed waits until every timer the scripted flow registered with watchTimer
+// and due at the clock reading after a duration-pass step is Ready. The shared
+// duration-pass step advances the fake clock before calling this.
+func (w *localWorld) timePassed(ctx context.Context, _ time.Duration) error {
 	if w.rt == nil {
-		return
+		return nil
 	}
 	w.mu.Lock()
 	exec := w.currentExec
 	w.mu.Unlock()
 	if exec == nil {
-		return
+		return nil
 	}
-	exec.mu.Lock()
-	running := !exec.done
-	exec.mu.Unlock()
-	if !running {
-		return
+	reading := world(ctx).Core.clock.Now()
+	what := fmt.Sprintf("timers due at %s to become ready", reading.Format(time.RFC3339))
+	err := w.spin(what, func() bool { return exec.timersDueReadyAt(reading) })
+	if err == nil {
+		return nil
 	}
-	for i := 0; i < localSpinBudget; i++ {
-		goruntime.Gosched()
-	}
+	pending := exec.pendingTimersAt(reading)
+	return fmt.Errorf("%w (%d timer(s) still not ready at %s)", err, pending, reading.Format(time.RFC3339))
 }
 
+// cleanup releases the scenario's runtimes so no goroutine outlives it. Serving
+// with an already-cancelled context cancels every run, children included.
 func (w *localWorld) cleanup() {
 	w.mu.Lock()
 	runtimes := append([]*local.Runtime(nil), w.retired...)

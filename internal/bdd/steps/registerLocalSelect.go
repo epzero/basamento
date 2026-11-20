@@ -22,6 +22,7 @@ func registerLocalSelect(sc *godog.ScenarioContext) {
 			}
 			w.setFlow("select", func(e *localExec, dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 				timer := dc.Sleep(d)
+				e.watchTimer(timer, dc.Now().Add(d))
 				wait := dc.Await(runtime.GateSpec{Name: gate})
 				probe := &selectProbe{began: func() {
 					e.update(func() {
@@ -64,7 +65,9 @@ func registerLocalSelect(sc *godog.ScenarioContext) {
 			}
 			w.setFlow("select", func(e *localExec, dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 				firstTimer := dc.Sleep(one)
+				e.watchTimer(firstTimer, dc.Now().Add(one))
 				secondTimer := dc.Sleep(two)
+				e.watchTimer(secondTimer, dc.Now().Add(two))
 				probe := &selectProbe{began: func() {
 					e.update(func() { e.waiting = true })
 				}}
