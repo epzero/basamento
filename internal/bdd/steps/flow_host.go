@@ -501,9 +501,10 @@ func (d *hostFake) abort() {
 	d.cond.Broadcast()
 }
 
+// record appends one durable call to the log. Caller must hold d.mu; it must not
+// set parked (only blocking runtime calls do).
 func (d *hostFake) record(c hostCall) {
 	d.calls = append(d.calls, c)
-	d.parked = true
 	d.cond.Broadcast()
 }
 
