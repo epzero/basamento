@@ -152,6 +152,7 @@ func Layering(root string) ([]string, error) {
 func goListPackages(root string) ([]goPkg, error) {
 	cmd := exec.Command("go", "list", "-json", "./...")
 	cmd.Dir = root
+	cmd.Env = layeringGoEnv()
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {

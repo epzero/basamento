@@ -83,37 +83,46 @@ func relPathSkipped(rel string) bool {
 }
 
 func dirPathSkipped(root, dir string) bool {
-	rel, err := filepath.Rel(root, dir)
+	rootAbs, err := cleanAbs(root)
 	if err != nil {
+		return false
+	}
+	dirAbs, err := cleanAbs(dir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, dirAbs)
+	if err != nil {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
 	return relPathSkipped(filepath.ToSlash(rel))
 }
 
-func layeringGoEnv() []string {
-	env := os.Environ()
-	out := make([]string, 0, len(env)+2)
-	var hasWork, hasFlags bool
-	for _, e := range env {
-		if strings.HasPrefix(e, "GOWORK=") {
-			out = append(out, "GOWORK=off")
-			hasWork = true
+// sanitizeLayeringGoEnv returns a copy of environ safe for nested go list and
+// go list -m: ambient GOFLAGS (including -overlay and -tags), GOWORK and a user
+// GOENV file cannot change what packages and imports are visible.
+func sanitizeLayeringGoEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, e := range environ {
+		key, _, ok := strings.Cut(e, "=")
+		if !ok {
+			out = append(out, e)
 			continue
 		}
-		if strings.HasPrefix(e, "GOFLAGS=") {
-			out = append(out, "GOFLAGS=-mod=readonly")
-			hasFlags = true
+		if key == "GOWORK" || key == "GOFLAGS" || key == "GOENV" {
 			continue
 		}
 		out = append(out, e)
 	}
-	if !hasWork {
-		out = append(out, "GOWORK=off")
-	}
-	if !hasFlags {
-		out = append(out, "GOFLAGS=-mod=readonly")
-	}
+	out = append(out, "GOWORK=off", "GOFLAGS=-mod=readonly", "GOENV=off")
 	return out
+}
+
+func layeringGoEnv() []string {
+	return sanitizeLayeringGoEnv(os.Environ())
 }
 
 // nestedModuleLoads reports whether go accepts dir as a module root.
