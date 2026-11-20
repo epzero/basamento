@@ -8,7 +8,7 @@ import (
 )
 
 func TestRegistrySameRefIsolatedPerTenant(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	ctxA := tenantCtx("tenant-a")
 	ctxB := tenantCtx("tenant-b")
 	runA := mustBegin(t, reg, ctxA, "shared-ref")
@@ -36,7 +36,7 @@ func TestRegistrySameRefIsolatedPerTenant(t *testing.T) {
 }
 
 func TestRegistryCrossTenantHandleIsNotFound(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	ctxA := tenantCtx("tenant-a")
 	ctxB := tenantCtx("tenant-b")
 	run := mustBegin(t, reg, ctxA, "ref-x")
@@ -67,7 +67,7 @@ func TestRegistryCrossTenantHandleIsNotFound(t *testing.T) {
 }
 
 func TestRegistryRequiresTenant(t *testing.T) {
-	reg := NewRegistry("test")
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 	if _, _, err := reg.Begin(ctx, "ref"); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("begin code = %q, want invalid_argument", core.CodeOf(err))

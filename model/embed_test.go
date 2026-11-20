@@ -43,6 +43,7 @@ func embedConfig(f *fakeEmbedder) EmbeddingConfig {
 			Protocol: ProtocolSingle,
 		}},
 		Embedder: f,
+		Clock:    testClock(),
 	}
 }
 
@@ -165,7 +166,10 @@ func TestNewEmbeddingValidatesItsConfig(t *testing.T) {
 	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim"}); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("missing embedder code = %q", core.CodeOf(err))
 	}
-	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}}); core.CodeOf(err) != core.CodeUnsupported {
+	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}}); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("missing clock code = %q", core.CodeOf(err))
+	}
+	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}, Clock: testClock()}); core.CodeOf(err) != core.CodeUnsupported {
 		t.Fatalf("missing descriptor code = %q", core.CodeOf(err))
 	}
 }
@@ -268,6 +272,7 @@ func TestEmbeddingVendorPanicSurvives(t *testing.T) {
 		Provider:    "sim",
 		Descriptors: embedConfig(&fakeEmbedder{}).Descriptors,
 		Embedder:    &panicEmbedder{},
+		Clock:       testClock(),
 	})
 	res, err := Invoke(testCtx(t), adapter, Request{
 		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-panic",

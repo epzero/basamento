@@ -40,7 +40,14 @@ blocking `Invoke` in process.
 `model.Registry` holds what every adapter owes regardless of protocol:
 idempotent starts per client ref within the tenant of the call's context, the
 ordered event log with replay from a cursor, the result, cancellation and
-lookup. Bounding memory for ended invocations is ticketed as EP0-140. The chat
+lookup. It does not grow without bound: an ended invocation is kept for its
+retention window after its end and no longer (1 hour by default), and while the
+registry holds more ended invocations than its ended bound (10,000 by default)
+it evicts them oldest-ended first, never a running one; an evicted client ref
+then answers exactly as one the registry never held (REQ-MODEL-088). Both bounds
+are set through `NewRegistry`'s options and read on a `core.Clock` the caller
+supplies, and the sweep runs inline in the registry's methods: no timer, no
+goroutine per invocation, and nothing in the gate depends on wall time. The chat
 adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
 eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
 values, so the contract itself stays free of the dependency. The chat adapter
