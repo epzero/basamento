@@ -1,7 +1,6 @@
 package local
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 
@@ -35,19 +34,14 @@ func parseListCursor(cursor string, tenant core.TenantID, runCount int) (int, er
 		return 0, invalidErr("local: invalid list cursor", nil)
 	}
 	var payload listCursorPayload
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return 0, invalidErr("local: invalid list cursor", nil)
 	}
-	if dec.More() {
-		return 0, invalidErr("local: invalid list cursor", nil)
-	}
+	// Canonical equality is the sole format gate: only encodeListCursor's JSON
+	// (fixed version, fields, and encoding) is accepted, so wrong versions,
+	// unknown fields, extra JSON, and non-canonical base64url are rejected.
 	canonical, err := encodeListCursor(core.TenantID(payload.Tenant), payload.Pos)
 	if err != nil || canonical != cursor {
-		return 0, invalidErr("local: invalid list cursor", nil)
-	}
-	if payload.V != listCursorVersion || payload.Tenant == "" {
 		return 0, invalidErr("local: invalid list cursor", nil)
 	}
 	if payload.Tenant != string(tenant) {
