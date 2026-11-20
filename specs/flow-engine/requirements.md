@@ -33,6 +33,9 @@ If the collection a `map` node fans out over holds more items than the fan-out l
 ### REQ-FLOW-049 — A finished node's settled cost accrues to the run
 When the flow machine applies a `node_completed` or `node_failed` event carrying a node's settled cost, the flow machine shall add that cost, in milli-points, to the run's settled cost, which later expressions read as `run.cost`.
 
+### REQ-FLOW-051 — A node with no input mapping receives the run's input
+Where a node has no input mapping (`in`), the flow machine shall pass the run's input to the node, passing `{}` when the run's input is empty.
+
 ## Compiler limits (WP-L4-01)
 
 The maxima in REQ-FLOW-045 and REQ-FLOW-046 are fixed properties of the
@@ -159,4 +162,34 @@ When the flow machine completes a run, the flow host shall complete the run with
 When the flow machine returns multiple commands in one superstep, the flow host shall start every durable call in that superstep before waiting for any of them to complete.
 
 ### REQ-FLOW-050 — The cost is part of the node's recorded result
-When the flow host reports a finished node to the flow machine, the flow host shall report the node settled cost in milli-points, taken from the result the node step, node handler or child run returned for this run; a gate or wait node completion carries no cost.
+When the flow host reports a finished node to the flow machine, the flow host shall report the node settled cost in milli-points, taken from the result the node handler returned for this run; a gate or wait node completion carries no cost.
+
+### REQ-FLOW-052 — The first failure in a superstep ends the run
+When more than one future of one superstep fails, the flow host shall fail the run with the error of the future its `Select` reports first, shall not await the other futures and shall run no later superstep.
+
+### REQ-FLOW-053 — A failed handler stops the superstep
+When a node handler returns an error, the flow host shall not call the handler of any node that follows it in command order in that superstep.
+
+### REQ-FLOW-054 — A mismatched pinned hash fails the run
+If a loaded flow definition's content hash differs from the run's non-empty pinned hash, then the flow host shall fail the run with code `internal`, naming the flow, before making any durable call.
+
+### REQ-FLOW-055 — The callers pin runs, not the flow host
+The caller that starts a top-level run shall resolve the flow's name through the definition catalog and pass the resolved content hash in the run's `FlowRef`, and the flow host shall not resolve a hash itself. Where a `subflow` node's specification carries a `hash`, the flow host shall pass that hash in the child run's `FlowRef`; where it does not, the child run's `FlowRef` hash shall be empty. An empty hash is accepted and leaves the run unpinned: the flow host shall run whatever definition the catalog resolves when the run starts or restarts, and REQ-FLOW-005 shall not apply to that run.
+
+### REQ-FLOW-056 — Negative durations are rejected when the node runs
+If a `wait` node's duration or a `gate` node's timeout is negative, then the flow host shall fail the run with code `invalid_argument` when the node runs, before making any durable call for that node, and shall neither wait zero nor panic.
+
+### REQ-FLOW-057 — A node failure carries only the error code and message
+When a node fails, the flow host shall put only the error's platform code and message in the `node_failed` event's payload, carrying no error details, node input or state; where the error is not a `*core.Error`, the host shall report code `internal` with the message `flow: node "<id>" failed` and shall not report the original error text.
+
+### REQ-FLOW-058 — A step's idempotency key identifies one logical step
+When the flow host runs a `tool` or `task` node as a step, the host shall give the step the idempotency key `<definition name>@<hash>/<node>#<attempt>@<superstep sequence>`, formed from the loaded definition's name, the run's pinned hash, the node id, the step's attempt and the machine's superstep sequence (the snapshot's `Seq`), so that the same logical step keeps its key across a retry and a second visit of a node in a loop issues a different key.
+
+### REQ-FLOW-059 — Only a node handler carries settled cost
+The flow host shall take a finished node's settled cost only from the result its node handler returned: a `tool` or `task` step's result and a `subflow` child run's result shall carry no settled cost and the host shall report `0` for them. Where a node handler returns both a result and an error, the host shall report the result's settled cost on the `node_failed` event.
+
+### REQ-FLOW-060 — The map fan-out limit is clamped above the default
+Where a flow host is built with `WithMaxFanout(n)` and `n` is above the default fan-out limit, the flow host shall use the default fan-out limit for the runs it starts.
+
+### REQ-FLOW-061 — A fan-out limit below one fails the run
+If a flow host is built with `WithMaxFanout(n)` where `n` is below 1, then the flow host shall fail each run it starts with code `invalid_argument`, before any durable call.
