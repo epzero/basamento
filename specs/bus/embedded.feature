@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded
+@wp:WP-L1-03 @level:component @profile:embedded
 Feature: The embedded bus keeps its data across restarts
   In the embedded profile the bus runs in the kit process and stores its data
   in the data directory, next to the SQLite files.

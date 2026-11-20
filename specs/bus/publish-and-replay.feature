@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
+@wp:WP-L1-03 @level:component @profile:embedded @profile:cloud @REQ-BUS-001
 Feature: Publish on a subject and replay it by bus sequence
   Every message published on a subject gets a bus sequence. A subscriber
   replays a subject from the start or after a bus sequence it already has,

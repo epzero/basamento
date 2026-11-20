@@ -63,7 +63,8 @@ marked entry nodes, as the scenarios say.
 
 **Left to the compiler:** node spec shape and kind (an unknown kind is
 `invalid_argument` from the decoder or the compiler,
-`docs/architecture/flow-engine.md` §2), guarded cycles (REQ-FLOW-003), and
+`docs/architecture/flow-engine.md` §2), guarded cycles (REQ-FLOW-003), the
+`map` child errors of §2.6 (REQ-FLOW-062 … 066), and
 every CEL or jq expression — edge `when` conditions, node `in` mappings, `set`
 assignments, guard `while` conditions and gate `accept_if` conditions
 (REQ-FLOW-004). The builder keeps expressions in the IR as written.
@@ -98,23 +99,25 @@ exists in the state schema's properties.
   by WP-L4-01.
 - The BDD steps for `builder.feature` go into
   `internal/bdd/steps/flow_builder.go`. `flow/builder` may import `core/schema`
-  directly; test-only packages (`core/coretest`) remain restricted to
-  `_test.go` files and `internal/bdd` (`layering.yaml`).
+  directly; packages listed in `layering.yaml` `test_only` remain restricted to
+  `_test.go` files and `internal/bdd`.
 
 ## 2. Compiler and machine
 
 WP-L4-01 and WP-L4-02: `docs/architecture/flow-engine.md` §2 and §3,
-requirements REQ-FLOW-001 … 006 and 045 … 046, scenarios `compile.feature`,
-`routing.feature` and `runs.feature`.
+requirements REQ-FLOW-001 … 006, 045 … 049, 051 and 062 … 066, scenarios
+`compile.feature`, `routing.feature`, `runs.feature` and `host.feature`.
 
 ### 2.1 Bounded cycles (REQ-FLOW-003)
 
 A cycle terminates only if something it passes through is consumed on every
-lap. `guard.max_visits` counts the visits of its node and `guard.cost_mpts`
-counts the milli-points spent there; either is a finite number in the IR, so a
+lap. `guard.max_visits` counts the visits of its node, and `guard.cost_mpts`
+bounds the run's settled milli-points (`Snapshot.Cost`, CEL `run.cost`) at the
+moment the node is about to start — it is a budget for the run, not for the
+milli-points spent inside that node; either is a finite number in the IR, so a
 bound exists for the machine to enforce. What a run does when a guard is
-reached is the machine's behavior (`specs/glossary.md`, "Repair guard"), not
-the compiler's. One of the two is enough: a node on the cycle with
+reached is the machine's behavior (§2.4, `specs/glossary.md` "Repair guard"),
+not the compiler's. One of the two is enough: a node on the cycle with
 `{max_visits: 3}` and a node on it with `{cost_mpts: 5000}` both bound the
 cycle.
 
@@ -193,28 +196,161 @@ before type-checking expressions; `ir.Canonical` and `ir.Hash` are then never
 asked to hash a definition the compiler would reject. A definition over
 several limits reports the first check in that order, deterministically.
 
+### 2.4 Guard budgets at run time (REQ-FLOW-047)
+
+`max_visits` and `cost_mpts` are enforced by the machine at the moment a node
+is about to start, before a command for that node exists. **Reached** means
+`>=`: a cost or a visit count one below its budget still lets the node start.
+
+- `max_visits`: the node may start while `Snapshot.Visit[node]` is below the
+  budget. A guard of 3 lets the node run 3 times and refuses the fourth start,
+  so the run still does the work its last allowed visit pays for. Scenario
+  `FLOW-047-01`.
+- `cost_mpts`: the budget is compared with the run's settled milli-points
+  (`Snapshot.Cost`, which is the `run.cost` CEL sees), not with a per-node
+  total: a budget protects the run, and the node that spends is not always the
+  guarded one. The node may start while `Snapshot.Cost` is below `cost_mpts`;
+  at or above it, the start fails. A `cost_mpts` of 80 with 40 milli-points
+  settled per visit therefore stops the run before the third visit: `40` after
+  the first, `80` after the second, refused before the third. Scenario
+  `FLOW-047-02`; the per-visit number is the cost the node's event carries, §3.
+
+A refused start returns the machine's `fail` command with code
+`budget_exceeded` and a message naming the node and the budget, for example
+`flow: node "repair": visit budget 3 reached` and
+`flow: node "repair": cost budget 80 milli-points reached with 80 settled`.
+The host turns that command into the run's error (REQ-FLOW-035), so the run
+ends `failed` with `budget_exceeded`, as `specs/glossary.md` ("Repair guard")
+and the preset scenarios already state. A guard field that is absent or 0 is
+no budget (§2.2) and never refuses a start.
+
+### 2.5 Map fan-out limit (REQ-FLOW-048)
+
+A `map` node fans out to one command per item of its collection. `flow/machine`
+exports `DefaultMaxFanout = 10000`, the most items one `map` node may fan out
+to in a run, and a collection with more items than that fails the run with
+code `budget_exceeded` before the machine returns any fan-out command for the
+node, so the host creates no step and no child run for it. The message names
+the node, the item count and the limit, for example
+`flow: node "impl": fan-out limit 10000 items exceeded: 10001 items`, and the
+`fail` command carries no state data: the run fails at the start of the
+superstep, before any item's result could be merged.
+
+A collection of exactly the limit is not over it, so every item fans out
+(scenario `FLOW-048-02`). `WithMaxFanout(n)` lowers the limit for the runs the
+host starts (§3); it never raises it above the default. A value above the
+default is clamped to the default (REQ-FLOW-060); a value below 1 fails each
+run the host starts with code `invalid_argument` before any durable call
+(REQ-FLOW-061).
+
+`max_parallel` in a `map` node's spec is the host's throttle on how many of the
+node's items are in flight at once. It bounds neither the superstep nor the
+size of the collection: REQ-FLOW-046 limits the definition — its nodes, edges,
+expressions and canonical bytes — not the number of items a run's collection
+holds, which is data the run receives and not part of the definition.
+
+### 2.6 Definition errors the machine cannot repair (REQ-FLOW-062 … 066)
+
+`flow/ir.Validate` rejects five defects that leave a definition unrunnable — a
+`map` child that is not a declared node, a `map` child of a kind the machine
+runs itself (`set`, `parallel`, `map`), one child used by two `map` nodes, a
+`map` child carrying a guard, and a condition on the edge from `START` — with
+code `invalid_argument`, naming the `map` node and its child, both `map`
+nodes, or the edge. The `map` checks read the node spec's `over` and `node`
+fields the way `flow/machine` reads them (`parseMapSpec`), and they scan
+`IR.Nodes` in sorted id order, so two `map` nodes using one child always
+report them in the same order.
+
+- **A child that is not a node** (REQ-FLOW-062): the machine emits no `run_node`
+  command for the child, so the host would never run it. Message:
+  `flow: map node "fanout": child node "ghost" does not exist`.
+- **A kind the machine runs itself** (REQ-FLOW-063): `set` is evaluated by the
+  machine, `parallel` and `map` are expanded by it, so none of them produces a
+  `run_node` command for the host. Message:
+  `flow: map node "fanout": child node "fanout_item" has kind "set", which the machine runs itself`.
+- **One child for two `map` nodes** (REQ-FLOW-064): steps are identified by
+  `(node, attempt)` (REQ-FLOW-002, scenario FLOW-002-01), so both fan-outs
+  produce the same step identities and the canonical merge sees whichever
+  completed first. Message:
+  `flow: map nodes "fanout" and "review" both use child node "fanout_item"`.
+- **A `map` child with a guard** (REQ-FLOW-065): a guard bounds a cycle by
+  counting the visits of the nodes the machine routes to (REQ-FLOW-003, §2.1),
+  and the machine starts a `map` child once per element without routing to it,
+  so the count never advances. A `map` → child → `map` cycle that only the
+  child's `max_visits` bounds would pass the cycle check and never stop.
+  Message: `flow: map node "fanout": child node "fanout_item" has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element`.
+- **A condition on the edge from `START`** (REQ-FLOW-066): `START` is where a
+  run enters, before any node has routed, so the first superstep has no state
+  to route on and the machine never evaluates the condition — today it is
+  silently ignored. Message:
+  `flow: edge "START" -> "plan" takes no condition`.
+
+**Enforcement order.** `flow/ir.Validate` runs the `START`-edge check with the
+other edge checks, which have already established that exactly one edge leaves
+`START` (REQ-FLOW-043), and the `map` checks after the node and edge checks and
+before reachability and the cycle search. A `map` child with a guard is
+therefore reported as REQ-FLOW-065, not as a bounded cycle by REQ-FLOW-003.
+
+**Defence in depth.** These five are the checks `flow/machine.New` makes for
+itself before it compiles an expression, with the same code and the same
+wording; they stay there, because an IR can be built in Go without the
+compiler (ADR-0003) and a machine must refuse to run one it cannot run. The
+compiler adds them so the author sees the error when the flow is registered
+(`flow/compile.Compile`, `flow/ir.Validate`) rather than when a run starts.
+`flow/builder` keeps a node spec as written (REQ-FLOW-012) and has no `map`
+check of its own: it checks only what its declarations make knowable, and the
+compiler is the one validator — a second copy would be a second source of
+truth. A flow built in Go therefore meets these checks at compile time exactly
+as one written as data does.
+
+### 2.7 Default node input (REQ-FLOW-051)
+
+A node with no input mapping (`in`) receives the run's input as its command
+input; an empty run input becomes `{}`. This is the machine's `nodeInput`, so
+it holds for every node kind, including a `subflow` node whose spec names a
+child flow but gives no `in` (scenario `FLOW-033-01`). It is not a mapping the
+host adds: REQ-FLOW-036 still forbids a durable call for pure `set` nodes and
+routing.
+
 ## 3. Flow host (WP-L4-04)
 
 `flow/host` is the layer ADR-0011 defines (`layering.yaml`): it may import
 `core`, `expr`, `flow` and `runtime`, never a durable-execution vendor, and it
 imports no node handler. It provides the one `runtime.FlowHost`
 (`docs/architecture/runtime.md` §1, `docs/architecture/flow-engine.md` §4) and
-owns `flow/host`. Requirements REQ-FLOW-027 … 033, 035 … 038 and 044, scenarios
-`host.feature`.
+owns `flow/host`. Requirements REQ-FLOW-027 … 050 and 052 … 061 (REQ-FLOW-051
+is the machine's default node input, §2.7), scenarios `host.feature`.
 
 ```go
+// NodeResult is what a node handler returns: the node's output and the
+// milli-points it settled for the call (REQ-FLOW-050, REQ-FLOW-059).
+type NodeResult struct {
+	Output   json.RawMessage
+	CostMpts int64
+}
+
 // NodeHandler is the flow code of one effectful node kind (ADR-0011).
-type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (json.RawMessage, error)
+type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (NodeResult, error)
+
+// flow.Event carries CostMpts int64 on node_completed and node_failed only
+// (REQ-FLOW-049); every other event leaves it zero.
 
 // Host implements runtime.FlowHost via its Run method, with a definition
 // catalog and registered node handlers.
 type Host struct{ /* unexported */ }
 
-func New(catalog DefinitionCatalog) *Host
+func New(catalog DefinitionCatalog, opts ...Option) *Host
 // RegisterHandler registers the handler for a node kind. The composition root
 // calls it before the host is registered with a runtime.
 func (h *Host) RegisterHandler(kind string, handler NodeHandler)
 func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.RawMessage) (json.RawMessage, error)
+
+// WithMaxFanout lowers the map fan-out limit for the runs the host starts
+// (REQ-FLOW-048, design.md §2.5); the machine's DefaultMaxFanout is the cap.
+// A value above the cap is clamped to it (REQ-FLOW-060); a value below 1
+// fails each run the host starts with invalid_argument before any durable
+// call (REQ-FLOW-061).
+func WithMaxFanout(limit int) Option
 
 // DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
 type DefinitionCatalog interface {
@@ -222,12 +358,27 @@ type DefinitionCatalog interface {
 }
 ```
 
-**Pinned definition (REQ-FLOW-027).** The host loads the IR from the catalog by
-the run's content-addressed `FlowRef` (`Name` and `Hash`) at the start of `Run`
-and holds it in a local variable for that execution. Because `FlowRef.Hash`
-identifies an immutable compiled IR, re-loading on replay returns the identical
-IR, and registering a new version cannot affect a running run. Loading is not a
-step.
+**Pinned definition (REQ-FLOW-027, REQ-FLOW-054, REQ-FLOW-055).** The host loads
+the IR from the catalog by the run's content-addressed `FlowRef` (`Name` and
+`Hash`) at the start of `Run` and holds it in a local variable for that
+execution. Because `FlowRef.Hash` identifies an immutable compiled IR, re-loading
+on replay returns the identical IR, and registering a new version cannot affect
+a running run. Loading is not a step.
+
+The caller that starts a top-level run resolves the flow name through the
+definition catalog and passes the resolved content hash in its `FlowRef`; the
+host never resolves a hash itself. A `subflow` node's `spec.hash`, when present,
+pins the child run to that hash; when absent, the child starts with an empty
+hash — the host does not require a hash the spec does not carry. When the host
+loads a definition and the run's pinned hash is not empty, it compares the
+loaded definition's content hash with the pin and fails the run with code
+`internal`, naming the flow, if they differ (the catalog returned something
+other than what was pinned), before any durable call (REQ-FLOW-054).
+
+An empty hash is accepted and leaves the run unpinned. The host then runs
+whatever definition the catalog resolves when the run starts or restarts, so
+REQ-FLOW-005 (runs continue with the definition hash they started with) does
+not apply to such a run (REQ-FLOW-055).
 
 **Node kinds (REQ-FLOW-028 … 033, 036).** The host checks the whole IR before
 `flow.Machine.Start`: if any node's kind is `model` or `agent` and
@@ -251,26 +402,79 @@ drives the machine, and turns its commands into calls:
 Pure `set` nodes and edge routing are evaluated by `flow/machine` itself without
 host durable calls (REQ-FLOW-036, `docs/architecture/flow-engine.md` §4).
 
+**Idempotency keys (REQ-FLOW-058).** A `tool` or `task` step carries the key
+`<definition name>@<hash>/<node>#<attempt>@<superstep sequence>`: the loaded
+definition's name, the run's pinned hash, the node id, the command's attempt and
+the machine's superstep sequence (the snapshot's `Seq`). A normal node's attempt
+is 0 on every visit and a `map` child's attempt is its element index, so
+`(node, attempt)` repeats on a loop's second visit; the sequence is what makes
+the key unique per logical step. Replay therefore issues the same key for the
+same logical step, and a second visit of a node in a loop issues a different one.
+
 A command for a kind the machine returns without a follow-up event is answered
 with the one event in its row, so the machine advances: for `wait` and `gate`
 the host feeds `timer_fired` or `gate_resolved` alone, and adds no
-`node_completed` after it.
+`node_completed` after it. A negative `wait` `duration` or `gate` `timeout`
+fails the run with code `invalid_argument` when the node runs, before the host
+makes any durable call for it (`dc.Sleep` or `dc.Await`); it never becomes a zero
+wait and never panics (REQ-FLOW-056).
 
 **Superstep concurrency (REQ-FLOW-044).** When `Machine.Start` or
 `Machine.Apply` returns multiple commands in one superstep, the host starts all
 of their Future-returning durable calls (`dc.Step`, `dc.Sleep`, `dc.Await` and
 `dc.Child`) in command order and then waits for completions with `dc.Select`,
 rather than blocking on each command sequentially. `NodeHandler` is synchronous
-and returns no `Future`: the host calls it directly, one command at a time, as
-the table above says; it occupies the host while it runs, so the host has no
-other concurrent work to wait on around it.
+and returns a `NodeResult` and no `Future`: the host calls it directly, one
+command at a time, as the table above says; it occupies the host while it runs,
+so the host has no other concurrent work to wait on around it.
 
-**Node failure (REQ-FLOW-035).** Any error from a `NodeHandler`, `dc.Step`,
-`dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a `node_failed`
-event carrying the error's `core.Code` and message (`core.CodeOf`, so a
-non-`*core.Error` becomes `internal`). Handing `node_failed` to the machine is
-the host's whole decision; when the machine returns `fail`, the host returns a
-`*core.Error` with that code.
+When several futures of one superstep fail, the host fails the run with the
+error of the future `Select` reports first, does not await the other futures and
+runs no later superstep (REQ-FLOW-052). The host calls node handlers in command
+order; once a handler returns an error, it does not call the handlers of the
+nodes that follow it in command order in that superstep (REQ-FLOW-053).
+
+**Node failure (REQ-FLOW-035, REQ-FLOW-057).** Any error from a `NodeHandler`,
+`dc.Step`, `dc.Await` (including `CodeTimeout`), or `dc.Child` becomes a
+`node_failed` event carrying the error's `core.Code` and message (`core.CodeOf`,
+so a non-`*core.Error` becomes `internal`). The payload carries only the code
+and message: no error details, no node input and no state. A non-`*core.Error`
+is reported as code `internal` with the message `flow: node "<id>" failed`; the
+original error text is not reported (REQ-FLOW-057). Handing `node_failed` to the
+machine is the host's whole decision; when the machine returns `fail`, the host
+returns a `*core.Error` with that code.
+
+**Node cost (REQ-FLOW-049, REQ-FLOW-050, REQ-FLOW-059).** The host reports a
+finished node's settled cost to the machine in `flow.Event.CostMpts`: an
+additive field of `flow.Event`, an `int64` of milli-points, non-negative, set
+only on `node_completed` and `node_failed` and left zero on every other event.
+The machine adds it to `Snapshot.Cost` with the node's other updates, when it
+applies the event (REQ-FLOW-049), so the edges out of that node and every later
+expression see it in `run.cost`, which is what a guard's `cost_mpts` compares
+against (§2.4). The number is part of the node's recorded result — the amount
+the node's handler returned — and never a value read from a ledger, a price
+table or a meter while replaying: the event the host feeds back already carries
+it, so replaying the same history accrues the same cost and reaches the same
+guard verdicts (REQ-FLOW-037). A `node_failed` accrues the settled cost of the
+pending step the event names, once: applying it removes that pending step. A
+pure `set` node, a wait node and a gate node cost nothing, so their completions
+carry no cost. The field is non-negative by contract — settlement charges a
+non-negative number of milli-points (`specs/models/design.md` §C3 and §C5) — so
+the machine never has to read a negative cost as a refund.
+
+**The node handler is the only cost source (REQ-FLOW-059).** `NodeHandler`
+returns `NodeResult{Output json.RawMessage; CostMpts int64}`. The host copies
+`CostMpts` into the `node_completed` event for a successful handler, and into
+the `node_failed` event when the handler returns both a result and an error.
+Only the model layer prices a call (`specs/models/design.md` §C4 and §C5), so
+the handler of a `model` or `agent` node is where cost is settled. A `tool` or
+`task` step's result and a `subflow` child run's result carry no settled cost:
+`runtime.StepFunc` returns an output only, and a child run completes with its
+final state (REQ-FLOW-038). Carrying cost in either would change the step or the
+child contract — a runtime contract change that needs the architect and an
+ADR. The host therefore reports `0` for a tool/task step and for a subflow child
+run. A child run's cost accrues inside the child and is bounded by the child's
+own guards.
 
 **Replay and state (REQ-FLOW-037, 038).** The host keeps no state between calls
 other than local variables of the `FlowHost` call and the machine `Snapshot`

@@ -43,7 +43,7 @@ Capabilities:
 | [`schema`](schema/requirements.md) | Implemented (WP-L2-02, EP0-126). |
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
 | [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |
-| [`bus`](bus/requirements.md) | Planned (WP-L1-03). |
+| [`bus`](bus/requirements.md) | Implemented (WP-L1-03, `platform/bus`, BDD fake `internal/bdd/bustest`). |
 | [`expr`](expr/requirements.md) | Implemented (WP-L2-01). |
 | [`blob`](blob/requirements.md) | Implemented (WP-L1-02, WP-L1-08). |
 | [`sql`](sql/requirements.md) | Implemented (WP-L1-01). |

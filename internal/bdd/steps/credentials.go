@@ -696,9 +696,6 @@ func registerCredentials(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the put fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return credentialsCode(credentialsW(ctx).putErr, code)
-	})
 	sc.Step(`^the deletion fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		return credentialsCode(credentialsW(ctx).deleteErr, code)
 	})

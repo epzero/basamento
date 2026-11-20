@@ -35,7 +35,7 @@ of `kit`. Status words: **Implemented**,
 | SQL | SQLite (`modernc.org/sqlite`) | Postgres (`pgx`) | goose migrations |
 | Blob | local directory | S3, GCS, Azure | `gocloud.dev/blob` |
 | Bus + KV | `nats-server` in-process with JetStream | NATS cluster | `nats-server`, `nats.go` |
-| Secrets (key wrapping) | local key | KMS or Vault Transit | `gocloud.dev/secrets` + Tink |
+| Secrets (key wrapping) | local key | KMS or Vault Transit (`hashivault://`; refused at open until ADR-0017's driver) | `gocloud.dev/secrets` + Tink (+ our Transit keeper) |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
 | Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
 | Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |
@@ -112,6 +112,7 @@ flowchart TD
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
+| `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |
 | `flow` | IR, compiler, builder and the pure `Machine`. Imports no runtime. |

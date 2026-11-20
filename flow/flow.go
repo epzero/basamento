@@ -6,8 +6,8 @@
 // this package never imports package runtime (ADR-0011). This is what lets the same flow run on
 // every runtime with identical results (REQ-FLOW-*). See ADR-0003.
 //
-// Status: IR and compiler implemented (WP-L4-01); Machine contract only
-// (WP-L4-02).
+// Status: IR, compiler and Go builder implemented (WP-L4-01, WP-L4-03); machine
+// implemented in flow/machine (WP-L4-02).
 package flow
 
 import "encoding/json"
@@ -59,29 +59,58 @@ type Event struct {
 	Node    string          `json:"node,omitempty"`
 	Attempt int             `json:"attempt,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// CostMpts is milli-points the completed node settled, set by the host from
+	// the model node's settlement (model-layer.md §4); only node_completed and
+	// node_failed may carry it. A node_failed accrues cost once, for the pending
+	// step it names.
+	CostMpts int64 `json:"cost_mpts,omitempty"`
 }
 
-// Command is returned by the Machine for the runtime to execute.
+// Command is returned by the Machine for the runtime to execute. Attempt is
+// the one-based fan-out index of a map child, echoed back on its completion.
 type Command struct {
-	Type  string          `json:"type"` // run_node|start_timer|await_gate|emit|complete|fail|checkpoint
-	Node  string          `json:"node,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type    string          `json:"type"` // run_node|start_timer|await_gate|emit|complete|fail|checkpoint
+	Node    string          `json:"node,omitempty"`
+	Attempt int             `json:"attempt,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
 }
 
-// Snapshot is the Machine's serializable state.
+// Snapshot is the Machine's serializable state. Steps is the current
+// superstep: every unit of work the machine started, its input and the update
+// it reported at the barrier. Steps is kept sorted by node id and attempt, so
+// two snapshots that differ only in completion order are byte-identical.
 type Snapshot struct {
 	Seq   int64           `json:"seq"`
 	State json.RawMessage `json:"state"`
-	Ready []string        `json:"ready,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+	Steps []Step          `json:"steps,omitempty"`
 	Visit map[string]int  `json:"visit,omitempty"`
 	Cost  int64           `json:"cost_mpts"`
 }
 
-// Machine is the pure interpreter. Implementations must be deterministic:
-// the same IR, input and event sequence always yield the same snapshots and
-// commands, independent of the order in which parallel nodes completed
-// (updates merge in canonical node-id order at superstep barriers).
+// Step is one unit of work in a superstep: a node, or one fan-out attempt of
+// a map node. Skip marks a guarded node whose While condition did not hold: it
+// runs nothing and routes nowhere.
+type Step struct {
+	Node    string          `json:"node"`
+	Attempt int             `json:"attempt,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Done    bool            `json:"done,omitempty"`
+	Skip    bool            `json:"skip,omitempty"`
+	Update  json.RawMessage `json:"update,omitempty"`
+}
+
+// Machine is the pure interpreter over one compiled definition. It reads no
+// clock, does no I/O and has no runtime dependency (ADR-0003, ADR-0011).
+//
+// Implementations must be deterministic: the same definition, input and event
+// sequence always yield the same snapshots and commands, independent of the
+// order in which parallel nodes complete (updates merge in canonical node-id
+// order at superstep barriers). The snapshot passed to Apply is never modified;
+// on error the host keeps that snapshot unchanged. json.RawMessage fields in
+// snapshots, events and commands share backing arrays across return values;
+// callers must treat them as read-only.
 type Machine interface {
-	Start(ir *IR, input json.RawMessage) (Snapshot, []Command, error)
+	Start(input json.RawMessage) (Snapshot, []Command, error)
 	Apply(s Snapshot, ev Event) (Snapshot, []Command, error)
 }

@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component
+@wp:WP-L1-07 @level:component
 Feature: Secrets never reach a log record, span attribute or metric label
   Whatever is recorded, a credential value or a field named after a secret
   never leaves the process. Redaction runs before anything is kept or exported.

@@ -4,9 +4,13 @@ Measurements of the in-process Temporal server used by the embedded profile
 (single-user daily use), and the reasons behind its settings. Re-run them after
 any change to the server version or the settings.
 
-Environment: Linux x86-64, 4 vCPU, Go 1.26.10, `go.temporal.io/server` v1.32.2,
+Environment: Linux x86-64, 4 vCPU, Go 1.26.10 (measured), `go.temporal.io/server` v1.32.2,
 `go.temporal.io/sdk` v1.47.0, `go.temporal.io/api` v1.63.5, `modernc.org/sqlite`
 v1.51.0, built with `CGO_ENABLED=0`.
+
+These numbers predate the Go 1.26.11 patch bump. The `net/http` fix in that
+patch (GO-2026-6859, ADR-0014) does not touch the embedded server or worker
+paths these benchmarks exercise, so the results still describe this module.
 
 ```bash
 cd runtime/temporal/embedded
@@ -61,7 +65,8 @@ go build -o bench-cli ./bench
 6. **Pin `go.temporal.io/api` and `go.temporal.io/sdk` to the versions the
    server release was built with** (from the matching `temporalio/cli` release).
    Newer API modules do not compile against a given server release.
-7. **Go ≥ 1.26.11** is required by server v1.32.
+7. **Go ≥ 1.26.11** is required by server v1.32 and carries the `net/http`
+   fix for GO-2026-6859 (ADR-0014).
 8. **The server's dependencies are heavy.** That is acceptable in the `kit`
    binary but must stay out of library packages, so this is its own Go module
    (ADR-0002).

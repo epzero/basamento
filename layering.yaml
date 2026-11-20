@@ -29,9 +29,12 @@ layers:
   internal/bdd:     [core, platform, expr, stream, model, prompt, flow, runtime, agent, tool, auth, api, internal/config]
   internal/config:    [core]
 
-# Fakes: importable only from _test.go files (not checked by `go list` Imports)
-# and from the BDD harness.
-test_only: [core/coretest]
+# Listed packages are test support (ADR-0018): never importable from production
+# code outside internal/bdd. Until the layering walk in the EP0-70 implementation
+# change lands, `go tool gate layering` still checks production `Imports` only;
+# `_test.go` / TestImports enforcement is that follow-up. After it: importable
+# from `_test.go` of any layer and from internal/bdd.
+test_only: [core/coretest, internal/bdd]
 test_only_allowed_from: [internal/bdd]
 
 # Durable-execution vendors stay behind runtime implementations; flow code and

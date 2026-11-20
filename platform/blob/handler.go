@@ -43,7 +43,8 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	if err := validateTenantSegment(tenant); err != nil {
+	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
+	if _, ok := core.TenantFrom(ctx); !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -59,7 +60,6 @@ func (h *URLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	ctx := core.WithTenant(r.Context(), core.TenantID(tenant))
 	contentKey := key
 	ctype, err := h.Store.ContentType(ctx, contentKey)
 	if err != nil {
