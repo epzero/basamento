@@ -57,6 +57,11 @@ the **line** job above, and a flake hunt (one `go test -race -count=10 -timeout 
 timeout is explicit because it applies per test binary and the default 10 minutes
 is shorter than ten BDD suite runs under `-race`; a flaky scenario is quarantined
 with an issue and an expiry).
+**flake-hunt** and **slow-lanes** set `GATE_STRICT=1`, restore the embedded
+Postgres bundle cache and run `make pg-prefetch` before tests so a missing
+supervisor fails the job instead of skipping Postgres runs. In `internal/bdd`,
+`go test -count=N` shares one embedded server per process (`TestMain` closes it
+after all repetitions).
 The **release-readiness** job uses `continue-on-error` and is informational
 only (P0 backlog is expected); **line** is the blocking nightly signal.
 
