@@ -159,7 +159,7 @@ flowchart LR
   WP_L3_03 --> WP_L3_04
   WP_L3_03 --> WP_L6_02
   WP_L3_04 --> WP_L3_07
-  WP_L3_04 --> WP_L7_04
+  WP_L3_04 --> WP_L7_01
   WP_L3_06 --> WP_L3_03
   WP_L3_07 --> WP_L3_08
   WP_L4_01 --> WP_L4_02
@@ -170,7 +170,6 @@ flowchart LR
   WP_L5_01 --> WP_L3_03
   WP_L5_01 --> WP_L5_04
   WP_L5_01 --> WP_L6_01
-  WP_L5_01 --> WP_L7_01
   WP_L5_02 --> WP_L5_03
   WP_L5_03 --> WP_L5_04
   WP_L5_03 --> WP_L7_04

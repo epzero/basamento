@@ -5,7 +5,7 @@ Status: the invocation contract and adapters in `model` and `model/chat`
 and `model/middleware` (WP-L3-02), the catalog and price table in
 `model/catalog` (WP-L3-06) and the model node in `model/node` (WP-L3-03) are
 implemented; provider construction and routing **Planned** (WP-L3-04).
-Decision: ADR-0006. Specs: `specs/models`.
+Decision: ADR-0006, ADR-0019. Specs: `specs/models`.
 
 ## 1. One invocation contract
 
@@ -23,6 +23,51 @@ type Invoker interface {
 }
 func Invoke(ctx, Invoker, Request) (Result, error)          // blocking form: Start + Result
 ```
+
+A request may carry a **cache hint** (ADR-0019), `Request.Cache *CacheHint`.
+It is vendor-neutral and advisory:
+
+```go
+// CacheHint marks up to three cache breakpoints in a request: the last
+// non-empty system message, the last non-empty tool definition, and the last
+// non-empty content block of the last non-empty message. A nil hint asks for
+// none.
+type CacheHint struct {
+    System  bool `json:"system,omitempty"`
+    Tools   bool `json:"tools,omitempty"`
+    Message bool `json:"message,omitempty"`
+}
+```
+
+The three breakpoints are the last **non-empty** system block, the last
+**non-empty** tool definition and a rolling marker on the last **non-empty**
+content block of the last non-empty message. An empty anchor is skipped. The
+hint is part of the durable request, so a replay annotates the same request
+the same way. A provider that cannot express a breakpoint ignores it; a hint
+never fails an invocation. The provider adapter, not the caller, turns it into
+the vendor's wire form. Only trusted flow code sets the hint; the API edge
+strips a client-supplied cache field.
+
+A caller that maps an assembled prompt to a model request places the `static`
+and `semi-static` parts in system messages and the `dynamic`, `history` and
+`user` parts in non-system messages. It sets `CacheHint.System` only when the
+last system message ends exactly at the prompt's `cache_after`; when it cannot,
+it sets no system breakpoint and the request proceeds unannotated
+(`specs/prompt/design.md`).
+
+`model.PrefixHash(Request)` returns the SHA-256 of a canonical byte string: the
+request's tool definitions in request order, then its system messages in
+request order. It is order-sensitive; a tool definition contributes the JSON
+object the contract carries (`name`, `desc`, its parameter schema and every
+other field such as `extra`), and a system message contributes its JSON object
+(`role`, `content`, `multi_content`, `user_input_multi_content`, `name` and
+every other field), with object keys sorted. It is empty when the request has
+neither a tool definition nor a system message, and it ignores the hint. It is
+the model-layer counterpart of `prompt.PrefixHash`: the agent loop asserts that
+two consecutive turns have the same stable prefix hash (REQ-AGENT-031) while
+the tool set is unchanged, while the rolling message marker extends the cached
+prefix without changing the stable one. `PrefixHash` is internal: never logged, never returned to a
+tenant, and never a cache key without tenant and credential scope.
 
 | Vendor protocol | Adapter mapping | Typical capabilities |
 | --- | --- | --- |
@@ -90,6 +135,25 @@ Every model has a `Descriptor`:
 | Remote invokers | Any service implementing `basamento.invoke.v1.InvocationService` over connect (for example the browser runner, ADR-0009). |
 | Vendor-specific adapters | Only where a manifest cannot express the protocol. |
 
+Cache annotations are the provider adapters' (ADR-0019). Anthropic-compatible
+adapters mark the last non-empty system block, the last non-empty tool
+definition and the last non-empty message content block with
+`cache_control: {"type":"ephemeral"}`. No adapter sets any breakpoint —
+`System`, `Tools` or `Message` — until the cache-write contract (ADR-0019 §7)
+lands in the same change; a `Tools` breakpoint is still a cache write billed
+at the premium. Providers with automatic prefix caching (OpenAI-compatible,
+DeepSeek, Qwen, MiniMax, GLM, OpenRouter, Ollama, Ark/Doubao, Qianfan) need no
+hint, ignore it, and are unaffected. A generic manifest provider ignores the
+hint unless its manifest declares an annotation mapping. Every provider not
+listed in ADR-0019 §2 ignores the hint. Gemini explicit cached content is a
+separate ADR (ADR-0019's non-goals); until it lands, the Gemini adapter
+ignores the hint. The provider composition root is `model/providers`
+(WP-L3-04), under the `model` layer; it supplies each adapter's annotator and
+is called from `cmd/kit`, the BDD harness and the worker. The hint crosses the
+network in an additive `StartRequest.cache` field of
+`basamento.invoke.v1.InvocationService`, and the worker contract carries the
+same field; a remote invoker or worker maps or ignores it.
+
 Every provider ships with a **simulator** and contract tests (WP-L3-04).
 
 ## 4. The model node in a flow
@@ -155,6 +219,16 @@ reads that final state before falling back to the estimate.
   provider error retries the same rung. The local repair runs in process after
   the last supported rung: it strips prose and code fences and fixes JSON
   syntax, never a field, so a missing field is not fabricated.
+- **Cache hints.** `model/chat` forwards `Request.Cache` to the provider's
+  `CacheAnnotator`; it never writes vendor syntax itself. The annotator is a
+  pure function of the decoded messages, the tools and the hint, so a replay
+  of the same durable request produces the same annotation. An annotator error
+  is ignored: `Start` proceeds with the decoded messages and tools unchanged,
+  and the error carries neither message text nor a provider handle. The
+  rolling marker's position is the last message block of that request; no turn
+  counter or clock is read. The tool definitions are journaled and are never
+  re-resolved at adapter time, so a tool set that changes between turns
+  legitimately changes the stable prefix.
 - **Middleware order** (`model/middleware`): call log ∘ recording ∘ fallback ∘
   metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk, idle, total).
   Every attempt of one call, across rungs and retries, spends one budget of 3
@@ -215,11 +289,11 @@ configuration sets its value in a currency.
 
 | Piece | What it is |
 | --- | --- |
-| **Price table** | Per model, an ordered list of **rate rules**. A rule has rates (per million input, output, cached and reasoning tokens; per image, second or character) and an optional `when`. The first rule that holds applies. |
+| **Price table** | Per model, an ordered list of **rate rules**. A rule has rates (per million input, output, cached, cache-write and reasoning tokens; per image, second or character) and an optional `when`. The first rule that holds applies. |
 | `when` | CEL over `at` (the start time of the invocation), `params`, `usage` and `tenant`. It expresses off-peak hours, long-context tiers, batch discounts and dated price changes. |
 | Layers | A snapshot shipped with the binary, then deployment overrides, then tenant overrides (negotiated rates, markup). |
 | **Price formula** | The descriptor's CEL over `params`, `usage` and the chosen `rates`. Token models share a default formula. |
-| Reserve | The formula on estimated usage: counted input tokens and the output limit. |
+| Reserve | The formula on estimated usage: for the default token formula, counted input tokens at `max(input, cache_write)` when the request has a cache hint, and the output limit. |
 | Settle | The cost the vendor reports, or else the formula on actual usage. |
 
 ```yaml
@@ -236,6 +310,23 @@ example-chat:
 CEL has no clock here: `at` is passed in and recorded with the invocation, so
 a replay prices it the same way. A vendor whose pricing no rule can express
 gets a formula of its own in its descriptor.
+
+Cache writes are part of the contract (ADR-0019 §7). `Usage.InputTokens` is
+the provider's total prompt tokens: the uncached input plus cache reads plus
+cache creations, with each part added only when the provider's count excludes
+it. `CachedTokens` is the cache-read part and `CacheWriteTokens` the
+cache-creation part, both inside `InputTokens`. A rule may set `cache_write`;
+when it omits it, cache writes cost the input rate, and `cache_write: 0` is a
+rate. The default formula prices `I − C − W` at the input rate, `C` at the
+cached rate, `W` at the cache-write rate and `O` at the output rate, and it
+needs the input rate when `I − C − W > 0` and, without `cache_write`, when
+`W > 0`; a negative count and `C + W > I` fail with `invalid_argument`. A
+reservation for a request with a cache hint reserves its counted input tokens
+at the greater of the input and cache-write rates (`input` when the rule sets
+no `cache_write`), so a `cache_write: 0` rule still reserves the input rate;
+the estimator wiring (`agent.Options.Estimate`) passes `Request.Cache` into
+`catalog.Request.Cache` so the price table can see the hint. The settled
+`CostMpts` includes the write premium.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run
