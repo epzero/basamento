@@ -35,10 +35,12 @@ here in full; no code from that repository is copied.
 ## Decision
 
 1. A **dropped-turn summary** is an opt-in part of the context-window policy
-   (`input_summary: true`). When turns are dropped, the loop keeps a durable
-   summary of them and puts one synthetic user message, wrapped in
+   (`input_summary: true`). When turns are dropped and a summary message
+   covering one or more of them exists, the loop keeps a durable summary of
+   them and puts one synthetic user message, wrapped in
    `<untrusted source="conversation-summary">`, between the kept first turn and
-   the kept recent tail.
+   the kept recent tail. A summary that failed or could not be afforded sends
+   no summary message (REQ-AGENT-035).
 2. The summary is produced by **durable steps** `summary-<from>-<to>`, one per
    chunk of the dropped range, and is extended incrementally as the drop
    frontier advances; replay reads the recorded steps, so it assembles the same
@@ -71,8 +73,9 @@ here in full; no code from that repository is copied.
 
 ### 1.1 Placement and shape
 
-When `input_summary` is true, `input_tokens > 0` and at least one turn is
-dropped, the messages of model turn `n` are, in order:
+When `input_summary` is true, `input_tokens > 0`, at least one turn is
+dropped and the loop has a summary message covering one or more of the dropped
+turns, the messages of model turn `n` are, in order:
 
 1. the agent's system messages;
 2. the kept first model turn and the tool results that followed it;
