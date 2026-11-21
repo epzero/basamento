@@ -26,17 +26,14 @@ func registerSQL(sc *godog.ScenarioContext) {
 	})
 	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
 		w := world(ctx)
-		if w.SQL == nil {
-			w.SQL = newSQLWorld()
-		} else {
-			w.SQL.teardown()
-			w.SQL = newSQLWorld()
-		}
+		w.SQL = newSQLWorld()
 		if err := skipByProfile(scn, w.SQL.profile); err != nil {
 			return ctx, err
 		}
 		return ctx, nil
 	})
+	registerFailureSource(callFailurePhrase, "sql", sqlCallFailure)
+	registerFailureSource(openingFailurePhrase, "sql", sqlOpeningFailure)
 
 	sc.Step(`^an empty data directory$`, func(ctx context.Context) error {
 		dir, err := os.MkdirTemp("", "sql-data-*")
@@ -530,4 +527,33 @@ func registerSQL(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+}
+
+func sqlCallFailure(ctx context.Context, code string) (bool, error) {
+	w := world(ctx).SQL
+	if w == nil {
+		return false, nil
+	}
+	err := w.lastErr
+	if err == nil {
+		err = w.lastTxErr
+	}
+	if err == nil {
+		return false, nil
+	}
+	if string(core.CodeOf(err)) != code {
+		return true, fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
+	}
+	return true, nil
+}
+
+func sqlOpeningFailure(ctx context.Context, code string) (bool, error) {
+	w := world(ctx).SQL
+	if w == nil || w.openErr == nil {
+		return false, nil
+	}
+	if string(core.CodeOf(w.openErr)) != code {
+		return true, fmt.Errorf("got code %s, want %s", core.CodeOf(w.openErr), code)
+	}
+	return true, nil
 }

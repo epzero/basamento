@@ -106,6 +106,10 @@ func (w *catalogWorld) update(ctx context.Context, id string, change func(*model
 }
 
 func registerCatalog(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Catalog = newCatalogWorld()
+		return ctx, nil
+	})
 	sc.Step(`^the catalog holds a "([^"]*)" model "([^"]*)"$`, func(ctx context.Context, capability, id string) error {
 		return world(ctx).Catalog.hold(ctx, capability, id)
 	})

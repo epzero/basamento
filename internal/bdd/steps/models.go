@@ -48,6 +48,10 @@ func (w *modelWorld) tenantCtx(ctx context.Context) context.Context {
 }
 
 func registerModel(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Model = newModelWorld()
+		return ctx, nil
+	})
 	sc.Step(`^a simulated "([^"]*)" provider whose vendor protocol is "([^"]*)"$`, func(ctx context.Context, capability, protocol string) error {
 		return world(ctx).Model.provider(ctx, capability, protocol)
 	})

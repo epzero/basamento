@@ -432,6 +432,10 @@ func (agentFuture) Ready() bool { return true }
 // --- step definitions ------------------------------------------------------
 
 func registerAgent(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Agent = newAgentWorld()
+		return ctx, nil
+	})
 	// Flow and agent setup.
 	sc.Step(`^flow "([^"]*)" defines agent node "([^"]*)" with a scripted model$`, func(ctx context.Context, flowName, node string) error {
 		world(ctx).Agent.def(node)

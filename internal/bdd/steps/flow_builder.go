@@ -86,6 +86,10 @@ func unquoteName(name string) string {
 }
 
 func registerFlowBuilder(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).FlowBuilder = newBuilderWorld()
+		return ctx, nil
+	})
 	sc.Step(`^a flow builder for flow "([^"]*)" version (\d+)$`, func(ctx context.Context, name string, version int) error {
 		w := builderCtx(ctx)
 		w.name, w.version = name, version
