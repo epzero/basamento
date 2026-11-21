@@ -306,7 +306,7 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	// Settle before anything that can fail after the invocation ended: the
 	// provider already ran and may have charged.
 	result := followed.Result
-	actual, err := h.actualCost(result, quote, priced)
+	actual, err := h.actualCost(result, quote, priced, followed.Cancelled)
 	if err != nil {
 		return Output{}, err
 	}
@@ -486,11 +486,23 @@ func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.Raw
 // actualCost is what the run is charged: the cost the provider reports, or
 // else the price formula on the actual usage (docs/architecture/model-layer.md
 // §7).
-func (h *Handler) actualCost(result model.Result, quote catalog.Quote, priced bool) (int64, error) {
+//
+// A started, priced invocation that completed without reporting a cost or a
+// usage is charged the reserved estimate, not zero: an absent usage is not
+// proof the provider charged nothing (poll and video results often carry none).
+// The one exception is a cancellation whose provider reports no cost: the run
+// stops the invocation, so it releases the reservation (REQ-MODEL-009).
+func (h *Handler) actualCost(result model.Result, quote catalog.Quote, priced, cancelled bool) (int64, error) {
 	if result.CostMpts > 0 {
 		return result.CostMpts, nil
 	}
-	if result.Usage == nil || !priced {
+	if result.Usage == nil {
+		if priced && !cancelled {
+			return quote.Estimate, nil
+		}
+		return 0, nil
+	}
+	if !priced {
 		return 0, nil
 	}
 	charge, err := h.deps.Catalog.Settle(quote, *result.Usage)
