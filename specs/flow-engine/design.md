@@ -256,10 +256,17 @@ holds, which is data the run receives and not part of the definition.
 runs itself (`set`, `parallel`, `map`), one child used by two `map` nodes, a
 `map` child carrying a guard, and a condition on the edge from `START` — with
 code `invalid_argument`, naming the `map` node and its child, both `map`
-nodes, or the edge. The `map` checks read the node spec's `over` and `node`
-fields the way `flow/machine` reads them (`parseMapSpec`), and they scan
-`IR.Nodes` in sorted id order, so two `map` nodes using one child always
-report them in the same order.
+nodes, or the edge. The `map` child checks decide the child from the spec's
+`node` field alone, not from both `over` and `node` the way `flow/machine`'s
+`parseMapSpec` reads them, and they scan `IR.Nodes` in sorted id order, so two
+`map` nodes using one child always report them in the same order. A `map` spec
+whose `node` is absent, not a string, or empty names no child the machine can
+run, so the compiler rejects it before any child check with
+`flow: map node "fanout": spec needs a non-empty "node" child name`.
+
+A `map` with no `over` is rejected under REQ-FLOW-067 with code
+`invalid_argument`, naming the `map` node and the `over` field:
+`flow: map node "fanout": spec needs a non-empty "over" expression`.
 
 - **A child that is not a node** (REQ-FLOW-062): the machine emits no `run_node`
   command for the child, so the host would never run it. Message:
@@ -295,8 +302,13 @@ therefore reported as REQ-FLOW-065, not as a bounded cycle by REQ-FLOW-003.
 itself before it compiles an expression, with the same code and the same
 wording; they stay there, because an IR can be built in Go without the
 compiler (ADR-0003) and a machine must refuse to run one it cannot run. The
-compiler adds them so the author sees the error when the flow is registered
-(`flow/compile.Compile`, `flow/ir.Validate`) rather than when a run starts.
+shape check for a missing usable `node` breaks the "same wording" claim: the
+machine's own missing-`node` check lives in `parseMapSpec` and says
+`map spec needs over and node`, while the validator says
+`flow: map node "fanout": spec needs a non-empty "node" child name`. The
+compiler adds the five defects and that shape check so the author sees the
+error when the flow is registered (`flow/compile.Compile`, `flow/ir.Validate`)
+rather than when a run starts.
 `flow/builder` keeps a node spec as written (REQ-FLOW-012) and has no `map`
 check of its own: it checks only what its declarations make knowable, and the
 compiler is the one validator — a second copy would be a second source of

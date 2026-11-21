@@ -850,3 +850,15 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/116
         human:
             status: pending
+    FLOW-067-01:
+        hash: sha256:656097548132afe014726a62fae7bba2d8beaf2020b41f5fd4c7039b110dcbd2
+        reqs:
+            - REQ-FLOW-067
+        tier: P2
+        author: opencode:spec-author:0c761e
+        reviewer: cursor:spec-reviewer:8c73d6
+        approved_at: "2026-11-21"
+        note: Compile-time rejection of a map with missing or empty over (REQ-FLOW-067); outline covers both Examples; design §2.6 demotes missing-node to shape precondition and documents the exact over message. Round 2 closes EP0-165 F1–F3 and fully reviews EP0-171.
+        ref: https://github.com/epzero/basamento/pull/135
+        human:
+            status: pending
