@@ -168,8 +168,8 @@ func TestStepPanicWithErrorValue(t *testing.T) {
 	if !errors.As(err, &platform) || platform.Message != "local: the step panicked" {
 		t.Fatalf("step error %v, want internal step panic wrapper", err)
 	}
-	if !errors.Is(platform.Cause, sentinel) && platform.Cause.Error() != sentinel.Error() {
-		t.Fatalf("cause %v, want %v", platform.Cause, sentinel)
+	if platform.Cause != nil {
+		t.Fatalf("cause %v, want nil (panic logged, not exposed)", platform.Cause)
 	}
 	if strings.Contains(platform.Message, "boom-step") {
 		t.Fatal("cause leaked into the platform message")

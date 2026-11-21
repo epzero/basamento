@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -23,6 +24,9 @@ type Options struct {
 	// IDs issues run ids when StartRequest.RunID is empty. nil means ULIDs
 	// over Clock.
 	IDs core.Ids
+	// Logger receives one Error record per recovered flow-host or step panic. nil
+	// means slog.Default().
+	Logger *slog.Logger
 }
 
 // wakeClock is the clock port the local runtime uses for Now and timer wake-ups.
@@ -60,10 +64,11 @@ type idemKey struct {
 
 // Runtime is the in-process implementation of runtime.Runtime.
 type Runtime struct {
-	mu    sync.Mutex
-	clock wakeClock
-	ids   core.Ids
-	host  runtime.FlowHost
+	mu     sync.Mutex
+	clock  wakeClock
+	ids    core.Ids
+	logger *slog.Logger
+	host   runtime.FlowHost
 	steps map[string]registeredStep
 
 	runs  map[runKey]*run
@@ -92,11 +97,12 @@ func New(opts Options) (*Runtime, error) {
 			"local: the clock cannot schedule timers: it has no After(duration)", nil)
 	}
 	r := &Runtime{
-		clock: wake,
-		ids:   opts.IDs,
-		steps: map[string]registeredStep{},
-		runs:  map[runKey]*run{},
-		idem:  map[idemKey]*run{},
+		clock:  wake,
+		ids:    opts.IDs,
+		logger: opts.Logger,
+		steps:  map[string]registeredStep{},
+		runs:   map[runKey]*run{},
+		idem:   map[idemKey]*run{},
 	}
 	if r.ids == nil {
 		r.ids = core.NewULIDs(r.clock, nil)
@@ -134,7 +140,9 @@ func (r *Runtime) RegisterStep(name string, fn runtime.StepFunc, d runtime.StepD
 }
 
 // Capabilities reports what the local runtime supports: nothing durable, just
-// synchronous gate resolution (REQ-RT-005).
+// synchronous gate resolution (REQ-RT-005). Resolve delivers any payload today;
+// validation against GateSpec.Schema and AcceptIf (FLOW-006-01) arrives with
+// WP-L5-04.
 func (r *Runtime) Capabilities() runtime.Caps {
 	return runtime.Caps{
 		Durable:         false,
@@ -233,8 +241,9 @@ func (r *Runtime) startChild(tenant core.TenantID, id string, flow runtime.FlowR
 	return started, nil
 }
 
-// Resolve hands payload to the run waiting at gate. The tenant comes from ctx
-// and must agree with run.TenantID when set (REQ-RT-009, REQ-RT-010,
+// Resolve hands payload to the run waiting at gate without evaluating
+// GateSpec.Schema or AcceptIf today (FLOW-006-01, WP-L5-04). The tenant comes
+// from ctx and must agree with run.TenantID when set (REQ-RT-009, REQ-RT-010,
 // REQ-RT-042, REQ-RT-044, REQ-RT-025).
 func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, payload json.RawMessage) error {
 	tenant, err := r.tenant(ctx, ref.TenantID)
@@ -249,7 +258,8 @@ func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, 
 }
 
 // Cancel cancels a run and delivers cancellation to its in-flight steps and
-// waits (REQ-RT-012, REQ-RT-013).
+// waits (REQ-RT-012, REQ-RT-013). The reason is truncated to 256 runes in the
+// cancellation message.
 func (r *Runtime) Cancel(ctx context.Context, ref runtime.RunRef, reason string) error {
 	tenant, err := r.tenant(ctx, ref.TenantID)
 	if err != nil {

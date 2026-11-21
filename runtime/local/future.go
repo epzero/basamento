@@ -2,7 +2,6 @@ package local
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -116,36 +115,15 @@ func invalidErr(message string, details map[string]any) error {
 	return core.NewError(core.CodeInvalidArgument, message, details)
 }
 
-// flowPanicErr turns a recovered host panic into a failed run. The recovered
-// value is kept as Cause only for logging inside the runtime; Describe, List
-// and RunStatus never surface it.
+// flowPanicErr turns a recovered host panic into a failed run. The panic value is
+// logged, not attached as Cause, so callers never see it through Error().
 func flowPanicErr(recovered any) error {
-	var cause error
-	switch x := recovered.(type) {
-	case error:
-		cause = x
-	default:
-		cause = fmt.Errorf("%v", x)
-	}
-	e := core.NewError(core.CodeInternal, "local: the flow host panicked", nil)
-	e.Cause = cause
-	return e
+	return core.NewError(core.CodeInternal, "local: the flow host panicked", nil)
 }
 
 // stepPanicErr turns a recovered step panic into a non-retryable step error. The
 // wrapper is deliberately not marked retryable, so runStep's retryable check ends
-// attempts after the first panic even when Cause is a retryable *core.Error. The
-// recovered value is kept as Cause only for logging inside the runtime;
-// Describe, List and RunStatus never surface it.
+// attempts after the first panic. The panic value is logged, not Cause.
 func stepPanicErr(step string, recovered any) error {
-	var cause error
-	switch x := recovered.(type) {
-	case error:
-		cause = x
-	default:
-		cause = fmt.Errorf("%v", x)
-	}
-	e := core.NewError(core.CodeInternal, "local: the step panicked", map[string]any{"step": step})
-	e.Cause = cause
-	return e
+	return core.NewError(core.CodeInternal, "local: the step panicked", map[string]any{"step": step})
 }
