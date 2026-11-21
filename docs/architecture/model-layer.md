@@ -292,7 +292,7 @@ configuration sets its value in a currency.
 | `when` | CEL over `at` (the start time of the invocation), `params`, `usage` and `tenant`. It expresses off-peak hours, long-context tiers, batch discounts and dated price changes. |
 | Layers | A snapshot shipped with the binary, then deployment overrides, then tenant overrides (negotiated rates, markup). |
 | **Price formula** | The descriptor's CEL over `params`, `usage` and the chosen `rates`. Token models share a default formula. |
-| Reserve | The formula on estimated usage: counted input tokens (with the cache-write premium for a request with a cache hint) and the output limit. |
+| Reserve | The formula on estimated usage: counted input tokens at `max(input, cache_write)` for a request with a cache hint, and the output limit. |
 | Settle | The cost the vendor reports, or else the formula on actual usage. |
 
 ```yaml
@@ -320,9 +320,12 @@ rate. The default formula prices `I − C − W` at the input rate, `C` at the
 cached rate, `W` at the cache-write rate and `O` at the output rate, and it
 needs the input rate when `I − C − W > 0` and, without `cache_write`, when
 `W > 0`; a negative count and `C + W > I` fail with `invalid_argument`. A
-reservation for a request with a cache hint counts its counted input tokens as
-cache-write tokens, so a full write is reserved; the settled `CostMpts`
-includes the write premium.
+reservation for a request with a cache hint reserves its counted input tokens
+at the greater of the input and cache-write rates (`input` when the rule sets
+no `cache_write`), so a `cache_write: 0` rule still reserves the input rate;
+the estimator wiring (`agent.Options.Estimate`) passes `Request.Cache` into
+`catalog.Request.Cache` so the price table can see the hint. The settled
+`CostMpts` includes the write premium.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run

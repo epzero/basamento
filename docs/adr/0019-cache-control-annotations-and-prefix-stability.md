@@ -306,10 +306,13 @@ free numbers (REQ-MODEL-089 onward):
 
 > **REQ-MODEL-092 — The reservation covers cache writes**
 > When the price table estimates the cost of a call whose request carries a
-> cache hint, the estimate shall include the cache-write premium by counting
-> the call's counted input tokens as cache-write tokens; and if a call's usage
-> reports more cached and cache-write tokens together than input tokens, then
-> the price table shall fail pricing the call with code `invalid_argument`.
+> cache hint and the default token formula applies, the estimate shall reserve
+> the call's counted input tokens at the greater of the chosen rule's input
+> and cache-write rates (the input rate when the rule defines no
+> `cache_write`), so the reservation is never below the input rate; and if a
+> call's usage reports more cached and cache-write tokens together than input
+> tokens, then the price table shall fail pricing the call with code
+> `invalid_argument`.
 
 Proposed scenarios for caster:
 
@@ -351,9 +354,11 @@ Proposed scenarios for caster:
   1,000,000` → 1 milli-point; a rule with neither `cache_write` nor `input`
   fails with `invalid_argument`.
 - `@REQ-MODEL-092 @id:MODEL-092-01`, "The reservation covers the cache-write
-  premium". A request with a cache hint and 7000 counted input tokens reserves
-  the write rate for those tokens, so a call that writes the whole prefix does
-  not exceed its reservation.
+  premium". A request with a cache hint and 7000 counted input tokens on a
+  rule with input 1000 and cache_write 1250 reserves
+  `7000 × 1250 = 8,750,000` → 9 milli-points; on a rule with cache_write 0 it
+  reserves `7000 × 1000 = 7` milli-points, never 0, so a call that writes the
+  whole prefix does not exceed its reservation.
 - `@REQ-MODEL-092 @id:MODEL-092-02`, "More cached and cache-write tokens than
   input fails pricing". Usage with 4000 cached and 2000 cache-write tokens but
   5000 input tokens fails with `invalid_argument`.
@@ -391,11 +396,19 @@ hint and is unaffected.
   `C > I` check becomes `C + W > I`, and `validateUsage` rejects a negative
   `W` like the other counts.
 - The reservation estimate includes the write premium: for a request with a
-  cache hint, the estimate counts the call's counted input tokens as
-  cache-write tokens, so a full write is reserved. The actual usage settles
-  it, and `Result.CostMpts` includes it. This also fixes the agent's token
-  cap seeing `input_tokens: 0` for a fully cached request: `InputTokens` now
+  cache hint and the default token formula, the estimate reserves the call's
+  counted input tokens at the greater of the rule's `input` and `cache_write`
+  rates (a rule without `cache_write` uses `input`), plus its output limit at
+  the output rate. Reserving only the write rate under-reserves a call that
+  costs the input rate when `cache_write` is 0 or below `input`; `max` is
+  never lower than the actual per-token charge. The actual usage settles it,
+  and `Result.CostMpts` includes it. This also fixes the agent's token cap
+  seeing `input_tokens: 0` for a fully cached request: `InputTokens` now
   includes the cache reads and writes.
+- `catalog.Request` gains `Cache bool`, set from `model.Request.Cache != nil`
+  by the composition root's estimator (`agent.Options.Estimate`, WP-L7-01),
+  so the price table can see the hint. `model/node`'s price step passes it
+  when a later spec gives a node a hint; today the node leaves the hint zero.
 - This supersedes the "Cache writes are not priced" note in
   `specs/models/design.md` C3; the spec change that adds REQ-MODEL-091/092
   updates that note. REQ-MODEL-075 and REQ-MODEL-082 remain true for `W = 0`;
@@ -525,12 +538,13 @@ mapping note from `specs/prompt/design.md`, and the split cache-hint rows from
 | `specs/prompt/design.md` | Intro and §4: the `cache_after` mapping; the vendor mapping is ADR-0019's. | this change |
 | `specs/glossary.md` | Split the prompt and model cache hints and the two prefix hashes. | this change |
 | `model/model.go` | `CacheHint`, `Request.Cache`, `PrefixHash`, `Usage.CacheWriteTokens`. | WP-L3-01 (done); changed by WP-L3-04 |
+| `model/catalog/types.go` | `Request.Cache bool`, set from `model.Request.Cache != nil`. | WP-L3-06 (done); changed by WP-L3-04 |
 | `model/chat/chat.go` | `CacheAnnotator`; ignore an annotator error; `usageOf` maps `InputTokens`, `CachedTokens` and `CacheWriteTokens` from `PromptTokens` and `PromptTokenDetails`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `model/providers/` | Provider composition root and per-vendor annotators. | WP-L3-04 |
 | `model/catalog/price.go` | `rates.cache_write`, the default formula, `validateUsage` (negative `W`, `C + W > I`), the missing-rate checks and the reservation estimate. | WP-L3-06 (done); changed by WP-L3-04 |
 | `contracts/basamento/invoke/v1/invoke.proto` | Additive `StartRequest.cache`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `contracts/basamento/worker` | Additive cache hint in the worker start request. | WP-L3-07 |
-| `agent/handler.go` | Set and journal the hint; include cache writes in the reservation. | WP-L7-01 |
+| `agent/handler.go` | Set and journal the hint on every turn; the estimator wiring passes `Cache: req.Cache != nil` into `catalog.Request`. | WP-L7-01 |
 | `specs/models/requirements.md` | REQ-MODEL-089 to REQ-MODEL-092; `cache_write_tokens` in REQ-MODEL-085 and the `W` term in REQ-MODEL-082 (re-locks, P1). | caster, after this ADR |
 | `specs/models/contract.feature` | MODEL-089-01..04 and MODEL-090-01. | caster |
 | `specs/models/catalog.feature` | MODEL-085-02. | caster |
