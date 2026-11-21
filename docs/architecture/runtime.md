@@ -2,7 +2,9 @@
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
 **Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
-(`runtime/local`, WP-L5-01); `temporal` **Planned** (WP-L5-02).
+(`runtime/local`, WP-L5-01); `temporal` **In progress** — data path
+(`runtime/temporal`, WP-L5-02 pull request (a); control plane and Await still
+planned in the same WP).
 Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
@@ -79,7 +81,68 @@ Settings for the embedded profile:
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.
 
-## 6. Local runtime: behaviours the specs leave open
+## 6. Temporal runtime: data path (WP-L5-02, pull request (a))
+
+`runtime/temporal` registers the flow host as a Temporal workflow and each step
+as an activity. This change delivers:
+
+- A **payload data converter** shared by workflow and activity workers: tenant
+  encryption (`platform/secrets`), blob claim-check over the threshold (default
+  5 KB on encrypted size), markers use encoding `basamento/claim-check` and only
+  history ever holds `binary/encrypted`. The converter may perform blob I/O inside
+  workflow code; `New` wraps it with `workflow.DataConverterWithoutDeadlockDetection`
+  so the SDK worker deadlock detector does not count that I/O (a slow store delays
+  the workflow task subject to server task timeout; pull request (c) will document
+  worker `DeadlockDetectionTimeout`).
+- **Payload codec errors:** only the **workflow-bound** data converter (the clone
+  from `WithWorkflowContext`) applies the transient policy: `unavailable`,
+  `timeout`, `rate_limited`, `cancelled` on this path (bound expiry—the blob layer
+  may map the deadline to `cancelled`—or store-reported cancellation; not a caller
+  decision), or retryable `core.Error` values are logged (bounded message, code,
+  tenant, workflow id) and panic as a sanitized `taskFailure`, so the **workflow
+  task** fails and the server retries (the run is not failed). Permanent errors
+  are returned. That covers step argument and result encode/decode, workflow input
+  decode, workflow result encode, and later workflow-side uses in (b)/(c). Client
+  and activity converters (`WithContext`) return errors without panicking.
+  Permanent step-argument encode failures are still surfaced to the flow as a failed
+  `Step` future (`Step` recovers the SDK panic). Workflow I/O is bounded at 30 s
+  per converter call so a hung store cannot block a worker thread; those
+  `cancelled` cases and bound expiry are transient (workflow task failure, server
+  retry, bounded by the run timeout), never a permanent flow error. Run-level
+  cancellation (`REQ-RT-013`) is unrelated. Workers must keep the SDK default
+  `WorkflowPanicPolicy` (`BlockWorkflow`); `FailWorkflow` would turn task failures
+  into permanent run failures (pull request (c) pins worker options). User panics
+  in the flow host still fail the run once with `temporal: the flow host panicked`;
+  SDK non-determinism and illegal-state panics are out of scope here.
+- A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
+  `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
+  `Emit` and `Checkpoint` return `unsupported` until the next changes of
+  WP-L5-02.
+- **Step activity** retries: `MaxAttempts` 0 → 3, listed `NonRetryable` codes and
+  non-retryable `core.Error` values stop after one attempt; Temporal backoff is
+  1 s initial, ×2, cap 100 s (the local runtime retries immediately). Codes and
+  the `Retryable` flag cross the activity boundary on `Future.Get`.
+- **Registration** (`RegisterFlowHost`, `RegisterStep`, `Register`,
+  `DataConverter`) without control-plane `runtime.Runtime` (pull request (c)).
+- **`Capabilities()`** on `DurableContext` reports only `durable` and
+  `polyglot_queues` until pull requests (b) and (c) add gates and ContinueAsNew.
+
+**Plain text in history:** Temporal stores failure messages and the tenant
+header unencrypted; payload bytes go through the codec only. History carries only
+a core error’s code and message (no Details, no chained cause text). Step authors
+must not put secrets in `core.Error` messages; other failures become `internal`
+with a fixed message and the original text goes to the logger only (bounded).
+
+**Claim-check blobs** are content-addressed. A replayed workflow task or retried
+activity may store new ciphertext under new keys; unreferenced blobs are not
+reclaimed in this phase.
+
+The BDD harness **decorates** `DataConverter` (records payloads, models the
+client tenant context, injects RT-032/033 faults on activity results). Production
+code has no test hooks. Real-server version pinning is pull request (c) and
+WP-L5-03.
+
+## 7. Local runtime: behaviours the specs leave open
 
 These are implementation choices for `runtime/local` (WP-L5-01). Where a row
 names a requirement or scenario id, the gate exercises it; otherwise the
