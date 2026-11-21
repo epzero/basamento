@@ -127,9 +127,10 @@ At a boundary:
    summary can be made.
 
 A failed chunk is recorded as `summary.failed` and is not retried. The loop
-does not extend past it: the summary stops at the end of the last successful
-chunk, and the remaining dropped turns stay unsummarised for the run. This is
-why a later boundary cannot re-include a range that already failed.
+does not extend past it, even after a restart: the summary stops at the end of
+the last successful chunk, and the remaining dropped turns stay unsummarised
+for the run. This is why a later boundary cannot re-include a range that
+already failed.
 
 The loop is bounded: at most 8 summary steps per turn boundary and at most 2
 restarts per boundary, both fixed constants; at most 16 summary steps per run,

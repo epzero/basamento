@@ -281,7 +281,8 @@ the loop restarts from turn 2. The loop is bounded: at most 8 summary steps per
 boundary, at most 2 restarts per boundary, and at most 16 summary steps per
 run, counted from the journaled `summary-*` steps. A failed chunk is recorded
 as `summary.failed` with a fixed reason code and is not retried; it stops the
-extension, so a later boundary cannot re-include the failed range. The fixed
+extension even after a restart, so a later boundary cannot re-include the
+failed range. The fixed
 point terminates because each successful chunk increases `To`, the frontier is
 bounded by the number of turns, a failure stops the extension, and a restart
 strictly shrinks the covered range.
