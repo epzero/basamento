@@ -87,6 +87,10 @@ func TestBDDGateProfiles(t *testing.T) {
 // BDD_BUS_BACKEND selects a single bus implementation when set (fake, embedded, cloud).
 func TestFeatures(t *testing.T) {
 	sqltest.ResetSkipCounts()
+	// An earlier -count repetition, or a test such as the strict URL probe in
+	// report_test.go, may close the embedded server or leave a failed InitPostgres
+	// outcome in this process; start from a clean server (EP0-154).
+	sqltest.ResetPostgresForTest()
 	failed := false
 	defer func() {
 		if err := WriteBDDReport(failed); err != nil {

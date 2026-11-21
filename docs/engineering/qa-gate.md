@@ -57,6 +57,11 @@ the **line** job above, and a flake hunt (one `go test -race -count=10 -timeout 
 timeout is explicit because it applies per test binary and the default 10 minutes
 is shorter than ten BDD suite runs under `-race`; a flaky scenario is quarantined
 with an issue and an expiry).
+**flake-hunt** and **slow-lanes** set `GATE_STRICT=1`, restore the embedded
+Postgres bundle cache and run `make pg-prefetch` before tests so a missing
+supervisor fails the job instead of skipping Postgres runs. In `internal/bdd`,
+each repetition of `TestFeatures` resets and starts its own embedded server so
+every `go test -count=N` repetition runs the Postgres dialect pass.
 The **release-readiness** job uses `continue-on-error` and is informational
 only (P0 backlog is expected); **line** is the blocking nightly signal.
 
@@ -118,7 +123,9 @@ after the previous one, and the reader says stale at 36 hours).
 ## Postgres in G3 (ADR-0015)
 
 The SQL conformance driver's **Postgres pass** (not every `@profile:cloud`
-scenario) needs a server once per `go test` process of `internal/bdd` (G3).
+scenario) needs a server once per `TestFeatures` run in `internal/bdd` (G3);
+each `go test -count=N` repetition of that test starts its own embedded
+server.
 `gate redgreen` starts embedded again per activated scenario (G4); each base
 worktree run reuses the head checkout's built supervisor (`EP_SUPERVISOR`) and
 inherits `BDD_POSTGRES_CACHE_DIR`, matching the G3 BDD step environment. A base
