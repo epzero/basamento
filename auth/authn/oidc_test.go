@@ -309,6 +309,76 @@ func TestNewOIDCAcceptsMaxLeeway(t *testing.T) {
 	}
 }
 
+type errKeySet struct{ err error }
+
+func (e errKeySet) VerificationKey(context.Context, string) (any, error) {
+	return nil, e.err
+}
+
+type ctxHonoringKeySet struct {
+	key any
+}
+
+func (c ctxHonoringKeySet) VerificationKey(ctx context.Context, kid string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if kid != "" {
+		return c.key, nil
+	}
+	return c.key, nil
+}
+
+func TestOIDCAuthenticateMapsContextErrors(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow())
+	key := rsaPrivateKey(t)
+	raw := signToken(t, jwt.SigningMethodRS256, key, testKeyID, testClaims(clock.Now()))
+
+	cases := map[string]struct {
+		keys     KeySet
+		ctx      context.Context
+		wantCode core.Code
+	}{
+		"key set cancelled": {
+			keys:     errKeySet{err: context.Canceled},
+			ctx:      context.Background(),
+			wantCode: core.CodeCancelled,
+		},
+		"key set deadline": {
+			keys:     errKeySet{err: context.DeadlineExceeded},
+			ctx:      context.Background(),
+			wantCode: core.CodeTimeout,
+		},
+		"caller cancelled": {
+			keys:     ctxHonoringKeySet{key: &key.PublicKey},
+			ctx:      func() context.Context { c, cancel := context.WithCancel(context.Background()); cancel(); return c }(),
+			wantCode: core.CodeCancelled,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			verifier, err := NewOIDC(OIDCOptions{
+				Issuer: testIssuer, Audience: testAudience, Keys: tc.keys, Clock: clock,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = verifier.Authenticate(tc.ctx, raw)
+			if core.CodeOf(err) != tc.wantCode {
+				t.Fatalf("code = %s, want %s", core.CodeOf(err), tc.wantCode)
+			}
+		})
+	}
+
+	verifier := testOIDC(t, clock)
+	claims := testClaims(clock.Now())
+	claims["exp"] = jwt.NewNumericDate(clock.Now().Add(-time.Hour))
+	expired := signToken(t, jwt.SigningMethodRS256, key, testKeyID, claims)
+	if _, err := verifier.Authenticate(context.Background(), expired); core.CodeOf(err) != core.CodeUnauthenticated {
+		t.Fatalf("expired token: code = %s, want unauthenticated", core.CodeOf(err))
+	}
+}
+
 func TestNewOIDCRejectsIncompleteOptions(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	key := rsaPrivateKey(t)

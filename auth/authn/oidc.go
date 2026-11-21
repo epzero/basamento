@@ -2,6 +2,7 @@ package authn
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -119,6 +120,15 @@ func (o *OIDC) Authenticate(ctx context.Context, raw string) (Principal, error) 
 		return o.keys.VerificationKey(ctx, kid)
 	})
 	if err != nil || token == nil || !token.Valid {
+		// The key function runs only after the token parsed; mapping a cancelled
+		// or timed-out context to cancelled/timeout reveals nothing the caller
+		// does not already know. JWKS fetch failures stay unauthenticated.
+		if errors.Is(err, context.Canceled) {
+			return Principal{}, core.NewError(core.CodeCancelled, "cancelled", nil)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return Principal{}, core.NewError(core.CodeTimeout, "timeout", nil)
+		}
 		return Principal{}, unauthenticated()
 	}
 
