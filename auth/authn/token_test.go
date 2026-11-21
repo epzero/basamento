@@ -81,25 +81,53 @@ func TestTokenVerifyRejectsEmptyHash(t *testing.T) {
 
 func TestNewTokenRejectsInvalidArguments(t *testing.T) {
 	expires := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	entropy := bytes.NewReader(make([]byte, tokenBytes))
 	cases := map[string]struct {
 		entropy io.Reader
 		id      string
 		tenant  core.TenantID
+		scopes  []string
 		expires time.Time
 	}{
-		"no entropy": {id: "tok_1", tenant: "acme", expires: expires},
-		"no id":      {entropy: bytes.NewReader(make([]byte, tokenBytes)), tenant: "acme", expires: expires},
-		"no tenant":  {entropy: bytes.NewReader(make([]byte, tokenBytes)), id: "tok_1", expires: expires},
-		"bad tenant": {entropy: bytes.NewReader(make([]byte, tokenBytes)), id: "tok_1", tenant: "acme/../../etc", expires: expires},
-		"no expiry":  {entropy: bytes.NewReader(make([]byte, tokenBytes)), id: "tok_1", tenant: "acme"},
+		"no entropy":   {id: "tok_1", tenant: "acme", scopes: []string{"read"}, expires: expires},
+		"no id":        {entropy: entropy, tenant: "acme", scopes: []string{"read"}, expires: expires},
+		"no tenant":    {entropy: entropy, id: "tok_1", scopes: []string{"read"}, expires: expires},
+		"bad tenant":   {entropy: entropy, id: "tok_1", tenant: "acme/../../etc", scopes: []string{"read"}, expires: expires},
+		"no expiry":    {entropy: entropy, id: "tok_1", tenant: "acme", scopes: []string{"read"}},
+		"nil scopes":   {entropy: entropy, id: "tok_1", tenant: "acme", scopes: nil, expires: expires},
+		"empty scopes": {entropy: entropy, id: "tok_1", tenant: "acme", scopes: []string{}, expires: expires},
+		"empty entry":  {entropy: entropy, id: "tok_1", tenant: "acme", scopes: []string{""}, expires: expires},
+		"blank entry":  {entropy: entropy, id: "tok_1", tenant: "acme", scopes: []string{"read", "  "}, expires: expires},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := NewToken(tc.entropy, tc.id, tc.tenant, nil, tc.expires)
+			_, _, err := NewToken(tc.entropy, tc.id, tc.tenant, tc.scopes, tc.expires)
 			if core.CodeOf(err) != core.CodeInvalidArgument {
 				t.Fatalf("code = %s, want invalid_argument", core.CodeOf(err))
 			}
 		})
+	}
+}
+
+func TestNewTokenScopesAreCloned(t *testing.T) {
+	expires := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	entropy := bytes.NewReader(make([]byte, tokenBytes))
+	scopes := []string{"read"}
+	_, token, err := NewToken(entropy, "tok_1", "acme", scopes, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes[0] = "mutated"
+	if token.Scopes[0] != "read" {
+		t.Fatalf("scopes = %v, want a clone", token.Scopes)
+	}
+	entropy = bytes.NewReader(make([]byte, tokenBytes))
+	_, token, err = NewToken(entropy, "tok_2", "acme", []string{"read", "write"}, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(token.Scopes) != 2 || token.Scopes[0] != "read" || token.Scopes[1] != "write" {
+		t.Fatalf("scopes = %v", token.Scopes)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -45,6 +46,14 @@ func NewToken(entropy io.Reader, id string, tenant core.TenantID, scopes []strin
 	}
 	if expires.IsZero() {
 		return "", Token{}, core.NewError(core.CodeInvalidArgument, "token expiry is required", nil)
+	}
+	if len(scopes) == 0 {
+		return "", Token{}, core.NewError(core.CodeInvalidArgument, "token needs at least one scope", nil)
+	}
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) == "" {
+			return "", Token{}, core.NewError(core.CodeInvalidArgument, "token needs at least one scope", nil)
+		}
 	}
 
 	raw := make([]byte, tokenBytes)
