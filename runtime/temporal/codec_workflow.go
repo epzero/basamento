@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -30,6 +31,9 @@ func codecTransient(pe *core.Error) bool {
 	switch pe.Code {
 	case core.CodeUnavailable, core.CodeTimeout, core.CodeRateLimited:
 		return true
+	case core.CodeCancelled:
+		// Workflow-bound codec I/O uses a timeout-only context; nothing else cancels it.
+		return true
 	default:
 		return core.IsRetryable(pe)
 	}
@@ -43,12 +47,19 @@ func errorFromPanic(v any) error {
 }
 
 // workflowCodecPolicy applies transient-vs-permanent rules for workflow-bound converter calls.
-func workflowCodecPolicy(wfBound bool, log func(*core.Error), err error) error {
-	if err == nil {
-		return nil
-	}
+func workflowCodecPolicy(wfBound bool, log func(*core.Error), ioCtx context.Context, err error) error {
 	if !wfBound {
 		return err
+	}
+	if ioCtx != nil && ioCtx.Err() != nil {
+		pe := &core.Error{Code: core.CodeTimeout, Message: "workflow codec I/O bound exceeded", Cause: ioCtx.Err()}
+		if log != nil {
+			log(pe)
+		}
+		panic(taskFailure{code: core.CodeTimeout})
+	}
+	if err == nil {
+		return nil
 	}
 	var pe *core.Error
 	if !errors.As(err, &pe) {

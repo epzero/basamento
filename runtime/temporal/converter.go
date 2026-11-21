@@ -45,6 +45,7 @@ func (d *dataConverter) WithContext(ctx context.Context) converter.DataConverter
 func (d *dataConverter) WithWorkflowContext(ctx workflow.Context) converter.DataConverter {
 	clone := *d
 	clone.wfCtx = ctx
+	clone.ctx = nil
 	return &clone
 }
 
@@ -109,7 +110,7 @@ func (d *dataConverter) ToPayload(value interface{}) (*commonpb.Payload, error) 
 		return nil, err
 	}
 	enc, err := d.codec.Encode(ctx, payloadFromProto(plain))
-	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, err); err != nil {
+	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, ctx, err); err != nil {
 		return nil, err
 	}
 	return payloadToProto(enc), nil
@@ -122,7 +123,7 @@ func (d *dataConverter) FromPayload(payload *commonpb.Payload, valuePtr interfac
 	}
 	defer cancel()
 	plain, err := d.codec.Decode(ctx, payloadFromProto(payload))
-	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, err); err != nil {
+	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, ctx, err); err != nil {
 		return err
 	}
 	return d.inner.FromPayload(payloadToProto(plain), valuePtr)
