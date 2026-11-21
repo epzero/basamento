@@ -441,12 +441,12 @@ func TestValidateRejectsUnreadableMapChildName(t *testing.T) {
 	}
 }
 
-// A missing or blank "over" is a map the machine cannot run, so the compiler
-// rejects it and names the map node and the field (EP0-166).
+// A missing, null or empty-string "over" is a map the machine cannot read, so
+// the compiler rejects it and names the map node and the field (EP0-166).
 func TestValidateRejectsMapWithEmptyOver(t *testing.T) {
 	for _, spec := range []string{
 		`{"over":"","node":"fanout_item"}`,
-		`{"over":"   ","node":"fanout_item"}`,
+		`{"over":null,"node":"fanout_item"}`,
 		`{"node":"fanout_item"}`,
 	} {
 		t.Run(spec, func(t *testing.T) {
@@ -455,6 +455,39 @@ func TestValidateRejectsMapWithEmptyOver(t *testing.T) {
 			requireInvalid(t, Validate(f),
 				`map node "fanout"`, `"over"`, "non-empty")
 		})
+	}
+}
+
+// Any non-string "over" is as unreadable as a null one, and it is the first
+// rejection: a "node" that names no child cannot hide it (EP0-166, F1).
+func TestValidateRejectsNonStringMapOverBeforeReadingChild(t *testing.T) {
+	for _, spec := range []string{
+		`{"over":null,"node":"ghost"}`,
+		`{"over":42,"node":"ghost"}`,
+		`{"over":{"expr":"state.items"},"node":"ghost"}`,
+		`{"over":["state.items"],"node":"ghost"}`,
+	} {
+		t.Run(spec, func(t *testing.T) {
+			f := mapFlow()
+			f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(spec)}
+			f.Edges = []flow.Edge{
+				{From: Start, To: "fanout"},
+				{From: "fanout", To: Fail},
+			}
+			requireInvalid(t, Validate(f),
+				`map node "fanout"`, `"over"`, "non-empty")
+		})
+	}
+}
+
+// A whitespace-only "over" keeps the shape of an expression: ir.Validate
+// accepts it and hands it to the expression compiler, the same way the machine
+// does, so the two no longer disagree (EP0-166, F2).
+func TestValidateAcceptsWhitespaceOnlyMapOver(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"   ","node":"fanout_item"}`)}
+	if err := Validate(f); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 

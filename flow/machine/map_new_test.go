@@ -152,6 +152,30 @@ func hostKindSpec(kind string) json.RawMessage {
 	}
 }
 
+// A whitespace-only "over" is an expression, not a blank spec: ir.Validate
+// and parseMapSpec both accept its shape, and New rejects it at the expression
+// stage, the same verdict flow/compile reaches (EP0-166, F2).
+func TestWhitespaceMapOverRejectedByExpressionNotShape(t *testing.T) {
+	def := mapWithChild("child", "task")
+	node := def.Nodes["mapn"]
+	node.Spec = json.RawMessage(`{"over":"   ","node":"child"}`)
+	def.Nodes["mapn"] = node
+	if err := ir.Validate(def); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	over, child, err := parseMapSpec(node)
+	if err != nil || over != "   " || child != "child" {
+		t.Fatalf("parseMapSpec = %q, %q, %v; want the whitespace expression accepted", over, child, err)
+	}
+	_, err = New(def)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("error %v, want invalid_argument", err)
+	}
+	if !strings.Contains(err.Error(), "map over") || strings.Contains(err.Error(), "needs over and node") {
+		t.Fatalf("error %q, want the expression stage", err)
+	}
+}
+
 func TestMapChildSharedByTwoMapsRejectedAtNew(t *testing.T) {
 	_, err := New(mapTwoOwners())
 	if core.CodeOf(err) != core.CodeInvalidArgument {
