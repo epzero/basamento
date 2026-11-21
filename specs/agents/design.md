@@ -225,6 +225,22 @@ not kept elsewhere: the run's messages stay complete for its output. A kept set
 that still exceeds `input_tokens` fails the run with `invalid_argument` before
 invoking the model (REQ-AGENT-027).
 
+When the node input is not a handoff (`carry == nil`, REQ-AGENT-031), the loop
+seeds the message history with one user message taken from the input before the
+first model turn: a JSON string contributes its decoded text, any other non-empty
+JSON contributes its compact JSON bytes, and empty or whitespace-only input
+contributes no message. This seed is the run's first turn: the memory policy
+keeps it whole (REQ-AGENT-023), weights it by the same content estimate (REQ-AGENT-024/025),
+and does not count it as a model turn for the step cap. A handoff target is not
+seeded a second time — its input is the handoff envelope and its history is
+exactly the carried turns (REQ-AGENT-017). As a backstop (REQ-AGENT-032), if the
+assembled request has no non-system message — neither a seed nor carried turns —
+the loop fails with `invalid_argument` and the message
+`agent "<node>": the run has no user message` before any cost reservation or
+model invocation. This amends ADR-0011's handler contract; the adapters are
+unchanged: `model/chat.Start` still rejects an empty request and no adapter
+synthesizes a user turn. No new ADR.
+
 ## 6. Order of checks at a turn boundary
 
 At each turn boundary before model turn `n`, in this order:
