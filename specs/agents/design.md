@@ -105,7 +105,11 @@ change to package `flow`. The node id is the node's key in `flow.IR.Nodes`, and
 | `caps.cost_mpts` | the cost cap, in milli-points | none = no cap |
 | `caps.tokens` | the token cap, counted as input plus output tokens | none = no cap |
 | `caps.time` | the time cap, a duration on the run clock | none = no cap |
-| `input_tokens` | the input token limit of the model, in tokens | the model's descriptor |
+| `input_tokens` | the input token limit of the model, in tokens | `0` = no limit |
+
+`input_tokens` is not derived from the model: `model.Descriptor` carries no
+input-token limit, so an agent node that omits it has no limit and keeps the
+whole message history.
 
 A cap that is absent is not applied. For step, token and cost caps, reaching
 the cap (`==`) is within the cap; only a turn that would exceed (`>`) the cap is
