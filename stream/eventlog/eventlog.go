@@ -38,8 +38,10 @@ type Log struct {
 	store *psql.Store
 	clock core.Clock
 	fault Fault
-	// relayMu serialises relay passes over this log, so two loops cannot read
-	// the same pending rows and publish them twice (REQ-STRM-013).
+	// relayMu serialises relay passes over this Log, so two loops over it
+	// cannot read the same pending rows and publish them twice (REQ-STRM-013).
+	// Passes over another Log or another process are excluded by the lease in
+	// the store that each pass takes per run.
 	relayMu sync.Mutex
 }
 

@@ -76,8 +76,10 @@ type pendingRun struct {
 	runID  string
 }
 
-// Run makes one relay pass. Passes over the same log are serialised, so two
-// loops cannot publish the same pending rows. It publishes every run's
+// Run makes one relay pass. Passes over the same log are serialised by relayMu,
+// and each run is relayed under a lease in the store, so passes over another Log
+// or another process cannot publish the same run's pending rows at once
+// (REQ-STRM-013). It publishes every run's
 // unrelayed entries in sequence order. A bus that cannot be reached ends the
 // pass with no error and leaves the head entry unrelayed, so a later pass
 // resumes exactly there (REQ-STRM-017 … 019). Entries are marked relayed only
@@ -105,7 +107,7 @@ func (r *Relay) Run(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := r.relayRun(ctx, run, subject); err != nil {
+		if err := r.relayRunLeased(ctx, run, subject); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -151,6 +153,64 @@ func (r *Relay) pendingRuns(ctx context.Context) ([]pendingRun, error) {
 		return nil, err
 	}
 	return runs, nil
+}
+
+// relayLeaseFor is how long a pass owns a run before another pass may take it
+// over. It must exceed the time one pass needs to publish a run's pending
+// entries, including a slow bus. A pass that stops without releasing its lease
+// (a crashed process) leaves it to expire, and the next pass takes it and
+// republishes the unmarked head entry (REQ-STRM-015).
+const relayLeaseFor = time.Minute
+
+// relayRunLeased relays one run while holding its lease in the shared store.
+// relayMu only serialises passes over this Log; the lease is what keeps another
+// Log or process from publishing the same run at the same time.
+func (r *Relay) relayRunLeased(ctx context.Context, run pendingRun, subject string) error {
+	until, held, err := r.acquireRunLease(ctx, run)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return nil
+	}
+	defer r.releaseRunLease(ctx, run, until)
+	return r.relayRun(ctx, run, subject)
+}
+
+// acquireRunLease takes the run's lease until now+relayLeaseFor, or reports
+// false when another pass still holds it. The statement is atomic on SQLite and
+// Postgres, so exactly one concurrent pass wins; no transaction is needed.
+func (r *Relay) acquireRunLease(ctx context.Context, run pendingRun) (time.Time, bool, error) {
+	now := psql.TruncateMicrosecond(r.clock.Now())
+	until := now.Add(relayLeaseFor)
+	var tenant string
+	err := r.log.store.Execer().QueryRow(ctx,
+		`INSERT INTO eventlog_relay_leases (tenant_id, run_id, expires_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT (tenant_id, run_id) DO UPDATE
+		   SET expires_at = excluded.expires_at
+		 WHERE eventlog_relay_leases.expires_at <= ?
+		 RETURNING tenant_id`,
+		run.tenant, run.runID, until, now).Scan(&tenant)
+	if err != nil {
+		// A held lease makes the ON CONFLICT WHERE reject the update, so the
+		// RETURNING yields no row and Scan maps it to not_found.
+		if core.CodeOf(err) == core.CodeNotFound {
+			return time.Time{}, false, nil
+		}
+		return time.Time{}, false, err
+	}
+	return until, true, nil
+}
+
+// releaseRunLease drops the lease so the next pass may relay the run at once
+// instead of after expiry. A failed release is harmless: the lease expires, and
+// the next pass then republishes what was not marked.
+func (r *Relay) releaseRunLease(ctx context.Context, run pendingRun, until time.Time) {
+	_, _ = r.log.store.Execer().Exec(ctx,
+		`DELETE FROM eventlog_relay_leases
+		 WHERE tenant_id = ? AND run_id = ? AND expires_at = ?`,
+		run.tenant, run.runID, until)
 }
 
 func (r *Relay) relayRun(ctx context.Context, run pendingRun, subject string) error {

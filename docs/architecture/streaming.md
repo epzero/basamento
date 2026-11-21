@@ -18,6 +18,12 @@ ADR-0007. Specs: `specs/streaming`.
 | Durable events | `seq` per run | SQL table, written in the transaction of the state change, then relayed to the bus | `run.*`, `node.*`, `message.started`, `message.completed{content_ref}`, `tool.*` summaries, `gate.*` |
 | Deltas | `dseq` per message | Bus only, retained while the message is in flight and dropped shortly after it completes | `text`, `audio`, `progress`, `reset{attempt}` |
 
+The relay takes a lease per run in the store while it publishes it, so
+concurrent passes — over another `Log` or another process — skip a run that is
+already being relayed: a run's entries reach its bus subject in `seq` order
+(REQ-STRM-013). A lease left behind by a crashed pass expires, and the next
+pass republishes the unmarked entry (REQ-STRM-015).
+
 Wire shapes: `contracts/basamento/stream/v1/stream.proto`, Go mirror in
 `stream/stream.go`.
 

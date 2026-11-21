@@ -9,6 +9,7 @@ import (
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
+	psql "github.com/epzero/basamento/platform/sql"
 )
 
 func TestRelayPublishesInSequenceOrderAndMarks(t *testing.T) {
@@ -328,6 +329,123 @@ func TestLoopStopsWhenContextIsCancelled(t *testing.T) {
 	if err := relay.Loop(ctx); err != nil {
 		t.Fatalf("loop: %v", err)
 	}
+}
+
+// blockingBus stops the first publish until the test releases it, so another
+// relay can run while that entry is sent but not yet marked.
+type blockingBus struct {
+	fakeBus
+	once    sync.Once
+	blocked chan struct{}
+	proceed chan struct{}
+}
+
+func newBlockingBus() *blockingBus {
+	return &blockingBus{blocked: make(chan struct{}), proceed: make(chan struct{})}
+}
+
+func (b *blockingBus) Publish(ctx context.Context, subject string, data []byte) (uint64, error) {
+	first := false
+	b.once.Do(func() {
+		first = true
+		close(b.blocked)
+	})
+	if first {
+		<-b.proceed
+	}
+	return b.fakeBus.Publish(ctx, subject, data)
+}
+
+// TestConcurrentRelayPassesOverSeparateLogsPublishOneOrderedPass is the CR1
+// regression: two Log and Relay values over one store must not relay the same
+// run at the same time, so its subject sees the entries in sequence order,
+// once each (REQ-STRM-013). relayMu alone does not cover this, because it
+// belongs to a single Log.
+func TestConcurrentRelayPassesOverSeparateLogsPublishOneOrderedPass(t *testing.T) {
+	store := testStore(t)
+	clock := coretest.NewFakeClock(testNow)
+	logs := make([]*Log, 2)
+	for i := range logs {
+		l, err := New(store, Options{Clock: clock})
+		if err != nil {
+			t.Fatalf("new log: %v", err)
+		}
+		logs[i] = l
+	}
+	mustCreateRun(t, logs[0], "r1", "running")
+	const events = 20
+	types := make([]string, events)
+	for i := range types {
+		types[i] = "node.started"
+	}
+	appendTypes(t, logs[0], "r1", "running", types...)
+
+	bus := newBlockingBus()
+	results := make(chan error, len(logs))
+	for _, l := range logs {
+		relay := newRelay(t, l, bus, nil)
+		go func() { results <- relay.Run(context.Background()) }()
+	}
+
+	// The first relay to publish is stopped in the bus with its lease taken and
+	// nothing marked relayed. The other must skip the run rather than publish
+	// its entries a second time.
+	<-bus.blocked
+	otherErr := <-results
+	close(bus.proceed)
+	blockedErr := <-results
+	if otherErr != nil {
+		t.Fatalf("relay: %v", otherErr)
+	}
+	if blockedErr != nil {
+		t.Fatalf("relay: %v", blockedErr)
+	}
+
+	subject, err := RunSubject("acme", "r1")
+	if err != nil {
+		t.Fatalf("subject: %v", err)
+	}
+	want := make([]uint64, events)
+	for i := range want {
+		want[i] = uint64(i + 1)
+	}
+	wantSeqs(t, bus.sequencesOn(subject), want...)
+	assertRelayed(t, logs[0], "r1", events, 0)
+}
+
+// TestRelaySkipsAHeldLeaseAndTakesItOverAfterExpiry covers the crash path: a
+// lease left behind by a pass that never released it blocks other passes until
+// it expires, then the next pass takes it and relays the unmarked entries
+// (REQ-STRM-015).
+func TestRelaySkipsAHeldLeaseAndTakesItOverAfterExpiry(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow)
+	l := testLogAt(t, clock)
+	mustCreateRun(t, l, "r1", "running")
+	appendTypes(t, l, "r1", "running", "run.started", "node.started", "run.completed")
+
+	until := psql.TruncateMicrosecond(clock.Now()).Add(relayLeaseFor)
+	if _, err := l.store.Execer().Exec(context.Background(),
+		`INSERT INTO eventlog_relay_leases (tenant_id, run_id, expires_at) VALUES (?, ?, ?)`,
+		"acme", "r1", until); err != nil {
+		t.Fatalf("leave lease: %v", err)
+	}
+
+	bus := &fakeBus{}
+	relay, err := NewRelay(l, bus, RelayOptions{Clock: clock})
+	if err != nil {
+		t.Fatalf("new relay: %v", err)
+	}
+	if err := relay.Run(context.Background()); err != nil {
+		t.Fatalf("relay while held: %v", err)
+	}
+	wantSeqs(t, bus.sequences("r1"))
+
+	clock.Advance(relayLeaseFor)
+	if err := relay.Run(context.Background()); err != nil {
+		t.Fatalf("relay after expiry: %v", err)
+	}
+	wantSeqs(t, bus.sequences("r1"), 1, 2, 3)
+	assertRelayed(t, l, "r1", 3, 0)
 }
 
 func assertRelayed(t *testing.T, l *Log, runID string, relayed, pending uint64) {

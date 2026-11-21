@@ -17,7 +17,8 @@ import (
 
 var testNow = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
-func testLog(t *testing.T, fault Fault) *Log {
+// testStore opens a fresh SQLite store with the event-log migrations.
+func testStore(t *testing.T) *psql.Store {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := psql.Open(context.Background(), "sqlite:///"+filepath.Join(dir, "kit.db"), Migrations())
@@ -25,7 +26,22 @@ func testLog(t *testing.T, fault Fault) *Log {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	log, err := New(store, Options{Clock: coretest.NewFakeClock(testNow), Fault: fault})
+	return store
+}
+
+func testLog(t *testing.T, fault Fault) *Log {
+	t.Helper()
+	return testLogAt(t, coretest.NewFakeClock(testNow), fault)
+}
+
+// testLogAt opens a fresh store whose timestamps come from clock.
+func testLogAt(t *testing.T, clock core.Clock, fault ...Fault) *Log {
+	t.Helper()
+	var f Fault
+	if len(fault) > 0 {
+		f = fault[0]
+	}
+	log, err := New(testStore(t), Options{Clock: clock, Fault: f})
 	if err != nil {
 		t.Fatalf("new log: %v", err)
 	}
