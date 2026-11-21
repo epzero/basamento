@@ -148,7 +148,8 @@ activity), **Child** workflows, **Checkpoint** / ContinueAsNew, and the
 **continuation journal** in `HostInput.Continuation`. After ContinueAsNew the
 host workflow runs the flow function again from its first line; values from
 earlier executions come from `HostInput.Continuation`, not from re-running side
-effects.
+effects. `HostInput` decodes both the `run_id` field and the `RunID` spelling,
+so a history recorded with either name replays with its original run id.
 
 ### Continuation journal
 
@@ -165,7 +166,7 @@ see section 6 for blob retention).
 | `timers` | `Sleep(d>0)` calls | Match by call order; deadline and `fired` |
 | `selects` | `Select` branch indices | Match by call order |
 | `nows` | `Now()` samples | Match by call order |
-| `emitted` | Count of stored Emit events | Dense `seq` = `emitted + 1` for the next append |
+| `emitted` | Count of stored Emit events | Next seq = `emitted + len(emit_failures) + 1` |
 | `emit_failures` | Terminal Emit failures | Key = 1-based Emit call ordinal |
 | `checkpoints` | Honored Checkpoint calls | Ordinal already continued returns nil |
 
@@ -200,8 +201,12 @@ finish without re-running them, snapshots the journal, and continues as new.
 The deciding `Checkpoint` returns the ContinueAsNew error; **the flow must
 return that error immediately** (the host workflow still continues as new if
 the flow ignores it; blocking on a future created before the decision keeps
-the run alive until that wait ends). New durable calls after the decision
-fail fast with code `cancelled` and message `temporal: the run is continuing as new`.
+the run alive until that wait ends). After the decision, side-effecting durable
+calls (`Step`, `Sleep`, `Select`, `Child`, `Await`, `Emit`, `Checkpoint`) fail
+fast with code `cancelled` and message `temporal: the run is continuing as new`.
+`Now`, `NewID` and `Rand` keep returning their deterministic values (journaled
+time, per-execution counter, run-id seed) and schedule nothing; the host
+continues as new regardless.
 A Checkpoint whose ordinal was already honored in an earlier execution returns
 nil on replay. `SnapshotRef` is unused. See the spec-silent table below for a
 cancelled run at threshold.
@@ -229,8 +234,13 @@ and `AcceptIf` are not evaluated (FLOW-006-01, WP-L5-04).
 
 A synchronous outbox activity `basamento-emit` calls
 `Outbox.Append(ctx, run, seq, event)` with the tenant in context and
-`RunRef.TenantID`. `seq` is dense and counts stored events only (`emitted + 1`),
-so replay and activity retries are idempotent by `seq`. Retryable errors retry
+`RunRef.TenantID`. The activity derives the run id from the scheduling
+workflow id (`<tenant>/<run id>`, or a bare run id for a top-level run started
+with one) and rejects an activity input whose run id differs, so another
+workflow on the queue cannot emit for the run. `seq` is the 1-based Emit call ordinal
+(`emitted + len(emit_failures) + 1`): a terminal failure consumes its seq, so a
+later event never reuses one that a store-then-error sink may already hold.
+Replay and activity retries are idempotent by `seq`. Retryable errors retry
 without attempt limit (1 s initial, ×2, cap 1 min, 1 min
 `StartToCloseTimeout` per attempt). A non-retryable error fails that `Emit` once,
 is journaled in `emit_failures`, and is returned identically on replay after
@@ -243,7 +253,9 @@ A child is another host workflow with Temporal workflow id `<tenant>/<child run
 id>` on the same task queue. `ChildOptions.ID` empty → `NewID("child")`
 (`child_N`). Parent-close policies map like the local runtime: `terminate`
 (default), `request_cancel`, `abandon` → Temporal `PARENT_CLOSE_POLICY_*`.
-Finished child results are journaled by child id. **Caveat:** default child ids
+Finished child results are journaled by child id; a call that reuses an id for
+a different flow (name or hash) returns `conflict` and starts no child.
+**Caveat:** default child ids
 (`child_N`) are per-execution counters, not scoped to the parent run; two
 concurrent parent runs in one tenant that both use default ids target the same
 workflow id and the second start fails with the SDK's already-started error.
