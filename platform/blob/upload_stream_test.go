@@ -71,7 +71,7 @@ func TestUploadMemoryDoesNotScaleWithBodySize(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.ContentLength = -1
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

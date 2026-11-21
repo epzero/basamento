@@ -34,7 +34,7 @@ func TestEmbeddedTenantNamedUploadCanReadAndUpload(t *testing.T) {
 				t.Fatal(err)
 			}
 			readURL = rewriteLocalURL(srv, readURL)
-			res, err := http.Get(readURL)
+			res, err := srv.Client().Get(readURL)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestEmbeddedTenantNamedUploadCanReadAndUpload(t *testing.T) {
 			putURL := rewriteLocalURL(srv, up.URL)
 			req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("staged")))
 			req.Header.Set("Content-Type", "text/plain")
-			pres, err := http.DefaultClient.Do(req)
+			pres, err := srv.Client().Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +83,7 @@ func TestEmbeddedContentKeyShapedStageStillUploads(t *testing.T) {
 		t.Fatal(err)
 	}
 	readURL = rewriteLocalURL(srv, readURL)
-	res, err := http.Get(readURL)
+	res, err := srv.Client().Get(readURL)
 	if err != nil {
 		t.Fatal(err)
 	}

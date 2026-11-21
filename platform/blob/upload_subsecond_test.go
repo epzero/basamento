@@ -51,7 +51,7 @@ func TestSubSecondUploadSlotLiveUntilTTL(t *testing.T) {
 	putURL := rewriteLocalURL(srv, up.URL)
 	req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("x")))
 	req.Header.Set("Content-Type", "text/plain")
-	res, err := http.DefaultClient.Do(req)
+	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
