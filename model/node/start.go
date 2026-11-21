@@ -42,13 +42,15 @@ type StartOutcome struct {
 // Start calls Start until the provider accepts, the outcome is ambiguous, or
 // the attempts are spent.
 //
-// A retryable start error may mean either "nothing was accepted" or "it was
-// accepted and the response was lost", so each one is followed by Lookup:
+// A retryable start error that may have reached the provider (a timeout after
+// sending) is resolved by Lookup before anything is sent again:
 //   - lookup finds the invocation: the start is resolved, no second start.
-//   - lookup answers "nothing": the attempt did not reach the provider, so the
-//     next attempt may use the same client ref.
-//   - lookup cannot answer: the outcome is unknown and the call returns
-//     Ambiguous; starting again would risk a second charge.
+//   - lookup answers "nothing" or cannot answer: the outcome is unknown — a
+//     forgotten ref cannot prove the start never landed — and the call returns
+//     Ambiguous; starting again would risk a second charge (REQ-MODEL-005).
+//
+// Any other retryable error means the provider rejected the start before
+// accepting it, so the next attempt may use the same client ref.
 //
 // A non-retryable error ends the start at once: the provider refused it and
 // there is nothing ambiguous about it.
@@ -76,6 +78,11 @@ func (s Starter) Start(ctx context.Context, req model.Request) (StartOutcome, er
 			return StartOutcome{Attempts: i + 1}, model.MapError(err)
 		}
 		last = err
+		if core.CodeOf(err) != core.CodeTimeout {
+			// The provider refused the start before accepting it: retrying
+			// with the same client ref cannot charge twice.
+			continue
+		}
 		found, lookupErr := s.Invoker.Lookup(ctx, req.ClientRef)
 		if lookupErr != nil {
 			return StartOutcome{Attempts: i + 1, Ambiguous: true}, nil
@@ -83,6 +90,7 @@ func (s Starter) Start(ctx context.Context, req model.Request) (StartOutcome, er
 		if found != nil {
 			return StartOutcome{Handle: *found, Attempts: i + 1, Resolved: true}, nil
 		}
+		return StartOutcome{Attempts: i + 1, Ambiguous: true}, nil
 	}
 	return StartOutcome{Attempts: attempts}, model.MapError(last)
 }

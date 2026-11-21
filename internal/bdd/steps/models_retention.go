@@ -242,6 +242,11 @@ func acceptedInvocations(ctx context.Context, want int) error {
 	if w.retention.reg != nil {
 		got = w.retention.started
 	}
+	if n := world(ctx).Node; n != nil && n.provider != nil {
+		n.provider.mu.Lock()
+		got = n.provider.accepted
+		n.provider.mu.Unlock()
+	}
 	if got != want {
 		return fmt.Errorf("provider accepted %d invocations, want %d", got, want)
 	}
