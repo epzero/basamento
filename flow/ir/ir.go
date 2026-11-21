@@ -27,18 +27,41 @@ const (
 
 // Decode parses a flow definition from JSON, or from YAML when data does not
 // start with a JSON object. Unknown fields and duplicate object keys are
-// rejected: a misspelled field must not silently drop nodes or edges.
+// rejected: a misspelled field must not silently drop nodes or edges. A stream
+// carrying more than one document is rejected too, because only the first
+// would be compiled and hashed.
+//
+// A YAML flow-style mapping such as {name: x} also starts with "{", so input
+// that looks like JSON but does not parse as JSON is retried as YAML before the
+// JSON error is reported.
 func Decode(data []byte) (*flow.IR, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, invalid("flow: empty definition", nil)
 	}
-	text := data
 	if !isJSON(data) {
 		converted, err := yamlToJSON(data)
 		if err != nil {
 			return nil, err
 		}
-		text = converted
+		return decodeObject(converted)
+	}
+	f, err := decodeObject(data)
+	if err == nil || !startsWithBrace(data) {
+		return f, err
+	}
+	if converted, yamlErr := yamlToJSON(data); yamlErr == nil {
+		if f, yamlErr := decodeObject(converted); yamlErr == nil {
+			return f, nil
+		}
+	}
+	return nil, err
+}
+
+// decodeObject requires a top-level JSON object and checks its keys. A
+// top-level null, array or scalar is not a definition.
+func decodeObject(text []byte) (*flow.IR, error) {
+	if !startsWithBrace(text) {
+		return nil, invalid("flow: the definition must be a JSON object", nil)
 	}
 	dec := json.NewDecoder(bytes.NewReader(text))
 	dec.DisallowUnknownFields()
@@ -47,7 +70,11 @@ func Decode(data []byte) (*flow.IR, error) {
 		return nil, invalid("flow: invalid JSON: "+err.Error(), nil)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, invalid("flow: trailing data after the definition", nil)
+		if err != nil {
+			return nil, invalid("flow: trailing data after the definition", nil)
+		}
+		// A well-formed second value: only one document is a definition.
+		return nil, multipleDocumentsErr()
 	}
 	if err := checkDuplicateKeys(text); err != nil {
 		return nil, err
@@ -96,13 +123,41 @@ func isJSON(data []byte) bool {
 	return len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
 }
 
+func startsWithBrace(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
 func yamlToJSON(data []byte) ([]byte, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, invalid("flow: empty definition", nil)
+		}
 		return nil, invalid("flow: invalid YAML: "+err.Error(), nil)
 	}
 	if len(doc.Content) == 0 {
 		return nil, invalid("flow: empty definition", nil)
+	}
+	// A decoder over the stream, not yaml.Unmarshal: Unmarshal silently keeps
+	// only the first document, so a corrected definition appended after a
+	// stale one would be dropped and the stale one hashed instead. A trailing
+	// document-start marker leaves an empty document behind, which carries no
+	// definition and is accepted; the stream is drained either way, so
+	// "a: 1\n---\n---" ends the same as "a: 1\n---".
+	for {
+		var extra yaml.Node
+		err := dec.Decode(&extra)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, invalid("flow: invalid YAML: "+err.Error(), nil)
+		}
+		if !emptyDocument(&extra) {
+			return nil, multipleDocumentsErr()
+		}
 	}
 	if err := checkYAMLDuplicateKeys(doc.Content[0], ""); err != nil {
 		return nil, err
@@ -118,12 +173,38 @@ func yamlToJSON(data []byte) ([]byte, error) {
 	return converted, nil
 }
 
+// multipleDocumentsErr rejects a stream that carries more than one document:
+// exactly one document is a definition, so the rest would be dropped and the
+// first hashed and pinned as if it were the whole input (REQ-FLOW-005).
+func multipleDocumentsErr() *core.Error {
+	return invalid("flow: more than one document in the definition", nil)
+}
+
+// emptyDocument reports whether a decoded document carries nothing. go-yaml
+// materializes a document with no content — a trailing document-start marker,
+// or a document holding only a comment — as one null scalar with an empty
+// value, so that is what "empty" means here; an explicit null, a scalar, a
+// mapping or a sequence is content.
+func emptyDocument(doc *yaml.Node) bool {
+	if len(doc.Content) == 0 {
+		return true
+	}
+	if len(doc.Content) > 1 {
+		return false
+	}
+	node := doc.Content[0]
+	return node.Kind == yaml.ScalarNode && node.Tag == "!!null" && node.Value == ""
+}
+
 func checkYAMLDuplicateKeys(n *yaml.Node, path string) error {
 	switch n.Kind {
 	case yaml.MappingNode:
 		seen := make(map[string]bool, len(n.Content)/2)
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i].Value
+			if isMergeKey(key, n.Content[i].Tag) {
+				return mergeKeyErr(path)
+			}
 			if seen[key] {
 				return duplicateErr(path, key)
 			}
@@ -166,6 +247,9 @@ func walkKeys(dec *json.Decoder, path string) error {
 				return invalid("flow: invalid JSON: "+err.Error(), nil)
 			}
 			key, _ := keyTok.(string)
+			if isMergeKey(key, "") {
+				return mergeKeyErr(path)
+			}
 			if seen[key] {
 				return duplicateErr(path, key)
 			}
@@ -186,6 +270,23 @@ func walkKeys(dec *json.Decoder, path string) error {
 		return err
 	}
 	return nil
+}
+
+// mergeKey is YAML's merge key. Decode expands it, so a key or a duplicate
+// merged through it would bypass the duplicate-key check; it is refused on the
+// JSON path too, where nothing expands it and a field named "<<" would
+// otherwise survive as data.
+const mergeKey = "<<"
+
+func isMergeKey(name, tag string) bool { return name == mergeKey || tag == "!!merge" }
+
+func mergeKeyErr(path string) error {
+	where := path
+	if where == "" {
+		where = "/"
+	}
+	return invalid(fmt.Sprintf("flow: merge key %q at %s is not allowed", mergeKey, where),
+		map[string]any{"location": path + "/" + escapePointer(mergeKey)})
 }
 
 func duplicateErr(path, key string) error {

@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cucumber/godog"
 	messages "github.com/cucumber/messages/go/v34"
@@ -89,14 +91,117 @@ func cellAt(row *messages.PickleTableRow, idx int) string {
 // name the field tables use.
 type namedBytes []byte
 
+// Binary is a named byte slice whose values carry their own text encoding.
+type Binary []byte
+
+// MarshalText writes the encoding encoding/json sees before the base64 form.
+func (Binary) MarshalText() ([]byte, error) { return []byte("binary"), nil }
+
+// UUID is a named byte array whose values carry their own text encoding.
+type UUID [16]byte
+
+// MarshalText writes the encoding encoding/json sees before the integer array.
+func (UUID) MarshalText() ([]byte, error) { return []byte("uuid"), nil }
+
+// TextStamp carries a text encoding and no JSON encoding.
+type TextStamp struct{}
+
+// MarshalText writes the encoding encoding/json sees before the structure.
+func (TextStamp) MarshalText() ([]byte, error) { return []byte("stamp"), nil }
+
+// JSONStamp carries a JSON encoding whose result the generator cannot know.
+type JSONStamp struct{}
+
+// MarshalJSON writes a value the generator has to admit.
+func (JSONStamp) MarshalJSON() ([]byte, error) { return []byte("[1,2]"), nil }
+
+// PointerStamp carries its JSON encoding only on the pointer's method set.
+type PointerStamp struct{}
+
+// MarshalJSON writes the encoding of an addressable value.
+func (*PointerStamp) MarshalJSON() ([]byte, error) { return []byte("[1]"), nil }
+
+// IntKeyed maps integer keys, which encoding/json writes as strings.
+type IntKeyed map[int]string
+
+// IntPtr is a named pointer to an integer. encoding/json ignores the string
+// option on it, because the option follows only one unnamed pointer.
+type IntPtr *int
+
+// StrPtr is a named pointer to a string, encoded like IntPtr without quotes.
+type StrPtr *string
+
+// textKey implements encoding.TextMarshaler so a map key is written as text.
+type textKey string
+
+// MarshalText writes the member name encoding/json uses for the key.
+func (k textKey) MarshalText() ([]byte, error) { return []byte("S" + string(k)), nil }
+
+// TextKeyed maps keys written through MarshalText.
+type TextKeyed map[textKey]string
+
+// FloatKeyed maps a key type encoding/json cannot write.
+type FloatKeyed map[float64]string
+
 // declaredNamedTypes maps scenario type names to the Go types declared for them.
 var declaredNamedTypes = map[string]reflect.Type{
-	"NamedBytes": reflect.TypeFor[namedBytes](),
+	"NamedBytes":   reflect.TypeFor[namedBytes](),
+	"Binary":       reflect.TypeFor[Binary](),
+	"UUID":         reflect.TypeFor[UUID](),
+	"TextStamp":    reflect.TypeFor[TextStamp](),
+	"JSONStamp":    reflect.TypeFor[JSONStamp](),
+	"PointerStamp": reflect.TypeFor[PointerStamp](),
+	"IntKeyed":     reflect.TypeFor[IntKeyed](),
+	"IntPtr":       reflect.TypeFor[IntPtr](),
+	"StrPtr":       reflect.TypeFor[StrPtr](),
+	"TextKeyed":    reflect.TypeFor[TextKeyed](),
+	"FloatKeyed":   reflect.TypeFor[FloatKeyed](),
+	"TimeStamp":    reflect.TypeFor[time.Time](),
+	"Numbered":     reflect.TypeFor[json.Number](),
+}
+
+// hasValueEncoding reports whether values of t implement an encoder on the
+// value receiver, so an embedded value promotes it to the holder too.
+func hasValueEncoding(t reflect.Type) bool {
+	return t.Implements(reflect.TypeFor[json.Marshaler]()) ||
+		t.Implements(reflect.TypeFor[encoding.TextMarshaler]())
+}
+
+// embeddedHolder builds a struct that holds t as an embedded field. A struct
+// type, and a type with a value encoding, is embedded directly: the first
+// flattens its fields, the second promotes its encoding, as encoding/json
+// does. Any other type sits in an embedded holder struct so the scenario
+// instances use the member name "v".
+func embeddedHolder(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Struct || hasValueEncoding(t) {
+		name := t.Name()
+		if name == "" {
+			name = "Embedded"
+		}
+		return reflect.StructOf([]reflect.StructField{{
+			Name:      name,
+			Type:      t,
+			Anonymous: true,
+		}})
+	}
+	inner := reflect.StructOf([]reflect.StructField{{
+		Name: "V",
+		Type: t,
+		Tag:  `json:"v"`,
+	}})
+	return reflect.StructOf([]reflect.StructField{{
+		Name:      "Inner",
+		Type:      inner,
+		Anonymous: true,
+	}})
 }
 
 func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) {
 	s = strings.TrimSpace(s)
 	if t, ok := named[s]; ok {
+		return t, nil
+	}
+	if t, ok := declaredNamedTypes[s]; ok {
 		return t, nil
 	}
 	if strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "<") {
@@ -115,6 +220,8 @@ func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) 
 		return reflect.TypeFor[int64](), nil
 	case "float64":
 		return reflect.TypeFor[float64](), nil
+	case "uint":
+		return reflect.TypeFor[uint](), nil
 	case "bool":
 		return reflect.TypeFor[bool](), nil
 	case "chan int":
@@ -130,6 +237,13 @@ func parseGoType(s string, named map[string]reflect.Type) (reflect.Type, error) 
 			return nil, err
 		}
 		return reflect.SliceOf(elem), nil
+	}
+	if strings.HasPrefix(s, "*") {
+		elem, err := parseGoType(strings.TrimPrefix(s, "*"), named)
+		if err != nil {
+			return nil, err
+		}
+		return reflect.PointerTo(elem), nil
 	}
 	if strings.HasPrefix(s, "[") {
 		end := strings.Index(s, "]")
@@ -190,6 +304,13 @@ func firstGenKey(w *schemaWorld) string {
 		return k
 	}
 	return ""
+}
+
+func schemaType(w *schemaWorld, name string) (reflect.Type, error) {
+	if t, ok := w.types[name]; ok {
+		return t, nil
+	}
+	return nil, fmt.Errorf("no Go type %q", name)
 }
 
 func splitCSVOrder(s string) []string {
@@ -326,6 +447,27 @@ func parseSchemaObject(raw json.RawMessage) (map[string]any, error) {
 		return nil, fmt.Errorf("parse schema: %w", err)
 	}
 	return m, nil
+}
+
+func instanceRejected(err error) bool {
+	return err != nil && len(schema.Violations(err)) > 0
+}
+
+// instanceVerdictError reports why a validation result does not match the
+// verdict a scenario expects. A rejection needs at least one violation: a
+// malformed instance or a failed decode says the instance was not rejected by
+// the schema, and the message carries the underlying error.
+func instanceVerdictError(verdict string, err error) error {
+	if verdict == "accepted" && err != nil {
+		return fmt.Errorf("accepted: %w", err)
+	}
+	if verdict == "rejected" && !instanceRejected(err) {
+		if err != nil {
+			return fmt.Errorf("rejected without a violation: %w", err)
+		}
+		return fmt.Errorf("accepted")
+	}
+	return nil
 }
 
 func rejectFromErr(err error, loc, kw string) error {

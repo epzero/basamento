@@ -13,3 +13,6 @@ type SystemClock struct{}
 
 // Now returns the current UTC time.
 func (SystemClock) Now() time.Time { return time.Now().UTC() }
+
+// After returns a channel that receives once after d on the system clock.
+func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }

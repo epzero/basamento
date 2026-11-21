@@ -1,0 +1,227 @@
+package gate
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// cleanAbs returns the absolute, cleaned path with symlinks resolved.
+func cleanAbs(path string) (string, error) {
+	path = filepath.Clean(path)
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+// attributedGoFiles maps absolute paths of .go files already checked through go list.
+func attributedGoFiles(pkgs []goPkg) (map[string]bool, error) {
+	out := make(map[string]bool)
+	for _, p := range pkgs {
+		dir := p.Dir
+		if dir == "" {
+			continue
+		}
+		names := append([]string{}, p.GoFiles...)
+		names = append(names, p.CgoFiles...)
+		names = append(names, p.TestGoFiles...)
+		names = append(names, p.XTestGoFiles...)
+		for _, name := range names {
+			abs, err := cleanAbs(filepath.Join(dir, name))
+			if err != nil {
+				continue
+			}
+			out[abs] = true
+		}
+	}
+	return out, nil
+}
+
+func parseGoImports(path string) ([]string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+	if err != nil {
+		return nil, err
+	}
+	imports := make([]string, 0, len(f.Imports))
+	for _, spec := range f.Imports {
+		imp, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		imports = append(imports, imp)
+	}
+	return imports, nil
+}
+
+func dirShouldSkip(name string) bool {
+	return name == "testdata" || name == "vendor" ||
+		strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+}
+
+func relPathSkipped(rel string) bool {
+	for _, seg := range strings.Split(rel, "/") {
+		if dirShouldSkip(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+func dirPathSkipped(root, dir string) bool {
+	rootAbs, err := cleanAbs(root)
+	if err != nil {
+		return false
+	}
+	dirAbs, err := cleanAbs(dir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, dirAbs)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || rel == "" {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return relPathSkipped(rel)
+}
+
+// sanitizeLayeringGoEnv copies environ for nested go list invocations. Ambient
+// GOWORK and GOFLAGS entries (including duplicates) are removed and replaced with
+// GOWORK=off and GOFLAGS=-mod=readonly so -overlay, -tags or workspace settings
+// cannot change import lists. GOENV is left unchanged: the go command uses process
+// environment variables before the user config file (go env -w), and we always set
+// GOFLAGS and GOWORK on the child, so nothing in that file can reintroduce overlays.
+func sanitizeLayeringGoEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, e := range environ {
+		key, _, ok := strings.Cut(e, "=")
+		if !ok {
+			out = append(out, e)
+			continue
+		}
+		if key == "GOWORK" || key == "GOFLAGS" {
+			continue
+		}
+		out = append(out, e)
+	}
+	out = append(out, "GOWORK=off", "GOFLAGS=-mod=readonly")
+	return out
+}
+
+func layeringGoEnv() []string {
+	return sanitizeLayeringGoEnv(os.Environ())
+}
+
+// nestedModuleLoads reports whether go accepts dir as a module root.
+func nestedModuleLoads(dir string) (bool, error) {
+	cmd := exec.Command("go", "list", "-m")
+	cmd.Dir = dir
+	cmd.Env = layeringGoEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return false, nil
+		}
+		return false, fmt.Errorf("go list -m: %w: %s", err, stderr.String())
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(stdout.String()), "\n")
+	return strings.TrimSpace(line) != "", nil
+}
+
+// layeringWalkExtra parses and checks .go files go list did not attribute to a package.
+func layeringWalkExtra(root string, r LayeringRules, attributed map[string]bool, check func(rel, layer string, imports []string, ctx importCheck), add func(string)) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		base := filepath.Base(path)
+		if d.IsDir() {
+			if dirShouldSkip(base) {
+				return filepath.SkipDir
+			}
+			if path != root {
+				modPath := filepath.Join(path, "go.mod")
+				if _, err := os.Stat(modPath); err == nil {
+					loads, err := nestedModuleLoads(path)
+					if err != nil {
+						return err
+					}
+					if loads {
+						return filepath.SkipDir
+					}
+					modRel, err := filepath.Rel(root, modPath)
+					if err != nil {
+						return err
+					}
+					dirRel, err := filepath.Rel(root, path)
+					if err != nil {
+						return err
+					}
+					add(fmt.Sprintf("%s: go cannot load it as a module (run `go list -m` in %s for the reason); fix the file or delete it",
+						filepath.ToSlash(modRel), filepath.ToSlash(dirRel)))
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(base, ".go") {
+			return nil
+		}
+		abs, err := cleanAbs(path)
+		if err != nil {
+			return nil
+		}
+		if attributed[abs] {
+			return nil
+		}
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		dirRel := filepath.ToSlash(filepath.Dir(relPath))
+		if dirRel == "." {
+			dirRel = ""
+		}
+		layer := matchLayer(dirRel, keys(r.Layers))
+		if layer == "" {
+			check(dirRel, "", nil, importCheck{kind: kindExcluded, fileName: base, unlayered: true})
+			return nil
+		}
+		imports, err := parseGoImports(path)
+		if err != nil {
+			check(filepath.ToSlash(relPath), layer, nil, importCheck{kind: kindExcluded, fileName: base, parseErr: err})
+			return nil
+		}
+		ctx := importCheck{kind: kindExcluded, fileName: base}
+		if strings.HasSuffix(base, "_test.go") {
+			ctx.useTestRules = true
+		}
+		check(dirRel, layer, imports, ctx)
+		return nil
+	})
+}

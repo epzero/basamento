@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-05 @level:component
+@wp:WP-L1-05 @level:component
 Feature: Profiles and port selection
   Each port has an embedded implementation and cloud ones; the scheme of the
   port's URL says which one a `kit` process uses (ADR-0004).

@@ -14,6 +14,15 @@ import (
 	"github.com/epzero/basamento/model"
 )
 
+// defaultMaxStreamPayloadBytes caps how much payload one vendor stream may
+// deliver before the adapter ends the run as vendor_error. It bounds memory
+// growth when the vendor never ends the stream (ADR-0005 detached context).
+const defaultMaxStreamPayloadBytes = 8 << 20
+
+// defaultMaxStreamChunks caps how many chunks one vendor stream may deliver,
+// including empty chunks, so a stream cannot spin forever without payload.
+const defaultMaxStreamChunks = 262144
+
 // Config describes one chat adapter.
 type Config struct {
 	// Provider names the vendor on every handle.
@@ -23,13 +32,19 @@ type Config struct {
 	Descriptors []model.Descriptor
 	// Model is the eino chat model the adapter drives.
 	Model einomodel.BaseChatModel
+	// Clock is the adapter registry's clock: it stamps the end time of an
+	// invocation and drives the retention window for ended ones. It is
+	// required, so the adapter never falls back to the system clock.
+	Clock core.Clock
 }
 
 // Adapter implements model.Invoker over an eino chat model.
 type Adapter struct {
-	descriptors []model.Descriptor
-	chat        einomodel.BaseChatModel
-	runs        *model.Registry
+	descriptors           []model.Descriptor
+	chat                  einomodel.BaseChatModel
+	runs                  *model.Registry
+	maxStreamPayloadBytes int
+	maxStreamChunks       int
 }
 
 var _ model.Invoker = (*Adapter)(nil)
@@ -44,13 +59,22 @@ func New(cfg Config) (*Adapter, error) {
 	if cfg.Model == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "chat adapter has no model", nil)
 	}
+	if cfg.Clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "chat adapter has no clock", nil)
+	}
 	if !anyChat(cfg.Descriptors) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the chat capability", nil)
 	}
+	runs, err := model.NewRegistry(cfg.Provider, model.WithClock(cfg.Clock))
+	if err != nil {
+		return nil, err
+	}
 	return &Adapter{
-		descriptors: cfg.Descriptors,
-		chat:        cfg.Model,
-		runs:        model.NewRegistry(cfg.Provider),
+		descriptors:           cfg.Descriptors,
+		chat:                  cfg.Model,
+		runs:                  runs,
+		maxStreamPayloadBytes: defaultMaxStreamPayloadBytes,
+		maxStreamChunks:       defaultMaxStreamChunks,
 	}, nil
 }
 
@@ -60,9 +84,14 @@ func (a *Adapter) Describe(context.Context) ([]model.Descriptor, error) {
 }
 
 // Start validates the request, opens the invocation and returns at once. It is
-// idempotent per ClientRef: a repeated start returns the original handle and
-// publishes nothing more.
+// idempotent per ClientRef while the adapter's registry retains the invocation:
+// a repeated start returns the original handle and publishes nothing more.
+// Once the client ref is evicted, a start opens a new invocation
+// (REQ-MODEL-088).
 func (a *Adapter) Start(ctx context.Context, r model.Request) (model.Handle, error) {
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	if _, err := model.Select(a.descriptors, r.Model, r.Op); err != nil {
 		return model.Handle{}, err
 	}
@@ -87,7 +116,10 @@ func (a *Adapter) Start(ctx context.Context, r model.Request) (model.Handle, err
 		return model.Handle{}, err
 	}
 
-	run, existing := a.runs.Begin(ctx, r.ClientRef)
+	run, existing, err := a.runs.Begin(ctx, r.ClientRef)
+	if err != nil {
+		return model.Handle{}, err
+	}
 	if existing {
 		return run.Handle(), nil
 	}
@@ -148,7 +180,27 @@ func (a *Adapter) modelFor(r model.Request) (einomodel.BaseChatModel, error) {
 }
 
 func (a *Adapter) execute(run *model.Run, chat einomodel.BaseChatModel, messages []*schema.Message, opts []einomodel.Option) {
-	stream, err := chat.Stream(run.Context(), messages, opts...)
+	var stream *schema.StreamReader[*schema.Message]
+	defer func() {
+		if p := recover(); p != nil {
+			// Do not Close stream here: defer stream.Close below is registered
+			// after this recover and runs first on unwind, so a second Close
+			// can panic inside this defer and kill the process.
+			// Deliberately converts a panic at the invocation boundary;
+			// run.Fail is a no-op after the run ended.
+			var cause error
+			if perr, ok := p.(error); ok {
+				cause = perr
+			}
+			run.Fail(&core.Error{Code: core.CodeInternal, Message: "vendor call panicked", Cause: cause})
+		}
+	}()
+
+	var err error
+	stream, err = chat.Stream(run.Context(), messages, opts...)
+	if stream != nil {
+		defer stream.Close()
+	}
 	if err != nil {
 		run.Fail(model.MapError(err))
 		return
@@ -157,9 +209,10 @@ func (a *Adapter) execute(run *model.Run, chat einomodel.BaseChatModel, messages
 		run.Fail(core.NewError(core.CodeInternal, "chat model returned no stream", nil))
 		return
 	}
-	defer stream.Close()
 
 	var chunks []*schema.Message
+	var payloadBytes int
+	var chunkCount int
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -169,8 +222,20 @@ func (a *Adapter) execute(run *model.Run, chat einomodel.BaseChatModel, messages
 			run.Fail(model.MapError(err))
 			return
 		}
+		chunkCount++
+		if chunkCount > a.maxStreamChunks {
+			run.Fail(core.NewError(core.CodeVendor,
+				fmt.Sprintf("stream chunk count exceeded %d", a.maxStreamChunks), nil))
+			return
+		}
 		if chunk == nil {
 			continue
+		}
+		payloadBytes += chunkPayloadBytes(chunk)
+		if payloadBytes > a.maxStreamPayloadBytes {
+			run.Fail(core.NewError(core.CodeVendor,
+				fmt.Sprintf("stream payload exceeded %d bytes", a.maxStreamPayloadBytes), nil))
+			return
 		}
 		chunks = append(chunks, chunk)
 		publishChunk(run, chunk)
@@ -181,15 +246,17 @@ func (a *Adapter) execute(run *model.Run, chat einomodel.BaseChatModel, messages
 		run.Fail(model.MapError(err))
 		return
 	}
-	res := model.Result{Usage: usageOf(chunks)}
-	if final != nil {
-		data, err := json.Marshal(final)
-		if err != nil {
-			run.Fail(model.MapError(err))
-			return
-		}
-		res.Message = data
+	if !messageHasAssistantOutput(final) {
+		run.Fail(core.NewError(core.CodeVendor, "chat stream produced no usable output", nil))
+		return
 	}
+	res := model.Result{Usage: usageOf(chunks)}
+	data, err := json.Marshal(final)
+	if err != nil {
+		run.Fail(model.MapError(err))
+		return
+	}
+	res.Message = data
 	run.Succeed(res)
 }
 
@@ -217,11 +284,24 @@ func publishChunk(run *model.Run, chunk *schema.Message) {
 		run.Publish(model.Event{Kind: model.EventReasoning, Text: chunk.ReasoningContent})
 	}
 	for i := range chunk.ToolCalls {
-		data, err := json.Marshal(chunk.ToolCalls[i])
+		tc := chunk.ToolCalls[i]
+		data, err := json.Marshal(tc)
 		if err != nil {
 			// A tool call's Extra is free-form and may hold a value JSON cannot
-			// encode; the assembled result still carries the call.
-			continue
+			// encode; keep identity on the event so replay matches Result.Message.
+			slim := schema.ToolCall{
+				Index: tc.Index,
+				ID:    tc.ID,
+				Type:  tc.Type,
+				Function: schema.FunctionCall{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			}
+			data, err = json.Marshal(slim)
+			if err != nil {
+				continue
+			}
 		}
 		run.Publish(model.Event{Kind: model.EventToolCall, Data: data})
 	}
@@ -270,6 +350,9 @@ type chatParams struct {
 	Stop        []string `json:"stop"`
 }
 
+// callOptions maps Request.Params to eino chat options. Keys the adapter does
+// not map (for example params.tier used only in price formulas) are ignored;
+// mapped keys are temperature, top_p, max_tokens and stop.
 func callOptions(r model.Request) ([]einomodel.Option, error) {
 	var opts []einomodel.Option
 	if len(r.Tools) > 0 {

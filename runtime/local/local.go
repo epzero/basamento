@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -16,19 +17,23 @@ import (
 // core.SystemClock and core.ULIDs in the binary, coretest.FakeClock and
 // coretest.SeqIds in the gate (see specs/runtime/design.md §Local runtime).
 type Options struct {
-	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. A clock that
-	// also implements After(d) <-chan time.Time is used for timers; otherwise
-	// the runtime falls back to real timers. nil means core.SystemClock.
+	// Clock supplies Now, StartedAt, ClosedAt and timer wake-ups. It must be a
+	// timer clock (implement After(d) <-chan time.Time). nil means
+	// core.SystemClock.
 	Clock core.Clock
 	// IDs issues run ids when StartRequest.RunID is empty. nil means ULIDs
 	// over Clock.
 	IDs core.Ids
+	// Logger receives one Error record per recovered flow-host or step panic with
+	// tenant, run, step, the panic value cut at 4,096 runes and the stack cut at
+	// 16 KiB. nil means slog.Default() at call time.
+	Logger *slog.Logger
 }
 
-// timerClock is the optional extension of core.Clock a runtime uses to wake a
-// timer when the clock reaches its deadline. coretest.FakeClock implements it;
-// the production clock falls back to real timers in after.
-type timerClock interface {
+// wakeClock is the clock port the local runtime uses for Now and timer wake-ups.
+// core.SystemClock and coretest.FakeClock implement it.
+type wakeClock interface {
+	core.Clock
 	After(time.Duration) <-chan time.Time
 }
 
@@ -60,19 +65,19 @@ type idemKey struct {
 
 // Runtime is the in-process implementation of runtime.Runtime.
 type Runtime struct {
-	mu    sync.Mutex
-	clock core.Clock
-	ids   core.Ids
-	host  runtime.FlowHost
-	steps map[string]registeredStep
+	mu     sync.Mutex
+	clock  wakeClock
+	ids    core.Ids
+	logger *slog.Logger
+	host   runtime.FlowHost
+	steps  map[string]registeredStep
 
 	runs  map[runKey]*run
 	order []*run
 	idem  map[idemKey]*run
 
-	serving bool
-	closed  bool
-	wg      sync.WaitGroup
+	closed bool
+	wg     sync.WaitGroup
 }
 
 type registeredStep struct {
@@ -82,21 +87,28 @@ type registeredStep struct {
 
 // New returns a local runtime. It starts empty: it has no record of any run
 // from an earlier instance (REQ-RT-006).
-func New(opts Options) *Runtime {
-	r := &Runtime{
-		clock: opts.Clock,
-		ids:   opts.IDs,
-		steps: map[string]registeredStep{},
-		runs:  map[runKey]*run{},
-		idem:  map[idemKey]*run{},
+func New(opts Options) (*Runtime, error) {
+	clock := opts.Clock
+	if clock == nil {
+		clock = core.SystemClock{}
 	}
-	if r.clock == nil {
-		r.clock = core.SystemClock{}
+	wake, ok := clock.(wakeClock)
+	if !ok {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"local: the clock cannot schedule timers: it has no After(duration)", nil)
+	}
+	r := &Runtime{
+		clock:  wake,
+		ids:    opts.IDs,
+		logger: opts.Logger,
+		steps:  map[string]registeredStep{},
+		runs:   map[runKey]*run{},
+		idem:   map[idemKey]*run{},
 	}
 	if r.ids == nil {
 		r.ids = core.NewULIDs(r.clock, nil)
 	}
-	return r
+	return r, nil
 }
 
 // RegisterFlowHost installs the single flow entrypoint the composition root
@@ -129,7 +141,9 @@ func (r *Runtime) RegisterStep(name string, fn runtime.StepFunc, d runtime.StepD
 }
 
 // Capabilities reports what the local runtime supports: nothing durable, just
-// synchronous gate resolution (REQ-RT-005).
+// synchronous gate resolution (REQ-RT-005). Resolve delivers any payload today;
+// validation against GateSpec.Schema and AcceptIf (FLOW-006-01) arrives with
+// WP-L5-04.
 func (r *Runtime) Capabilities() runtime.Caps {
 	return runtime.Caps{
 		Durable:         false,
@@ -206,11 +220,16 @@ func (r *Runtime) startChild(tenant core.TenantID, id string, flow runtime.FlowR
 	key := runKey{tenant: tenant, id: id}
 	existing := r.runs[key]
 	if existing != nil {
+		if existing.parentRun == parent && existing.flow == flow {
+			r.mu.Unlock()
+			return existing, nil
+		}
 		r.mu.Unlock()
-		return existing, nil
+		return nil, core.NewError(core.CodeConflict, "local: a run with that id already exists", map[string]any{"run": id})
 	}
 	ctx := context.WithoutCancel(parent.ctx)
 	started := newRun(r, tenant, id, flow, in, ctx)
+	started.parentRun = parent
 	r.runs[key] = started
 	r.order = append(r.order, started)
 	r.wg.Add(1)
@@ -223,8 +242,9 @@ func (r *Runtime) startChild(tenant core.TenantID, id string, flow runtime.FlowR
 	return started, nil
 }
 
-// Resolve hands payload to the run waiting at gate. The tenant comes from ctx
-// and must agree with run.TenantID when set (REQ-RT-009, REQ-RT-010,
+// Resolve hands payload to the run waiting at gate without evaluating
+// GateSpec.Schema or AcceptIf today (FLOW-006-01, WP-L5-04). The tenant comes
+// from ctx and must agree with run.TenantID when set (REQ-RT-009, REQ-RT-010,
 // REQ-RT-042, REQ-RT-044, REQ-RT-025).
 func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, payload json.RawMessage) error {
 	tenant, err := r.tenant(ctx, ref.TenantID)
@@ -239,7 +259,8 @@ func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, 
 }
 
 // Cancel cancels a run and delivers cancellation to its in-flight steps and
-// waits (REQ-RT-012, REQ-RT-013).
+// waits (REQ-RT-012, REQ-RT-013). The reason is truncated to 256 runes in the
+// cancellation message.
 func (r *Runtime) Cancel(ctx context.Context, ref runtime.RunRef, reason string) error {
 	tenant, err := r.tenant(ctx, ref.TenantID)
 	if err != nil {
@@ -268,31 +289,58 @@ func (r *Runtime) Describe(ctx context.Context, ref runtime.RunRef) (runtime.Run
 }
 
 // List returns the calling tenant's runs, optionally filtered by flow and
-// state (REQ-RT-026, REQ-RT-043).
+// state (REQ-RT-026, REQ-RT-043, REQ-RT-051…053). Limit zero means no limit.
+// When more matching runs remain after a limited page, the second return is an
+// opaque versioned paging token bound to the issuing tenant; clients must not
+// parse it. The token names the tenant ordinal in that tenant's start-ordered
+// run list where the next page begins. Invalid, out-of-range or foreign-tenant
+// cursors fail with invalid_argument before any run is read.
 func (r *Runtime) List(ctx context.Context, q runtime.RunQuery) ([]runtime.RunStatus, string, error) {
 	tenant, err := r.tenant(ctx, q.TenantID)
 	if err != nil {
 		return nil, "", err
 	}
 	r.mu.Lock()
-	runs := append([]*run(nil), r.order...)
+	tenantRuns := tenantRunSnapshot(r.order, tenant)
 	r.mu.Unlock()
 
-	out := make([]runtime.RunStatus, 0, len(runs))
-	for _, candidate := range runs {
-		status := candidate.status()
-		if status.Ref.TenantID != tenant {
-			continue
+	start := 0
+	if q.Cursor != "" {
+		start, err = parseListCursor(q.Cursor, tenant, len(tenantRuns))
+		if err != nil {
+			return nil, "", err
 		}
+	}
+
+	matches := func(candidate *run) bool {
+		status := candidate.status()
 		if q.Flow != "" && candidate.flow.Name != q.Flow {
-			continue
+			return false
 		}
 		if q.State != "" && status.State != q.State {
+			return false
+		}
+		return true
+	}
+
+	out := make([]runtime.RunStatus, 0, len(tenantRuns))
+	for i := start; i < len(tenantRuns); i++ {
+		candidate := tenantRuns[i]
+		if !matches(candidate) {
 			continue
 		}
-		out = append(out, status)
+		out = append(out, candidate.status())
 		if q.Limit > 0 && len(out) >= q.Limit {
-			break
+			for j := i + 1; j < len(tenantRuns); j++ {
+				if matches(tenantRuns[j]) {
+					tok, encErr := encodeListCursor(tenant, j)
+					if encErr != nil {
+						return nil, "", encErr
+					}
+					return out, tok, nil
+				}
+			}
+			return out, "", nil
 		}
 	}
 	return out, "", nil
@@ -309,7 +357,6 @@ func (r *Runtime) Serve(ctx context.Context) error {
 		r.wg.Wait()
 		return nil
 	}
-	r.serving = true
 	r.mu.Unlock()
 
 	<-ctx.Done()
@@ -333,10 +380,7 @@ func (r *Runtime) lookup(tenant core.TenantID, id string) *run {
 }
 
 func (r *Runtime) after(d time.Duration) <-chan time.Time {
-	if clock, ok := r.clock.(timerClock); ok {
-		return clock.After(d)
-	}
-	return time.After(d)
+	return r.clock.After(d)
 }
 
 // tenant enforces the shared rule: the tenant of a call is the context's, and

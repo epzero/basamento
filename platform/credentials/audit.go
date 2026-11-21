@@ -73,20 +73,22 @@ ORDER BY at, id`, string(tenant))
 		)
 		if err := rows.Scan(&tenantID, &event.Time, &event.Principal, &event.Action,
 			&event.Resource, &event.Outcome, &event.RunID, &event.Step, &event.Reason); err != nil {
-			return nil, err
+			return nil, psql.MapError(err)
 		}
 		event.Tenant = core.TenantID(tenantID)
 		out = append(out, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, psql.MapError(err)
 	}
 	return out, nil
 }
 
 // nextID takes the next value of the single audit sequence row. The UPDATE is
 // atomic on both dialects, so concurrent producers get distinct ids without a
-// transaction; a failed insert may leave a gap, which ordering tolerates.
+// transaction. Ids are handed out in order but arrive in no particular order:
+// a higher id may commit before a lower one, and a failed insert leaves a gap.
+// Reads therefore order by at, id rather than by id.
 func (a *AuditStore) nextID(ctx context.Context) (int64, error) {
 	var id int64
 	err := a.store.Execer().QueryRow(ctx,

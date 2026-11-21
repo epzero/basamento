@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -42,6 +43,7 @@ func embedConfig(f *fakeEmbedder) EmbeddingConfig {
 			Protocol: ProtocolSingle,
 		}},
 		Embedder: f,
+		Clock:    testClock(),
 	}
 }
 
@@ -51,7 +53,7 @@ func TestEmbeddingReturnsVectorsInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	res, err := Invoke(t.Context(), adapter, Request{
+	res, err := Invoke(testCtx(t), adapter, Request{
 		Model:     "sim-embed",
 		Op:        CapEmbed,
 		Texts:     []string{"one", "two"},
@@ -75,14 +77,14 @@ func TestEmbeddingReturnsVectorsInOrder(t *testing.T) {
 func TestEmbeddingPublishesNoEvents(t *testing.T) {
 	f := &fakeEmbedder{vecs: [][]float64{{1}}}
 	adapter, _ := NewEmbedding(embedConfig(f))
-	h, err := adapter.Start(t.Context(), Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"})
+	h, err := adapter.Start(testCtx(t), Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := adapter.Result(t.Context(), h); err != nil {
+	if _, err := adapter.Result(testCtx(t), h); err != nil {
 		t.Fatalf("result: %v", err)
 	}
-	ch, err := adapter.Events(t.Context(), h, 0)
+	ch, err := adapter.Events(testCtx(t), h, 0)
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
@@ -99,18 +101,18 @@ func TestEmbeddingStartIsIdempotent(t *testing.T) {
 	f := &fakeEmbedder{vecs: [][]float64{{1}}}
 	adapter, _ := NewEmbedding(embedConfig(f))
 	req := Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-1"}
-	first, err := adapter.Start(t.Context(), req)
+	first, err := adapter.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	second, err := adapter.Start(t.Context(), req)
+	second, err := adapter.Start(testCtx(t), req)
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
 	if first != second {
 		t.Fatalf("handles differ: %+v and %+v", first, second)
 	}
-	if _, err := adapter.Result(t.Context(), first); err != nil {
+	if _, err := adapter.Result(testCtx(t), first); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	if f.calls != 1 {
@@ -132,7 +134,7 @@ func TestEmbeddingRejectsRequestsItCannotServe(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := adapter.Start(t.Context(), tc.req); core.CodeOf(err) != tc.code {
+			if _, err := adapter.Start(testCtx(t), tc.req); core.CodeOf(err) != tc.code {
 				t.Fatalf("code = %q, want %q: %v", core.CodeOf(err), tc.code, err)
 			}
 		})
@@ -141,7 +143,7 @@ func TestEmbeddingRejectsRequestsItCannotServe(t *testing.T) {
 
 func TestEmbeddingVendorFailure(t *testing.T) {
 	adapter, _ := NewEmbedding(embedConfig(&fakeEmbedder{err: errors.New("boom")}))
-	res, err := Invoke(t.Context(), adapter, Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "r"})
+	res, err := Invoke(testCtx(t), adapter, Request{Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "r"})
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -164,14 +166,140 @@ func TestNewEmbeddingValidatesItsConfig(t *testing.T) {
 	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim"}); core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("missing embedder code = %q", core.CodeOf(err))
 	}
-	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}}); core.CodeOf(err) != core.CodeUnsupported {
+	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}}); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("missing clock code = %q", core.CodeOf(err))
+	}
+	if _, err := NewEmbedding(EmbeddingConfig{Provider: "sim", Embedder: &fakeEmbedder{}, Clock: testClock()}); core.CodeOf(err) != core.CodeUnsupported {
 		t.Fatalf("missing descriptor code = %q", core.CodeOf(err))
 	}
 }
 
+func TestEmbeddingRejectsVectorCountMismatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		texts []string
+		vecs  [][]float64
+	}{
+		{name: "fewer vectors", texts: []string{"a", "b"}, vecs: [][]float64{{1}}},
+		{name: "more vectors", texts: []string{"a"}, vecs: [][]float64{{1}, {2}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeEmbedder{vecs: tc.vecs}
+			adapter, _ := NewEmbedding(embedConfig(f))
+			res, err := Invoke(testCtx(t), adapter, Request{
+				Model: "sim-embed", Op: CapEmbed, Texts: tc.texts, ClientRef: "ref-mismatch",
+			})
+			if err != nil {
+				t.Fatalf("invoke: %v", err)
+			}
+			if res.State != StateFailed {
+				t.Fatalf("state = %q, want failed", res.State)
+			}
+			var failure Failure
+			if err := json.Unmarshal(res.Error, &failure); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if failure.Code != core.CodeVendor {
+				t.Fatalf("code = %q, want vendor_error", failure.Code)
+			}
+			want := fmt.Sprintf("embedding count mismatch: got %d vectors for %d texts", len(tc.vecs), len(tc.texts))
+			if failure.Message != want {
+				t.Fatalf("message = %q, want %q", failure.Message, want)
+			}
+		})
+	}
+}
+
+func TestEmbeddingAcceptsExactVectorCount(t *testing.T) {
+	f := &fakeEmbedder{vecs: [][]float64{{0.1}, {0.2}, {0.3}}}
+	adapter, _ := NewEmbedding(embedConfig(f))
+	res, err := Invoke(testCtx(t), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x", "y", "z"}, ClientRef: "ref-ok",
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if res.State != StateSucceeded {
+		t.Fatalf("state = %q, want succeeded", res.State)
+	}
+	want := [][]float32{{0.1}, {0.2}, {0.3}}
+	if !reflect.DeepEqual(res.Vectors, want) {
+		t.Fatalf("vectors = %v, want %v", res.Vectors, want)
+	}
+}
+
+func TestEmbeddingRejectsEmptyVectors(t *testing.T) {
+	cases := []struct {
+		name  string
+		texts []string
+		vecs  [][]float64
+		msg   string
+	}{
+		{name: "all empty", texts: []string{"a", "b"}, vecs: [][]float64{{}, {}}, msg: "embedding vector 0 is empty"},
+		{name: "second empty", texts: []string{"a", "b"}, vecs: [][]float64{{1}, {}}, msg: "embedding vector 1 is empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeEmbedder{vecs: tc.vecs}
+			adapter, _ := NewEmbedding(embedConfig(f))
+			res, err := Invoke(testCtx(t), adapter, Request{
+				Model: "sim-embed", Op: CapEmbed, Texts: tc.texts, ClientRef: "ref-" + tc.name,
+			})
+			if err != nil {
+				t.Fatalf("invoke: %v", err)
+			}
+			if res.State != StateFailed {
+				t.Fatalf("state = %q", res.State)
+			}
+			var failure Failure
+			_ = json.Unmarshal(res.Error, &failure)
+			if failure.Code != core.CodeVendor || failure.Message != tc.msg {
+				t.Fatalf("failure = %+v, want vendor %q", failure, tc.msg)
+			}
+		})
+	}
+}
+
+type panicEmbedder struct{}
+
+func (panicEmbedder) EmbedStrings(context.Context, []string, ...einoEmbedding.Option) ([][]float64, error) {
+	panic("embed panic")
+}
+
+func TestEmbeddingVendorPanicSurvives(t *testing.T) {
+	adapter, _ := NewEmbedding(EmbeddingConfig{
+		Provider:    "sim",
+		Descriptors: embedConfig(&fakeEmbedder{}).Descriptors,
+		Embedder:    &panicEmbedder{},
+		Clock:       testClock(),
+	})
+	res, err := Invoke(testCtx(t), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"x"}, ClientRef: "ref-panic",
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if res.State != StateFailed {
+		t.Fatalf("state = %q", res.State)
+	}
+	var failure Failure
+	_ = json.Unmarshal(res.Error, &failure)
+	if failure.Code != core.CodeInternal || failure.Message != "vendor call panicked" {
+		t.Fatalf("failure = %+v", failure)
+	}
+	ok, err := Invoke(testCtx(t), adapter, Request{
+		Model: "sim-embed", Op: CapEmbed, Texts: []string{"y"}, ClientRef: "ref-after",
+	})
+	if err != nil {
+		t.Fatalf("second invoke: %v", err)
+	}
+	_ = ok
+}
+
 func TestEmbeddingDescribe(t *testing.T) {
 	adapter, _ := NewEmbedding(embedConfig(&fakeEmbedder{}))
-	ds, err := adapter.Describe(t.Context())
+	ds, err := adapter.Describe(testCtx(t))
 	if err != nil || len(ds) != 1 || ds[0].ID != "sim-embed" {
 		t.Fatalf("describe = (%+v, %v)", ds, err)
 	}

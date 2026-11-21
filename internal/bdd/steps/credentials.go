@@ -17,7 +17,6 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/credentials"
-	"github.com/epzero/basamento/platform/secrets"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -32,17 +31,19 @@ type credentialsWorld struct {
 	back   credentials.Backend
 	ext    *simExternal
 
-	lastErr    error
-	lastValue  []byte
-	resolveErr error
-	putErr     error
-	deleteErr  error
-	listErr    error
-	auditErr   error
-	lastOp     string
-	listing    []string
-	results    map[string]resolution
-	waiting    *waitingResolution
+	lastPutTenant string
+	lastPutName   string
+	lastErr       error
+	lastValue     []byte
+	resolveErr    error
+	putErr        error
+	deleteErr     error
+	listErr       error
+	auditErr      error
+	lastOp        string
+	listing       []string
+	results       map[string]resolution
+	waiting       *waitingResolution
 }
 
 type resolution struct {
@@ -52,7 +53,15 @@ type resolution struct {
 
 type waitingResolution struct {
 	done   chan resolution
+	abort  chan struct{}
+	once   sync.Once
 	result resolution
+}
+
+// stop aborts a wait that outlived its scenario; calling it more than once is
+// harmless.
+func (r *waitingResolution) stop() {
+	r.once.Do(func() { close(r.abort) })
 }
 
 func newCredentialsWorld() *credentialsWorld {
@@ -60,6 +69,14 @@ func newCredentialsWorld() *credentialsWorld {
 }
 
 func (w *credentialsWorld) teardown() {
+	// A resolution still waiting when the scenario ends must not leak: abort
+	// its wait and let its goroutine finish instead of blocking on the gate.
+	if w.waiting != nil {
+		w.waiting.stop()
+	}
+	if w.sec != nil && w.sec.gate != nil {
+		w.sec.gate.unblock()
+	}
 	if w.db != nil {
 		_ = w.db.Close()
 		w.db = nil
@@ -105,14 +122,20 @@ type bddValueSecrets struct {
 }
 
 type secretsGate struct {
-	reached chan struct{}
-	release chan struct{}
-	once    sync.Once
+	reached     chan struct{}
+	release     chan struct{}
+	once        sync.Once
+	releaseOnce sync.Once
 }
 
 func (g *secretsGate) wait() {
 	g.once.Do(func() { close(g.reached) })
 	<-g.release
+}
+
+// unblock releases a waiter that the scenario never released.
+func (g *secretsGate) unblock() {
+	g.releaseOnce.Do(func() { close(g.release) })
 }
 
 func (s *bddValueSecrets) Encrypt(_ context.Context, plaintext []byte) ([]byte, error) {
@@ -132,14 +155,31 @@ func (s *bddValueSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte,
 	return s.open(ciphertext)
 }
 
+// valueFrameV1 separates the value domain from the keyset domain in this
+// simulated Secrets port. WP-L1-04 keeps its own copy unexported, so the steps
+// carry the frame they need instead of reaching into production code.
+const valueFrameV1 = "basamento.value.v1"
+
+func frameValue(plaintext []byte) []byte {
+	inner := append([]byte(valueFrameV1), 0)
+	return append(inner, plaintext...)
+}
+
+func parseValueFrame(inner []byte) ([]byte, error) {
+	if len(inner) < len(valueFrameV1)+1 || string(inner[:len(valueFrameV1)]) != valueFrameV1 ||
+		inner[len(valueFrameV1)] != 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
+	}
+	return append([]byte(nil), inner[len(valueFrameV1)+1:]...), nil
+}
+
 func (s *bddValueSecrets) seal(plaintext []byte) ([]byte, error) {
-	inner := secrets.FrameValuePlaintext(plaintext)
 	gcm, err := s.gcm()
 	if err != nil {
 		return nil, err
 	}
 	nonce := s.reg.nextNonce(gcm.NonceSize())
-	return gcm.Seal(nonce, nonce, inner, nil), nil
+	return gcm.Seal(nonce, nonce, frameValue(plaintext), nil), nil
 }
 
 func (s *bddValueSecrets) open(ciphertext []byte) ([]byte, error) {
@@ -155,7 +195,7 @@ func (s *bddValueSecrets) open(ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "value cannot be decrypted", nil)
 	}
-	return secrets.ParseValuePlaintext(inner)
+	return parseValueFrame(inner)
 }
 
 func (s *bddValueSecrets) gcm() (cipher.AEAD, error) {
@@ -459,6 +499,9 @@ func registerCredentials(sc *godog.ScenarioContext) {
 	sc.Step(`^the value "([^"]*)" is put as "([^"]*)" for tenant "([^"]*)"$`, func(ctx context.Context, value, name, tenant string) error {
 		w := credentialsW(ctx)
 		w.putErr = w.store.Put(credentialsCtx(ctx, tenant), name, []byte(value))
+		if w.putErr == nil {
+			w.lastPutTenant, w.lastPutName = tenant, name
+		}
 		w.lastOp = "put"
 		setCredentialsError(ctx, w.putErr)
 		return nil
@@ -530,7 +573,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("resolved %q, want %q", value, want)
+				return fmt.Errorf("resolved value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})
@@ -539,21 +582,34 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			w := credentialsW(ctx)
 			gate := &secretsGate{reached: make(chan struct{}), release: make(chan struct{})}
 			w.sec.gate = gate
-			waiting := &waitingResolution{done: make(chan resolution, 1)}
+			waiting := &waitingResolution{done: make(chan resolution, 1), abort: make(chan struct{})}
 			w.waiting = waiting
 			go func() {
 				value, err := w.store.Resolve(credentialsUseCtx(ctx, tenant, principal, run, step), ref)
 				waiting.done <- resolution{value: value, err: err}
 			}()
-			<-gate.reached
-			return nil
+			// The resolution may finish without ever reaching the secrets port
+			// (a rejected reference, a missing row, an unreachable key
+			// service); fail on its result instead of blocking forever.
+			select {
+			case <-gate.reached:
+				return nil
+			case r := <-waiting.done:
+				waiting.result = r
+				if r.err != nil {
+					return fmt.Errorf("resolution finished before it reached the secrets port: %w", r.err)
+				}
+				return fmt.Errorf("resolution finished before it reached the secrets port")
+			case <-waiting.abort:
+				return fmt.Errorf("scenario ended before the resolution reached the secrets port")
+			}
 		})
 	sc.Step(`^the waiting resolution is released$`, func(ctx context.Context) error {
 		w := credentialsW(ctx)
 		if w.waiting == nil {
 			return fmt.Errorf("no waiting resolution")
 		}
-		close(w.sec.gate.release)
+		w.sec.gate.unblock()
 		w.waiting.result = <-w.waiting.done
 		if w.waiting.result.err != nil {
 			return w.waiting.result.err
@@ -566,7 +622,8 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return fmt.Errorf("no waiting resolution")
 		}
 		if string(w.waiting.result.value) != want {
-			return fmt.Errorf("waiting resolution returned %q, want %q", w.waiting.result.value, want)
+			return fmt.Errorf("waiting resolution returned %d bytes, want %d",
+				len(w.waiting.result.value), len(want))
 		}
 		return nil
 	})
@@ -622,7 +679,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return w.resolveErr
 		}
 		if string(w.lastValue) != want {
-			return fmt.Errorf("resolution returned %q, want %q", w.lastValue, want)
+			return fmt.Errorf("resolution returned %d bytes, want %d", len(w.lastValue), len(want))
 		}
 		return nil
 	})
@@ -635,12 +692,9 @@ func registerCredentials(sc *godog.ScenarioContext) {
 			return r.err
 		}
 		if string(r.value) != want {
-			return fmt.Errorf("resolution for %q returned %q, want %q", tenant, r.value, want)
+			return fmt.Errorf("resolution for %q returned %d bytes, want %d", tenant, len(r.value), len(want))
 		}
 		return nil
-	})
-	sc.Step(`^the put fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return credentialsCode(credentialsW(ctx).putErr, code)
 	})
 	sc.Step(`^the deletion fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
 		return credentialsCode(credentialsW(ctx).deleteErr, code)
@@ -672,7 +726,7 @@ func registerCredentials(sc *godog.ScenarioContext) {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("decrypted %q, want %q", value, want)
+				return fmt.Errorf("decrypted value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})
@@ -731,16 +785,18 @@ func registerCredentials(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the stored ciphertext in the simulated external store decrypts through the secrets port to "([^"]*)"$`,
 		func(ctx context.Context, want string) error {
-			ct, ok := credentialsW(ctx).ext.ciphertext("acme", "vendor/anthropic")
+			w := credentialsW(ctx)
+			ct, ok := w.ext.ciphertext(w.lastPutTenant, w.lastPutName)
 			if !ok {
-				return fmt.Errorf("external store has no credential")
+				return fmt.Errorf("external store has no credential for tenant %q named %q",
+					w.lastPutTenant, w.lastPutName)
 			}
-			value, err := credentialsW(ctx).sec.Decrypt(context.Background(), ct)
+			value, err := w.sec.Decrypt(context.Background(), ct)
 			if err != nil {
 				return err
 			}
 			if string(value) != want {
-				return fmt.Errorf("decrypted %q, want %q", value, want)
+				return fmt.Errorf("decrypted value has %d bytes, want %d", len(value), len(want))
 			}
 			return nil
 		})

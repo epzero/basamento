@@ -217,6 +217,32 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	sc.Step(`^a template with id "([^"]*)", version "([^"]*)", inputs "([^"]*)" and segments "([^"]*)" each with a budget of (\d+)$`, func(ctx context.Context, id, version, inputs, segments string, budget int) error {
+		w := world(ctx).Prompt
+		t := &prompt.Template{ID: id, Version: version}
+		if s := strings.TrimSpace(inputs); s != "" {
+			for _, name := range strings.Split(s, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					t.Inputs = append(t.Inputs, prompt.Input{Name: name})
+				}
+			}
+		}
+		if s := strings.TrimSpace(segments); s != "" {
+			for _, spec := range strings.Split(s, ",") {
+				name, kind, ok := strings.Cut(strings.TrimSpace(spec), ":")
+				if !ok {
+					return fmt.Errorf("segment %q must be name:kind", spec)
+				}
+				t.Segments = append(t.Segments, prompt.Segment{
+					Name:   strings.TrimSpace(name),
+					Kind:   prompt.Kind(strings.TrimSpace(kind)),
+					Budget: budget,
+				})
+			}
+		}
+		w.draft = t
+		return nil
+	})
 	sc.Step(`^the template is registered$`, func(ctx context.Context) error {
 		w := world(ctx).Prompt
 		w.regResult, w.lastErr = w.regOrNew().Register(w.draft)
@@ -283,22 +309,27 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		if len(w.assembled) == 0 {
 			return fmt.Errorf("no assembly to mutate")
 		}
-		last := w.assembled[len(w.assembled)-1]
-		cp := *last
-		cp.Parts = append([]prompt.AssembledPart(nil), last.Parts...)
+		cp := cloneAssembledForMutation(w.assembled[len(w.assembled)-1])
 		for i := range cp.Parts {
-			cp.Parts[i].Wrapped = append([]prompt.DelimiterRecord(nil), last.Parts[i].Wrapped...)
-			if len(cp.Parts[i].History) > 0 {
-				cp.Parts[i].History = append([]prompt.AssembledHistoryEntry(nil), last.Parts[i].History...)
-				for j := range cp.Parts[i].History {
-					cp.Parts[i].History[j].Wrapped = append([]prompt.DelimiterRecord(nil), last.Parts[i].History[j].Wrapped...)
-				}
-			}
 			if cp.Parts[i].Name == name {
 				cp.Parts[i].Text += suffix
 			}
 		}
-		w.mutateAssembly = &cp
+		w.mutateAssembly = cp
+		return nil
+	})
+	sc.Step(`^the assembled segment "([^"]*)" is changed afterwards by removing "([^"]*)"$`, func(ctx context.Context, name, fragment string) error {
+		w := world(ctx).Prompt
+		if len(w.assembled) == 0 {
+			return fmt.Errorf("no assembly to mutate")
+		}
+		cp := cloneAssembledForMutation(w.assembled[len(w.assembled)-1])
+		for i := range cp.Parts {
+			if cp.Parts[i].Name == name {
+				cp.Parts[i].Text = strings.Replace(cp.Parts[i].Text, fragment, "", 1)
+			}
+		}
+		w.mutateAssembly = cp
 		return nil
 	})
 
@@ -349,12 +380,6 @@ func registerPrompt(sc *godog.ScenarioContext) {
 			return fmt.Errorf("got %d versions, want %d", got, n)
 		}
 		return nil
-	})
-	sc.Step(`^the resolution fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		if world(ctx).Prompt.lastErr != nil {
-			return expectCode(world(ctx).Prompt.lastErr, code)
-		}
-		return localLastError(world(ctx).Local, code)
 	})
 	sc.Step(`^the registration fails with code "([^"]*)" naming variable "([^"]*)"$`, func(ctx context.Context, code, name string) error {
 		if err := expectCode(world(ctx).Prompt.lastErr, code); err != nil {
@@ -538,6 +563,12 @@ func registerPrompt(sc *godog.ScenarioContext) {
 		}
 		return lintListed(world(ctx).Prompt.lastErr, rule, seg)
 	})
+	sc.Step(`^the registration fails with code "([^"]*)" listing the lint error "([^"]*)"$`, func(ctx context.Context, code, rule string) error {
+		if err := expectCode(world(ctx).Prompt.lastErr, code); err != nil {
+			return err
+		}
+		return lintRuleListed(world(ctx).Prompt.lastErr, rule)
+	})
 	sc.Step(`^the registration succeeds with the lint warning "([^"]*)" for segment "([^"]*)"$`, func(ctx context.Context, rule, seg string) error {
 		if world(ctx).Prompt.lastErr != nil {
 			return world(ctx).Prompt.lastErr
@@ -642,6 +673,42 @@ func expectDetails(err error, want map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func cloneAssembledForMutation(a *prompt.Assembled) *prompt.Assembled {
+	cp := *a
+	cp.Parts = append([]prompt.AssembledPart(nil), a.Parts...)
+	for i := range cp.Parts {
+		cp.Parts[i].Wrapped = append([]prompt.DelimiterRecord(nil), a.Parts[i].Wrapped...)
+		if len(a.Parts[i].History) > 0 {
+			cp.Parts[i].History = append([]prompt.AssembledHistoryEntry(nil), a.Parts[i].History...)
+			for j := range cp.Parts[i].History {
+				cp.Parts[i].History[j].Wrapped = append([]prompt.DelimiterRecord(nil), a.Parts[i].History[j].Wrapped...)
+			}
+		}
+	}
+	return &cp
+}
+
+func lintRuleListed(err error, rule string) error {
+	var pe *core.Error
+	if !errorsAs(err, &pe) {
+		return fmt.Errorf("not a core error")
+	}
+	raw, ok := pe.Details["lint"]
+	if !ok {
+		return fmt.Errorf("no lint details")
+	}
+	slice, ok := raw.([]map[string]string)
+	if !ok {
+		return fmt.Errorf("unexpected lint detail type")
+	}
+	for _, item := range slice {
+		if item["rule"] == rule {
+			return nil
+		}
+	}
+	return fmt.Errorf("lint %q not listed", rule)
 }
 
 func lintListed(err error, rule, seg string) error {

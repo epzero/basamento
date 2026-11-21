@@ -2,10 +2,27 @@ package secrets
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 
+	"github.com/epzero/basamento/core"
 	"google.golang.org/protobuf/encoding/protowire"
 )
+
+// maxTenantLen caps the protobuf length prefix when a keyset frame is parsed so
+// int(n) cannot overflow; a longer prefix is refused early. It is not a grammar check.
+const maxTenantLen = 128
+
+// tenantStringOK checks tenant against REQ-CORE-005 via core.TenantFrom.
+func tenantStringOK(tenant string) error {
+	if tenant == "" {
+		return errInvalidArgument(msgTenantRequired)
+	}
+	if _, ok := core.TenantFrom(core.WithTenant(context.Background(), core.TenantID(tenant))); !ok {
+		return errInvalidArgument(msgTenantInvalid)
+	}
+	return nil
+}
 
 const (
 	frameKeysetV1 = "basamento.keyset.v1"
@@ -15,7 +32,7 @@ const (
 
 // FrameBoundPlaintext builds the keyset-domain plaintext for Wrap (keyset frame).
 func FrameBoundPlaintext(tenant string, plaintext []byte) ([]byte, error) {
-	if err := ValidateTenant(tenant); err != nil {
+	if err := tenantStringOK(tenant); err != nil {
 		return nil, err
 	}
 	return frameTagged(frameKeysetV1, tenant, plaintext)
@@ -26,8 +43,8 @@ func ParseBoundPlaintext(expectTenant string, inner []byte) ([]byte, error) {
 	return parseTagged(frameKeysetV1, expectTenant, inner)
 }
 
-// FrameValuePlaintext builds the value-domain plaintext for Port.Encrypt.
-func FrameValuePlaintext(plaintext []byte) []byte {
+// frameValuePlaintext tags plaintext for Port.Encrypt (value domain).
+func frameValuePlaintext(plaintext []byte) []byte {
 	var buf []byte
 	buf = append(buf, frameValueV1...)
 	buf = append(buf, 0)
@@ -35,8 +52,8 @@ func FrameValuePlaintext(plaintext []byte) []byte {
 	return buf
 }
 
-// ParseValuePlaintext unwraps the value-domain plaintext after Decrypt.
-func ParseValuePlaintext(inner []byte) ([]byte, error) {
+// parseValuePlaintext unwraps the value-domain plaintext after Decrypt.
+func parseValuePlaintext(inner []byte) ([]byte, error) {
 	if len(inner) < len(frameValueV1)+1 {
 		return nil, errInvalidArgument(msgValueCannotDecrypt)
 	}
@@ -57,7 +74,7 @@ func frameTagged(tag, tenant string, plaintext []byte) ([]byte, error) {
 }
 
 func parseTagged(tag, expectTenant string, inner []byte) ([]byte, error) {
-	if err := ValidateTenant(expectTenant); err != nil {
+	if err := tenantStringOK(expectTenant); err != nil {
 		return nil, err
 	}
 	tagLen := len(tag)

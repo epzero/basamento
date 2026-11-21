@@ -23,21 +23,31 @@ type Compiled struct {
 	hash       string
 }
 
-// Compile validates f and type-checks its expressions.
+// Compile validates f, enforces the definition size limit and type-checks its
+// expressions.
+//
+// The order is the one specs/flow-engine/design.md §2.3 pins: ir.Validate
+// checks the counts, guard budgets and expression sizes first, the canonical
+// form is produced once and rejected above 1 MiB before it is hashed or its
+// expressions are type-checked, and only then does the type-checking run.
 //
 // On success the returned Compiled carries the same IR, its RFC 8785 canonical
 // JSON and the SHA-256 hash of those bytes. Errors are *core.Error with code
 // invalid_argument naming the node or edge and the expression at fault
-// (REQ-FLOW-003, REQ-FLOW-004, REQ-FLOW-040 to REQ-FLOW-043).
+// (REQ-FLOW-003, REQ-FLOW-004, REQ-FLOW-040 to REQ-FLOW-043, REQ-FLOW-045,
+// REQ-FLOW-046).
 func Compile(f *flow.IR) (*Compiled, error) {
 	if err := ir.Validate(f); err != nil {
 		return nil, err
 	}
-	if err := checkExpressions(f); err != nil {
-		return nil, err
-	}
 	canonical, err := ir.Canonical(f)
 	if err != nil {
+		return nil, err
+	}
+	if err := ir.CheckCanonicalSize(canonical); err != nil {
+		return nil, err
+	}
+	if err := checkExpressions(f); err != nil {
 		return nil, err
 	}
 	return &Compiled{definition: f, canonical: canonical, hash: ir.HashCanonical(canonical)}, nil
@@ -65,20 +75,22 @@ func (c *Compiled) Canonical() []byte {
 // Hash returns the lowercase hex SHA-256 of the canonical IR.
 func (c *Compiled) Hash() string { return c.hash }
 
-// checkExpressions type-checks node inputs, guard conditions and edge
-// conditions in a deterministic order: nodes by id, then edges in declaration
-// order. A mapping is CEL when it compiles as CEL, otherwise jq.
+// checkExpressions type-checks node inputs, node spec expressions, guard
+// conditions and edge conditions in a deterministic order: nodes by id, then
+// edges in declaration order. A mapping is CEL when it compiles as CEL,
+// otherwise jq.
+//
+// The environment is built for every definition, with expressions or without:
+// a state schema the expression layer cannot type-check must give one verdict
+// whichever flow carries it, not pass because its flow happens to have no
+// expression.
 func checkExpressions(f *flow.IR) error {
-	if !hasExpressions(f) {
-		return nil
-	}
 	env, err := expressionEnv(f)
 	if err != nil {
 		return err
 	}
 	for _, id := range sortedNodeIDs(f) {
-		node := f.Nodes[id]
-		if err := checkNode(env, id, node); err != nil {
+		if err := checkNode(env, id, f.Nodes[id]); err != nil {
 			return err
 		}
 	}
@@ -92,20 +104,6 @@ func checkExpressions(f *flow.IR) error {
 		}
 	}
 	return nil
-}
-
-func hasExpressions(f *flow.IR) bool {
-	for _, node := range f.Nodes {
-		if node.In != "" || (node.Guard != nil && node.Guard.While != "") {
-			return true
-		}
-	}
-	for _, edge := range f.Edges {
-		if edge.When != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func expressionEnv(f *flow.IR) (*expr.Env, error) {
@@ -124,7 +122,7 @@ func expressionEnv(f *flow.IR) (*expr.Env, error) {
 
 func checkNode(env *expr.Env, id string, node flow.Node) error {
 	if node.In != "" {
-		if err := checkMapping(env, fmt.Sprintf("node %q", id), node.In); err != nil {
+		if err := checkMapping(env, fmt.Sprintf("node %q", id), "input mapping", node.In); err != nil {
 			return err
 		}
 	}
@@ -133,18 +131,126 @@ func checkNode(env *expr.Env, id string, node flow.Node) error {
 			return err
 		}
 	}
+	specs, err := nodeSpecExpressions(id, node)
+	if err != nil {
+		return err
+	}
+	for _, spec := range specs {
+		if spec.condition {
+			if err := checkCondition(env, spec.subject, spec.value); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := checkMapping(env, spec.subject, "", spec.value); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func checkMapping(env *expr.Env, subject, src string) error {
+// specExpression is one CEL or jq expression a node kind keeps in its spec. A
+// condition is type-checked as a boolean; a mapping is only checked as an
+// expression, because its result shape belongs to the node kind.
+type specExpression struct {
+	subject   string // names the kind and spec field in errors
+	value     string
+	condition bool
+}
+
+// nodeSpecExpressions returns the spec expressions the compiler checks: a
+// gate's accept_if and a map's over (ir.SpecExpressionFields). A spec that is
+// not a JSON object, and a spec expression that is not a string, is rejected
+// instead of skipped: a spec the compiler cannot read must not pass as one
+// without expressions (REQ-FLOW-004, specs/flow-engine/design.md §1).
+func nodeSpecExpressions(id string, node flow.Node) ([]specExpression, error) {
+	if len(node.Spec) == 0 {
+		return nil, nil
+	}
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(node.Spec, &spec); err != nil || spec == nil {
+		return nil, specError(fmt.Sprintf("node %q spec", id), "is not a JSON object")
+	}
+	var out []specExpression
+	for _, field := range ir.SpecExpressionFields(node.Kind) {
+		raw, ok := spec[field]
+		if !ok {
+			continue
+		}
+		// A JSON string only: null unmarshals into a string without an error
+		// and is still not one.
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, specError(fmt.Sprintf("node %q %s %s", id, node.Kind, field), "is not a string")
+		}
+		value, ok := decoded.(string)
+		if !ok {
+			return nil, specError(fmt.Sprintf("node %q %s %s", id, node.Kind, field), "is not a string")
+		}
+		if value == "" {
+			continue
+		}
+		out = append(out, specExpression{
+			subject:   fmt.Sprintf("node %q %s %s", id, node.Kind, field),
+			value:     value,
+			condition: field == "accept_if",
+		})
+	}
+	return out, nil
+}
+
+// specError rejects a node spec the compiler cannot read, naming the node and
+// the field at fault.
+func specError(subject, problem string) error {
+	return core.NewError(core.CodeInvalidArgument, subject+": "+problem, map[string]any{"subject": subject})
+}
+
+func checkMapping(env *expr.Env, subject, label, src string) error {
 	_, celErr := env.Compile(src, nil)
 	if celErr == nil {
 		return nil
 	}
-	if _, mappingErr := expr.CompileMapping(src, nil); mappingErr == nil {
+	_, mappingErr := expr.CompileMapping(src, nil)
+	if mappingErr == nil {
 		return nil
 	}
-	return expressionError(subject+": input mapping", celErr)
+	return expressionError(joinSubject(subject, label), bothMappingErrors(celErr, mappingErr))
+}
+
+// bothMappingErrors keeps the CEL and the jq message: neither parser says
+// alone why a text is neither.
+func bothMappingErrors(celErr, mappingErr error) error {
+	message := fmt.Sprintf("not CEL (%s) and not jq (%s)", messageOf(celErr), messageOf(mappingErr))
+	details := map[string]any{}
+	for _, err := range []error{celErr, mappingErr} {
+		for key, value := range errorDetails(err) {
+			details[key] = value
+		}
+	}
+	return core.NewError(core.CodeInvalidArgument, message, details)
+}
+
+func messageOf(err error) string {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Message
+	}
+	return err.Error()
+}
+
+func errorDetails(err error) map[string]any {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Details
+	}
+	return nil
+}
+
+func joinSubject(subject, label string) string {
+	if label == "" {
+		return subject
+	}
+	return subject + ": " + label
 }
 
 func checkCondition(env *expr.Env, subject, src string) error {

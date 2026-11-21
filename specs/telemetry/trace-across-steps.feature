@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-07 @level:component
+@wp:WP-L1-07 @level:component
 Feature: Trace context crosses a boundary
   When trace context is written to a carrier and read back, a child span started
   from the restored context joins the parent trace.

@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/epzero/basamento/core"
 )
@@ -162,14 +161,14 @@ func skipSingleQuotedString(q string, i int) int {
 }
 
 // skipPostgresPrefixedString skips typed string literals (E'/e', B'/b', X'/x', U&'/u&')
-// when not preceded by an identifier character. The second bool is true when i was advanced.
+// when not preceded by an identifier character. U& strings use the standard single-quote
+// rule. The second bool is true when i was advanced.
 func skipPostgresPrefixedString(q string, i int) (int, bool, error) {
 	if i > 0 && postgresIdentTailByte(q[i-1]) {
 		return i, false, nil
 	}
 	if i+2 < len(q) && (q[i] == 'U' || q[i] == 'u') && q[i+1] == '&' && q[i+2] == '\'' {
-		j, err := skipPostgresEscapeString(q, i+2)
-		return j, true, err
+		return skipSingleQuotedString(q, i+2), true, nil
 	}
 	if i+1 < len(q) {
 		switch q[i] {
@@ -210,28 +209,35 @@ func skipPostgresEscapeString(q string, i int) (int, error) {
 	return j, nil
 }
 
+func postgresDollarQuoteTagByte(b byte, first bool) bool {
+	if b == '_' {
+		return true
+	}
+	if b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
+		return true
+	}
+	if b >= 0x80 {
+		return true
+	}
+	if !first && b >= '0' && b <= '9' {
+		return true
+	}
+	return false
+}
+
 func skipDollarQuoted(q string, i int) (delim string, end int, ok bool) {
 	if i >= len(q) || q[i] != '$' {
 		return "", i, false
 	}
 	j := i + 1
 	for j < len(q) {
-		r := rune(q[j])
-		if r == '$' {
+		if q[j] == '$' {
 			break
 		}
-		if j == i+1 {
-			if r == '_' || unicode.IsLetter(r) {
-				j++
-				continue
-			}
+		if !postgresDollarQuoteTagByte(q[j], j == i+1) {
 			return "", i, false
 		}
-		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
-			j++
-			continue
-		}
-		return "", i, false
+		j++
 	}
 	if j >= len(q) || q[j] != '$' {
 		return "", i, false
@@ -240,7 +246,7 @@ func skipDollarQuoted(q string, i int) (delim string, end int, ok bool) {
 	k := j + 1
 	pos := strings.Index(q[k:], delim)
 	if pos < 0 {
-		return "", i, false
+		return delim, len(q), true
 	}
 	return delim, k + pos + len(delim), true
 }

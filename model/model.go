@@ -9,7 +9,9 @@
 // in model/chat maps them to eino's types; the embedding adapter here maps
 // Request.Texts to an eino Embedder. Registry holds the part every adapter owes
 // regardless of protocol: idempotent starts, the ordered event log, the
-// result, cancellation and lookup.
+// result, cancellation and lookup. It forgets ended invocations past a
+// retention window and an ended bound, so an adapter's memory does not grow
+// with every call it ever served (REQ-MODEL-088).
 //
 // Provider construction (vendor SDKs, eino-ext, OpenAI-compatible endpoints for
 // MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping lives in
@@ -105,7 +107,10 @@ type Request struct {
 	ClientRef    string                `json:"client_ref"`
 }
 
-// Handle identifies a started invocation.
+// Handle identifies a started invocation. It is valid only for the tenant
+// that started the invocation. Provider may be empty on a handle returned by
+// Lookup or replayed from storage; identity is the (tenant, client ref) pair.
+// A non-empty Provider that does not match the registry's is not_found.
 type Handle struct {
 	Provider  string `json:"provider"`
 	ID        string `json:"id"` // vendor id, or an adapter-local id for streamed calls
@@ -172,10 +177,13 @@ type Result struct {
 	Error    json.RawMessage `json:"error,omitempty"`
 }
 
-// Invoker is implemented by every provider adapter.
+// Invoker is implemented by every provider adapter. Every call uses the tenant
+// of ctx; handles are valid only for the tenant that started the invocation.
 type Invoker interface {
 	Describe(ctx context.Context) ([]Descriptor, error)
-	// Start begins an invocation and returns at once. It is idempotent per ClientRef.
+	// Start begins an invocation and returns at once. It is idempotent per ClientRef
+	// while the provider's registry retains that invocation: after the client ref is
+	// evicted, a start begins a new invocation (REQ-MODEL-088).
 	Start(ctx context.Context, r Request) (Handle, error)
 	// Events delivers partial output with Seq > after; the channel closes when the invocation ends.
 	Events(ctx context.Context, h Handle, after int64) (<-chan Event, error)

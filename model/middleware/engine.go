@@ -54,6 +54,10 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 	var lastErr error
 
 	for attempt < budget {
+		if !callDeadline.IsZero() && !e.rt.Now().Before(callDeadline) {
+			lastErr = timeoutError("call total")
+			break
+		}
 		rung := structured.RungNone
 		repair := false
 		if spec != nil {
@@ -84,7 +88,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 				e.log(rec)
 				e.recordAttempt(rec)
 				e.appendAttempt(rec)
-				return e.done(model.Result{}, answer, nil)
+				return e.done(model.Result{State: model.StateSucceeded}, answer, nil)
 			}
 			rec.Outcome = OutcomeFailed
 			rec.Code = core.CodeInvalidArgument
@@ -102,9 +106,12 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		if err != nil {
 			return CallResult{}, err
 		}
+		// Start must see this attempt's idempotency key, not the call's
+		// original one, or a retry would replay attempt 1 (REQ-MODEL-054).
+		req.ClientRef = ref
 		res, timedOut, events, attemptErr := e.runAttempt(ctx, Attempt{
 			Number: attempt, Rung: rung, ClientRef: ref, Request: req,
-		})
+		}, callDeadline)
 		ended := e.rt.Now()
 
 		usage := model.Usage{}
@@ -114,6 +121,15 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		cost := int64(0)
 		if cfg.Price != nil {
 			cost = cfg.Price(usage)
+		}
+		// The outcome is decided after validation: an attempt whose output
+		// arrived but missed the schema did not succeed (REQ-MODEL-044,
+		// REQ-MODEL-062), and the call log, recording and result must all say
+		// so before the ladder moves on.
+		validAnswer := json.RawMessage(nil)
+		schemaOK := attemptErr == nil && !timedOut
+		if schemaOK && spec != nil {
+			validAnswer, schemaOK = spec.Validate(res.Message)
 		}
 		rec := AttemptRecord{
 			Number: attempt, Rung: rung, ClientRef: ref,
@@ -126,6 +142,9 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		case attemptErr != nil:
 			rec.Outcome = OutcomeFailed
 			rec.Code = core.CodeOf(attemptErr)
+		case !schemaOK:
+			rec.Outcome = OutcomeFailed
+			rec.Code = core.CodeInvalidArgument
 		default:
 			rec.Outcome = OutcomeSucceeded
 		}
@@ -136,9 +155,8 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 
 		if attemptErr != nil {
 			lastErr = attemptErr
-			if timedOut {
-				lastErr = timeoutError("attempt")
-			}
+			// runAttempt returns timedOut only together with a reason-specific
+			// timeoutError, so lastErr already keeps that reason.
 			if core.IsRetryable(lastErr) && events == 0 && attempt < budget {
 				wait := e.retryWait(lastErr, retries)
 				retries++
@@ -159,8 +177,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		}
 
 		if spec != nil {
-			answer, ok := spec.Validate(res.Message)
-			if !ok {
+			if !schemaOK {
 				lastAnswer = res.Message
 				if rungIdx+1 < len(rungs) {
 					rungIdx++
@@ -173,7 +190,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 				}
 				continue
 			}
-			return e.done(res, answer, nil)
+			return e.done(res, validAnswer, nil)
 		}
 		return e.done(res, nil, nil)
 	}
@@ -191,27 +208,37 @@ func (e *engine) requestFor(rung structured.Rung) (model.Request, error) {
 	return structured.RequestFor(e.cfg.Request, rung, e.cfg.Structured.Schema())
 }
 
-// runAttempt runs one provider invocation under the attempt's three timers.
-func (e *engine) runAttempt(parent context.Context, a Attempt) (model.Result, bool, int, error) {
+// runAttempt runs one provider invocation under the attempt's three timers
+// and the call's total deadline (REQ-MODEL-053).
+func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time.Time) (model.Result, bool, int, error) {
 	timeouts := e.cfg.Timeouts.WithDefaults()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	var mu sync.Mutex
-	timedOut := false
-	what := ""
+	// The first completed outcome wins: a timer that fires before the attempt
+	// returns cancels it and makes it a timeout; a timer that fires after the
+	// attempt returned must not discard the result it produced. sync.Once
+	// orders the two claims (SystemRuntime timers race with the return).
+	var (
+		once     sync.Once
+		timedOut bool
+		what     string
+	)
 	fire := func(reason string) {
-		mu.Lock()
-		if !timedOut {
+		once.Do(func() {
 			timedOut = true
 			what = reason
-		}
-		mu.Unlock()
-		cancel()
+			cancel()
+		})
 	}
+	complete := func() { once.Do(func() {}) }
 
 	first := e.rt.AfterFunc(timeouts.FirstChunk, func() { fire("first-chunk") })
 	total := e.rt.AfterFunc(timeouts.AttemptTotal, func() { fire("attempt total") })
+	var callTotal Timer
+	if !callDeadline.IsZero() {
+		callTotal = e.rt.AfterFunc(callDeadline.Sub(e.rt.Now()), func() { fire("call total") })
+	}
 	var idle Timer
 	stopIdle := func() {
 		if idle != nil {
@@ -234,16 +261,28 @@ func (e *engine) runAttempt(parent context.Context, a Attempt) (model.Result, bo
 	}
 
 	res, err := e.cfg.Provider.Attempt(ctx, a, emit)
+	// Claim the attempt's completion before stopping the timers, so a timer
+	// that already started late cannot turn this result into a timeout.
+	complete()
 	if first != nil {
 		first.Stop()
 	}
 	total.Stop()
+	if callTotal != nil {
+		callTotal.Stop()
+	}
 	stopIdle()
 
-	mu.Lock()
 	to, reason := timedOut, what
-	mu.Unlock()
 	if to {
+		// A provider run the middleware could not cancel may still be
+		// alive; report that failure instead of a retryable timeout so the
+		// call does not start a second invocation under a new client ref
+		// (REQ-MODEL-005, REQ-MODEL-009).
+		var ce *cancelError
+		if errors.As(err, &ce) {
+			return res, false, events, err
+		}
 		return res, true, events, timeoutError(reason)
 	}
 	if err != nil {

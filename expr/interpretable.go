@@ -11,10 +11,14 @@ import (
 
 func sortedMapDecorator(adapter *sortedAdapter) interpreter.InterpretableDecoratorV2 {
 	return func(i interpreter.InterpretableV2) (interpreter.InterpretableV2, error) {
-		if reflect.TypeOf(i).String() != "*interpreter.evalMap" {
+		switch reflect.TypeOf(i).String() {
+		case "*interpreter.evalMap":
+			return &sortedEvalMap{InterpretableV2: i, adapter: adapter}, nil
+		case "*interpreter.evalFold":
+			return guardFoldRange(i)
+		default:
 			return i, nil
 		}
-		return &sortedEvalMap{InterpretableV2: i, adapter: adapter}, nil
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/epzero/basamento/core"
 )
@@ -45,8 +46,14 @@ func TestFailureOf(t *testing.T) {
 	if got := FailureOf(core.NewError(core.CodeConflict, "taken", nil)); got.Code != core.CodeConflict {
 		t.Fatalf("code = %q, want conflict", got.Code)
 	}
-	if got := FailureOf(errors.New("boom")); got.Code != core.CodeVendor {
-		t.Fatalf("code = %q, want vendor_error", got.Code)
+	if got := FailureOf(&core.Error{Code: core.CodeRateLimited, Retryable: true, RetryAfter: 5 * time.Second}); got.RetryAfter != 5*time.Second {
+		t.Fatalf("retry after = %v, want 5s", got.RetryAfter)
+	}
+	if got := FailureOf(errors.New("boom")); got.Code != core.CodeVendor || got.Message != "vendor call failed" {
+		t.Fatalf("got %+v, want vendor_error with fixed message", got)
+	}
+	if got := FailureOf(MapError(errors.New("401: invalid key sk-secret"))); got.Message != "vendor call failed" {
+		t.Fatalf("message = %q, want vendor call failed", got.Message)
 	}
 	if got := FailureOf(nil); got.Code != core.CodeInternal {
 		t.Fatalf("code = %q, want internal", got.Code)

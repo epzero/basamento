@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
 )
@@ -153,6 +154,48 @@ func TestRepairFixesTypographicQuotes(t *testing.T) {
 	}
 }
 
+func TestRepairKeepsBracketsInsideTypographicStrings(t *testing.T) {
+	objectSpec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := objectSpec.Repair(replyWith(t, "{\u201ctext\u201d: \u201ca } b\u201d}")); !ok || string(got) != `{"text":"a } b"}` {
+		t.Fatalf("object Repair = %s, %v", got, ok)
+	}
+
+	arraySpec, err := NewSpec(json.RawMessage(`{"type":"array","items":{"type":"string"}}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := arraySpec.Repair(replyWith(t, "[\u201ca ] b\u201d, \u201cc } d\u201d]")); !ok || string(got) != `["a ] b","c } d"]` {
+		t.Fatalf("array Repair = %s, %v", got, ok)
+	}
+}
+
+func TestRepairKeepsBracketsInsideStraightStrings(t *testing.T) {
+	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := spec.Repair(replyWith(t, `{"text": "a } b ] c"}`)); !ok || string(got) != `{"text":"a } b ] c"}` {
+		t.Fatalf("Repair = %s, %v", got, ok)
+	}
+}
+
+func TestRepairPreservesTypographicQuotesInsideStrings(t *testing.T) {
+	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}},"required":["note"]}`), []Rung{RungJSONMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := spec.Repair(replyWith(t, "{\"note\":\"it\u2019s\",\"syntax\":true,}"))
+	if !ok {
+		t.Fatal("Repair did not accept the answer")
+	}
+	if string(got) != "{\"note\":\"it\u2019s\",\"syntax\":true}" {
+		t.Fatalf("Repair = %s, want the string value untouched", got)
+	}
+}
+
 func TestRepairEscapesAnInvalidEscape(t *testing.T) {
 	spec, err := NewSpec(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`), []Rung{RungJSONMode})
 	if err != nil {
@@ -218,6 +261,22 @@ func TestRequestForNativeAndJSONMode(t *testing.T) {
 	}
 }
 
+func TestRequestForNullParams(t *testing.T) {
+	for _, rung := range []Rung{RungNativeSchema, RungJSONMode} {
+		req, err := RequestFor(model.Request{Model: "sim-chat", Params: json.RawMessage("null")}, rung, json.RawMessage(answerSchema))
+		if err != nil {
+			t.Fatalf("RequestFor(%s) with null params: %v", rung, err)
+		}
+		var params map[string]any
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			t.Fatalf("%s params = %s: %v", rung, req.Params, err)
+		}
+		if params["response_format"] == nil {
+			t.Fatalf("%s dropped the response format: %s", rung, req.Params)
+		}
+	}
+}
+
 func TestRequestForForcedTool(t *testing.T) {
 	req, err := RequestFor(model.Request{Model: "sim-chat"}, RungForcedTool, json.RawMessage(answerSchema))
 	if err != nil {
@@ -226,11 +285,18 @@ func TestRequestForForcedTool(t *testing.T) {
 	if len(req.OutputSchema) != 0 {
 		t.Fatalf("forced tool still carries a native schema: %s", req.OutputSchema)
 	}
-	var tools []map[string]any
+	var tools []*schema.ToolInfo
 	if err := json.Unmarshal(req.Tools, &tools); err != nil {
-		t.Fatalf("tools = %s: %v", req.Tools, err)
+		t.Fatalf("tools do not decode as eino tool infos: %s: %v", req.Tools, err)
 	}
-	if len(tools) != 1 || tools[0]["name"] != "structured_output" {
+	if len(tools) != 1 || tools[0].Name != "structured_output" {
 		t.Fatalf("tools = %s", req.Tools)
+	}
+	schema, err := tools[0].ToJSONSchema()
+	if err != nil {
+		t.Fatalf("tool schema: %v", err)
+	}
+	if schema.Type != "object" {
+		t.Fatalf("tool schema type = %q, want object", schema.Type)
 	}
 }

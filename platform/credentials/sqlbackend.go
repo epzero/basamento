@@ -3,7 +3,6 @@ package credentials
 import (
 	"context"
 
-	"github.com/epzero/basamento/core"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -51,7 +50,7 @@ FROM credentials
 WHERE tenant_id = ? AND name = ?`,
 		string(tenant), name).Scan(&r.Name, &r.Ciphertext, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
-		return Record{}, missingAsNotFound(err)
+		return Record{}, credentialError(err)
 	}
 	return r, nil
 }
@@ -95,19 +94,12 @@ WHERE tenant_id = ?`, string(tenant))
 	for rows.Next() {
 		var r Record
 		if err := rows.Scan(&r.Name, &r.Ciphertext, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			return nil, err
+			return nil, psql.MapError(err)
 		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, psql.MapError(err)
 	}
 	return out, nil
-}
-
-func missingAsNotFound(err error) error {
-	if core.CodeOf(err) == core.CodeNotFound {
-		return errNotFound()
-	}
-	return err
 }

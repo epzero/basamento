@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +40,7 @@ type xorSecrets struct {
 
 	reached chan struct{}
 	release chan struct{}
+	abort   chan struct{}
 	once    sync.Once
 }
 
@@ -64,7 +67,11 @@ func (s *xorSecrets) Decrypt(_ context.Context, ciphertext []byte) ([]byte, erro
 	s.mu.Unlock()
 	if s.reached != nil {
 		s.once.Do(func() { close(s.reached) })
-		<-s.release
+		select {
+		case <-s.release:
+		case <-s.abort:
+			return nil, core.NewError(core.CodeUnavailable, "resolution aborted", nil)
+		}
 	}
 	s.mu.Lock()
 	err := s.decryptErr
@@ -255,6 +262,54 @@ func TestWriteOnlyOperationsDoNotDecrypt(t *testing.T) {
 	}
 	if got := ts.secrets.decryptCount(); got != 0 {
 		t.Fatalf("Put, Names and Delete called Decrypt %d times", got)
+	}
+}
+
+func TestNamesMapsRowErrors(t *testing.T) {
+	ts := newTestStore(t)
+	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-4f9a2c")
+	if _, err := ts.sql.Execer().Exec(context.Background(),
+		`UPDATE credentials SET created_at = ? WHERE tenant_id = ? AND name = ?`,
+		"not-a-timestamp", "acme", "vendor/anthropic"); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+	names, err := ts.store.Names(tenantCtx("acme"))
+	wantCode(t, err, core.CodeInternal)
+	if names != nil {
+		t.Fatalf("names %v, want none", names)
+	}
+	assertNoDriverText(t, err)
+}
+
+// assertNoDriverText checks that a row error was mapped by platform/sql
+// instead of reaching the caller as the driver wrote it.
+func assertNoDriverText(t *testing.T, err error) {
+	t.Helper()
+	for _, leak := range []string{"Scan error", "not-a-timestamp", "unsupported Scan"} {
+		if bytes.Contains([]byte(err.Error()), []byte(leak)) {
+			t.Fatalf("driver text reached the caller: %v", err)
+		}
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("sql: ")) {
+		t.Fatalf("error not mapped by platform/sql: %v", err)
+	}
+}
+
+func TestFailLogsCauseCode(t *testing.T) {
+	ts := newTestStore(t)
+	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-4f9a2c")
+	ts.audit.err = errors.New("audit down")
+	var buf bytes.Buffer
+	store := New(NewSQLBackend(ts.sql), ts.audit, ts.secrets, ts.clock,
+		WithLogger(slog.New(slog.NewJSONHandler(&buf, nil))))
+	_, err := store.Resolve(tenantCtx("acme"), "cred://vendor/missing")
+	wantCode(t, err, core.CodeUnavailable)
+	logged := buf.String()
+	if !strings.Contains(logged, `"reason":"not_found"`) {
+		t.Fatalf("log lacks the cause code: %s", logged)
+	}
+	if strings.Contains(logged, "sk-live") {
+		t.Fatalf("log leaks a value: %s", logged)
 	}
 }
 
@@ -451,6 +506,9 @@ func TestRotationDuringResolution(t *testing.T) {
 	ts := newTestStore(t)
 	ts.secrets.reached = make(chan struct{})
 	ts.secrets.release = make(chan struct{})
+	ts.secrets.abort = make(chan struct{})
+	// A resolution that never reaches the secrets port must not hang the test.
+	defer close(ts.secrets.abort)
 	mustPut(t, ts.store, "acme", "vendor/anthropic", "sk-live-old")
 
 	type result struct {
@@ -464,7 +522,11 @@ func TestRotationDuringResolution(t *testing.T) {
 			"cred://vendor/anthropic")
 		done <- result{string(value), err}
 	}()
-	<-ts.secrets.reached
+	select {
+	case <-ts.secrets.reached:
+	case got := <-done:
+		t.Fatalf("resolution finished before it reached the secrets port: (%q, %v)", got.value, got.err)
+	}
 
 	if err := ts.store.Put(tenantCtx("acme"), "vendor/anthropic", []byte("sk-live-new")); err != nil {
 		t.Fatalf("replace: %v", err)

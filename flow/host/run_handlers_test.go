@@ -1,0 +1,67 @@
+package host
+
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/flow"
+	"github.com/epzero/basamento/runtime"
+)
+
+// REQ-FLOW-049: failed-node settled cost is wired in runHandlers and consumed by the machine;
+// it is not observable through Host.Run, so this test pins the call site.
+func TestRunHandlersFailurePassesSettledCostToEvent(t *testing.T) {
+	def := &flow.IR{
+		Name:    "repair",
+		Version: 1,
+		Nodes: map[string]flow.Node{
+			"repair": {Kind: "agent"},
+		},
+	}
+	h := &Host{
+		handlers: map[string]NodeHandler{
+			"agent": func(_ runtime.DurableContext, _ flow.Node, _ json.RawMessage) (NodeResult, error) {
+				return NodeResult{
+					Output:   json.RawMessage(`{"fixed":false}`),
+					CostMpts: 2500,
+				}, core.NewError(core.CodeVendor, "model failed", nil)
+			},
+		},
+	}
+	dc := ctxOnlyDC{}
+	events, err := h.runHandlers(dc, def, []flow.Command{{Type: "run_node", Node: "repair", Attempt: 2}})
+	if err != nil {
+		t.Fatalf("runHandlers: %v", err)
+	}
+	if len(events) != 1 || events[0].Type != "node_failed" {
+		t.Fatalf("events %+v, want one node_failed", events)
+	}
+	if events[0].CostMpts != 2500 {
+		t.Fatalf("node_failed CostMpts %d, want 2500", events[0].CostMpts)
+	}
+	if events[0].Attempt != 2 {
+		t.Fatalf("node_failed Attempt %d, want 2", events[0].Attempt)
+	}
+}
+
+// TestNodeFailedEventPayloadIsOnlyCodeAndMessage is the only pin of the
+// node_failed event payload for REQ-FLOW-057: failedEvent is the single
+// constructor on every failure path (handler error, awaited future, timer/gate).
+func TestNodeFailedEventPayloadIsOnlyCodeAndMessage(t *testing.T) {
+	t.Run("core error", func(t *testing.T) {
+		err := core.NewError(core.CodeVendor, "vendor said no", map[string]any{"detail": "x"})
+		ev := failedEvent("n", 1, err, 0)
+		if string(ev.Payload) != `{"code":"vendor_error","message":"vendor said no"}` {
+			t.Fatalf("payload %s", ev.Payload)
+		}
+	})
+	t.Run("unclassified", func(t *testing.T) {
+		ev := failedEvent("plan", 1, errors.New("SEALED"), 0)
+		want := `{"code":"internal","message":"flow: node \"plan\" failed"}`
+		if string(ev.Payload) != want {
+			t.Fatalf("payload %s, want %s", ev.Payload, want)
+		}
+	})
+}

@@ -84,7 +84,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 	go func() {
 		defer r.rt.wg.Done()
 		defer r.stepWG.Done()
-		r.runStep(f, registered.fn, raw, options)
+		r.runStep(f, name, registered.fn, raw, options)
 	}()
 	return f
 }
@@ -92,7 +92,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 // runStep executes a step's attempts on the step's own goroutine. Attempts run
 // immediately, back to back, and the step closes with the last attempt's error
 // when the limit is reached.
-func (r *run) runStep(f *future, fn runtime.StepFunc, in json.RawMessage, opts runtime.StepOptions) {
+func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMessage, opts runtime.StepOptions) {
 	attempts := opts.MaxAttempts
 	if attempts <= 0 {
 		attempts = defaultAttempts
@@ -103,7 +103,17 @@ func (r *run) runStep(f *future, fn runtime.StepFunc, in json.RawMessage, opts r
 			f.complete(nil, cancelledErr("step cancelled"))
 			return
 		}
-		out, err := fn(r.ctx, in)
+		var out json.RawMessage
+		var err error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = stepPanicErr(step)
+					r.rt.logPanic(r.tenant, r.id, step, recovered)
+				}
+			}()
+			out, err = fn(r.ctx, in)
+		}()
 		if err == nil {
 			f.complete(out, nil)
 			return
@@ -158,12 +168,11 @@ func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 
 	go func() {
 		defer r.rt.wg.Done()
-		select {
-		case <-timer.wake:
-			r.fireDueTimers()
-		case <-r.ctx.Done():
-			f.complete(nil, cancelledErr("timer cancelled"))
-		}
+		r.waitTimer(timer, nil, func() {
+			if !f.Ready() {
+				f.complete(nil, cancelledErr("timer cancelled"))
+			}
+		})
 	}()
 	return f
 }
@@ -186,80 +195,68 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 	g := &gate{spec: spec, future: newFuture(r)}
 	r.gates[spec.Name] = g
 	if spec.Timeout > 0 {
+		stop := make(chan struct{})
+		g.timeoutStop = stop
+		deadline := r.rt.clock.Now().Add(spec.Timeout)
 		wake := r.rt.after(spec.Timeout)
+		timer := &runTimer{deadline: deadline, future: g.future, wake: wake, gate: g}
+		g.timeoutTimer = timer
+		r.timers = append(r.timers, timer)
+		r.gateTimeouts.Add(1)
 		r.rt.wg.Add(1)
 		go func() {
 			defer r.rt.wg.Done()
-			select {
-			case <-wake:
-				g.future.complete(nil, core.NewError(core.CodeTimeout,
-					fmt.Sprintf("local: gate %q timed out", spec.Name), map[string]any{"gate": spec.Name}))
-			case <-r.ctx.Done():
-				g.future.complete(nil, cancelledErr("gate cancelled"))
-			}
+			defer r.gateTimeouts.Add(-1)
+			r.waitTimer(timer, stop, func() {
+				if !g.future.Ready() {
+					g.future.complete(nil, cancelledErr("gate cancelled"))
+				}
+			})
 		}()
 	}
 	r.mu.Unlock()
 	return g.future
 }
 
-// Select waits for the first pending operation to complete (REQ-RT-011). A
-// future that is already ready at call time wins by lowest index; otherwise the
-// first future to complete after the call wins, even when a lower-index future
-// completes shortly after it. Two futures that become ready together resolve by
-// their completion order, which the run records.
+// Select waits for the first pending operation to complete (REQ-RT-011).
+//
+// At call time, the lowest index among futures that are already Ready wins;
+// run-owned futures are observed under r.mu so a timer batch is all-or-nothing.
+// While the run is blocked in Select, the ready future with the earliest
+// completion seq wins; equal seqs keep the lowest index (one timer batch).
+// When steps complete independently, completion order is the order in which
+// they closed done—that is the only deterministic order the local runtime has
+// and it is not replayable across processes.
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 	if len(fs) == 0 {
 		return 0, core.NewError(core.CodeInvalidArgument, "local: Select needs at least one future", nil)
 	}
 	r := dc.run
-	marked := r.seqs.Load()
-	for i, f := range fs {
-		if f.Ready() {
-			return i, nil
-		}
+	if i, ok := r.lowestReady(fs); ok {
+		return i, nil
 	}
 	for {
+		// Subscribe before scanning: a completion cannot land between the
+		// check and the wait without also closing this wake channel.
 		changed := r.wake()
-		if index := r.firstCompletedSince(fs, marked); index >= 0 {
+		if index := r.firstCompleted(fs); index >= 0 {
 			return index, nil
 		}
 		select {
 		case <-changed:
 		case <-r.ctx.Done():
-			for i, f := range fs {
-				if f.Ready() {
-					return i, nil
-				}
+			if i, ok := r.lowestReady(fs); ok {
+				return i, nil
 			}
 			return 0, cancelledErr("select cancelled")
 		}
 	}
 }
 
-// firstCompletedSince returns the lowest-index future that completed after the
-// run's seqs counter passed marked, or -1 when none did. Among futures that
-// completed after the call the earliest completion wins, not the lowest index.
-func (r *run) firstCompletedSince(fs []runtime.Future, marked uint64) int {
-	index := -1
-	var earliest uint64
-	for i, f := range fs {
-		local, ok := f.(*future)
-		if !ok {
-			if f.Ready() {
-				return i
-			}
-			continue
-		}
-		seq, done := local.completedSeq()
-		if !done || seq <= marked {
-			continue
-		}
-		if index < 0 || seq < earliest {
-			index, earliest = i, seq
-		}
-	}
-	return index
+// firstCompleted returns the earliest-ready index by completion seq, or -1 when
+// none are ready; locals are snapshotted under r.mu, foreign Ready() outside it.
+func (r *run) firstCompleted(fs []runtime.Future) int {
+	return firstCompletedFromSnap(fs, r.snapshotLocalFutures(fs))
 }
 
 // Emit appends to the run's ordered outbox (REQ-RT-006).
@@ -285,18 +282,17 @@ func (dc *durableContext) Checkpoint(runtime.SnapshotRef) error { return nil }
 func (dc *durableContext) Capabilities() runtime.Caps { return dc.run.rt.Capabilities() }
 
 // Child starts a child run of flow in the parent's tenant and returns a future
-// for its output (REQ-RT-014). The parent's close policy applies when the
-// parent ends (REQ-RT-015).
+// for its output (REQ-RT-014). The parent's close policy applies when the parent
+// ends (REQ-RT-015). Re-attach with the same parent run, flow and id returns the
+// first call's future and keeps its policy; a closed or shutting-down parent
+// returns cancelled without starting a new run unless the child is already
+// recorded on the journal. Concurrent Child calls for the same id from several
+// goroutines have no defined call order; the call that links first sets policy.
 func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOptions) runtime.Future {
 	r := dc.run
-	policy := o.ParentClose
-	if policy == "" {
-		policy = defaultParentClose
-	}
-	switch policy {
-	case "terminate", "request_cancel", "abandon":
-	default:
-		return failedFuture(r, invalidErr(fmt.Sprintf("local: unknown parent close policy %q", policy), map[string]any{"policy": policy}))
+	policy, err := childPolicy(o.ParentClose)
+	if err != nil {
+		return failedFuture(r, err)
 	}
 	raw, err := rawInput(in)
 	if err != nil {
@@ -306,32 +302,18 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 	if id == "" {
 		id = dc.NewID("child")
 	}
-	child, err := r.rt.startChild(r.tenant, id, flow, raw, r)
-	if err != nil {
-		return failedFuture(r, err)
-	}
-	f := newFuture(r)
-	child.mu.Lock()
-	if child.state == stateRunning {
-		child.waiters = append(child.waiters, f)
-	}
-	out, childErr := child.output, child.err
-	state := child.state
-	child.mu.Unlock()
-	if state != stateRunning {
-		f.complete(out, childErr)
-	}
-
 	r.mu.Lock()
-	if r.state == stateRunning && !r.shuttingDown {
-		r.children = append(r.children, &childLink{run: child, policy: policy, future: f})
+	if f, ok := r.recordedOrClosedChildFuture(id, flow); ok {
 		r.mu.Unlock()
 		return f
 	}
 	r.mu.Unlock()
-	child.applyParentClose(policy)
-	f.complete(nil, cancelledErr("local: the parent closed before the child was linked"))
-	return f
+
+	child, err := r.rt.startChild(r.tenant, id, flow, raw, r)
+	if err != nil {
+		return failedFuture(r, err)
+	}
+	return r.linkChild(child, policy)
 }
 
 func mergeOptions(o, d runtime.StepOptions) runtime.StepOptions {

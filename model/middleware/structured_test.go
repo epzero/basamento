@@ -139,6 +139,49 @@ func TestRetryableFailureRetriesOnTheSameRung(t *testing.T) {
 	}
 }
 
+func TestSchemaMissIsRecordedAsFailure(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	p, _ := structuredProvider(t, rt, invalidAnswer, `{"answer": 7}`)
+	logs := &logCollector{}
+	recorder := NewRecorder()
+	var onAttempt []AttemptRecord
+	cfg := baseConfig(rt, p)
+	cfg.Structured = answerSpec(t, structured.RungNativeSchema, structured.RungJSONMode)
+	cfg.CallLog = logs
+	cfg.Recorder = recorder
+	cfg.OnAttempt = func(a AttemptRecord) { onAttempt = append(onAttempt, a) }
+	res, err := Call(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if len(res.Attempts) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(res.Attempts))
+	}
+	first := res.Attempts[0]
+	if first.Outcome != OutcomeFailed || first.Code != core.CodeInvalidArgument {
+		t.Fatalf("attempt 1 = %s/%s, want failed/invalid_argument", first.Outcome, first.Code)
+	}
+	if res.Attempts[1].Outcome != OutcomeSucceeded {
+		t.Fatalf("attempt 2 = %s, want succeeded", res.Attempts[1].Outcome)
+	}
+	if len(logs.entries) != 2 {
+		t.Fatalf("call log = %d entries, want 2", len(logs.entries))
+	}
+	if logs.entries[0].State != OutcomeFailed || logs.entries[0].Code != core.CodeInvalidArgument {
+		t.Fatalf("call log entry 1 = %s/%s, want failed/invalid_argument", logs.entries[0].State, logs.entries[0].Code)
+	}
+	if logs.entries[1].State != OutcomeSucceeded {
+		t.Fatalf("call log entry 2 = %s, want succeeded", logs.entries[1].State)
+	}
+	if len(onAttempt) != 2 || onAttempt[0].Outcome != OutcomeFailed || onAttempt[0].Code != core.CodeInvalidArgument {
+		t.Fatalf("OnAttempt = %+v, want a failed first attempt", onAttempt)
+	}
+	recorded := recorder.Recording()
+	if recorded == nil || len(recorded.Attempts) != 2 || recorded.Attempts[0].Outcome != OutcomeFailed {
+		t.Fatalf("recording = %+v, want a failed first attempt", recorded)
+	}
+}
+
 func TestModelWithoutARungIsNotCalled(t *testing.T) {
 	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	p, _ := structuredProvider(t, rt)
@@ -181,6 +224,9 @@ func TestLocalRepairReturnsTheRepairedJSON(t *testing.T) {
 	}
 	if len(res.Attempts) != 2 || (*rungs)[0] != structured.RungJSONMode {
 		t.Fatalf("attempts = %d, rungs = %v, want 2 and JSON mode", len(res.Attempts), *rungs)
+	}
+	if res.Result.State != model.StateSucceeded {
+		t.Fatalf("result state = %q, want succeeded", res.Result.State)
 	}
 	if res.Attempts[1].Rung != structured.RungLocalRepair || !res.Attempts[1].LocalRepair {
 		t.Fatalf("attempt 2 = %+v, want the local repair", res.Attempts[1])

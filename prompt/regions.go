@@ -33,7 +33,11 @@ func delimiterRecordInWrapped(wrapped string, base int) (DelimiterRecord, bool) 
 }
 
 func recordMatchesText(text string, r DelimiterRecord) bool {
-	if r.OpenStart < 0 || r.OpenEnd > len(text) || r.CloseStart < r.OpenEnd || r.CloseEnd > len(text) {
+	if r.OpenStart < 0 ||
+		r.OpenEnd < r.OpenStart ||
+		r.CloseStart < r.OpenEnd ||
+		r.CloseEnd < r.CloseStart ||
+		r.CloseEnd > len(text) {
 		return false
 	}
 	end, ok := scanCanonicalOpen(text, r.OpenStart)
@@ -63,77 +67,20 @@ func shiftDelimiterRecords(recs []DelimiterRecord, shift int) []DelimiterRecord 
 	return out
 }
 
-func hasLookAlikeIn(text string, from, to int) bool {
-	if from > to {
-		from, to = to, from
-	}
-	if from < 0 {
-		from = 0
-	}
-	if to > len(text) {
-		to = len(text)
-	}
-	i := from
-	for i < to {
-		if delimiterLikeAt(text, i) {
-			return true
-		}
-		_, w := utf8.DecodeRuneInString(text[i:])
-		i += w
-	}
-	return false
-}
-
-func textHasDelimiterIssue(text string) bool {
-	i := 0
-	for i < len(text) {
-		if strings.HasPrefix(text[i:], "&lt;") {
-			i += 4
-			continue
-		}
-		if _, ok := scanCanonicalOpen(text, i); ok {
-			return true
-		}
-		if _, ok := scanCanonicalClose(text, i); ok {
-			return true
-		}
-		if delimiterLikeAt(text, i) {
-			return true
-		}
-		_, w := utf8.DecodeRuneInString(text[i:])
-		i += w
-	}
-	return false
-}
-
-func lintTextWithRecords(text string, records []DelimiterRecord) bool {
+// countUnpairedDelimiters counts untrusted-content delimiters in text that are
+// not at a recorded pair's spans. A record counts only when both of its halves
+// are at their spans; otherwise the delimiters in the text are unpaired.
+func countUnpairedDelimiters(text string, records []DelimiterRecord) int {
+	openEnds := map[int]int{}
+	closeEnds := map[int]int{}
 	for _, r := range records {
 		if !recordMatchesText(text, r) {
-			return true
+			continue
 		}
+		openEnds[r.OpenStart] = r.OpenEnd
+		closeEnds[r.CloseStart] = r.CloseEnd
 	}
-	if len(records) == 0 {
-		return textHasDelimiterIssue(text)
-	}
-	used := make([]bool, len(records))
-	openAt := func(pos int) int {
-		for i, r := range records {
-			if r.OpenStart == pos {
-				return i
-			}
-		}
-		return -1
-	}
-	closeAt := func(pos int) int {
-		for i, r := range records {
-			if r.CloseStart == pos {
-				return i
-			}
-		}
-		return -1
-	}
-	depth := 0
-	var active int
+	n := 0
 	i := 0
 	for i < len(text) {
 		if strings.HasPrefix(text[i:], "&lt;") {
@@ -141,45 +88,30 @@ func lintTextWithRecords(text string, records []DelimiterRecord) bool {
 			continue
 		}
 		if end, ok := scanCanonicalOpen(text, i); ok {
-			ri := openAt(i)
-			if ri < 0 || used[ri] {
-				return true
+			if recordedEnd, ok := openEnds[i]; ok && recordedEnd == end {
+				i = end
+				continue
 			}
-			if depth > 0 {
-				return true
-			}
-			used[ri] = true
-			active = ri
-			depth = 1
-			if hasLookAlikeIn(text, end, records[ri].CloseStart) {
-				return true
-			}
+			n++
 			i = end
 			continue
 		}
 		if end, ok := scanCanonicalClose(text, i); ok {
-			ri := closeAt(i)
-			if ri < 0 || !used[ri] || ri != active {
-				return true
+			if recordedEnd, ok := closeEnds[i]; ok && recordedEnd == end {
+				i = end
+				continue
 			}
-			depth = 0
-			active = -1
+			n++
 			i = end
 			continue
 		}
 		if delimiterLikeAt(text, i) {
-			return true
+			n++
+			i++
+			continue
 		}
 		_, w := utf8.DecodeRuneInString(text[i:])
 		i += w
 	}
-	if depth != 0 {
-		return true
-	}
-	for _, ok := range used {
-		if !ok {
-			return true
-		}
-	}
-	return false
+	return n
 }

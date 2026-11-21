@@ -217,6 +217,10 @@ func withResponseFormat(params json.RawMessage, format string) (json.RawMessage,
 			return nil, core.NewError(core.CodeInvalidArgument,
 				"params are not a JSON object", map[string]any{"cause": err.Error()})
 		}
+		if merged == nil {
+			// A JSON null means the call set no params; it is not an object.
+			merged = map[string]any{}
+		}
 	}
 	merged["response_format"] = format
 	out, err := json.Marshal(merged)
@@ -231,8 +235,10 @@ func forcedTool(spec json.RawMessage) (json.RawMessage, error) {
 		"name":              "structured_output",
 		"desc":              "Answer with the call's output schema",
 		"has_params_one_of": true,
-		// eino's ToolInfo carries a JSON schema as an encoded string.
-		"json_schema": string(spec),
+		// eino's ToolInfo decodes json_schema as a JSON-schema object, not as
+		// an encoded string (model/chat.callOptions unmarshals Tools into
+		// []*schema.ToolInfo).
+		"json_schema": spec,
 	}
 	out, err := json.Marshal([]any{tool})
 	if err != nil {
@@ -277,11 +283,15 @@ func answerBytes(message json.RawMessage) (json.RawMessage, bool) {
 // member is ever added, dropped or rewritten.
 func repairJSON(s string) ([]byte, bool) {
 	s = stripFences(strings.TrimSpace(s))
+	// Normalise the string delimiters before taking the outer value: the
+	// value scanner tracks straight quotes only, so a typographic quote that
+	// still delimited a string would let a } or ] inside that string end the
+	// value early (REQ-MODEL-065: bytes inside a string are content).
+	s = normalizeQuotes(s)
 	s = outerValue(s)
 	if s == "" {
 		return nil, false
 	}
-	s = normalizeQuotes(s)
 	s = removeTrailingCommas(s)
 	s = escapeInvalidEscapes(s)
 	if !json.Valid([]byte(s)) {
@@ -294,14 +304,46 @@ func repairJSON(s string) ([]byte, bool) {
 	return out.Bytes(), true
 }
 
-// normalizeQuotes turns typographic quotes into JSON's straight ones. They
-// are syntax, not content: a model that answers with curly quotes meant a
-// JSON string.
+// normalizeQuotes turns typographic double quotes that delimit a JSON string
+// into straight ones. Only delimiters change: inside a string opened by a
+// straight quote, every byte is content and stays as the model wrote it
+// (REQ-MODEL-065). Typographic single quotes are content too, never syntax.
 func normalizeQuotes(s string) string {
-	return strings.NewReplacer(
-		"\u201c", `"`, "\u201d", `"`,
-		"\u2018", `'`, "\u2019", `'`,
-	).Replace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	inString, curlyDelim, escaped := false, false, false
+	for _, r := range s {
+		if inString {
+			switch {
+			case escaped:
+				b.WriteRune(r)
+				escaped = false
+			case r == '\\':
+				b.WriteRune(r)
+				escaped = true
+			case !curlyDelim && r == '"':
+				b.WriteRune(r)
+				inString = false
+			case curlyDelim && r == '\u201d':
+				b.WriteByte('"')
+				inString = false
+			default:
+				b.WriteRune(r)
+			}
+			continue
+		}
+		switch r {
+		case '\u201c', '\u201d':
+			b.WriteByte('"')
+			inString, curlyDelim = true, true
+		case '"':
+			b.WriteRune(r)
+			inString, curlyDelim = true, false
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // escapeInvalidEscapes doubles a backslash that starts no JSON escape, so a

@@ -2,12 +2,68 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
 )
+
+// lateTimerRuntime fires every timer's function when it is stopped, modelling
+// the SystemRuntime race where a timer callback has already started by the
+// time the attempt returns and Stop runs.
+type lateTimerRuntime struct {
+	now   time.Time
+	fired int
+}
+
+func (r *lateTimerRuntime) Now() time.Time { return r.now }
+
+func (r *lateTimerRuntime) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+func (r *lateTimerRuntime) AfterFunc(_ time.Duration, f func()) Timer {
+	return &lateFireTimer{rt: r, f: f}
+}
+
+type lateFireTimer struct {
+	rt      *lateTimerRuntime
+	f       func()
+	stopped bool
+}
+
+func (t *lateFireTimer) Stop() {
+	if t.stopped {
+		return
+	}
+	t.stopped = true
+	t.rt.fired++
+	t.f()
+}
+
+func TestLateTimerAfterAttemptReturnDoesNotDiscardSuccess(t *testing.T) {
+	rt := &lateTimerRuntime{now: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)}
+	p := &scriptedProvider{}
+	p.run = func(context.Context, *scriptedProvider, Attempt, func(model.Event)) (model.Result, error) {
+		return succeeded("late success", nil), nil
+	}
+	cfg := baseConfig(newVirtualRuntime(rt.now), p)
+	cfg.Runtime = rt
+	cfg.Attempts = 1
+	res, err := Call(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if rt.fired == 0 {
+		t.Fatal("no timer fired late; the test path was not exercised")
+	}
+	if p.invoked != 1 {
+		t.Fatalf("invocations = %d, want 1", p.invoked)
+	}
+	if res.Attempts[0].Outcome != OutcomeSucceeded {
+		t.Fatalf("attempt 1 = %s, want succeeded", res.Attempts[0].Outcome)
+	}
+}
 
 func TestFirstChunkTimeoutCancelsAndRetries(t *testing.T) {
 	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
@@ -152,6 +208,65 @@ func TestDefaultTimeouts(t *testing.T) {
 				t.Fatalf("events = %d, want %d", first.Events, tc.events)
 			}
 		})
+	}
+}
+
+func TestCallTotalTimeoutStopsAnInFlightStream(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	p := &scriptedProvider{rt: rt}
+	p.run = func(ctx context.Context, p *scriptedProvider, _ Attempt, emit func(model.Event)) (model.Result, error) {
+		for {
+			emit(model.Event{Kind: model.EventText, Text: "x"})
+			if err := p.sleep(ctx, 5*time.Second); err != nil {
+				return model.Result{}, err
+			}
+		}
+	}
+	cfg := baseConfig(rt, p)
+	cfg.Attempts = 1
+	cfg.Timeouts.CallTotal = 3 * time.Second
+	res, err := Call(context.Background(), cfg)
+	if got := codeOf(t, err); got != core.CodeTimeout {
+		t.Fatalf("code = %s, want timeout", got)
+	}
+	first := res.Attempts[0]
+	if first.Outcome != OutcomeCancelled {
+		t.Fatalf("attempt 1 = %+v, want cancelled", first)
+	}
+	if got := first.End.Sub(first.Start); got != 3*time.Second {
+		t.Fatalf("call total stopped the stream after %v, want 3s", got)
+	}
+	if first.Events != 1 {
+		t.Fatalf("events = %d, want 1", first.Events)
+	}
+}
+
+func TestCallTotalTimeoutKeepsItsReason(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	p := &scriptedProvider{rt: rt}
+	p.run = func(ctx context.Context, p *scriptedProvider, _ Attempt, emit func(model.Event)) (model.Result, error) {
+		emit(model.Event{Kind: model.EventText, Text: "x"})
+		if err := p.sleep(ctx, 5*time.Second); err != nil {
+			return model.Result{}, err
+		}
+		return succeeded("never", nil), nil
+	}
+	cfg := baseConfig(rt, p)
+	cfg.Attempts = 1
+	cfg.Timeouts.CallTotal = 3 * time.Second
+	res, err := Call(context.Background(), cfg)
+	if got := codeOf(t, err); got != core.CodeTimeout {
+		t.Fatalf("code = %s, want timeout", got)
+	}
+	var ce *core.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("error %T is not a *core.Error", err)
+	}
+	if ce.Message != "call total timeout" {
+		t.Fatalf("message = %q, want %q", ce.Message, "call total timeout")
+	}
+	if res.Attempts[0].Outcome != OutcomeCancelled || res.Attempts[0].Code != core.CodeTimeout {
+		t.Fatalf("attempt 1 = %+v, want a cancelled timeout", res.Attempts[0])
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
 
@@ -20,15 +19,21 @@ type worldKey struct{}
 // World is per-scenario state. Never share it between scenarios.
 type World struct {
 	Core        *coreWorld
+	Schema      *schemaWorld
+	Expr        *exprWorld
 	SQL         *sqlWorld
 	Prompt      *promptWorld
+	Telemetry   *telemetryWorld
+	Blob        *blobWorld
+	Bus         *busWorld
 	Secrets     *secretsWorld
+	Config      *configWorld
 	Credentials *credentialsWorld
-	Expr        *exprWorld
-	Schema      *schemaWorld
+	Flow        *flowWorld
+	FlowBuilder *builderWorld
+	Catalog     *catalogWorld
 	Model       *modelWorld
 	Agent       *agentWorld
-	Flow        *flowWorld
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
@@ -40,81 +45,144 @@ func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 func Initialize(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, worldKey{}, &World{
-			Core:    newCoreWorld(),
-			Prompt:  newPromptWorld(),
-			Expr:    &exprWorld{bindings: map[string]any{}},
-			Schema:  newSchemaWorld(),
-			Model:   newModelWorld(),
-			Agent:   newAgentWorld(),
-			Flow:    newFlowWorld(),
-			Machine: newMachineWorld(),
-			Host:    newHostWorld(),
-			Local:   newLocalWorld(),
+			Core:        newCoreWorld(),
+			Schema:      newSchemaWorld(),
+			Expr:        &exprWorld{bindings: map[string]any{}},
+			SQL:         newSQLWorld(),
+			Prompt:      newPromptWorld(),
+			Telemetry:   newTelemetryWorld(),
+			Blob:        newBlobWorld(),
+			Secrets:     newSecretsWorld(),
+			Config:      newConfigWorld(),
+			Flow:        newFlowWorld(),
+			FlowBuilder: newBuilderWorld(),
+			Catalog:     newCatalogWorld(),
+			Model:       newModelWorld(),
+			Agent:       newAgentWorld(),
+			Machine:     newMachineWorld(),
+			Host:        newHostWorld(),
+			Local:       newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
+	registerSchema(sc)
+	registerExpr(sc)
 	registerSQL(sc)
 	registerPrompt(sc)
-	registerSecrets(sc)
-	registerCredentials(sc)
-	registerExpr(sc)
-	registerSchema(sc)
-	registerModel(sc)
-	registerAgent(sc)
-	registerMiddleware(sc)
-	registerMiddlewareCalls(sc)
+	registerBlob(sc)
+	registerTelemetry(sc)
 	registerFlowCompile(sc)
+	registerFlowLimits(sc)
+	registerFlowBuilder(sc)
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
+	registerBus(sc)
+	registerSharedSteps(sc)
+	registerBlobUploads(sc)
+	registerSecrets(sc)
+	registerConfig(sc)
+	registerConfigServe(sc)
+	registerOpeningSteps(sc)
+	registerCredentials(sc)
+	registerCatalog(sc)
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		world(ctx).Config.teardown()
+		return ctx, nil
+	})
+	registerModel(sc)
+	registerAgent(sc)
 	registerLocal(sc)
-	registerShared(sc)
+	registerModelRetention(sc)
+	registerMiddleware(sc)
+	registerMiddlewareCalls(sc)
 }
 
-// registerShared holds phrases used by more than one domain. The SQL store and
-// the Secrets port both report an open failure with the same phrase; one
-// handler reads whichever domain opened in the scenario. The clock step is
-// shared by the flow host and the model middleware: both worlds advance, and
-// the one that is active settles.
-func registerShared(sc *godog.ScenarioContext) {
-	sc.Step(`^(\d+) (second|seconds|minute|minutes|hour|hours) pass(?:es)?$`, func(ctx context.Context, count int, unit string) error {
-		var duration time.Duration
-		switch strings.TrimSuffix(unit, "s") {
-		case "second":
-			duration = time.Duration(count) * time.Second
-		case "minute":
-			duration = time.Duration(count) * time.Minute
-		case "hour":
-			duration = time.Duration(count) * time.Hour
+// durationPassStepPattern is the shared "N … pass" step. It is anchored on a
+// duration phrase parseElapsed accepts so godog's single step namespace is not
+// stolen from capabilities that own sentences ending in "pass" (for example a
+// runtime run start or a worker grace period). Models middleware scenarios say
+// "1 more second passes"; advanceClockByDurationPhrase strips the word "more".
+const durationPassStepPattern = `^(-?\d+ (?:more )?[a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
+
+func registerSharedSteps(sc *godog.ScenarioContext) {
+	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
+	sc.Step(durationPassStepPattern, advanceClockByDurationPhrase)
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+	registerSharedRunStartStep(sc)
+	registerSharedRunOutcomeSteps(sc)
+	registerSharedResolutionFailStep(sc)
+}
+
+// matchPutOutcomeShared owns the put phrase for every capability, because godog
+// has one step namespace and both the bus and the credentials scenarios say
+// "the put fails with code ...". The KV world is created only for bus scenarios
+// (registerBus) and the credentials world only for credentials ones, so the
+// worlds tell the two apart without reading the text.
+func matchPutOutcomeShared(ctx context.Context, tail string) error {
+	if world(ctx).Bus != nil {
+		return matchPutOutcome(ctx, tail)
+	}
+	if strings.HasPrefix(tail, `fails with code "`) {
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(credentialsW(ctx).putErr, code)
+	}
+	return fmt.Errorf("unknown put outcome %q", tail)
+}
+
+func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
+	// The middleware scenarios say "1 more second passes" to step the call's
+	// virtual runtime; the word carries no duration of its own.
+	elapsed = strings.Replace(elapsed, " more ", " ", 1)
+	d, err := parseElapsed(elapsed)
+	if err != nil {
+		return err
+	}
+	w := world(ctx)
+	if cw := w.Model.call; cw != nil {
+		// The call runs on its own virtual runtime over the scenario clock, so
+		// advancing it also fires the call's timers and wakes its goroutine.
+		cw.rt.Advance(d)
+	} else {
+		w.Core.clock.Advance(d)
+	}
+	if local := w.Local; local != nil {
+		if err := local.timePassed(ctx, d); err != nil {
+			return err
 		}
-		w := world(ctx)
-		if w.Host != nil && w.Host.dc != nil {
-			w.Core.clock.Advance(duration)
-			w.Host.dc.advance(duration)
-			w.Host.signal()
-			return w.Host.settle()
+	}
+	// A component server times its shutdown drain from the same frozen clock;
+	// advancing its timer here is what "the seconds pass" means.
+	if w.Config != nil && w.Config.shutdown != nil {
+		w.Config.shutdown.advance(d)
+	}
+	if sink, ok := any(w.Host).(timeSink); ok {
+		return sink.timePassed(ctx, d)
+	}
+	return nil
+}
+
+func assertCallFailsWithCode(ctx context.Context, code string) error {
+	w := world(ctx)
+	if w.SQL != nil {
+		err := w.SQL.lastErr
+		if err == nil {
+			err = w.SQL.lastTxErr
 		}
-		if w.Model != nil && w.Model.call != nil {
-			w.Model.call.rt.Advance(duration)
+		if err != nil {
+			if string(core.CodeOf(err)) != code {
+				return fmt.Errorf("got code %s, want %s", core.CodeOf(err), code)
+			}
 			return nil
 		}
-		w.Core.clock.Advance(duration)
-		return nil
-	})
-	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		w := world(ctx)
-		var err error
-		if w.SQL != nil {
-			err = w.SQL.openErr
-		}
-		if err == nil && w.Secrets != nil {
-			err = w.Secrets.lastErr
-		}
-		if err == nil {
-			return fmt.Errorf("opening succeeded, want %s", code)
-		}
-		if got := core.CodeOf(err); string(got) != code {
-			return fmt.Errorf("got code %s, want %s: %w", got, code, err)
+	}
+	if w.Blob != nil && (w.Blob.lastErr != nil || w.Blob.openErr != nil) {
+		return assertBlobCallCode(ctx, code)
+	}
+	if w.Bus != nil && w.Bus.lastErr != nil {
+		if string(core.CodeOf(w.Bus.lastErr)) != code {
+			return fmt.Errorf("got code %s, want %s", core.CodeOf(w.Bus.lastErr), code)
 		}
 		return nil
-	})
+	}
+	return fmt.Errorf("call succeeded, want %s", code)
 }

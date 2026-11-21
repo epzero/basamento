@@ -104,6 +104,8 @@ go tool gate agent list      # all sessions, their last status, branches and wor
 go tool gate agent status    # record how this session ended and the hand-off note
 go tool gate review plan     # risk tier, review depth and REVIEW.md files of a change (-head <branch>)
 go tool gate layering        # package graph
+go tool gate hygiene         # test determinism, production isolation and conflict markers; with -base <ref> also spec/code separation
+go tool gate nightly         # scheduled nightly ok, failed or stale (gh JSON on stdin)
 go tool gate redgreen -base origin/main
 ```
 

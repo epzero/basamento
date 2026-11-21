@@ -39,6 +39,42 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    FLOW-003-02:
+        hash: sha256:28ef1cceec78049906e317edae34d9c14e428dc57a46fbb0ec9f34d64498f333
+        reqs:
+            - REQ-FLOW-003
+        tier: P1
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'REQ-FLOW-003''s approved text changed: a cycle must pass a node with a finite guard budget (max_visits or cost_mpts); a while-only guard no longer bounds it.'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-003-03:
+        hash: sha256:6224b2afa0d721f230064bb19ea4d2bbd6defc0dde0c6c54a34292c33a099636
+        reqs:
+            - REQ-FLOW-003
+        tier: P1
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'REQ-FLOW-003''s approved text changed: a cycle must pass a node with a finite guard budget (max_visits or cost_mpts); a while-only guard no longer bounds it.'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-003-04:
+        hash: sha256:9a53470177699d95890fc62dac061ef77517073333c8bf23447b3a29e0ca93b8
+        reqs:
+            - REQ-FLOW-003
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
     FLOW-004-01:
         hash: sha256:92a5969fa28d0d02a773134a5bf0449ae4875c9982713482dac357b21772b68a
         reqs:
@@ -475,3 +511,354 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/21
+    FLOW-045-01:
+        hash: sha256:7032e06c25553f789277b1b5e0628421a520c24dba7cad15cfefcbbbec31a652
+        reqs:
+            - REQ-FLOW-045
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-045-02:
+        hash: sha256:33cb1d9d6e7aba07e96e533f56bccfc93065a7429533e9b5a4b2328f42cc89e2
+        reqs:
+            - REQ-FLOW-045
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-046-01:
+        hash: sha256:d8b73f6ed8cdd6bdf27d3fd56f88ec54e3ad9bc3a02b5c0c655aaf8afae09f6b
+        reqs:
+            - REQ-FLOW-046
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-046-02:
+        hash: sha256:c323ac29ded297cb99cbe62b42faca7edf6cc62b8f9df1db97e4b44746bd2a04
+        reqs:
+            - REQ-FLOW-046
+        tier: P2
+        author: claude-code:spec-author:7ed966
+        reviewer: opencode:spec-reviewer:a94185
+        approved_at: "2026-11-19"
+        note: 'New compiler limits on the not-yet-implemented compiler (BUS-011 precedent): cost-only cycle bound (REQ-FLOW-003), guard budgets within the design 2.2 maxima (REQ-FLOW-045), IR size limits of design 2.3 (REQ-FLOW-046).'
+        ref: https://github.com/epzero/basamento/pull/94
+        human:
+            status: pending
+    FLOW-047-01:
+        hash: sha256:5cbf31641dd44389f8f1d7e879ca7fc3a07b3519f2d555cef2388aebabd8ec32
+        reqs:
+            - REQ-FLOW-047
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-047-02:
+        hash: sha256:b61aec21c75b6c0c8644f25e6eb304d8ab5dbb236517ed5b861c38ff3dd0e1aa
+        reqs:
+            - REQ-FLOW-047
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-048-01:
+        hash: sha256:d218ed7a4ff5148ea6d366e098ba943fae8564bb745abd82e97a26f5d09fc5d5
+        reqs:
+            - REQ-FLOW-048
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-048-02:
+        hash: sha256:7c7e494a87652f8e9b53ca6563665a761fde99a4def846e4843b184bf3926cbb
+        reqs:
+            - REQ-FLOW-048
+        tier: P1
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Run-time bounds the compiler accepted: visit budget fails the fourth start, and a fan-out over the 10000-item limit fails before any fan-out with no state data.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-049-01:
+        hash: sha256:572b2a88775a337e44264746ce6f4993f9ec1fcdaa347d16782335be7e7e8615
+        reqs:
+            - REQ-FLOW-049
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-049-02:
+        hash: sha256:c4dd56418e6d9f567a7c2ce09bf30c74a3d4f4a4c0ec16b4eb34476219c69dc5
+        reqs:
+            - REQ-FLOW-049
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-050-01:
+        hash: sha256:2bc4c8c62d25063dca70b332739287237c30625706339670880cffbfc4f09806
+        reqs:
+            - REQ-FLOW-050
+        tier: P0
+        author: claude-code:spec-author:ed500a
+        reviewer: opencode:spec-reviewer:fef8f1
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): a finished node''s settled cost accrues to run.cost, cost guards stop their cycle, and gate and wait completions carry no cost.'
+        ref: https://github.com/epzero/basamento/pull/111
+        human:
+            status: pending
+    FLOW-051-01:
+        hash: sha256:b188ffbdc864abcffb21d857339f465e0cfb27fcaeee7b1d81a7c4bdf2349c93
+        reqs:
+            - REQ-FLOW-051
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: Default node input when in is absent; host BDD.
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-052-01:
+        hash: sha256:9915931208c06b08cda9ced17e96bfabd63cea08e58eb068c06a897b850b39f7
+        reqs:
+            - REQ-FLOW-052
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-053-01:
+        hash: sha256:94e0295729218acdd9df678c77b60e9fb3efc850fa82fb7d574eb4c9c3a2b801
+        reqs:
+            - REQ-FLOW-053
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-054-01:
+        hash: sha256:333cfa5758cc22d593756d696c08c1ab939421662ab41c94b2db6d9068560a4b
+        reqs:
+            - REQ-FLOW-054
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-055-01:
+        hash: sha256:99eecc17a40cab593ec9f444a0b1d30d4d3268d76e49ce110c4d09d0730de05f
+        reqs:
+            - REQ-FLOW-055
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-056-01:
+        hash: sha256:5d5583ebd5d69e4372e9a85e397e43bc3c12e3f032283d8a9029dac8b40b6c63
+        reqs:
+            - REQ-FLOW-056
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-057-01:
+        hash: sha256:0e580c532124791a4651562a3c89cb72c06a1bac7c112e37490ff968551be5da
+        reqs:
+            - REQ-FLOW-057
+        tier: P1
+        author: opencode:spec-author:6024f0
+        reviewer: cursor:spec-reviewer:b77191
+        approved_at: "2026-11-20"
+        note: Sealed unclassified handler text and run input must not appear in the caller-visible run error.
+        ref: https://github.com/epzero/basamento/pull/121
+        human:
+            status: pending
+    FLOW-058-01:
+        hash: sha256:1ce1d78e6df5f2cc797d8b734a9b5a684f36257071f8a0a67dd9de517c533a9b
+        reqs:
+            - REQ-FLOW-058
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-058-02:
+        hash: sha256:3cb8a8a622a0c16acb299d735db94664f62d92b23c7bc66edf685bf1cf55cd1d
+        reqs:
+            - REQ-FLOW-058
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-059-01:
+        hash: sha256:1223c94224a195423b634a9b7bd87683d426b960f77f557309fdf69163f17295
+        reqs:
+            - REQ-FLOW-059
+        tier: P0
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): only NodeHandler settles cost; tool/task/subflow report 0; failed handler still accrues result cost on node_failed.'
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-059-02:
+        hash: sha256:554bc2b0c6bd1d12521d65f44276d09d9befef89dafd87c003db008880e1f092
+        reqs:
+            - REQ-FLOW-059
+        tier: P0
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        note: 'Money safety (@cost): only NodeHandler settles cost; tool/task/subflow report 0; failed handler still accrues result cost on node_failed.'
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-060-01:
+        hash: sha256:010a6bb62406aab2cfa5b3c412724a367f2c4107c4feed24c915b795420a0238
+        reqs:
+            - REQ-FLOW-060
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-061-01:
+        hash: sha256:c0072e23d9180b754f25a3eb7040f6a1a9f194c80f631b0725c4d66050a08aac
+        reqs:
+            - REQ-FLOW-061
+        tier: P2
+        author: claude-code:spec-author:9a958f
+        reviewer: cursor:spec-reviewer:b29a72
+        approved_at: "2026-11-20"
+        ref: https://github.com/epzero/basamento/pull/115
+        human:
+            status: pending
+    FLOW-062-01:
+        hash: sha256:523ccb38d9cdd91e3de8c2cfa010c4023036ce5bf0c2efd0dc1d9feee81cfdf3
+        reqs:
+            - REQ-FLOW-062
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-063-01:
+        hash: sha256:9bd8566f93b8e70617bc143a5a6b9bd1cdda0d6316ed8a6c07f23f1181bb47f4
+        reqs:
+            - REQ-FLOW-063
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-064-01:
+        hash: sha256:9ba234dddeee72b57affef6aa739634180273b2782ae01b85fc1ef9dc2cd665f
+        reqs:
+            - REQ-FLOW-064
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-065-01:
+        hash: sha256:50bdc6982ad854c6c8cbef72dfe8f760a08a70ac652aa143faa9b0324efbff21
+        reqs:
+            - REQ-FLOW-065
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-066-01:
+        hash: sha256:420e4a52d403681a0aecc42878d8c3483f30060f1cb41e576d08824cdb3a9b10
+        reqs:
+            - REQ-FLOW-066
+        tier: P2
+        author: claude-code:spec-author:8d577d
+        reviewer: cursor:spec-reviewer:a34463
+        approved_at: "2026-11-20"
+        note: Compile-time rejection of five unrunnable map/START definition shapes the machine already refuses; defence-in-depth with single validator in ir.Validate (WP-L4-01).
+        ref: https://github.com/epzero/basamento/pull/116
+        human:
+            status: pending
+    FLOW-067-01:
+        hash: sha256:656097548132afe014726a62fae7bba2d8beaf2020b41f5fd4c7039b110dcbd2
+        reqs:
+            - REQ-FLOW-067
+        tier: P2
+        author: opencode:spec-author:0c761e
+        reviewer: cursor:spec-reviewer:8c73d6
+        approved_at: "2026-11-21"
+        note: Compile-time rejection of a map with missing or empty over (REQ-FLOW-067); outline covers both Examples; design §2.6 demotes missing-node to shape precondition and documents the exact over message. Round 2 closes EP0-165 F1–F3 and fully reviews EP0-171.
+        ref: https://github.com/epzero/basamento/pull/135
+        human:
+            status: pending

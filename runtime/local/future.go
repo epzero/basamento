@@ -25,7 +25,30 @@ func newFuture(r *run) *future {
 
 // complete records the outcome. The first completion wins; later ones are
 // ignored, which is what makes cancellation and a race with a result safe.
+// The completion seq is allocated under f.mu immediately before done closes,
+// so Select never observes a seq without a matching Ready().
 func (f *future) complete(result json.RawMessage, err error) bool {
+	f.mu.Lock()
+	select {
+	case <-f.done:
+		f.mu.Unlock()
+		return false
+	default:
+	}
+	seq := f.run.seqs.Add(1)
+	f.result = append(json.RawMessage(nil), result...)
+	f.err = err
+	f.seq = seq
+	close(f.done)
+	f.mu.Unlock()
+	f.run.notify()
+	return true
+}
+
+// completeWithSeq records the outcome using an already-allocated completion
+// sequence. notify is false while batching timer completions; the caller
+// notifies once after the batch.
+func (f *future) completeWithSeq(seq uint64, result json.RawMessage, err error, notify bool) bool {
 	f.mu.Lock()
 	select {
 	case <-f.done:
@@ -35,10 +58,12 @@ func (f *future) complete(result json.RawMessage, err error) bool {
 	}
 	f.result = append(json.RawMessage(nil), result...)
 	f.err = err
-	f.seq = f.run.seqs.Add(1)
+	f.seq = seq
 	close(f.done)
 	f.mu.Unlock()
-	f.run.notify()
+	if notify {
+		f.run.notify()
+	}
 	return true
 }
 
@@ -88,4 +113,17 @@ func failedFuture(r *run, err error) *future {
 
 func invalidErr(message string, details map[string]any) error {
 	return core.NewError(core.CodeInvalidArgument, message, details)
+}
+
+// flowPanicErr turns a recovered host panic into a failed run. The panic value is
+// logged, not attached as Cause, so callers never see it through Error().
+func flowPanicErr() error {
+	return core.NewError(core.CodeInternal, "local: the flow host panicked", nil)
+}
+
+// stepPanicErr turns a recovered step panic into a non-retryable step error. The
+// wrapper is deliberately not marked retryable, so runStep's retryable check ends
+// attempts after the first panic. The panic value is logged, not Cause.
+func stepPanicErr(step string) error {
+	return core.NewError(core.CodeInternal, "local: the step panicked", map[string]any{"step": step})
 }

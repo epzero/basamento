@@ -218,10 +218,6 @@ func registerMiddlewareCalls(sc *godog.ScenarioContext) {
 		cw.provider.set(0, cw.provider.stream(text, nil, deltas))
 		return nil
 	})
-	sc.Step(`^(\d+) more seconds? pass(?:es)?$`, func(ctx context.Context, seconds int) error {
-		callOf(ctx).rt.Advance(time.Duration(seconds) * time.Second)
-		return nil
-	})
 	sc.Step(`^the caller receives a "reset" event for attempt (\d+) with attempt number (\d+)$`, func(ctx context.Context, forAttempt, number int) error {
 		cw := callOf(ctx)
 		for _, e := range cw.current.events {

@@ -353,12 +353,15 @@ func TestCompletionOrderDoesNotChangeTheSnapshot(t *testing.T) {
 }
 
 // TestPropertyCompletionOrderIndependence checks random fan-outs and random
-// completion orders: the merged state is always the canonical node-id order.
+// completion orders: the merged state is always the canonical node-id order and
+// total cost_mpts is independent of completion order.
 func TestPropertyCompletionOrderIndependence(t *testing.T) {
 	for n := 2; n <= 6; n++ {
 		want := make([]string, n)
+		var wantCost int64
 		for i := range want {
 			want[i] = nodeName(i)
+			wantCost += int64((i + 1) * 10)
 		}
 		rng := rand.New(rand.NewSource(int64(n)))
 		for round := 0; round < 50; round++ {
@@ -376,6 +379,9 @@ func TestPropertyCompletionOrderIndependence(t *testing.T) {
 			}
 			if strings.Join(state.Log, ",") != strings.Join(want, ",") {
 				t.Fatalf("n=%d order %v: log %v, want %v", n, names, state.Log, want)
+			}
+			if snapshot.Cost != wantCost {
+				t.Fatalf("n=%d order %v: cost %d, want %d", n, names, snapshot.Cost, wantCost)
 			}
 		}
 	}
@@ -518,10 +524,12 @@ func runFanout(t *testing.T, n int, order []string) flow.Snapshot {
 	}
 	for _, name := range order {
 		payload, _ := json.Marshal(name)
+		cost := int64(name[0]-'a'+1) * 10
 		snapshot, commands, err = m.Apply(snapshot, flow.Event{
-			Type:    "node_completed",
-			Node:    name,
-			Payload: payload,
+			Type:     "node_completed",
+			Node:     name,
+			Payload:  payload,
+			CostMpts: cost,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -561,6 +569,85 @@ func snapshotsEqual(a, b flow.Snapshot) bool {
 		return false
 	}
 	return string(left) == string(right)
+}
+
+func TestNodeInputWithoutInUsesRunInput(t *testing.T) {
+	def := &flow.IR{
+		Name:    "input-default",
+		Version: 1,
+		State: flow.StateSpec{
+			Schema: json.RawMessage(`{"type":"object"}`),
+		},
+		Nodes: map[string]flow.Node{
+			"work": {Kind: "task"},
+		},
+		Edges: []flow.Edge{{From: ir.Start, To: "work"}},
+	}
+	for _, tc := range []struct {
+		name  string
+		start string
+		want  string
+	}{
+		{name: "run_input", start: `{"tests":4}`, want: `{"tests":4}`},
+		{name: "empty_run", start: `{}`, want: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := requireMachine(t, def)
+			_, commands, err := m.Start(json.RawMessage(tc.start))
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCommands(t, commands)
+			if string(commands[0].Input) != tc.want {
+				t.Fatalf("input %s, want %s", commands[0].Input, tc.want)
+			}
+		})
+	}
+	t.Run("whitespace_run_input", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			start string
+			want  string
+		}{
+			{name: "empty", start: `{}`, want: `{}`},
+			{name: "space", start: ` `, want: `{}`},
+			{name: "ws", start: "\n\t ", want: `{}`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := requireMachine(t, def)
+				_, commands, err := m.Start(json.RawMessage(tc.start))
+				if err != nil {
+					t.Fatal(err)
+				}
+				requireCommands(t, commands)
+				if string(commands[0].Input) != tc.want {
+					t.Fatalf("input %s, want %s", commands[0].Input, tc.want)
+				}
+			})
+		}
+	})
+	t.Run("in_mapping", func(t *testing.T) {
+		mapped := &flow.IR{
+			Name:    "input-mapped",
+			Version: 1,
+			State: flow.StateSpec{
+				Schema: json.RawMessage(`{"type":"object","properties":{"draft":{"type":"object"}}}`),
+			},
+			Nodes: map[string]flow.Node{
+				"work": {Kind: "task", In: "state.draft"},
+			},
+			Edges: []flow.Edge{{From: ir.Start, To: "work"}},
+		}
+		m := requireMachine(t, mapped)
+		_, commands, err := m.Start(json.RawMessage(`{"draft":{"picked":true},"tests":4}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireCommands(t, commands)
+		if string(commands[0].Input) != `{"picked":true}` {
+			t.Fatalf("input %s, want mapped draft", commands[0].Input)
+		}
+	})
 }
 
 func permutations(items []string) [][]string {

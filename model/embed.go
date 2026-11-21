@@ -19,6 +19,9 @@ type EmbeddingConfig struct {
 	// Embedder is the eino embedding model the adapter drives. Every eino-ext
 	// embedding provider satisfies it.
 	Embedder einoEmbedding.Embedder
+	// Clock is the adapter registry's clock, read for the end times and the
+	// retention window of ended invocations. It is required.
+	Clock core.Clock
 }
 
 // Embedding adapts an eino embedding model to the Invoker contract. It answers
@@ -26,7 +29,6 @@ type EmbeddingConfig struct {
 // the vectors, one per input text in order (the "single" protocol of
 // docs/architecture/model-layer.md §1). It publishes no events.
 type Embedding struct {
-	provider    string
 	descriptors []Descriptor
 	embedder    einoEmbedding.Embedder
 	runs        *Registry
@@ -44,14 +46,20 @@ func NewEmbedding(cfg EmbeddingConfig) (*Embedding, error) {
 	if cfg.Embedder == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "embedding adapter has no embedder", nil)
 	}
+	if cfg.Clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "embedding adapter has no clock", nil)
+	}
 	if !anySupports(cfg.Descriptors, CapEmbed) {
 		return nil, core.NewError(core.CodeUnsupported, "no descriptor declares the embed capability", nil)
 	}
+	runs, err := NewRegistry(cfg.Provider, WithClock(cfg.Clock))
+	if err != nil {
+		return nil, err
+	}
 	return &Embedding{
-		provider:    cfg.Provider,
 		descriptors: cfg.Descriptors,
 		embedder:    cfg.Embedder,
-		runs:        NewRegistry(cfg.Provider),
+		runs:        runs,
 	}, nil
 }
 
@@ -61,8 +69,13 @@ func (e *Embedding) Describe(context.Context) ([]Descriptor, error) {
 }
 
 // Start sends the embedding batch and returns at once. It is idempotent per
-// ClientRef: a repeated start returns the original handle.
+// ClientRef while the adapter's registry retains the invocation: a repeated
+// start returns the original handle. Once the client ref is evicted, a start
+// opens a new invocation (REQ-MODEL-088).
 func (e *Embedding) Start(ctx context.Context, r Request) (Handle, error) {
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	if _, err := Select(e.descriptors, r.Model, r.Op); err != nil {
 		return Handle{}, err
 	}
@@ -76,7 +89,10 @@ func (e *Embedding) Start(ctx context.Context, r Request) (Handle, error) {
 	if len(r.Texts) == 0 {
 		return Handle{}, core.NewError(core.CodeInvalidArgument, "request has no input texts", nil)
 	}
-	run, existing := e.runs.Begin(ctx, r.ClientRef)
+	run, existing, err := e.runs.Begin(ctx, r.ClientRef)
+	if err != nil {
+		return Handle{}, err
+	}
 	if existing {
 		return run.Handle(), nil
 	}
@@ -106,13 +122,35 @@ func (e *Embedding) Lookup(ctx context.Context, clientRef string) (*Handle, erro
 }
 
 func (e *Embedding) execute(run *Run, texts []string) {
+	defer func() {
+		if p := recover(); p != nil {
+			// Deliberately converts a panic at the invocation boundary;
+			// run.Fail is a no-op after the run ended.
+			var cause error
+			if perr, ok := p.(error); ok {
+				cause = perr
+			}
+			run.Fail(&core.Error{Code: core.CodeInternal, Message: "vendor call panicked", Cause: cause})
+		}
+	}()
+
 	vectors, err := e.embedder.EmbedStrings(run.Context(), texts)
 	if err != nil {
 		run.Fail(MapError(err))
 		return
 	}
+	if len(vectors) != len(texts) {
+		run.Fail(core.NewError(core.CodeVendor,
+			fmt.Sprintf("embedding count mismatch: got %d vectors for %d texts", len(vectors), len(texts)), nil))
+		return
+	}
 	out := make([][]float32, len(vectors))
 	for i, v := range vectors {
+		if len(v) == 0 {
+			run.Fail(core.NewError(core.CodeVendor,
+				fmt.Sprintf("embedding vector %d is empty", i), nil))
+			return
+		}
 		out[i] = vector32(v)
 	}
 	run.Succeed(Result{Vectors: out})

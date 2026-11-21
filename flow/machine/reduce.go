@@ -3,6 +3,7 @@ package machine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -186,6 +187,9 @@ func mergeKey(item any, field string) (string, error) {
 
 func reduceSum(current, update any) (any, error) {
 	if current == nil {
+		if _, _, err := numberValue(update); err != nil {
+			return nil, err
+		}
 		return update, nil
 	}
 	return addNumbers(current, update)
@@ -209,6 +213,12 @@ func addNumbers(a, b any) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("sum: %s", err.Error())
 		}
+		if add > 0 && sum > math.MaxInt64-add {
+			return nil, fmt.Errorf("overflow")
+		}
+		if add < 0 && sum < math.MinInt64-add {
+			return nil, fmt.Errorf("overflow")
+		}
 		return json.Number(strconv.FormatInt(sum+add, 10)), nil
 	}
 	sum, err := strconv.ParseFloat(left, 64)
@@ -219,7 +229,11 @@ func addNumbers(a, b any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sum: %s", err.Error())
 	}
-	return json.Number(strconv.FormatFloat(sum+add, 'g', -1, 64)), nil
+	result := sum + add
+	if math.IsInf(result, 0) || math.IsNaN(result) {
+		return nil, fmt.Errorf("overflow")
+	}
+	return json.Number(strconv.FormatFloat(result, 'g', -1, 64)), nil
 }
 
 func numberValue(value any) (text string, integral bool, err error) {

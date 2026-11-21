@@ -49,6 +49,19 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
   committed file. The command prints the hand-off the previous session left.
+  The file is replaced atomically, so a crash never leaves half a hand-off.
+- **Calls to `gate agent new` for one work item are serialised** by a lock in
+  the repository's common git directory: two sessions for the same issue
+  cannot both create its worktree and overwrite each other's hand-off. The lock
+  covers `gate agent new` only; `gate agent status` and `gate agent release`
+  take no lock. A second `agent new` waits up to 80 seconds (two bounded
+  remote calls plus local work), then reports that the first call may still be
+  running.
+- **Remote git calls are bounded.** A `fetch` or `ls-remote` gives up after 30
+  seconds and says what to check (the remote, the network, the credentials). git
+  is killed at the deadline, and the call is force-closed a few seconds later
+  even if a transport helper inherited the output pipes and survived the kill,
+  so an unreachable origin does not hang the command.
 
 A person is `human:<github-login>`; when no personal login is given, the
 default owner identity is `human:epzero` (§5). An identity is a convention,
@@ -92,10 +105,10 @@ rest of its work moves on.
    `go tool gate agent list`. For each ticket, read the latest hand-off
    comment and do the next step: spawn a subagent, act on GitHub, or hand
    the ticket on. Its playbook (§6) lists the cases.
-3. **Subagents do one step each** (write specs, implement, review one lens,
-   fix findings), record their status and stop. They never watch or wait. The
-   next step is a new session on the same branch. Several work items run at
-   once, up to the width the lead was given, never two whose owned
+3. **Subagents do one step each** (write specs, implement, review assigned
+   lenses, fix findings), record their status and stop. They never watch or
+   wait. The next step is a new session on the same branch. Several work items
+   run at once, up to the width the lead was given, never two whose owned
    directories overlap (§4).
 4. **Idle** when every ticket assigned to it is handed on and its subagents
    have stopped. It then waits for the next trigger.
@@ -150,7 +163,7 @@ definition's frontmatter), not a rule of this document.
 | --- | --- |
 | **heavy** | Round-1 spec review; code-review lenses at high and medium risk; the arbiter |
 | **standard** | Spec authoring and implementation; round-2+ re-reviews of specs and code; code-review lenses at low risk; finding verifiers at high risk |
-| **light** | Finding verifiers at low and medium risk; mechanical steps (a rebase without conflicts, a lock or doc regeneration); lead ticks with nothing to do |
+| **light** | Finding verifiers at medium risk; mechanical steps (a rebase without conflicts, a lock or doc regeneration); lead ticks with nothing to do |
 
 A re-review stays at standard, not light: its narrower scope is what makes it
 cheaper (`code-review.md` §6, `spec-review.md` §2).
@@ -215,6 +228,11 @@ options. A decision carries its reasons. Every hand-off between maintainers:
 | `needs-human` | anyone → owner | A high-risk change with no open findings; a design; another direction; a spec acceptance; a question; a ticket that should not be handled | unchanged |
 | `owner-approved` | owner → reviewer | `approve` on a high-risk change or a design | *In Review* |
 
+The reviewer lead also uses `design-needed` (state *Todo*, assignee the
+architect) when handing the architect a failed or stale nightly for triage
+(`docs/engineering/qa-gate.md`, "Who reads the nightly"); the usual
+designer → architect row is unchanged.
+
 The owner answers in a comment (`approve`, `reject: <reason>`, `restart`,
 `accept`, or new direction) and hands the ticket on by assigning it. The
 owner need not change the label: when the latest comment is the owner's, it
@@ -246,15 +264,16 @@ from the owner; the **risk** of a change says which do.
 
 **The reviewer sets the risk, not the author.** The author opens the pull
 request with the label `risk: TBD`. The reviewer replaces it with what
-`go tool gate review plan` computes from the paths the change touches
-(`code-review.md` §2), as `risk: low`, `risk: medium` or `risk: high`, and
+`go tool gate review plan` computes from the paths the change touches and the
+content rule for `go.mod` (`code-review.md` §2), as `risk: low`, `risk:
+medium` or `risk: high`, and
 writes it in the description. The reviewer may raise it above what the tool
 says, never lower it.
 
 | Risk | What lets it in |
 | --- | --- |
 | Low, medium | The reviewer's approval. The author then merges. |
-| High (CI, the gate, contracts, auth, secrets, money, runtimes, `go.mod`, and rule files: constitution, ADRs, `AGENTS.md`, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent definitions) | The owner's `approve` in the tracker, then the reviewer's approval on GitHub with a link to it. The author then merges. |
+| High (CI, the gate, contracts, auth, secrets, money, runtimes, `go.mod` **except** a patch-only `go` bump (medium, `ADR-0014`), and rule files: constitution, ADRs, `AGENTS.md`, `layering.yaml`, `review.yaml`, `REVIEW.md`, agent definitions) | The owner's `approve` in the tracker, then the reviewer's approval on GitHub with a link to it. The author then merges. |
 
 **The owner** is asked, and answers, only in the tracker, and leaves no name
 in the repository or on GitHub. The reviewer's approval on a high-risk pull
@@ -364,8 +383,8 @@ is <lead identity>. (Add -branch <branch> to your first command when the
 branch was pushed by another maintainer.)
 Why you were started: <new work package | write the specs | review the specs
 | implement the approved specs | fix these findings: … | the owner answered:
-"<answer>" | resolve the rebase conflict | review lens <lens>, base <base>,
-from <commit> | verify finding <text>>.
+"<answer>" | resolve the rebase conflict | review lenses <lenses>, base <base>,
+from <commit> | verify findings <list>, blind (`code-review.md` §4)>.
 Do this one step, record your status and stop. Never ask a person directly:
 end with needs-human.
 ```
@@ -416,8 +435,10 @@ its author approved.
   by new commits; on high-risk paths the approval of the reviewer or the
   architect; resolved threads; a green `gate` in the merge queue; squash
   only; no force-push to `main`. `CODEOWNERS` is generated from the high
-  tier of `review.yaml` (`go tool gate docs -write`), so it covers exactly
-  what the review plan calls high.
+  tier of `review.yaml` (`go tool gate docs -write`), so it covers the
+  high-tier paths of `review.yaml`. `go.mod` stays owned there even when a
+  patch-only `go` bump rates medium in the review plan; the reviewer's
+  approval alone satisfies what `CODEOWNERS` requires (`ADR-0014`).
 - **A merge that breaks `main`** is reverted with a pull request of its own
   and marked `escaped` (`code-review.md` §7).
 
@@ -427,7 +448,7 @@ its author approved.
 | --- | --- | --- |
 | 1. Take | developer | Takes a ticket assigned to it. With none left, runs `go tool gate wp -state ready`, opens a ticket for a ready work package that has none and assigns it to itself. A work package whose scenarios are missing or not approved goes to the designer first (§7.3). |
 | 2. Implement | developer | An implementer session in a new worktree, until `make gate BASE=main` passes and it records `code-review-requested`. |
-| 3. Self-review | developer | The code review of `code-review.md`, by code reviewer sessions at the depth of the change's tier, before anyone else sees it. Findings go back to the implementer; later rounds check each open finding and the whole diff since the last reviewed commit (`code-review.md` §6). After three rounds the lead reads what is still open itself and settles each finding: fixed, or dropped with a reason. |
+| 3. Self-review | developer | The self-review of `code-review.md` §1 to §4 before anyone else sees the change (up to two rounds; findings go back to the implementer, and the lead settles anything still open after round 2). |
 | 4. Open | developer | Pushes the branch and opens the pull request (§7.1), with what the self-review found and how it was settled. Hands the ticket to the reviewer. |
 | 5. Review | reviewer | Reads the change on GitHub; checks the branch out in a worktree only when it needs the code around it. Sets the risk (§5). Posts one review for the round: each important finding as a thread on its line and **Request changes**, or **Approve**. Hands the ticket back. |
 | 6. Answer | developer | Fixes or answers every thread and hands the ticket back; the reviewer resolves what is settled and checks each open finding and the whole diff since the last reviewed commit. After a third round without approval the reviewer hands it to the architect (§5). |
@@ -439,6 +460,11 @@ its author approved.
 The designer writes specs; the reviewer approves them (`spec-review.md`). A
 spec pull request holds specs only, so an implementation starts from specs
 that are already on `main`.
+
+An implementation pull request does not edit `specs/<capability>/design.md`.
+A design that turns out wrong or incomplete while implementing is a spec
+change: describe it in the pull request, hand the designer a ticket
+(`specs-needed`), and implement against the design as it stands.
 
 | Step | Who | What |
 | --- | --- | --- |
@@ -459,7 +485,7 @@ contract or layer, a different approach) is the architect's.
 
 | Step | Who | What |
 | --- | --- | --- |
-| 1. Draft | architect | A spec author session writes the ADR as it will read once merged (*Accepted*: an open pull request is the proposal), with the architecture docs it changes. Code reviewer sessions review it, several rounds, until nothing important is open. |
+| 1. Draft | architect | A spec author session writes the ADR as it will read once merged (*Accepted*: an open pull request is the proposal), with the architecture docs it changes. Code reviewer sessions review it at Deep depth (`code-review.md` §3 reviewer column and §4), up to three rounds, then the architect settles what is still open, with reasons (the `lead-architect` playbook). |
 | 2. Open | architect | Opens the pull request and hands the ticket to the owner with a summary: the decision, the alternatives, what it costs. |
 | 3. Decide | owner | Discusses on the ticket (comments go back to the architect, who answers or changes the design), then `approve` to the reviewer, or closes it. |
 | 4. Approve | reviewer | Checks that the pull request is still the commit the owner saw and that CI is green, sets the risk, approves with a link to the owner's comment. It does not review the design again. Hands the ticket to the architect. |

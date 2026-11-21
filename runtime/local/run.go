@@ -46,6 +46,9 @@ type run struct {
 
 	shuttingDown bool
 	stepWG       sync.WaitGroup
+
+	parentRun    *run
+	gateTimeouts atomic.Int32
 }
 
 // step is the journal entry of one step name in a run (REQ-RT-007).
@@ -55,10 +58,12 @@ type step struct {
 
 // gate is the journal entry of one gate name in a run (REQ-RT-009, REQ-RT-010).
 type gate struct {
-	spec     runtime.GateSpec
-	future   *future
-	resolved bool
-	payload  json.RawMessage
+	spec         runtime.GateSpec
+	future       *future
+	resolved     bool
+	payload      json.RawMessage
+	timeoutStop  chan struct{}
+	timeoutTimer *runTimer
 }
 
 // childLink ties a parent run to a child run it started (REQ-RT-014,
@@ -67,15 +72,6 @@ type childLink struct {
 	run    *run
 	policy string
 	future *future
-}
-
-// runTimer is one pending Sleep. Any timer goroutine of the run that wakes
-// completes every timer whose deadline the clock has already reached, so a
-// clock jump completes due timers together and Select sees the lowest index.
-type runTimer struct {
-	deadline time.Time
-	future   *future
-	wake     <-chan time.Time
 }
 
 func newRun(rt *Runtime, tenant core.TenantID, id string, flow runtime.FlowRef, input json.RawMessage, parent context.Context) *run {
@@ -105,9 +101,19 @@ func (r *run) ref() runtime.RunRef {
 }
 
 // execute runs the registered flow host on this run's goroutine and closes the
-// run with its outcome.
+// run with its outcome. A panicking host fails the run without ending the process.
 func (r *run) execute() {
-	out, err := r.rt.host(&durableContext{run: r}, r.flow, r.input)
+	var out json.RawMessage
+	var err error
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = flowPanicErr()
+				r.rt.logPanic(r.tenant, r.id, "", recovered)
+			}
+		}()
+		out, err = r.rt.host(&durableContext{run: r}, r.flow, r.input)
+	}()
 	r.finish(out, err)
 }
 
@@ -128,13 +134,17 @@ func (r *run) finish(out json.RawMessage, err error) {
 		r.closeChildrenLocked()
 	}
 	var waiters []*future
-	if r.state != stateRunning {
+	terminal := r.state != stateRunning
+	if terminal {
 		waiters = append(waiters, r.waiters...)
 	}
 	r.mu.Unlock()
 	r.notify()
 	for _, f := range waiters {
 		f.complete(out, err)
+	}
+	if terminal {
+		r.cancel()
 	}
 }
 
@@ -169,6 +179,7 @@ func (r *run) applyParentClose(policy string) {
 	err := cancelledErr("child closed by its parent")
 	r.completeWaitsLocked(err)
 	r.completeWaitersLocked(nil, err)
+	r.closeChildrenLocked()
 	r.mu.Unlock()
 	r.notify()
 }
@@ -208,10 +219,18 @@ func (r *run) shutdown() {
 	r.notify()
 }
 
+func (g *gate) stopTimeout() {
+	if g.timeoutStop != nil {
+		close(g.timeoutStop)
+		g.timeoutStop = nil
+	}
+}
+
 // completeWaitsLocked ends every pending gate wait, timer and child wait with
 // err. It is a no-op for waits that already completed.
 func (r *run) completeWaitsLocked(err error) {
 	for _, g := range r.gates {
+		g.stopTimeout()
 		if !g.resolved {
 			g.future.complete(nil, err)
 		}
@@ -223,27 +242,6 @@ func (r *run) completeWaitsLocked(err error) {
 	for _, link := range r.children {
 		link.future.complete(nil, err)
 	}
-}
-
-// fireDueTimers completes every timer of the run whose deadline the clock has
-// reached. The first timer goroutine to wake after a clock jump completes them
-// all, so due timers become ready together (REQ-RT-008, REQ-RT-011).
-func (r *run) fireDueTimers() {
-	r.mu.Lock()
-	now := r.rt.clock.Now()
-	kept := r.timers[:0]
-	for _, timer := range r.timers {
-		if timer.future.Ready() {
-			continue
-		}
-		if timer.deadline.After(now) {
-			kept = append(kept, timer)
-			continue
-		}
-		timer.future.complete(nil, nil)
-	}
-	r.timers = kept
-	r.mu.Unlock()
 }
 
 // completeWaitersLocked delivers this run's outcome to the parents waiting on
@@ -268,6 +266,16 @@ func (r *run) resolveGate(name string, payload json.RawMessage) error {
 	if g.resolved {
 		r.mu.Unlock()
 		return core.NewError(core.CodeConflict, "local: the gate was already resolved", map[string]any{"gate": name, "run": r.id})
+	}
+	// Hold r.mu before future.Ready() (r.mu then future.mu everywhere; select_scan.go).
+	if g.future.Ready() {
+		r.mu.Unlock()
+		return core.NewError(core.CodeConflict, "local: the gate wait already ended", map[string]any{"gate": name, "run": r.id})
+	}
+	g.stopTimeout()
+	if g.timeoutTimer != nil {
+		r.removeTimer(g.timeoutTimer)
+		g.timeoutTimer = nil
 	}
 	g.resolved = true
 	g.payload = append(json.RawMessage(nil), payload...)
@@ -308,9 +316,22 @@ func (r *run) wake() <-chan struct{} {
 	return r.changed
 }
 
+const maxCancelReason = 256
+
+// cancelMessage builds the cancellation message from reason. Reason is truncated
+// to maxCancelReason runes so an unbounded caller string cannot allocate a huge
+// intermediate slice.
 func cancelMessage(reason string) string {
 	if reason == "" {
 		return "run cancelled"
+	}
+	n := 0
+	for i := range reason {
+		if n == maxCancelReason {
+			reason = reason[:i]
+			break
+		}
+		n++
 	}
 	return "run cancelled: " + reason
 }

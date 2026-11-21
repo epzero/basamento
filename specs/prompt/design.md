@@ -9,7 +9,11 @@ control. That mapping is not part of this package.
 
 - A template has an `id`, a `version` (a non-empty string without `@`), its
   declared **inputs** (name, and `trust`: `trusted` or `untrusted`, default
-  `untrusted`), its **segments** and an optional **total budget**.
+  `untrusted`), its **segments** and an optional **total budget**. An empty
+  id or version, or one containing `@`, is reported by prompt lint as
+  `empty_template_id`, `at_in_template_id`, `empty_template_version` or
+  `at_in_template_version`. Input names are unique within a template; a
+  repeat is `duplicate_input`.
 - A reference is `<id>@<version>`. There is no "latest": a run pins the
   version it uses, so a replay assembles the same prompt (constitution §3).
 - Registration is idempotent for identical content and refused with
@@ -40,8 +44,10 @@ entry of an assembly before any part is rendered, and fails the assembly with
 (REQ-PROMPT-024). Entry text follows REQ-PROMPT-014 / REQ-PROMPT-015 whatever
 its role.
 
-A template has at most one `history` segment. Segments of other kinds may
-repeat; each has a name unique within the template.
+A template has at most one `history` segment; a second is
+`multiple_history`. Segments of other kinds may repeat; each has a name
+unique within the template, and a repeated name is `duplicate_segment`. A
+segment whose kind is outside the table above is `unknown_segment_kind`.
 
 ## 3. Sizes and budgets
 
@@ -82,15 +88,39 @@ A wrapped value reads:
 <untrusted source="NAME">VALUE</untrusted>
 ```
 
-`NAME` is the input name or `history`. Before wrapping, every `<` in the
-value that begins a delimiter-like sequence is replaced by `&lt;`. A
-delimiter-like sequence is `<`, optional whitespace, an optional `/`,
-optional whitespace, then `untrusted` in any letter case. No other text is
-changed, so a value without such a sequence is wrapped unchanged.
+`NAME` is the input name or `history`. It keeps only `A-Z`, `a-z`, `0-9`,
+`_`, `.` and `-`; every other character becomes `_`, so a label can never end
+the attribute or the tag. An input name a template can substitute already
+matches `[a-z][a-z0-9_]*`, and `history` matches as well, so the restriction
+guards the wrapper against a label built from any other text.
+
+Before wrapping, every `<` in the value that begins a delimiter-like sequence
+is replaced by `&lt;`. A delimiter-like sequence is `<`, optional whitespace,
+an optional `/`, optional whitespace, then `untrusted` in any letter case. No
+other text is changed, so a value without such a sequence is wrapped
+unchanged.
+
+The assembler records each delimiter pair it writes. Spans are per rendered
+text: one per segment, and one per history entry within its own rendered
+text. The opening delimiter's span runs from its `<` through its `>`, and the
+closing delimiter's span from its `<` through its `>`. Prompt lint of an
+assembled prompt accepts a delimiter only when both delimiters of its
+recorded pair are at their recorded spans; every other delimiter, including
+either half of a recorded pair whose other half is not at its span, is
+`unpaired_delimiter`, and a prompt that carries no record reports every
+delimiter. The record decides, not a scan of the text, because text alone
+cannot tell the assembler's own pairs from a pair forged by trusted values
+or by fixed text. The record is not part of `hash` or `prefix_hash` (§4), and
+it survives a JSON round trip of the assembled prompt.
 
 ## 6. Prompt lint
 
 Findings carry a rule, a severity (`error` or `warning`) and a segment name.
+The segment name is empty for a template-level rule (`empty_template_id`,
+`at_in_template_id`, `empty_template_version`, `at_in_template_version`,
+`duplicate_input` and `multiple_history`). A segment-level rule names its
+segment: `duplicate_segment` names the repeated segment, and every rule
+checked on one segment names that segment.
 
 | Rule | Severity | Checked on |
 | --- | --- | --- |
@@ -98,9 +128,21 @@ Findings carry a rule, a severity (`error` or `warning`) and a segment name.
 | `untrusted_in_cacheable` | error | template |
 | `fixed_text_over_budget` | error | template |
 | `no_budget` | warning | template |
+| `empty_template_id` | error | template |
+| `at_in_template_id` | error | template |
+| `empty_template_version` | error | template |
+| `at_in_template_version` | error | template |
+| `duplicate_input` | error | template |
+| `duplicate_segment` | error | template |
+| `multiple_history` | error | template |
+| `unknown_segment_kind` | error | template |
 | `unpaired_delimiter` | error | assembled prompt |
 
 The registry lints every template it registers: errors refuse it
 (REQ-PROMPT-020), warnings are returned with it (REQ-PROMPT-023). An
 undeclared variable is refused by the registry itself (REQ-PROMPT-004). Rule
 names are stable: new rules are added, none is renamed or removed.
+
+`PROMPT-021-02` is the scenario that keeps the lint from being satisfied by
+refusing everything: the assembler's own recorded pairs are linted clean
+there, and the unit tests pin the two sides.

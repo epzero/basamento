@@ -2,8 +2,9 @@
 
 Status: contract and adapters implemented in `model` and `model/chat`
 (WP-L3-01); structured output and the call middleware implemented in
-`model/structured` and `model/middleware` (WP-L3-02); provider construction
-and routing **Planned** (WP-L3-04).
+`model/structured` and `model/middleware` (WP-L3-02); the catalog and price
+table in `model/catalog` (WP-L3-06); provider construction and routing
+**Planned** (WP-L3-04).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -39,12 +40,33 @@ cancellation, reattach and replay. Small calls such as embeddings use the
 blocking `Invoke` in process.
 
 `model.Registry` holds what every adapter owes regardless of protocol:
-idempotent starts per client ref, the ordered event log with replay from a
-cursor, the result, cancellation and lookup. The chat adapter (`model/chat`)
-and the embedding adapter (`model.NewEmbedding`) drive eino models;
-`Request.Messages` and `Request.Tools` are JSON of `eino/schema` values, so the
-contract itself stays free of the dependency. Provider construction is
-WP-L3-04's, including the OpenAI-compatible mode MiniMax and GLM use.
+idempotent starts per client ref within the tenant of the call's context, the
+ordered event log with replay from a cursor, the result, cancellation and
+lookup. It does not grow without bound: an ended invocation is kept for its
+retention window after its end and no longer (1 hour by default), and while the
+registry holds more ended invocations than its ended bound (10,000 by default)
+it evicts them oldest-ended first, never a running one; an evicted client ref
+then answers exactly as one the registry never held (REQ-MODEL-088). Both bounds
+are set through `NewRegistry`'s options and read on a `core.Clock` the caller
+supplies, and the sweep runs inline in the registry's methods: no timer, no
+goroutine per invocation, and nothing in the gate depends on wall time. The chat
+adapter (`model/chat`) and the embedding adapter (`model.NewEmbedding`) drive
+eino models; `Request.Messages` and `Request.Tools` are JSON of `eino/schema`
+values, so the contract itself stays free of the dependency. The chat adapter
+caps one vendor stream at 8 MiB of payload and 262144 chunks; exceeding either
+limit ends the invocation with `vendor_error`. The payload counts assistant text
+and reasoning, every string of a tool call, the text and the URL or URI of legacy
+multi-content parts, and the text, reasoning, URL, base64 data, file id and MIME
+type of assistant-generated parts; Extra and ResponseMeta are metadata and are not
+counted. A stream that ends with only vendor metadata
+(`Extra`, `ResponseMeta` such as a content filter or refusal finish reason) and
+no assistant content is `vendor_error` with a fixed message; provider adapters
+map refusals to text or typed errors before that check. A vendor panic inside the
+adapter's execute goroutine is converted to `internal` at that boundary without
+crashing the process. Unmapped `Request.Params` keys (for example `tier` for
+pricing) are ignored; the adapter maps `temperature`, `top_p`, `max_tokens` and
+`stop`. Provider construction is WP-L3-04's, including the OpenAI-compatible
+mode MiniMax and GLM use.
 
 ## 2. Descriptors
 
@@ -102,11 +124,11 @@ invocation and settles by the provider's final state (REQ-MODEL-009).
   the last supported rung: it strips prose and code fences and fixes JSON
   syntax, never a field, so a missing field is not fabricated.
 - **Middleware order** (`model/middleware`): call log ∘ recording ∘ fallback ∘
-  metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk,
-  idle, total). Every attempt of one call, across rungs and retries, spends one
-  budget of 3 unless the call sets another; waits double from one second plus
-  up to half of it from the call's seeded randomness, and a longer Retry-After
-  wins. Streaming defaults are 30 seconds without a first event, 60 seconds
+  metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk, idle, total).
+  Every attempt of one call, across rungs and retries, spends one budget of 3
+  unless the call sets another; waits double from one second plus up to half
+  of it from the call's seeded randomness, and a longer Retry-After wins.
+  Streaming defaults are 30 seconds without a first event, 60 seconds
   without one in progress and 10 minutes per attempt, with no call total
   timeout unless the call sets one. Metering records every attempt that reached
   the provider; the call log records one entry per attempt without message
@@ -185,4 +207,8 @@ gets a formula of its own in its descriptor.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run
-time, so the same commit prices the same call the same way.
+time, so the same commit prices the same call the same way. `model/catalog`
+loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
+and tenant layers above it, and keeps the entry and start time of a call in a
+quote until settlement. A model's own formula must return a whole number of
+milli-points in integer arithmetic; rates and priced amounts are never negative.

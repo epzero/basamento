@@ -59,10 +59,11 @@ scenarios:
         reqs:
             - REQ-MODEL-004
         tier: P0
-        author: claude-code:spec-author:34bca5
-        reviewer: antigravity:spec-reviewer:cc9645
-        approved_at: "2026-11-01"
-        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:1c21de
+        approved_at: "2026-11-21"
+        note: 'Money safety: model-node client ref stays stable across retries of one logical invocation, including after a transient rejection or an unacknowledged start (REQ-MODEL-004 restored; MODEL-004-01).'
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
@@ -93,6 +94,18 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    MODEL-005-03:
+        hash: sha256:facbec23dccfa88571e3b6542d2521990e32956aa723eb3b351a74ea8519b0d6
+        reqs:
+            - REQ-MODEL-005
+        tier: P0
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Money safety: pins the fail-closed clause of REQ-MODEL-005 — an ambiguous start whose lookup finds nothing opens gate ambiguous_start instead of paying for a second start (constitution 5).'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending
     MODEL-006-01:
         hash: sha256:d828e46328ccb80bb5a9fe76e6c11f61389b9631c60917af3ad6a8b238735d9b
         reqs:
@@ -1084,10 +1097,11 @@ scenarios:
         reqs:
             - REQ-MODEL-064
         tier: P0
-        author: claude-code:spec-author:c5ea10
-        reviewer: antigravity:spec-reviewer:039bb8
-        approved_at: "2026-11-17"
-        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:56a69a
+        approved_at: "2026-11-21"
+        note: REQ-MODEL-064 adds structured between metering and retry (seven-stage chain). Aligns with design.md §1b, model/middleware/doc.go and docs/architecture/model-layer.md §5. Scenario text unchanged; re-approval for agreed requirement-behavior change (EP0-164).
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
@@ -1098,10 +1112,11 @@ scenarios:
         reqs:
             - REQ-MODEL-064
         tier: P0
-        author: claude-code:spec-author:c5ea10
-        reviewer: antigravity:spec-reviewer:039bb8
-        approved_at: "2026-11-17"
-        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:56a69a
+        approved_at: "2026-11-21"
+        note: REQ-MODEL-064 adds structured between metering and retry (seven-stage chain). Aligns with design.md §1b, model/middleware/doc.go and docs/architecture/model-layer.md §5. Scenario text unchanged; re-approval for agreed requirement-behavior change (EP0-164).
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
@@ -1468,3 +1483,147 @@ scenarios:
             by: human:epzero
             at: "2026-11-18"
             note: https://github.com/epzero/basamento/pull/20
+    MODEL-083-01:
+        hash: sha256:0b65809d5f5b3efe60906299937e5cf5c64e88e66232fb716af30b4ae480719b
+        reqs:
+            - REQ-MODEL-083
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-084-01:
+        hash: sha256:8271705a3e3857d50981458a49a75c2519b3a57ec773fed5009cc69e58d70d9b
+        reqs:
+            - REQ-MODEL-084
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-084-02:
+        hash: sha256:620695246417b90bab789e1813745f2635a7a60b1a1c416172efe57d8c114fb3
+        reqs:
+            - REQ-MODEL-084
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-085-01:
+        hash: sha256:72f3d961e0d0b8f5a2b18365d69fb485d936fe752494de09f7e433185030442e
+        reqs:
+            - REQ-MODEL-085
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-086-01:
+        hash: sha256:4bf5830f40a7d482caeba2d3b8d216e376ea32097e16868fdc9ec41c76a586c2
+        reqs:
+            - REQ-MODEL-086
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-086-02:
+        hash: sha256:f08f576b1c9afbad7b7b0a81f5ce52a18d1b3f71f5dd5b9e3fe7ae6def066861
+        reqs:
+            - REQ-MODEL-086
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-087-01:
+        hash: sha256:fc54fa5b41ab925f10fc1ec301fc512d8f5ae80a44e0c2678bb5c4f39cd61ac8
+        reqs:
+            - REQ-MODEL-087
+        tier: P0
+        author: claude-code:spec-author:c19944
+        reviewer: opencode:spec-reviewer:8f0366
+        approved_at: "2026-11-19"
+        note: 'Cost safety, fail closed: an erroring or non-boolean rate condition stops the rule search instead of falling through to a later, possibly cheaper rule; negative rates are refused at every layer and at snapshot load; negative usage counts fail before any formula; a negative amount fails while 0 stays a valid price; a model''s own formula must return whole milli-points (int, uint fitting int64, or an exact-integer double of magnitude at most 2^53) rather than silently rounding a fractional double, so REQ-MODEL-076''s half-up rounding keeps governing only the table''s exact-decimal amounts.'
+        ref: https://github.com/epzero/basamento/pull/107
+        human:
+            status: pending
+    MODEL-088-01:
+        hash: sha256:2e9231c203016be392c408c51652292ed77affdfe174f104f9142022cc1c7ef3
+        reqs:
+            - REQ-MODEL-088
+        tier: P1
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Bounds a retention REQ-MODEL-004/005 previously implied unbounded: window runs from the end with an inclusive boundary (design R2), oldest-first eviction at the ended bound, running never evicted, an evicted ref answers exactly as one never held. Round 2, EP0-140.'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending
+    MODEL-088-02:
+        hash: sha256:be9e25c2ccb1149f6b858a6338214392829343c44d268d9b19d8598bcf0d8fb5
+        reqs:
+            - REQ-MODEL-088
+        tier: P1
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Bounds a retention REQ-MODEL-004/005 previously implied unbounded: window runs from the end with an inclusive boundary (design R2), oldest-first eviction at the ended bound, running never evicted, an evicted ref answers exactly as one never held. Round 2, EP0-140.'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending
+    MODEL-088-03:
+        hash: sha256:1dbc29f2faa19e0a0fa3cea3612bc9972ac5e4f1ed55874fec7b86479dc3e564
+        reqs:
+            - REQ-MODEL-088
+        tier: P1
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Bounds a retention REQ-MODEL-004/005 previously implied unbounded: window runs from the end with an inclusive boundary (design R2), oldest-first eviction at the ended bound, running never evicted, an evicted ref answers exactly as one never held. Round 2, EP0-140.'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending
+    MODEL-088-04:
+        hash: sha256:62309dac7b92870111cfe2bc21c3986ffa446a29de228c2d3062a26d43044fa1
+        reqs:
+            - REQ-MODEL-088
+        tier: P1
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Bounds a retention REQ-MODEL-004/005 previously implied unbounded: window runs from the end with an inclusive boundary (design R2), oldest-first eviction at the ended bound, running never evicted, an evicted ref answers exactly as one never held. Round 2, EP0-140.'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending
+    MODEL-088-05:
+        hash: sha256:e5bc3ac84f79b3ad0fbc20dc93f2717961ed8380ad3e3566993550df618fdef3
+        reqs:
+            - REQ-MODEL-088
+        tier: P1
+        author: claude-code:spec-author:fb7447
+        reviewer: opencode:spec-reviewer:c78eb5
+        approved_at: "2026-11-19"
+        note: 'Bounds a retention REQ-MODEL-004/005 previously implied unbounded: window runs from the end with an inclusive boundary (design R2), oldest-first eviction at the ended bound, running never evicted, an evicted ref answers exactly as one never held. Round 2, EP0-140.'
+        ref: https://github.com/epzero/basamento/pull/108
+        human:
+            status: pending

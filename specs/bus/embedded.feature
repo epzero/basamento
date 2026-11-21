@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-03 @level:component @profile:embedded
+@wp:WP-L1-03 @level:component @profile:embedded
 Feature: The embedded bus keeps its data across restarts
   In the embedded profile the bus runs in the kit process and stores its data
   in the data directory, next to the SQLite files.
@@ -31,3 +31,10 @@ Feature: The embedded bus keeps its data across restarts
     And a subscriber subscribes to "run.r1.msg.a" after the bus sequence of "m1"
     Then the subscription fails with code "not_found"
     And the error reports the bus sequence of "m3" as the last purged
+
+  @REQ-BUS-031 @id:BUS-031-01
+  Scenario: Opening on a store directory others can read makes it private
+    Given the store directory of the embedded data directory has mode "0755"
+    When the embedded bus is opened
+    Then the open succeeds
+    And the store directory has mode "0700"

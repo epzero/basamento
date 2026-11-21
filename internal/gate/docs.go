@@ -74,8 +74,8 @@ func OwnershipOverlaps(epics []Epic) []string {
 
 func mark(seen map[string]bool, id string) map[string]bool { seen[id] = true; return seen }
 
-// Docs checks (or, with write, refreshes) every generated block, and the
-// roadmap's ownership rule.
+// Docs checks (or, with write, refreshes) every generated block, CODEOWNERS,
+// the roadmap's ownership rule, and specs/README.md capability statuses.
 func Docs(root string, write bool) ([]string, error) {
 	var stale []string
 	epics, err := LoadRoadmap(root)
@@ -83,11 +83,17 @@ func Docs(root string, write bool) ([]string, error) {
 		return nil, err
 	}
 	stale = append(stale, OwnershipOverlaps(epics)...)
+	readmeErrs, err := CheckSpecsReadme(root)
+	if err != nil {
+		return nil, err
+	}
+	stale = append(stale, readmeErrs...)
 	if raw, err := os.ReadFile(filepath.Join(root, "review.yaml")); err == nil {
 		var rules ReviewRules
 		if err := yaml.Unmarshal(raw, &rules); err != nil {
 			return nil, fmt.Errorf("review.yaml: %w", err)
 		}
+		stale = append(stale, rules.GoModPatchBumpConsistency()...)
 		if rules.HighOwner != "" {
 			path, want := filepath.Join(root, ".github", "CODEOWNERS"), rules.CodeOwners()
 			if have, _ := os.ReadFile(path); string(have) != want {

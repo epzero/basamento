@@ -21,12 +21,25 @@ func WithStepLimit(limit uint64) MappingOption {
 	}
 }
 
+// WithOutputLimit sets the output limit in RFC 8785 bytes (default 1_048_576).
+// The limit must be positive: there is no way to disable it.
+func WithOutputLimit(limit int) MappingOption {
+	return func(m *Mapping) error {
+		if limit <= 0 {
+			return fmt.Errorf("output limit %d must be positive", limit)
+		}
+		m.outputLimit = limit
+		return nil
+	}
+}
+
 // Mapping is a compiled gojq program.
 type Mapping struct {
-	src       string
-	code      *gojq.Code
-	vars      []string
-	stepLimit uint64
+	src         string
+	code        *gojq.Code
+	vars        []string
+	stepLimit   uint64
+	outputLimit int
 }
 
 // CompileMapping parses and validates a jq mapping. Banned builtin names are
@@ -35,6 +48,17 @@ type Mapping struct {
 // names and object literal keys are data and remain allowed (for example
 // .input and {env: .env}).
 func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapping, error) {
+	m := &Mapping{
+		src:         src,
+		vars:        append([]string(nil), varNames...),
+		stepLimit:   defaultStepLimit,
+		outputLimit: defaultOutputLimit,
+	}
+	for _, o := range opts {
+		if err := o(m); err != nil {
+			return nil, mappingCompileErr(src, err.Error())
+		}
+	}
 	for _, v := range varNames {
 		if v == "$ENV" {
 			return nil, mappingCompileErr(src, mappingReservedNameDetail("$ENV"))
@@ -50,26 +74,20 @@ func CompileMapping(src string, varNames []string, opts ...MappingOption) (*Mapp
 		}
 		return nil, mappingCompileErr(src, mappingReservedNameDetail(name))
 	}
-	code, err := gojq.Compile(query,
-		append([]gojq.CompilerOption{
-			gojq.WithVariables(varNames),
-			gojq.WithEnvironLoader(func() []string { return nil }),
-		}, blockedBuiltinCompilerOptions()...)...,
-	)
+	if err := newMappingRewriter(src, varNames).rewriteOutputLimit(query); err != nil {
+		return nil, mappingCompileErr(src, err.Error())
+	}
+	compilerOpts := []gojq.CompilerOption{
+		gojq.WithVariables(varNames),
+		gojq.WithEnvironLoader(func() []string { return nil }),
+	}
+	compilerOpts = append(compilerOpts, blockedBuiltinCompilerOptions()...)
+	compilerOpts = append(compilerOpts, outputLimitCompilerOptions(m.outputLimit)...)
+	code, err := gojq.Compile(query, compilerOpts...)
 	if err != nil {
 		return nil, mappingCompileErr(src, err.Error())
 	}
-	m := &Mapping{
-		src:       src,
-		code:      code,
-		vars:      append([]string(nil), varNames...),
-		stepLimit: defaultStepLimit,
-	}
-	for _, o := range opts {
-		if err := o(m); err != nil {
-			return nil, err
-		}
-	}
+	m.code = code
 	return m, nil
 }
 
@@ -98,10 +116,14 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 			break
 		}
 		if err, isErr := v.(error); isErr {
+			msg := err.Error()
+			if i := strings.Index(msg, "output over the output limit"); i >= 0 {
+				return nil, mappingEvalErr(msg[i:])
+			}
 			if ctx.limitExceeded() {
 				return nil, mappingEvalErr(fmt.Sprintf("step limit %d exceeded", m.stepLimit))
 			}
-			cause := mapGoJQCause(err.Error())
+			cause := mapGoJQCause(msg)
 			if cause == "" {
 				cause = "mapping evaluation failed"
 			}
@@ -109,6 +131,9 @@ func (m *Mapping) Eval(input any, vars map[string]any) (any, error) {
 		}
 		count++
 		if count == 1 {
+			if err := measureMappingValue(v, m.outputLimit); err != nil {
+				return nil, err
+			}
 			first, err = normalizeMappingOutput(v)
 			if err != nil {
 				return nil, mappingEvalErr("mapping evaluation failed")
@@ -171,6 +196,10 @@ func mapGoJQCause(msg string) string {
 	switch {
 	case strings.Contains(msg, "cannot be sorted"):
 		return "mapping produced more than one value"
+	case strings.Contains(msg, "output over the output limit"):
+		return "output over the output limit"
+	case strings.Contains(msg, "no JSON form"):
+		return "no JSON form"
 	case strings.Contains(msg, "division by zero"):
 		return "division by zero"
 	case strings.Contains(strings.ToLower(msg), "overflow"):
@@ -283,6 +312,12 @@ func scanBanned(query *gojq.Query) (string, bool) {
 }
 
 func mappingReservedNameDetail(name string) string {
+	if outputLimitReservedName(name) {
+		return fmt.Sprintf(
+			`reserved name %q names a mapping operator or output-limit function; mappings may not call or define it`,
+			name,
+		)
+	}
 	return fmt.Sprintf(
 		`reserved name %q names a clock, environment, or input builtin; mappings may not call or define it`,
 		name,
