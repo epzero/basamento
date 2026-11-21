@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-05 @level:system @profile:embedded
+@wp:WP-L1-05 @level:system @profile:embedded
 Feature: Inspecting the configuration with kit config validate
   `kit config validate` shows the effective configuration and where each
   setting came from, so a deployment can be checked before it starts.

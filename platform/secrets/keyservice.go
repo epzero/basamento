@@ -18,7 +18,7 @@ type KeyService interface {
 }
 
 func unwrapWithKeys(ctx context.Context, tenant string, ct []byte, id string, keys []KeyService) ([]byte, error) {
-	if err := ValidateTenant(tenant); err != nil {
+	if err := tenantStringOK(tenant); err != nil {
 		return nil, err
 	}
 	for _, ks := range keys {

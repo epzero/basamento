@@ -34,13 +34,30 @@
 // superstep; its edges are an unconditional fan-out. A map node evaluates its
 // spec's over expression to an array and runs the node named by its node field
 // once per element, carrying the element as the command input and the
-// one-based index as the attempt. The machine does not throttle map fan-out;
-// max_parallel is left to the host.
+// one-based index as the attempt, up to DefaultMaxFanout (10 000) items per
+// superstep; the host may lower the limit with WithMaxFanout but not raise it
+// above DefaultMaxFanout. max_parallel is
+// the host's throttle on how many map children run at once, not a cap on fan-out.
+// A map child must not carry a guard (the machine rejects it at New): guards
+// count routed nodes, but a map child is invoked once per element without
+// visiting the child node id.
+//
+// # Pure supersteps
+//
+// Inside one advance call the machine may run several command-free supersteps.
+// If that count exceeds a limit derived from the definition (and never below
+// DefaultMaxPureSupersteps, overridable with WithMaxPureSupersteps), the run
+// ends with budget_exceeded instead of hanging on a pure cycle whose only bound
+// is cost_mpts.
 //
 // # Guards
 //
 // Before a node runs its guard is checked. A guard While condition that does
 // not hold skips the node and ends its branch. A visit or cost bound that is
 // reached fails the run with code budget_exceeded (specs/glossary.md, "Repair
-// guard").
+// guard"). CostMpts is compared with Snapshot.Cost, the run's total settled
+// cost, when the node is about to start; the node does not start once cost has
+// reached the budget (cost >= cost_mpts), like max_visits after the last
+// allowed visit. Snapshot cost accumulates from CostMpts on node_completed and
+// node_failed events.
 package machine

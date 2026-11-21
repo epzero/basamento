@@ -9,35 +9,112 @@ permissions:
   contents: read
 
 jobs:
+  line:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - name: Go release line from go.mod
+        id: gover
+        run: |
+          line=$(sed -n 's/^go \([0-9]*\.[0-9]*\)\.[0-9]*$/\1/p' go.mod)
+          if [ -z "$line" ]; then
+            echo "no go release line in go.mod" >&2
+            exit 1
+          fi
+          echo "line=$line" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.gover.outputs.line }}
+          check-latest: true
+      - name: Install gate tools
+        run: |
+          make tools
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: govulncheck
+        run: |
+          set -e
+          roots="$(go tool gate module-roots)"
+          test -n "$roots"
+          for dir in $roots; do
+            (cd "$dir" && govulncheck ./...)
+          done
+
   flake-hunt:
     # Repeated runs look for nondeterminism; a flaky scenario is quarantined
     # with @quarantine @issue:<key> @until:<date> (docs/engineering/bdd-convention.md).
+    # The default go test package timeout (10m) is shorter than ten BDD runs under
+    # -race; the step sets -timeout 90m (the job still ends at GitHub's 6h limit).
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      GATE_STRICT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
-      - run: go test -race -count=10 ./...
+          go-version-file: go.mod
+      - name: Postgres bundle cache location and version
+        run: |
+          echo "BDD_POSTGRES_CACHE_DIR=$RUNNER_TEMP/embedded-postgres-cache" >> "$GITHUB_ENV"
+          echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
+
+      - name: Postgres bundle cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
+          key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prefetch Postgres bundles
+        run: make pg-prefetch
+
+      - run: go test -race -count=10 -timeout 90m ./...
 
   slow-lanes:
     # @slow scenarios; @live and @eval join once credentials and recordings exist.
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      GATE_STRICT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
-      - run: go test -count=1 ./internal/bdd/
+          go-version-file: go.mod
+      - name: Postgres bundle cache location and version
+        run: |
+          echo "BDD_POSTGRES_CACHE_DIR=$RUNNER_TEMP/embedded-postgres-cache" >> "$GITHUB_ENV"
+          echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
+
+      - name: Postgres bundle cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
+          key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          restore-keys: |
+            embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prefetch Postgres bundles
+        run: make pg-prefetch
+
+      - run: go test -count=1 -timeout 30m ./internal/bdd/
         env:
           BDD_TAGS: "@slow && ~@planned && ~@quarantine"
 
   release-readiness:
     # Reports P0 scenarios still awaiting human acceptance; informational at night.
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
-      - run: go tool gate release-check || true
+          go-version-file: go.mod
+      # Informational: pending P0 acceptances are expected; blocking signal is line. The reviewer lead reads the schedule via go tool gate nightly (docs/engineering/qa-gate.md, "Who reads the nightly").
+      - name: release-check
+        continue-on-error: true
+        run: go tool gate release-check

@@ -6,8 +6,9 @@
 // this package never imports package runtime (ADR-0011). This is what lets the same flow run on
 // every runtime with identical results (REQ-FLOW-*). See ADR-0003.
 //
-// Status: IR and compiler implemented (WP-L4-01); machine implemented in
-// flow/machine (WP-L4-02); host implemented in flow/host (WP-L4-04).
+// Status: IR, compiler and Go builder implemented (WP-L4-01, WP-L4-03); machine
+// implemented in flow/machine (WP-L4-02); host implemented in flow/host
+// (WP-L4-04).
 package flow
 
 import "encoding/json"
@@ -36,13 +37,14 @@ type Node struct {
 	// could not tell two nodes of the same kind apart (ADR-0011).
 	Name  string          `json:"-"`
 	Kind  string          `json:"kind"`          // set|task|model|agent|tool|map|parallel|subflow|gate|wait
-	In    string          `json:"in,omitempty"`  // CEL or jq mapping from state to node input
+	In    string          `json:"in,omitempty"`  // CEL or jq mapping from state to node input; empty means the run's input
 	Out   string          `json:"out,omitempty"` // state key receiving the node's update
 	Spec  json.RawMessage `json:"spec,omitempty"`
 	Guard *Guard          `json:"guard,omitempty"`
 }
 
-// Guard bounds cycles and spend. Every cycle must pass through a guarded node.
+// Guard bounds cycles and spend. A cycle needs a node on it whose guard carries
+// a positive MaxVisits or CostMpts; a While condition alone does not bound it.
 type Guard struct {
 	MaxVisits int    `json:"max_visits,omitempty"`
 	CostMpts  int64  `json:"cost_mpts,omitempty"`
@@ -62,6 +64,11 @@ type Event struct {
 	Node    string          `json:"node,omitempty"`
 	Attempt int             `json:"attempt,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// CostMpts is milli-points the completed node settled, set by the host from
+	// the model node's settlement (model-layer.md §4); only node_completed and
+	// node_failed may carry it. A node_failed accrues cost once, for the pending
+	// step it names.
+	CostMpts int64 `json:"cost_mpts,omitempty"`
 }
 
 // Command is returned by the Machine for the runtime to execute. Attempt is
@@ -104,7 +111,10 @@ type Step struct {
 // Implementations must be deterministic: the same definition, input and event
 // sequence always yield the same snapshots and commands, independent of the
 // order in which parallel nodes complete (updates merge in canonical node-id
-// order at superstep barriers).
+// order at superstep barriers). The snapshot passed to Apply is never modified;
+// on error the host keeps that snapshot unchanged. json.RawMessage fields in
+// snapshots, events and commands share backing arrays across return values;
+// callers must treat them as read-only.
 type Machine interface {
 	Start(input json.RawMessage) (Snapshot, []Command, error)
 	Apply(s Snapshot, ev Event) (Snapshot, []Command, error)

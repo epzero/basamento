@@ -211,3 +211,205 @@ nodes:
 		t.Fatalf("want duplicate-key error, got %v", err)
 	}
 }
+
+// A merge key is expanded by YAML after the duplicate check would see it, so a
+// key merged through "<<" could otherwise silently override a declared one.
+func TestDecodeRejectsYAMLMergeKey(t *testing.T) {
+	text := `
+name: x
+version: 1
+state:
+  schema: {type: object}
+nodes:
+  plan: &plan {kind: task}
+  copy:
+    <<: *plan
+    kind: tool
+edges:
+  - {from: START, to: plan}
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, `merge key "<<"`) || !strings.Contains(msg, "/nodes/copy") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestDecodeRejectsJSONMergeKey(t *testing.T) {
+	text := `{"name":"x","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"<<":{"kind":"task"}},
+		"edges":[{"from":"START","to":"<<"}]}`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, `merge key "<<"`) || !strings.Contains(msg, "/nodes") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+// The merge-key check must not reject anchors and aliases, which are how a
+// document reuses one node definition without merging keys into another.
+func TestDecodeAcceptsYAMLAlias(t *testing.T) {
+	text := `
+name: x
+version: 1
+state:
+  schema: {type: object}
+nodes:
+  plan: &p {kind: task}
+  copy: *p
+edges:
+  - {from: START, to: plan}
+  - {from: plan, to: copy}
+  - {from: copy, to: FAIL}
+`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Nodes) != 2 {
+		t.Fatalf("decoded %d nodes, want 2: %+v", len(f.Nodes), f.Nodes)
+	}
+	if f.Nodes["copy"].Kind != "task" {
+		t.Fatalf("alias decoded to %+v", f.Nodes["copy"])
+	}
+}
+
+func TestDecodeAcceptsFlowStyleYAMLMapping(t *testing.T) {
+	text := `{name: x, version: 1, state: {schema: {type: object, properties: {tests: {type: object}}}},
+		nodes: {plan: {kind: task}}, edges: [{from: START, to: plan}, {from: plan, to: FAIL}]}`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Name != "x" || f.Version != 1 || len(f.Nodes) != 1 || len(f.Edges) != 2 {
+		t.Fatalf("decoded %+v", f)
+	}
+}
+
+// A stream of more than one document is rejected in both formats: only the
+// first would be compiled and hashed, so a corrected definition appended after
+// a stale one would vanish.
+func TestDecodeRejectsASecondJSONDocument(t *testing.T) {
+	text := `{"name":"first","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"plan":{"kind":"task"}},"edges":[{"from":"START","to":"plan"}]}
+	{"name":"second","version":1,"state":{"schema":{"type":"object"}},
+		"nodes":{"plan":{"kind":"task"}},"edges":[{"from":"START","to":"plan"}]}`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, "more than one document") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestDecodeRejectsASecondYAMLDocument(t *testing.T) {
+	text := `
+name: first
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}]
+---
+name: second
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}]
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	if msg := err.Error(); !strings.Contains(msg, "more than one document") {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+// A single YAML document with a document start marker is still one document.
+func TestDecodeAcceptsOneDocumentWithAStartMarker(t *testing.T) {
+	text := `---
+name: x
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}, {from: plan, to: FAIL}]
+`
+	f, err := Decode([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Name != "x" || len(f.Nodes) != 1 {
+		t.Fatalf("decoded %+v", f)
+	}
+}
+
+// A trailing document-start marker leaves an empty document behind; it carries
+// no definition, so it is not a second one and the stream is drained to EOF.
+func TestDecodeAcceptsATrailingDocumentStartMarker(t *testing.T) {
+	for _, tail := range []string{"---", "---\n", "---\n---", "---\n---\n", "---\n# only a comment\n"} {
+		text := "name: x\nversion: 1\nstate: {schema: {type: object}}\n" +
+			"nodes: {plan: {kind: task}}\nedges: [{from: START, to: plan}, {from: plan, to: FAIL}]\n" + tail
+		f, err := Decode([]byte(text))
+		if err != nil {
+			t.Fatalf("trailing %q: %v", tail, err)
+		}
+		if f.Name != "x" || len(f.Nodes) != 1 {
+			t.Fatalf("trailing %q: decoded %+v", tail, f)
+		}
+	}
+}
+
+// A second document with content is still rejected, and so is one the YAML
+// parser cannot read: the first is a second definition, the other is a broken
+// stream, and the error says which.
+func TestDecodeRejectsAMalformedSecondDocument(t *testing.T) {
+	text := `
+name: first
+version: 1
+state: {schema: {type: object}}
+nodes: {plan: {kind: task}}
+edges: [{from: START, to: plan}, {from: plan, to: FAIL}]
+---
+name: [unclosed
+`
+	_, err := Decode([]byte(text))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s", core.CodeOf(err))
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "more than one document") || !strings.Contains(msg, "invalid YAML") {
+		t.Fatalf("message %q blames the document count, not the parse error", msg)
+	}
+}
+
+func TestDecodeRejectsNonObjectTopLevel(t *testing.T) {
+	for _, text := range []string{"null", `[{"name":"x"}]`, `"x"`, "42", "true"} {
+		_, err := Decode([]byte(text))
+		if err == nil {
+			t.Fatalf("%q: want error", text)
+		}
+		if core.CodeOf(err) != core.CodeInvalidArgument {
+			t.Fatalf("%q: code %s", text, core.CodeOf(err))
+		}
+	}
+}

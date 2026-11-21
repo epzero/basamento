@@ -40,7 +40,7 @@ func parseKeyset(b []byte) (*keyset.Handle, error) {
 }
 
 func wrapKeyset(ctx context.Context, ks KeyService, tenant string, h *keyset.Handle) (StoredKeyset, error) {
-	if err := ValidateTenant(tenant); err != nil {
+	if err := tenantStringOK(tenant); err != nil {
 		return StoredKeyset{}, err
 	}
 	plain, err := serializeKeyset(h)

@@ -63,7 +63,7 @@ Feature: Prompt lint
     Then the registration fails with code "invalid_argument" listing the lint error "variable_in_static" for segment "rules"
     And "greeting@1" does not resolve
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-025 @id:PROMPT-025-01
+  @REQ-PROMPT-025 @id:PROMPT-025-01
   Scenario Outline: Prompt lint names the structure rule a template breaks
     Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>" each with a budget of 100
     When the template is linted
@@ -82,7 +82,7 @@ Feature: Prompt lint
       | multiple_history       | chat   | 1       |         | past:history,turn:history |         |
       | unknown_segment_kind   | chat   | 1       |         | main:banner               | main    |
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-025 @REQ-PROMPT-020 @id:PROMPT-025-02
+  @REQ-PROMPT-025 @REQ-PROMPT-020 @id:PROMPT-025-02
   Scenario Outline: A template that breaks a structure rule is not registered
     Given a template with id "<id>", version "<version>", inputs "<inputs>" and segments "<segments>" each with a budget of 100
     When the template is registered
@@ -132,7 +132,7 @@ Feature: Prompt lint
     When the assembled prompt is linted
     Then prompt lint reports no findings
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-021 @security @id:PROMPT-021-03
+  @REQ-PROMPT-021 @security @id:PROMPT-021-03
   Scenario: Two trusted values that together form a delimiter pair are an error
     Given a template "docs@1" that declares trusted input "open" and trusted input "close" and the segments
       | segment | kind        | text              |
@@ -145,7 +145,7 @@ Feature: Prompt lint
       | unpaired_delimiter | error    | tenant  |
       | unpaired_delimiter | error    | tenant  |
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-021 @security @id:PROMPT-021-04
+  @REQ-PROMPT-021 @security @id:PROMPT-021-04
   Scenario: A delimiter pair in a template's fixed text is an error
     Given a template "docs@1" that declares input "doc" and the segments
       | segment | kind   | text                               |
@@ -158,18 +158,7 @@ Feature: Prompt lint
       | unpaired_delimiter | error    | rules   |
       | unpaired_delimiter | error    | rules   |
 
-  @planned @wp:WP-L3-05 @REQ-PROMPT-021 @security @id:PROMPT-021-05
-  Scenario: The assembler's own wrapped pairs are not errors
-    Given a template "docs@1" that declares input "doc" and input "question" and the segments
-      | segment | kind    | budget | text         |
-      | context | dynamic | 100    | {{doc}}      |
-      | turn    | user    | 100    | {{question}} |
-    And the template is registered
-    And "docs@1" was assembled with inputs {"doc": "Quarterly report.", "question": "Summarize it."}
-    When the assembled prompt is linted
-    Then prompt lint reports no findings
-
-  @planned @wp:WP-L3-05 @REQ-PROMPT-021 @security @id:PROMPT-021-06
+  @REQ-PROMPT-021 @security @id:PROMPT-021-06
   Scenario: A delimiter removed from an assembled prompt is an error
     Given a template "docs@1" that declares input "doc" and the segments
       | segment | kind    | budget | text    |

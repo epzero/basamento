@@ -4,20 +4,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"sort"
-	"time"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/flow"
+	"github.com/epzero/basamento/flow/ir"
 	"github.com/epzero/basamento/flow/machine"
 	"github.com/epzero/basamento/runtime"
 )
 
+// NodeResult is what a NodeHandler returns for one node: its output and the cost
+// the node settled, in milli-points (REQ-FLOW-049). Step, gate, wait, subflow and
+// emit nodes settle no cost through the host today; CostMpts stays zero for them.
+// A negative CostMpts is a programming error of the handler: the machine rejects
+// the event and the run fails with code invalid_argument.
+type NodeResult struct {
+	Output   json.RawMessage // the node's output update
+	CostMpts int64           // settled cost; non-negative; zero when the node cost nothing
+}
+
 // NodeHandler is the flow code of one effectful node kind (ADR-0011). It runs
 // deterministic flow code; its own side effects are DurableContext calls,
 // usually Step. The host calls it directly, one command at a time.
-type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (json.RawMessage, error)
+type NodeHandler func(dc runtime.DurableContext, node flow.Node, input json.RawMessage) (NodeResult, error)
 
 // DefinitionCatalog resolves a flow reference to its compiled IR (WP-L4-01).
 // Loading is not a durable step: the host loads once at the start of a run and
@@ -31,22 +41,34 @@ type DefinitionCatalog interface {
 // read-only after the composition root has registered its handlers, so one
 // Host may serve concurrent runs.
 type Host struct {
-	catalog  DefinitionCatalog
-	handlers map[string]NodeHandler
+	catalog     DefinitionCatalog
+	handlers    map[string]NodeHandler
+	machineOpts []machine.Option
 }
 
 // New returns a host over catalog. Register every node handler before the host
 // is registered with a runtime.
-func New(catalog DefinitionCatalog) *Host {
-	return &Host{catalog: catalog, handlers: map[string]NodeHandler{}}
+func New(catalog DefinitionCatalog, opts ...Option) *Host {
+	h := &Host{catalog: catalog, handlers: map[string]NodeHandler{}}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // RegisterHandler registers handler for a node kind. Calling it again for the
 // same kind replaces the handler; the composition root does it before the host
-// is used. The host itself imports no handler (ADR-0011).
+// is used. A nil handler removes the registration for kind. RegisterHandler is
+// not safe to call concurrently with Run: the handler table is a plain map
+// written here and read during runs once registration has finished. The host
+// itself imports no handler (ADR-0011).
 func (h *Host) RegisterHandler(kind string, handler NodeHandler) {
 	if h.handlers == nil {
 		h.handlers = map[string]NodeHandler{}
+	}
+	if handler == nil {
+		delete(h.handlers, kind)
+		return
 	}
 	h.handlers[kind] = handler
 }
@@ -57,7 +79,11 @@ func (h *Host) RegisterHandler(kind string, handler NodeHandler) {
 //
 // The host keeps no state between calls: the snapshot it carries is the
 // machine's, and every durable result comes from dc, which is replay-safe
-// (REQ-FLOW-037, REQ-FLOW-038).
+// (REQ-FLOW-037, REQ-FLOW-038). After loading, a non-empty ref.Hash must
+// match ir.Hash of the definition. Idempotency keys include the superstep
+// sequence. When several futures in one superstep fail, the first one dc.Select
+// reports ends the run; other futures are not awaited. A failed node handler
+// ends the superstep: later handlers in the batch do not run.
 func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.RawMessage) (json.RawMessage, error) {
 	if dc == nil {
 		return nil, invalid("flow host: nil durable context", nil)
@@ -72,10 +98,20 @@ func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.Ra
 	if def == nil {
 		return nil, core.NewError(core.CodeNotFound, fmt.Sprintf("flow %q: definition not found", ref.Name), map[string]any{"flow": ref.Name, "hash": ref.Hash})
 	}
+	if ref.Hash != "" {
+		loaded, err := ir.Hash(def)
+		if err != nil {
+			return nil, err
+		}
+		if loaded != ref.Hash {
+			return nil, core.NewError(core.CodeInternal, "flow host: loaded definition does not match the pinned hash",
+				map[string]any{"flow": ref.Name, "pinned_hash": ref.Hash, "loaded_hash": loaded})
+		}
+	}
 	if err := h.checkHandlers(def); err != nil {
 		return nil, err
 	}
-	m, err := machine.New(def)
+	m, err := machine.New(def, h.machineOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +122,9 @@ func (h *Host) Run(dc runtime.DurableContext, ref runtime.FlowRef, input json.Ra
 	for {
 		if len(commands) == 0 {
 			return nil, core.NewError(core.CodeInternal, "flow host: machine returned no command", map[string]any{"flow": def.Name})
+		}
+		if err := runContextError(dc.Context()); err != nil {
+			return nil, err
 		}
 		outcome, err := h.superstep(dc, m, def, ref, &snapshot, commands)
 		if err != nil {
@@ -187,7 +226,10 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				return nil, nil, nil, err
 			}
 		case "start_timer":
-			node := def.Nodes[command.Node]
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			duration, err := durationOf(node, command.Node)
 			if err != nil {
 				return nil, nil, nil, err
@@ -198,7 +240,10 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				event:   "timer_fired",
 			})
 		case "await_gate":
-			node := def.Nodes[command.Node]
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			spec, err := gateSpecOf(node, command.Node)
 			if err != nil {
 				return nil, nil, nil, err
@@ -209,13 +254,13 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 				event:   "gate_resolved",
 			})
 		case "run_node":
-			node, ok := def.Nodes[command.Node]
-			if !ok {
-				return nil, nil, nil, invalid(fmt.Sprintf("flow host: node %q does not exist", command.Node), map[string]any{"node": command.Node})
+			node, err := lookupNode(def, command.Node)
+			if err != nil {
+				return nil, nil, nil, err
 			}
 			switch node.Kind {
 			case "tool", "task", "subflow":
-				call, err := h.runNode(dc, ref, command, node)
+				call, err := h.runNode(dc, def, ref, snapshot, command, node)
 				if err != nil {
 					return nil, nil, nil, err
 				}
@@ -238,7 +283,13 @@ func (h *Host) startBatch(dc runtime.DurableContext, def *flow.IR, ref runtime.F
 func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []flow.Command) ([]flow.Event, error) {
 	events := make([]flow.Event, 0, len(commands))
 	for _, command := range commands {
-		node := def.Nodes[command.Node]
+		if err := runContextError(dc.Context()); err != nil {
+			return nil, err
+		}
+		node, err := lookupNode(def, command.Node)
+		if err != nil {
+			return nil, err
+		}
 		handler, ok := h.handlers[node.Kind]
 		if !ok {
 			return nil, core.NewError(core.CodeUnsupported,
@@ -246,16 +297,17 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 				map[string]any{"node": command.Node, "kind": node.Kind})
 		}
 		node.Name = command.Node
-		output, err := handler(dc, node, command.Input)
+		result, err := handler(dc, node, command.Input)
 		if err != nil {
-			events = append(events, failedEvent(command.Node, command.Attempt, err))
-			continue
+			events = append(events, failedEvent(command.Node, command.Attempt, err, result.CostMpts))
+			return events, nil
 		}
 		events = append(events, flow.Event{
-			Type:    "node_completed",
-			Node:    command.Node,
-			Attempt: command.Attempt,
-			Payload: output,
+			Type:     "node_completed",
+			Node:     command.Node,
+			Attempt:  command.Attempt,
+			Payload:  result.Output,
+			CostMpts: result.CostMpts,
 		})
 	}
 	return events, nil
@@ -266,6 +318,9 @@ func (h *Host) runHandlers(dc runtime.DurableContext, def *flow.IR, commands []f
 // (REQ-FLOW-035).
 func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *flow.Snapshot, pending []pendingCall) (outcome, error) {
 	for len(pending) > 0 {
+		if err := runContextError(dc.Context()); err != nil {
+			return outcome{}, err
+		}
 		futures := make([]runtime.Future, len(pending))
 		for i := range pending {
 			futures[i] = pending[i].future
@@ -287,16 +342,12 @@ func (h *Host) await(dc runtime.DurableContext, m *machine.Machine, snapshot *fl
 			Node:    call.command.Node,
 			Attempt: call.command.Attempt,
 		}
-		if call.event == "node_completed" {
-			if err != nil {
-				event = failedEvent(call.command.Node, call.command.Attempt, err)
-			} else {
-				event.Payload = payload
-			}
-		} else if err != nil {
-			// A timer or gate that fails (timeout, cancellation) is a failed
-			// node like any other.
-			event = failedEvent(call.command.Node, call.command.Attempt, err)
+		if err != nil {
+			// Any failed future (a step, a child run, or a timer or gate that
+			// times out or is cancelled) is a failed node (REQ-FLOW-035).
+			event = failedEvent(call.command.Node, call.command.Attempt, err, 0)
+		} else {
+			event.Payload = payload
 		}
 		next, end, err := feedEvents(m, snapshot, []flow.Event{event})
 		if err != nil {
@@ -336,7 +387,7 @@ func feedEvents(m *machine.Machine, snapshot *flow.Snapshot, events []flow.Event
 // runNode starts the Future-returning durable call for a run_node command: a
 // step for a tool or task node, a child run for a subflow node. Handler kinds
 // are run by superstep after the batch has started.
-func (h *Host) runNode(dc runtime.DurableContext, ref runtime.FlowRef, command flow.Command, node flow.Node) (pendingCall, error) {
+func (h *Host) runNode(dc runtime.DurableContext, def *flow.IR, ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command, node flow.Node) (pendingCall, error) {
 	switch node.Kind {
 	case "tool", "task":
 		name, err := nameOf(node, command.Node)
@@ -346,7 +397,7 @@ func (h *Host) runNode(dc runtime.DurableContext, ref runtime.FlowRef, command f
 		return pendingCall{
 			command: command,
 			future: dc.Step(name, jsonArgument(command.Input), runtime.StepOptions{
-				IdempotencyKey: idempotencyKey(ref, command),
+				IdempotencyKey: idempotencyKey(def, ref, snapshot, command),
 			}),
 			event: "node_completed",
 		}, nil
@@ -357,8 +408,10 @@ func (h *Host) runNode(dc runtime.DurableContext, ref runtime.FlowRef, command f
 		}
 		return pendingCall{
 			command: command,
-			future:  dc.Child(child, jsonArgument(command.Input), runtime.ChildOptions{ID: dc.NewID("subflow"), ParentClose: "terminate"}),
-			event:   "node_completed",
+			// REQ-RT-015: terminate — only this run needs the child output; a still-running
+			// child becomes terminated when the parent closes.
+			future: dc.Child(child, jsonArgument(command.Input), runtime.ChildOptions{ID: dc.NewID("subflow"), ParentClose: "terminate"}),
+			event:  "node_completed",
 		}, nil
 	default:
 		return pendingCall{}, core.NewError(core.CodeUnsupported,
@@ -388,12 +441,27 @@ func apply(m *machine.Machine, snapshot *flow.Snapshot, event flow.Event) ([]flo
 	}
 }
 
-func failedEvent(node string, attempt int, err error) flow.Event {
+func failedEvent(node string, attempt int, err error, costMpts int64) flow.Event {
+	code, message := nodeFailurePayload(node, err)
 	payload, _ := json.Marshal(map[string]any{
-		"code":    string(core.CodeOf(err)),
-		"message": err.Error(),
+		"code":    string(code),
+		"message": message,
 	})
-	return flow.Event{Type: "node_failed", Node: node, Attempt: attempt, Payload: payload}
+	return flow.Event{
+		Type:     "node_failed",
+		Node:     node,
+		Attempt:  attempt,
+		Payload:  payload,
+		CostMpts: costMpts,
+	}
+}
+
+func nodeFailurePayload(node string, err error) (core.Code, string) {
+	var pe *core.Error
+	if errors.As(err, &pe) {
+		return pe.Code, pe.Message
+	}
+	return core.CodeInternal, fmt.Sprintf(`flow: node "%s" failed`, node)
 }
 
 // commandError turns the machine's fail payload into the run's platform error.
@@ -423,115 +491,10 @@ func emitType(command flow.Command) string {
 	return "flow.event"
 }
 
-func idempotencyKey(ref runtime.FlowRef, command flow.Command) string {
-	return fmt.Sprintf("%s@%s/%s#%d", ref.Name, ref.Hash, command.Node, command.Attempt)
-}
-
-// jsonArgument passes an empty input as nil so a runtime stores no payload for
-// a node that has none.
-func jsonArgument(raw json.RawMessage) any {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil
+func idempotencyKey(def *flow.IR, ref runtime.FlowRef, snapshot *flow.Snapshot, command flow.Command) string {
+	var seq int64
+	if snapshot != nil {
+		seq = snapshot.Seq
 	}
-	return raw
-}
-
-func nameOf(node flow.Node, id string) (string, error) {
-	var spec map[string]json.RawMessage
-	if len(bytes.TrimSpace(node.Spec)) > 0 {
-		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return "", invalid(fmt.Sprintf("flow: node %q: invalid %s spec: %s", id, node.Kind, err.Error()), map[string]any{"node": id})
-		}
-	}
-	name, ok := stringAt(spec, node.Kind)
-	if !ok || name == "" {
-		return "", invalid(fmt.Sprintf("flow: node %q: %s spec has no %q name", id, node.Kind, node.Kind), map[string]any{"node": id})
-	}
-	return name, nil
-}
-
-func durationOf(node flow.Node, id string) (time.Duration, error) {
-	var spec map[string]json.RawMessage
-	if len(bytes.TrimSpace(node.Spec)) > 0 {
-		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return 0, invalid(fmt.Sprintf("flow: node %q: invalid wait spec: %s", id, err.Error()), map[string]any{"node": id})
-		}
-	}
-	text, ok := stringAt(spec, "duration")
-	if !ok || text == "" {
-		return 0, invalid(fmt.Sprintf("flow: node %q: wait spec has no duration", id), map[string]any{"node": id})
-	}
-	duration, err := time.ParseDuration(text)
-	if err != nil {
-		return 0, invalid(fmt.Sprintf("flow: node %q: duration %q: %s", id, text, err.Error()), map[string]any{"node": id})
-	}
-	return duration, nil
-}
-
-func gateSpecOf(node flow.Node, id string) (runtime.GateSpec, error) {
-	var spec struct {
-		Schema   json.RawMessage `json:"schema"`
-		AcceptIf string          `json:"accept_if"`
-		Timeout  string          `json:"timeout"`
-	}
-	if len(bytes.TrimSpace(node.Spec)) > 0 {
-		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: invalid gate spec: %s", id, err.Error()), map[string]any{"node": id})
-		}
-	}
-	var timeout time.Duration
-	if spec.Timeout != "" {
-		parsed, err := time.ParseDuration(spec.Timeout)
-		if err != nil {
-			return runtime.GateSpec{}, invalid(fmt.Sprintf("flow: node %q: timeout %q: %s", id, spec.Timeout, err.Error()), map[string]any{"node": id})
-		}
-		timeout = parsed
-	}
-	return runtime.GateSpec{
-		Name:     id,
-		Schema:   spec.Schema,
-		AcceptIf: spec.AcceptIf,
-		Timeout:  timeout,
-	}, nil
-}
-
-func subflowOf(node flow.Node, id string) (runtime.FlowRef, error) {
-	var spec struct {
-		Flow string `json:"flow"`
-		Hash string `json:"hash"`
-	}
-	if len(bytes.TrimSpace(node.Spec)) > 0 {
-		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			return runtime.FlowRef{}, invalid(fmt.Sprintf("flow: node %q: invalid subflow spec: %s", id, err.Error()), map[string]any{"node": id})
-		}
-	}
-	if spec.Flow == "" {
-		return runtime.FlowRef{}, invalid(fmt.Sprintf("flow: node %q: subflow spec has no flow name", id), map[string]any{"node": id})
-	}
-	return runtime.FlowRef{Name: spec.Flow, Hash: spec.Hash}, nil
-}
-
-func stringAt(spec map[string]json.RawMessage, key string) (string, bool) {
-	raw, ok := spec[key]
-	if !ok {
-		return "", false
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", false
-	}
-	return value, true
-}
-
-func sortedNodeIDs(def *flow.IR) []string {
-	ids := make([]string, 0, len(def.Nodes))
-	for id := range def.Nodes {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func invalid(message string, details map[string]any) *core.Error {
-	return core.NewError(core.CodeInvalidArgument, message, details)
+	return fmt.Sprintf("%s@%s/%s#%d@%d", def.Name, ref.Hash, command.Node, command.Attempt, seq)
 }

@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,14 +94,48 @@ var issueKey = regexp.MustCompile(`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*-\d+$`)
 
 const sessionFile = "basamento-agent.json"
 
-func git(dir string, args ...string) (string, error) {
+// gitBytes runs git in dir and returns raw combined output.
+func gitBytes(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+func git(dir string, args ...string) (string, error) {
+	out, err := gitBytes(dir, args...)
+	if err != nil {
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// gitPathsUnquoted lists paths from git with C-style quoting disabled and NUL delimiters.
+func gitPathsUnquoted(dir string, args ...string) ([]string, error) {
+	prefix := []string{"-c", "core.quotePath=false"}
+	out, err := gitBytes(dir, append(prefix, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	return splitGitNUL(out), nil
+}
+
+func splitGitNUL(out []byte) []string {
+	if len(out) == 0 {
+		return nil
+	}
+	parts := bytes.Split(out, []byte{0})
+	var paths []string
+	for _, p := range parts {
+		if len(p) == 0 {
+			continue
+		}
+		paths = append(paths, string(p))
+	}
+	return paths
 }
 
 func sessionPath(dir string) (string, error) {
@@ -131,6 +166,9 @@ func inLinkedWorktree(dir string) (bool, error) {
 var acceptedBranchName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 func branchNameError(branch string) error {
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("branch %q is not an accepted name: it begins with '-': use letters, digits, - and _ only; no spaces, /, .., leading -, :, refspecs, HEAD, or .lock", branch)
+	}
 	return fmt.Errorf("branch %q is not an accepted name: use letters, digits, - and _ only; no spaces, /, .., leading -, :, refspecs, HEAD, or .lock", branch)
 }
 
@@ -247,7 +285,7 @@ func reviewDetachSHA(dir, branch string) (string, error) {
 		return "", err
 	}
 	if onOrigin {
-		if _, err := git(dir, "fetch", "origin", originFetchRefspec(branch)); err != nil {
+		if _, err := gitRemote(dir, "fetch", "origin", originFetchRefspec(branch)); err != nil {
 			return "", err
 		}
 		return git(dir, "rev-parse", "--verify", remoteBranchRef(branch))
@@ -256,13 +294,13 @@ func reviewDetachSHA(dir, branch string) (string, error) {
 }
 
 // originHasBranch reports whether refs/heads/<branch> exists on origin.
-// Exit code 2 from ls-remote means no such ref; other failures are reachability errors.
+// Exit code 2 from ls-remote means no such ref; other failures are reachability
+// errors. The call is bounded like every other remote call, and the *exec.ExitError
+// survives the wrapping so the exit code stays observable.
 func originHasBranch(dir, branch string) (bool, error) {
-	cmd := exec.Command("git", "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/"+branch)
-	cmd.Dir = dir
-	err := cmd.Run()
+	out, err := gitRemote(dir, "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/"+branch)
 	if err == nil {
-		return true, nil
+		return out != "", nil
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == 2 {
@@ -298,7 +336,7 @@ func fastForwardBranch(dir, branch string) error {
 		}
 		return fmt.Errorf("worktree must be on branch %s to fast-forward (currently on %s); run git checkout %s in that worktree, then run gate agent new again", branch, cur, branch)
 	}
-	if _, err := git(dir, "fetch", "origin", originFetchRefspec(branch)); err != nil {
+	if _, err := gitRemote(dir, "fetch", "origin", originFetchRefspec(branch)); err != nil {
 		return err
 	}
 	head, err := git(dir, "rev-parse", "HEAD")
@@ -368,6 +406,12 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 			return Session{}, fmt.Errorf("parent: %w", err)
 		}
 	}
+	// Neither value may reach git as an option. validateBranchName rejects a
+	// leading dash too; a base ref is resolved to an existing ref before a
+	// worktree is created from it.
+	if err := checkRefNotOption("base ref", r.Base); err != nil {
+		return Session{}, err
+	}
 	if r.Branch != "" {
 		if err := validateBranchName(r.Branch); err != nil {
 			return Session{}, err
@@ -376,6 +420,15 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Session{}, err
+	}
+	if r.Issue != "" {
+		// Two calls for one issue would otherwise both see no worktree and
+		// create one, or overwrite each other's hand-off.
+		unlock, err := acquireIssueLock(top, r.Issue)
+		if err != nil {
+			return Session{}, err
+		}
+		defer unlock()
 	}
 	s := Session{Identity: id.String(), Parent: r.Parent, Issue: r.Issue, Worktree: top, Created: time.Now().UTC().Format(time.RFC3339)}
 	linked, err := inLinkedWorktree(top)
@@ -429,6 +482,9 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 		}
 		s.Branch = strings.TrimPrefix(ref, headPrefix)
 	default:
+		// resolveBaseRef checks the name (including a leading dash) and that
+		// the ref exists; checkBaseRef is for the review and redgreen bases,
+		// which may also be commit SHAs.
 		prefix := r.Issue
 		if prefix == "" {
 			prefix = id.Role
@@ -458,7 +514,7 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		if !onOrigin {
 			return Session{}, fmt.Errorf("branch %q is not on origin yet; push it from the clone that started it, then run gate agent new -branch %s again", branch, branch)
 		}
-		if _, err := git(top, "fetch", "origin", originFetchRefspec(branch)); err != nil {
+		if _, err := gitRemote(top, "fetch", "origin", originFetchRefspec(branch)); err != nil {
 			return Session{}, err
 		}
 		if _, err := git(top, "branch", "-f", branch, remoteBranchRef(branch)); err != nil {
@@ -582,7 +638,46 @@ func writeSession(s Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, append(b, '\n'), 0o644)
+	return writeFileAtomic(p, append(b, '\n'))
+}
+
+// writeFileAtomic replaces path with data through a file in the same
+// directory, so a crash leaves either the old contents or the new ones, never
+// a truncated file.
+func writeFileAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }() // a no-op once the rename succeeded
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	// CreateTemp already made the file 0600 and it stays that way: a chmod to
+	// 0644 would widen it under a restrictive umask. The hand-off holds paths
+	// and notes, not secrets, but it is only ever read by this user.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// The rename itself must reach disk, or a crash can lose the new name.
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 func readSession(dir string) (Session, error) {

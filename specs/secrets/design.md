@@ -89,19 +89,29 @@ done with the master key, and the keeper's own code says why it failed.
 | Context cancelled | `cancelled` | `cancelled` |
 | Deadline exceeded | `timeout`, retryable | `timeout`, retryable |
 | `InvalidArgument`, `FailedPrecondition` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `keyset of the tenant cannot be wrapped`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
-| `PermissionDenied`, `Unauthenticated`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
+| `PermissionDenied`, `NotFound`, `Unimplemented`, `AlreadyExists` | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Any other operation: `internal`, `key service refused the request`. | Same. |
 | Any other code | `unavailable`, retryable, the message is the scheme only | Unwrapping a keyset: `internal`, `keyset of the tenant cannot be unwrapped`. Wrapping a keyset: `internal`, `key service refused the request`. Encrypting a value: `internal`, `key service refused the request`. Decrypting a value: `invalid_argument`, `value cannot be decrypted`. |
 
 A cloud keeper that cannot be reached therefore fails a value decrypt with
 `unavailable`, retryable, never with `invalid_argument`. `localsecrets` holds
 the key in the process and has no unreachable state, so none of its failures
-is `unavailable`. `Unauthenticated` sits with `PermissionDenied`: expired
-credentials are a configuration fault, not an outage, so the failure is
-`internal` and not retryable. Opening a cloud key service URL goes through the
-same classification: a cancelled context or an exceeded deadline keeps
-`cancelled` or `timeout`, an outage keeps `unavailable`, and any other failure
-is a configuration error and becomes `invalid_argument` with `invalid key
-service URL for scheme "<scheme>"`.
+is `unavailable`. The table names only codes `gocloud.dev/gcerrors` has: there
+is no `Unauthenticated` code in it, and no keeper returns one, so a credentials
+failure is not a class of its own. An access-denied answer from the Google KMS
+API arrives as `PermissionDenied` and keeps its row; the AWS driver maps only a
+disabled key and an invalid grant token to `PermissionDenied`, while its
+access-denied answer, `AccessDeniedException`, is not in the driver's table and
+so arrives as `Unknown` and is retried as an outage like a credentials failure.
+A credentials failure the driver instead reports as a plain error — no
+credentials at all, or an expired session token the SDK cannot refresh — is
+classified `Unknown` and so falls under "any other code": a cloud keeper treats
+it as a retryable `unavailable` whose message is the scheme only. It is not a
+configuration fault and is not reported as `internal`. Opening a cloud key
+service URL uses its own one-off classification: a cancelled context or an
+exceeded deadline keeps `cancelled` or `timeout`, an outage keeps
+`unavailable`, and any other failure of the open itself is a configuration
+error — nothing has served a request yet — and becomes
+`invalid_argument` with `invalid key service URL for scheme "<scheme>"`.
 
 ### 2.3 The keyset cache and what it costs
 
@@ -151,17 +161,19 @@ service URL for scheme "<scheme>"`.
   changing under it fails it with `conflict`, retryable; neither writes a
   partial record. A completed rotation clears the codec's cache, so the next
   encode or decode of each tenant loads the rewrapped record.
+- Master-key rotation retires replaced master keys without closing them;
+  `Codec.Close` closes the ring and every retired key once. Deferred close
+  lets calls that hold a snapshot of the ring finish. `Close` must not run
+  concurrently with `Encode`, `Decode`, `RotateMasterKey` or `RotateDataKey`
+  (stop those callers first); if it does, nothing is closed twice and no key
+  leaks, but the racing call may fail with an error from the closed key.
 
 ### 2.5 Tenant ids
 
-- Every tenant id is checked against the grammar of REQ-CORE-005 by
-  `ValidateTenant`: non-empty, at most 128 bytes, valid UTF-8, no control
-  characters from U+0000 to U+001F and U+007F, not `.` or `..`, no `/` or
-  `\`, and no leading or trailing Unicode white space. The file store, the
-  keyset framing and the codec's context lookup all call it.
-- The local check is interim: `core.TenantFrom` enforces the same grammar, and
-  the package will rely on it and drop the copy. Until then `ValidateTenant`
-  is a copy of the rule and changes with it.
+- Every tenant id satisfies REQ-CORE-005 and is checked only by
+  `core.TenantFrom`. The codec's context lookup calls it directly; the file
+  store and keyset framing, which receive the id as a string, call it through
+  one helper (`tenantStringOK`). The package keeps no copy of the grammar.
 
 ## 3. Encoded payload
 
@@ -210,8 +222,8 @@ requests per codec and in total, and can delete a master key. The seeded random
 helper the scenarios use for deterministic payloads and keys lives beside it in
 `internal/bdd`; no production code path accepts a seeded random source. Unit
 tests in `platform/secrets` use fakes defined in their own `_test.go` files.
-`core/coretest` remains the only package listed as test-only in
-`layering.yaml` and belongs to another work package, so this WP adds none.
+Packages listed in `layering.yaml` `test_only` belong to other work packages;
+this WP adds none.
 No check exercises the live keepers yet; the gate uses `localsecrets` and the
 simulator.
 

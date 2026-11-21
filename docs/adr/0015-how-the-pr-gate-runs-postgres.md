@@ -1,6 +1,9 @@
 # ADR-0015 — How the PR gate runs Postgres
 
-**Status:** accepted · **Date:** 2026-11-19
+**Status:** accepted · **Date:** 2026-11-19 · **Amended 2026-11-21:** G3
+counts one embedded server per `TestFeatures` run, not per `go test` process,
+since `TestFeatures` resets Postgres at its start (EP0-154); the Decision,
+Consequences and Cost wording below is read that way.
 
 ## Context
 
@@ -80,7 +83,7 @@ embedded fallback when the variable is empty, and strict vs skip behaviour
 
 | Rule | Detail |
 | --- | --- |
-| **G3** | One embedded server (or one URL) per **`go test` process** of **`internal/bdd`** inside `go test -race ./...`. |
+| **G3** | One embedded server (or one URL) per **`TestFeatures` run** of **`internal/bdd`** inside `go test -race ./...`; a `go test -count=N` run repeats it N times, each repetition starting its own embedded server. |
 | **G4** | `gate redgreen` runs `go test ./internal/bdd/ -run TestFeatures` **once per newly activated scenario** in a detached base worktree (`internal/gate/redgreen.go`): each is a new process and may start embedded again. |
 | **Per scenario** | One **fresh database** per scenario, as `specs/sql/design.md` §5 requires. |
 | **Driver surface** | The conformance driver depends only on a **server URL**; the supplier is replaceable. |
@@ -142,11 +145,11 @@ Loopback bind; superuser may create databases.
 | **Skip and warn only in CI** | Contradicts `GATE_STRICT=1`. |
 | **Our own download script** | Rebuilds manifests, cache, supervisor; same outcome, more maintenance. |
 | **Vendored Postgres in git** | Large binaries, manual security updates. |
-| **embedded-postgres without this design** | v2 checksum-pinned bundles and multi-OS CI reduce platform risk; first fetch still needs network; **startup cost per `go test` process** remains (G3 one start, G4 one per activated scenario). Young module (v2.0.1); URL/container fallback stays. |
+| **embedded-postgres without this design** | v2 checksum-pinned bundles and multi-OS CI reduce platform risk; first fetch still needs network; **startup cost per `TestFeatures` run** remains (G3 one start per run, G4 one per activated scenario). Young module (v2.0.1); URL/container fallback stays. |
 
 ## Consequences
 
-**Cost.** Test-only dependency in root `go.mod`. Prefetch downloads bundles and fills cache; G3 pays one embedded start per `internal/bdd` process, G4 adds one per activated scenario. Disk under the cache directory.
+**Cost.** Test-only dependency in root `go.mod`. Prefetch downloads bundles and fills cache; G3 pays one embedded start per `TestFeatures` run in `internal/bdd`, G4 adds one per activated scenario. Disk under the cache directory.
 
 **Risks.** v2 is recent with a small maintainer set. Prefetch depends on `theseus-rs` release availability unless cache hits.
 
@@ -161,7 +164,7 @@ Loopback bind; superuser may create databases.
 | `go-licenses` accepts the library and tool dependency; bundle licences (PostgreSQL and contents) are recorded in `docs/engineering/qa-gate.md` and covered by owner approval of the implementation | Licence block; fallback URL + service container in CI. |
 | `govulncheck` and `gate layering` stay green | Fix placement; fallback isolate bootstrap in test-only package. |
 | `make pg-prefetch` + cache key keep the BDD step offline under strict; retries handle 429/5xx | Set `BDD_POSTGRES_URL` to a service container in the workflow. |
-| Wall-clock of embedded starts fits job limits (G3 + G4 process counts above) | Tune sharing; worst case container-only CI. |
+| Wall-clock of embedded starts fits job limits (G3 `TestFeatures` run counts and G4 process counts above) | Tune sharing; worst case container-only CI. |
 | Postgres **16.15.1** passes conformance (advisory locks, SQLSTATE, per-scenario `CREATE DATABASE`) | Bump library or use external 16. |
 | Unavailable and strict rules behave as written | Do not merge silent CI skips. |
 

@@ -35,10 +35,19 @@ WP-L6-01 depends on WP-L1-01 (SQL store), WP-L1-03 (Bus and KV) and WP-L5-01
 
 ### Subject
 
-One subject per run, `run.<run_id>.events`, matching `specs/bus` (where the
-bus delivers exact subjects without wildcards and orders messages per
-subject) and the two-stream layout in `docs/architecture/streaming.md` §2;
-the event type travels in the envelope's `type` field (REQ-STRM-024). The
+One subject per tenant and run, `run.<hex(tenant)>.<run_id>.events`, where
+`<hex(tenant)>` is the hexadecimal encoding of the tenant id's bytes (tenant
+"acme" → `61636d65`, so run "r1" of "acme" → `run.61636d65.r1.events`). The
+tenant token is needed because a run id is unique only within a tenant
+(REQ-RT-046): it keeps same-named runs of different tenants (e.g. acme/r1
+and globex/r1) on different subjects. This still matches `specs/bus` (exact
+subjects, per-subject ordering) and the two-stream layout in
+`docs/architecture/streaming.md` §2; the event type stays in the envelope's
+`type` field (REQ-STRM-024). Because the subject is an internal relay↔bus
+detail and not caller-observable, tenant isolation is pinned at unit level:
+`stream/eventlog.RunSubject(tenant, runID)` builds the subject, and the relay
+unit test asserts that acme/r1 and globex/r1 publish to different subjects
+(implementation on EP0-32-79ed63, commit 2395464). The
 bus sequence (`Message.Seq`, `platform.Bus`) is not used for durable-event
 ordering or deduplication: consumers order and deduplicate by the
 envelope's `seq` (REQ-STRM-016, REQ-STRM-024).

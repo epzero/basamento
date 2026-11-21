@@ -138,6 +138,14 @@ func redactSecretsInMsg(msg string, secrets []string) string {
 	return msg
 }
 
+// MapError maps a driver error to the same core error Execer and Row return.
+// Platform code calls it on errors that come straight from database/sql row
+// iteration (Rows.Scan, Rows.Err): those bypass Execer.Query, so an unmapped
+// driver error would reach callers with the wrong code and driver text.
+func MapError(err error) error {
+	return mapExecErr(err)
+}
+
 func mapExecErr(err error) error {
 	if err == nil {
 		return nil

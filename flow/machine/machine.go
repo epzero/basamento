@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/epzero/basamento/core"
@@ -16,13 +17,16 @@ import (
 // Machine is the pure interpreter over one definition. The zero value is not
 // usable; call New.
 type Machine struct {
-	def      *flow.IR
-	edges    map[string][]compiledEdge
-	guards   map[string]*expr.Program
-	inputs   map[string]*valueExpr
-	sets     map[string]*valueExpr
-	mapOver  map[string]*valueExpr
-	mapNodes map[string]string
+	def                *flow.IR
+	maxFanout          int
+	maxPureSupersteps  int
+	pureSuperstepLimit int64
+	edges              map[string][]compiledEdge
+	guards             map[string]*expr.Program
+	inputs             map[string]*valueExpr
+	sets               map[string]*valueExpr
+	mapOver            map[string]*valueExpr
+	mapNodes           map[string]string
 }
 
 type compiledEdge struct {
@@ -41,7 +45,7 @@ type valueExpr struct {
 // New compiles the expressions of def and returns a Machine that runs it. The
 // definition must pass flow/ir validation; an expression that does not
 // compile is rejected with code invalid_argument, naming the node or edge.
-func New(def *flow.IR) (*Machine, error) {
+func New(def *flow.IR, opts ...Option) (*Machine, error) {
 	if def == nil {
 		return nil, invalid("flow: nil definition", nil)
 	}
@@ -59,15 +63,30 @@ func New(def *flow.IR) (*Machine, error) {
 		return nil, invalid("flow: expressions: "+err.Error(), nil)
 	}
 	m := &Machine{
-		def:      def,
-		edges:    make(map[string][]compiledEdge, len(def.Nodes)),
-		guards:   make(map[string]*expr.Program),
-		inputs:   make(map[string]*valueExpr),
-		sets:     make(map[string]*valueExpr),
-		mapOver:  make(map[string]*valueExpr),
-		mapNodes: make(map[string]string),
+		def:               def,
+		maxFanout:         DefaultMaxFanout,
+		maxPureSupersteps: DefaultMaxPureSupersteps,
+		edges:             make(map[string][]compiledEdge, len(def.Nodes)),
+		guards:            make(map[string]*expr.Program),
+		inputs:            make(map[string]*valueExpr),
+		sets:              make(map[string]*valueExpr),
+		mapOver:           make(map[string]*valueExpr),
+		mapNodes:          make(map[string]string),
 	}
+	for _, opt := range opts {
+		if err := opt(m); err != nil {
+			return nil, err
+		}
+	}
+	m.pureSuperstepLimit = computePureSuperstepLimit(def, m.maxPureSupersteps)
+	mapChildOwners := map[string]string{}
 	for _, edge := range def.Edges {
+		// Defense in depth: ir.Validate normally rejects the definition first
+		// (design.md §2.6); this keeps the machine's own check with the
+		// validator's message in case validation is bypassed.
+		if err := checkStartEdge(edge); err != nil {
+			return nil, err
+		}
 		compiled := compiledEdge{to: edge.To}
 		if edge.When != "" {
 			condition, err := env.Compile(edge.When, json.RawMessage(`{"type":"boolean"}`))
@@ -114,6 +133,33 @@ func New(def *flow.IR) (*Machine, error) {
 			}
 			m.mapOver[id] = value
 			m.mapNodes[id] = child
+			childNode, ok := def.Nodes[child]
+			if !ok {
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q does not exist", id, child),
+					map[string]any{"node": id, "child": child},
+				)
+			}
+			if childNode.Guard != nil {
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element", id, child),
+					map[string]any{"node": id, "child": child},
+				)
+			}
+			switch childNode.Kind {
+			case "set", "map", "parallel":
+				return nil, invalid(
+					fmt.Sprintf("flow: map node %q: child node %q has kind %q, which the machine runs itself", id, child, childNode.Kind),
+					map[string]any{"node": id, "child": child, "kind": childNode.Kind},
+				)
+			}
+			if owner, ok := mapChildOwners[child]; ok {
+				return nil, invalid(
+					fmt.Sprintf("flow: map nodes %q and %q both use child node %q", owner, id, child),
+					map[string]any{"maps": []string{owner, id}, "child": child},
+				)
+			}
+			mapChildOwners[child] = id
 		}
 	}
 	return m, nil
@@ -121,7 +167,8 @@ func New(def *flow.IR) (*Machine, error) {
 
 // Start begins a run with input and returns the first superstep's commands.
 // The run's state is input, with the definition's defaults for keys input does
-// not set. A run whose entry edge reaches FAIL completes at once.
+// not set. A run whose entry edge reaches FAIL completes at once. On error the
+// returned snapshot is zero.
 func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, error) {
 	state, err := m.initialState(input)
 	if err != nil {
@@ -139,70 +186,115 @@ func (m *Machine) Start(input json.RawMessage) (flow.Snapshot, []flow.Command, e
 	}
 	commands, err := m.advance(&s, targets)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
 	return s, commands, nil
 }
 
 // Apply records one event against the current superstep. It returns no
 // commands until every node of the superstep has reported; then it merges the
-// updates, routes and starts the next superstep.
+// updates, routes and starts the next superstep. The snapshot argument is never
+// modified; on error the caller's snapshot is unchanged and the returned
+// snapshot is zero.
 func (m *Machine) Apply(s flow.Snapshot, ev flow.Event) (flow.Snapshot, []flow.Command, error) {
-	if s.Visit == nil {
-		s.Visit = map[string]int{}
+	work := copySnapshot(s)
+	if work.Visit == nil {
+		work.Visit = map[string]int{}
+	}
+	switch ev.Type {
+	case "node_failed", "cancelled", "node_completed", "gate_resolved", "timer_fired":
+	default:
+		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
+	}
+	if err := validateCostMpts(work.Cost, ev); err != nil {
+		return flow.Snapshot{}, nil, err
 	}
 	switch ev.Type {
 	case "node_failed":
-		return s, []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}, nil
-	case "cancelled":
-		return s, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
-	case "node_completed", "gate_resolved", "timer_fired":
-	default:
-		return s, nil, invalid(fmt.Sprintf("flow: unknown event type %q", ev.Type), map[string]any{"type": ev.Type})
-	}
-	index := -1
-	for i := range s.Steps {
-		step := &s.Steps[i]
-		if step.Node == ev.Node && step.Attempt == ev.Attempt && !step.Done {
-			index = i
-			break
+		failCmd := []flow.Command{{Type: "fail", Node: ev.Node, Input: ev.Payload}}
+		if index := pendingStepIndex(work.Steps, ev.Node, ev.Attempt); index >= 0 {
+			accrueCostMpts(&work, ev)
+			work.Steps[index].Done = true
 		}
+		return work, failCmd, nil
+	case "cancelled":
+		return work, []flow.Command{failure(ev.Node, core.CodeCancelled, "run cancelled")}, nil
 	}
+	index := pendingStepIndex(work.Steps, ev.Node, ev.Attempt)
 	if index < 0 {
-		return s, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
+		return flow.Snapshot{}, nil, invalid(fmt.Sprintf("flow: node %q has no pending step", ev.Node), map[string]any{"node": ev.Node})
 	}
-	step := &s.Steps[index]
+	if ev.Type == "node_completed" {
+		accrueCostMpts(&work, ev)
+	}
+	step := &work.Steps[index]
 	step.Done = true
 	switch ev.Type {
 	case "node_completed", "gate_resolved":
 		step.Update = append(json.RawMessage(nil), ev.Payload...)
 	}
-	for i := range s.Steps {
-		if !s.Steps[i].Done {
-			return s, nil, nil
+	for i := range work.Steps {
+		if !work.Steps[i].Done {
+			return work, nil, nil
 		}
 	}
-	next, failing, err := m.barrier(&s)
+	next, failing, err := m.barrier(&work)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
 	if failing != nil {
-		return s, []flow.Command{*failing}, nil
+		return work, []flow.Command{*failing}, nil
 	}
 	if len(next) == 0 {
-		return s, []flow.Command{{Type: "complete"}}, nil
+		return work, []flow.Command{{Type: "complete"}}, nil
 	}
-	s.Seq++
-	commands, err := m.advance(&s, next)
+	work.Seq++
+	commands, err := m.advance(&work, next)
 	if err != nil {
-		return s, nil, err
+		return flow.Snapshot{}, nil, err
 	}
-	return s, commands, nil
+	return work, commands, nil
+}
+
+func pendingStepIndex(steps []flow.Step, node string, attempt int) int {
+	for i := range steps {
+		step := &steps[i]
+		if step.Node == node && step.Attempt == attempt && !step.Done {
+			return i
+		}
+	}
+	return -1
+}
+
+func validateCostMpts(current int64, ev flow.Event) error {
+	if ev.CostMpts == 0 {
+		return nil
+	}
+	switch ev.Type {
+	case "node_completed", "node_failed":
+	default:
+		return invalid(fmt.Sprintf("flow: event type %q cannot carry cost_mpts", ev.Type), map[string]any{"type": ev.Type})
+	}
+	if ev.CostMpts < 0 {
+		return invalid("flow: cost_mpts must not be negative", nil)
+	}
+	if ev.CostMpts > math.MaxInt64-current {
+		return invalid("flow: cost_mpts overflow", nil)
+	}
+	return nil
+}
+
+func accrueCostMpts(s *flow.Snapshot, ev flow.Event) {
+	if ev.CostMpts == 0 {
+		return
+	}
+	s.Cost += ev.CostMpts
 }
 
 // advance expands a set of ready nodes and runs pure supersteps until it has
 // commands to hand out or the run ends.
 func (m *Machine) advance(s *flow.Snapshot, targets []string) ([]flow.Command, error) {
+	var pureSupersteps int64
 	for {
 		steps, failing, err := m.expand(s, targets)
 		if err != nil {
@@ -228,6 +320,14 @@ func (m *Machine) advance(s *flow.Snapshot, targets []string) ([]flow.Command, e
 		if len(next) == 0 {
 			return []flow.Command{{Type: "complete"}}, nil
 		}
+		pureSupersteps++
+		if pureSupersteps > m.pureSuperstepLimit {
+			node := targets[0]
+			if len(steps) > 0 {
+				node = steps[0].Node
+			}
+			return []flow.Command{*pureSuperstepFailure(node, m.pureSuperstepLimit)}, nil
+		}
 		s.Seq++
 		targets = next
 	}
@@ -251,12 +351,12 @@ func (m *Machine) expand(s *flow.Snapshot, targets []string) ([]flow.Step, *flow
 		if !ok {
 			return nil, nil, invalid(fmt.Sprintf("flow: node %q does not exist", id), map[string]any{"node": id})
 		}
-		skip, stopped, err := m.checkGuard(s, id, node)
+		skip, stopped, trip, err := m.checkGuard(s, id, node)
 		if err != nil {
 			return nil, nil, err
 		}
 		if stopped {
-			return nil, guardFailure(id, node), nil
+			return nil, guardFailure(id, node, s.Cost, trip), nil
 		}
 		if skip {
 			steps = append(steps, flow.Step{Node: id, Done: true, Skip: true})
@@ -270,6 +370,9 @@ func (m *Machine) expand(s *flow.Snapshot, targets []string) ([]flow.Step, *flow
 			items, err := m.mapItems(s, id)
 			if err != nil {
 				return nil, nil, err
+			}
+			if len(items) > m.maxFanout {
+				return nil, fanoutFailure(id, len(items), m.maxFanout), nil
 			}
 			for i, item := range items {
 				steps = append(steps, flow.Step{Node: m.mapNodes[id], Attempt: i + 1, Input: item})
@@ -398,31 +501,39 @@ func (m *Machine) edgeTarget(from, to string) ([]string, *flow.Command) {
 	return []string{to}, nil
 }
 
-func (m *Machine) checkGuard(s *flow.Snapshot, id string, node flow.Node) (skip, stopped bool, err error) {
+type guardTrip int
+
+const (
+	guardTripNone guardTrip = iota
+	guardTripVisit
+	guardTripCost
+)
+
+func (m *Machine) checkGuard(s *flow.Snapshot, id string, node flow.Node) (skip, stopped bool, trip guardTrip, err error) {
 	guard := node.Guard
 	if guard == nil {
-		return false, false, nil
+		return false, false, guardTripNone, nil
 	}
 	if condition := m.guards[id]; condition != nil {
 		state, err := decodedState(s)
 		if err != nil {
-			return false, false, err
+			return false, false, guardTripNone, err
 		}
 		holds, err := m.evalBool(condition, fmt.Sprintf("node %q guard", id), state, s)
 		if err != nil {
-			return false, false, err
+			return false, false, guardTripNone, err
 		}
 		if !holds {
-			return true, false, nil
+			return true, false, guardTripNone, nil
 		}
 	}
 	if guard.MaxVisits > 0 && s.Visit[id]+1 > guard.MaxVisits {
-		return false, true, nil
+		return false, true, guardTripVisit, nil
 	}
 	if guard.CostMpts > 0 && s.Cost >= guard.CostMpts {
-		return false, true, nil
+		return false, true, guardTripCost, nil
 	}
-	return false, false, nil
+	return false, false, guardTripNone, nil
 }
 
 func (m *Machine) fanout(id string) []string {
@@ -466,7 +577,7 @@ func (m *Machine) nodeInput(s *flow.Snapshot, id string, node flow.Node) (json.R
 	if node.In == "" {
 		// A node without an input mapping receives the run's input, as the
 		// host's subflow scenario states (host.feature, FLOW-033-01).
-		if len(s.Input) == 0 {
+		if len(bytes.TrimSpace(s.Input)) == 0 {
 			return json.RawMessage(`{}`), nil
 		}
 		return append(json.RawMessage(nil), s.Input...), nil
@@ -577,11 +688,12 @@ func compileValue(env *expr.Env, src string) (*valueExpr, error) {
 	if program, err := env.Compile(src, nil); err == nil {
 		return &valueExpr{cel: program}, nil
 	}
-	if mapping, err := expr.CompileMapping(src, []string{"state", "run"}); err == nil {
+	if mapping, err := expr.CompileMapping(src, nil); err == nil {
 		return &valueExpr{jq: mapping}, nil
 	}
-	_, err := env.Compile(src, nil)
-	return nil, err
+	_, celErr := env.Compile(src, nil)
+	_, mappingErr := expr.CompileMapping(src, nil)
+	return nil, bothMappingErrors(celErr, mappingErr)
 }
 
 func compileSet(env *expr.Env, node flow.Node) (*valueExpr, error) {
@@ -596,11 +708,22 @@ func compileSet(env *expr.Env, node flow.Node) (*valueExpr, error) {
 	return compileValue(env, src)
 }
 
+// checkStartEdge rejects a condition on the edge from START: the first
+// superstep has nothing to route on, so the machine would ignore it
+// (REQ-FLOW-066). The message is the validator's, so the same defect reads
+// the same whether ir.Validate or the machine reports it (design.md §2.6).
+func checkStartEdge(edge flow.Edge) error {
+	if edge.From != ir.Start || edge.When == "" {
+		return nil
+	}
+	return invalid(fmt.Sprintf("flow: edge %q -> %q takes no condition", edge.From, edge.To),
+		map[string]any{"from": edge.From, "to": edge.To})
+}
+
 func parseMapSpec(node flow.Node) (over, child string, err error) {
 	var spec struct {
 		Over string `json:"over"`
 		Node string `json:"node"`
-		Max  int    `json:"max_parallel"` // read by the host; the machine fans out all items
 	}
 	if len(bytes.TrimSpace(node.Spec)) == 0 {
 		return "", "", fmt.Errorf("map spec is empty")
@@ -618,7 +741,29 @@ func (v *valueExpr) eval(state, input any, run map[string]any) (any, error) {
 	if v.cel != nil {
 		return v.cel.Eval(map[string]any{"state": state, "input": input, "run": run})
 	}
-	return v.jq.Eval(state, map[string]any{"state": state, "run": run})
+	return v.jq.Eval(state, nil)
+}
+
+func bothMappingErrors(celErr, mappingErr error) error {
+	message := fmt.Sprintf("not CEL (%s) and not jq (%s)", mappingMessageOf(celErr), mappingMessageOf(mappingErr))
+	details := map[string]any{}
+	for _, err := range []error{celErr, mappingErr} {
+		var platform *core.Error
+		if errors.As(err, &platform) {
+			for key, value := range platform.Details {
+				details[key] = value
+			}
+		}
+	}
+	return invalid(message, details)
+}
+
+func mappingMessageOf(err error) string {
+	var platform *core.Error
+	if errors.As(err, &platform) {
+		return platform.Message
+	}
+	return err.Error()
 }
 
 func decodedState(s *flow.Snapshot) (map[string]any, error) {
@@ -652,13 +797,58 @@ func failEndpoint(from string) *flow.Command {
 	return &flow.Command{Type: "fail", Node: from}
 }
 
-func guardFailure(id string, node flow.Node) *flow.Command {
-	message := fmt.Sprintf("flow: node %q reached its guard", id)
-	if node.Guard != nil && node.Guard.MaxVisits > 0 {
-		message = fmt.Sprintf("flow: node %q reached its guard of %d visits", id, node.Guard.MaxVisits)
+func fanoutFailure(id string, count, limit int) *flow.Command {
+	message := fmt.Sprintf("flow: node %q: fan-out limit %d items exceeded: %d items", id, limit, count)
+	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
+	return &flow.Command{Type: "fail", Node: id, Input: payload}
+}
+
+func pureSuperstepFailure(id string, limit int64) *flow.Command {
+	message := fmt.Sprintf("flow: node %q: no declared bound can be counted for the cycle through this node (limit %d consecutive pure supersteps)", id, limit)
+	payload, _ := json.Marshal(map[string]any{
+		"code":    string(core.CodeBudgetExceeded),
+		"message": message,
+		"limit":   limit,
+	})
+	return &flow.Command{Type: "fail", Node: id, Input: payload}
+}
+
+const maxVisitsSumCap = math.MaxInt64 / 4096 / 2
+
+func computePureSuperstepLimit(def *flow.IR, floor int) int64 {
+	var sum int64
+	for _, node := range def.Nodes {
+		if node.Guard == nil || node.Guard.MaxVisits <= 0 {
+			continue
+		}
+		v := int64(node.Guard.MaxVisits)
+		if sum > maxVisitsSumCap-v {
+			sum = maxVisitsSumCap
+			break
+		}
+		sum += v
 	}
-	if node.Guard != nil && node.Guard.CostMpts > 0 && node.Guard.MaxVisits == 0 {
-		message = fmt.Sprintf("flow: node %q reached its guard of %d milli-points", id, node.Guard.CostMpts)
+	nodes := int64(len(def.Nodes))
+	multiplier := nodes * (1 + sum)
+	if nodes > 0 && multiplier/nodes != 1+sum {
+		multiplier = math.MaxInt64
+	}
+	limit := int64(floor)
+	if multiplier > limit {
+		limit = multiplier
+	}
+	return limit
+}
+
+func guardFailure(id string, node flow.Node, settledCost int64, trip guardTrip) *flow.Command {
+	var message string
+	switch trip {
+	case guardTripVisit:
+		message = fmt.Sprintf("flow: node %q: visit budget %d reached", id, node.Guard.MaxVisits)
+	case guardTripCost:
+		message = fmt.Sprintf("flow: node %q: cost budget %d milli-points reached with %d settled", id, node.Guard.CostMpts, settledCost)
+	default:
+		message = fmt.Sprintf("flow: node %q reached its guard", id)
 	}
 	payload, _ := json.Marshal(map[string]any{"code": string(core.CodeBudgetExceeded), "message": message})
 	return &flow.Command{Type: "fail", Node: id, Input: payload}

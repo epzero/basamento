@@ -35,7 +35,7 @@ of `kit`. Status words: **Implemented**,
 | SQL | SQLite (`modernc.org/sqlite`) | Postgres (`pgx`) | goose migrations |
 | Blob | local directory | S3, GCS, Azure | `gocloud.dev/blob` |
 | Bus + KV | `nats-server` in-process with JetStream | NATS cluster | `nats-server`, `nats.go` |
-| Secrets (key wrapping) | local key | KMS or Vault Transit | `gocloud.dev/secrets` + Tink |
+| Secrets (key wrapping) | local key | KMS or Vault Transit (`hashivault://`; refused at open until ADR-0017's driver) | `gocloud.dev/secrets` + Tink (+ our Transit keeper) |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
 | Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
 | Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |
@@ -46,9 +46,14 @@ Ports are selected by URL in configuration (see `platform/platform.go`).
 ## 3. Layers
 
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The
-module map below is generated from it (an arrow means "may import"; arrows
-implied by longer paths are omitted). Build tooling (`tools/gate`,
-`internal/gate`, `internal/bdd`) is not shown.
+checker reads every direct import in production files, tests (`_test.go`),
+and build-excluded sources the active tags omit, so the result does not depend
+on GOOS or build tags on the host (`ADR-0018`). Every `deny_external` and
+`test_only_allowed_from` key must name a layer in the same file. The module
+map below is generated from it (an arrow means "may import"; arrows implied by
+longer paths are omitted). Build tooling (`tools/gate`, `internal/gate`,
+`internal/bdd`) is not shown; other product layers under `internal/` appear
+when the graph names them.
 
 <!-- BEGIN GENERATED: modules (go tool gate docs -write) -->
 ```mermaid
@@ -61,6 +66,7 @@ flowchart TD
   expr["expr"]
   flow["flow"]
   flow_host["flow/host"]
+  internal_config["internal/config"]
   model["model"]
   model_node["model/node"]
   platform["platform"]
@@ -81,10 +87,12 @@ flowchart TD
   auth --> expr
   auth --> platform
   cmd_kit --> api
+  cmd_kit --> internal_config
   expr --> core
   flow --> expr
   flow_host --> flow
   flow_host --> runtime
+  internal_config --> core
   model --> expr
   model --> platform
   model_node --> model
@@ -108,6 +116,7 @@ flowchart TD
 | `platform` | Infrastructure ports and their embedded/cloud implementations. |
 | `expr` | CEL environment (deterministic, cost-limited, type-checked) and gojq mappings. |
 | `model` | The invocation contract, providers, routing, metering. Imports no runtime. |
+| `model/catalog` | Descriptors by model id, and the shipped, deployment and tenant price layers with the default token formula. |
 | `model/node` | The `model` node handler: the flow code and steps that reserve, start, wait and settle (ADR-0011). |
 | `prompt` | Versioned templates, segment assembly, untrusted wrapping, lint. |
 | `flow` | IR, compiler, builder and the pure `Machine`. Imports no runtime. |
@@ -117,6 +126,8 @@ flowchart TD
 | `agent`, `tool` | Bounded tool loop, conversations, tools, MCP, sandboxes. |
 | `auth` | Authentication modes and in-app authorization. |
 | `api` | connect-go services, SSE/WebSocket streams, OpenAI-compatible model endpoint, MCP server. |
+| `cmd/kit` | The `kit` binary: commands, composition root, `serve` lifecycle. |
+| `internal/config` | Load, validate and report kit configuration; imports `core` only (ADR-0016). |
 
 ### Security in the contracts
 

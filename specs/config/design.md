@@ -1,6 +1,6 @@
 # Config: design
 
-**Status:** draft, WP-L1-05, spec review pending.
+**Status:** implemented (WP-L1-05)
 
 Decisions the implementer of WP-L1-05 must follow. They refine the
 requirements; where this file and the requirements disagree, the requirements
@@ -14,42 +14,73 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 | Package | Role | Owned by |
 | --- | --- | --- |
 | `internal/config` | load, validate, effective report, schema of known keys | WP-L1-05 |
-| `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
+| `structs.go` in `internal/config` | the `Config` struct plus one key table (key, Go field, default, validator, apply path), with no `koanf` tags | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
 
+`serve.go` in `internal/config` provides `config.Server`: it serves an
+already-bound listener and, on shutdown, drains requests in flight and closes
+the ports it is given. It does not load or validate configuration, open ports,
+bind the listener, install a signal handler or print the ready line; `cmd/kit`
+does all of those and hands the bound listener and opened ports to
+`config.Server`. Section 5 records that start-up order, including the step
+where WP-L5-02 and WP-L5-03 hook in starting the temporal runtime (a no-op
+until then).
+
 `internal/gate/layering.go` fails the gate for every package `layering.yaml`
 does not assign to a layer (`package not assigned to a layer in
-layering.yaml`). `layering.yaml` has no line for `internal/config` today, so
-`gate layering` fails as soon as the package exists with the current graph:
-the statement that the current graph needs no change is not true. Before
-WP-L1-05 is implemented, a prerequisite move adds `internal/config: [core]`
-to `layering.yaml`, through its own ADR and layering pull request (changing
-the graph needs an ADR, AGENTS.md). Until that lands, the implementer does
-not create `internal/config`.
+layering.yaml`). ADR-0016 added the row, and `layering.yaml` on `main` has it
+before WP-L1-05 starts:
 
-The same prerequisite move lets `cmd/kit` and `internal/bdd` import
-`internal/config`: the `layers` entry is the only place `internal/gate/layering.go`
-reads what a layer may import (it forbids an import only when the imported
-layer is neither the importing layer nor in its list), so their existing
-lines each gain `internal`, named with the top-level package on purpose.
-Every `layers` value names a layer, so no value may say `internal/config`
-(that exact key would be a layer that `deny_external` cannot attach to), and
-two layers in `internal/` (`internal/bdd`, `internal/gate`) outside a shared
-enclosing layer make the whole `internal` directory the only entry that lets
-`internal/bdd` reach `internal/config`. As a consequence `cmd/kit`,
-`internal/bdd`, `internal/gate` and `tools/gate` (whose list names
-`internal/gate`) may each import any nested package under `internal/` that
-`layers` does not name, and `internal/gate` itself may now import the
-repository's public packages (`core`, `platform`, …). `internal/gate` and
-`internal/bdd` stay layers of their own and keep their current lists,
-because the longest match wins. Keep untrusted code out of `internal/`: such
-a package is importable by those four layers without another graph change.
+```yaml
+internal/config: [core]
+```
+
+The graph therefore admits the package: the implementer creates
+`internal/config` under that row and changes nothing in `layering.yaml`
+(changing the graph needs an ADR, AGENTS.md). The row allows imports of
+`core` only: no `platform`, no `runtime`, no port package.
+
+`cmd/kit` and `internal/bdd` are the only layers that import `internal/config`,
+each through a path-segment prefix entry naming that package, not the
+`internal` directory. `internal/gate/layering.go` matches a `layers` value on
+whole path segments and keeps the longest match, so the value
+`internal/config` grants that tree alone (`internal/bdd/steps` included,
+through its layer), while the value `internal` would grant every nested
+package under `internal/` that `layers` does not name. The broad entry is not
+merely wider than needed, it is wrong for this graph: with `internal` in
+`cmd/kit`'s list, `cmd/kit` may import `internal/gate` and `gate layering`
+stays green, so the gate binary joins the shipped graph and the two-importer
+rule is void. Naming `internal/config` in a list is valid: it is a layer key
+of its own, so `deny_external` attaches to it, and in another layer's list it
+is a path-segment prefix.
+
+The narrow grant keeps the graph closed. Exactly two layers import
+`internal/config`: `cmd/kit`, for `Load` and `Validate`, and `internal/bdd`
+and its `steps`, for the harness. `internal/gate` (empty list) and
+`tools/gate` (whose list names `internal/gate`) import no configuration and
+stay closed. Whether code under `internal/` is trusted is a policy, not a
+gate check: by policy untrusted code does not live there, the gate cannot
+tell it apart, and a new `internal/<pkg>` row or grant needs an ADR
+(ADR-0016).
+
+`deny_external` for `internal/config` lists the port vendor prefixes:
+`go.temporal.io/`, `gocloud.dev/`, `github.com/jackc/pgx/`, `modernc.org/`,
+`github.com/nats-io/`, `github.com/tink-crypto/`, `github.com/aws/`,
+`cloud.google.com/`, `github.com/Azure/` (ADR-0002, ADR-0004). The gate has
+no way to know which modules are port vendors, so whoever adds a port library
+to the config package extends that list in the same change and a reviewer
+checks it; an import the list does not name passes. `gate layering` reads
+production imports, test imports, and imports in build-excluded `.go` files
+under the module root, so the graph does not depend on the host build context
+(`ADR-0018`). The standard library and small parsers are allowed.
 
 Keep `internal/config` free of every port implementation and of
-`go.temporal.io/`: it returns validated values and lets `cmd/kit` import the
-implementations, and it imports `core` only. `cmd/kit` may already import
-`platform` and `runtime`; with the prerequisite move it also imports
+`go.temporal.io/`: the allow-list admits `core` only and `deny_external`
+blocks the vendors above. It returns validated values and the implementation
+name a URL selects (REQ-CONFIG-011, REQ-CONFIG-012), and lets `cmd/kit`
+import the implementations and their constructors. `cmd/kit` may already
+import `platform` and `runtime`; with the row in place it also imports
 `internal/config`.
 
 ## 2. Keys, types and defaults
@@ -61,6 +92,7 @@ renders and what the environment mapping is derived from.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `profile` | string | `embedded` | one of `embedded`, `cloud` |
+| `auth.mode` | string | `none` | one of `none`, `local`, `oidc` |
 | `listen.addr` | host:port | `127.0.0.1:8080` | parses, port > 0 |
 | `data.dir` | path | `./.kit/data` | non-empty |
 | `log.level` | string | `info` | one of `debug`, `info`, `warn`, `error` |
@@ -71,12 +103,20 @@ renders and what the environment mapping is derived from.
 | `secrets.url` | URL | profile-dependent | scheme per profile |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
 
+`auth.mode` selects the authentication mode (ADR-0008); in `none` the server refuses a non-loopback `listen.addr` (REQ-AUTH-001).
+
 The embedded profile defaults the four port URLs to
 `sqlite://$(data.dir)/kit.db`, `file://$(data.dir)/blobs`,
 `nats-embedded://$(data.dir)/nats`, `localsecrets://$(data.dir)/secrets.key`.
 `$(data.dir)` is expanded after loading, so changing `data.dir` moves every
 default port URL with it. The cloud profile has no default for a port URL:
 each must be set (REQ-CONFIG-010).
+
+For the embedded bus, the `bus.url` path names the JetStream store directory.
+`platform/bus` keeps its store in `<data dir>/nats`: a path ending in `nats`
+(the default, `<data.dir>/nats`) has its parent passed as the bus data
+directory, while any other path is the bus data directory itself. A host other
+than `localhost` in the URL is the first path segment (`localhost` is dropped).
 
 ## 3. Loading
 

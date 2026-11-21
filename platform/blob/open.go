@@ -52,16 +52,20 @@ func Open(ctx context.Context, raw string, opts Options) (*Store, http.Handler, 
 		signKey = append([]byte(nil), opts.SignKey...)
 	}
 	st := &Store{
-		bucket:   bucket,
+		bucket:   wrapBucket(bucket),
 		clock:    opts.clock(),
 		maxTTL:   opts.maxTTL(),
 		embedded: embedded,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
 		signKey:  signKey,
+		rand:     opts.rand(),
+	}
+	if st.embedded {
+		st.sweepAtOpen(ctx)
 	}
 	var handler http.Handler
 	if embedded {
-		handler = (&URLHandler{Store: st}).Mount()
+		handler = newEmbeddedHandler(st)
 	}
 	return st, handler, nil
 }
@@ -77,14 +81,16 @@ func ensureFileBlobNoTmpDir(u *url.URL) {
 
 func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 	if u.Scheme == "file" {
-		dir := u.Path
-		if dir == "" {
-			dir = u.Host
+		dir, err := fileDir(u)
+		if err != nil {
+			return nil, err
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, mapError(err)
 		}
-		u.Path = filepath.Clean(dir)
+		u.Host = ""
+		u.Path = dir
+		u.RawPath = ""
 		ensureFileBlobNoTmpDir(u)
 	}
 	b, err := blob.OpenBucket(ctx, u.String())
@@ -92,4 +98,23 @@ func openBucket(ctx context.Context, u *url.URL) (*blob.Bucket, error) {
 		return nil, mapOpenError(err)
 	}
 	return b, nil
+}
+
+// fileDir returns the absolute filesystem directory of a file URL. Go parses
+// file://data/blobs with Host "data" and Path "/blobs"; fileblob uses only the
+// path, which would open /blobs. A host other than localhost is therefore the
+// first path segment and is joined with the path.
+func fileDir(u *url.URL) (string, error) {
+	dir := u.Path
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		dir = filepath.Join(u.Host, dir)
+	}
+	if dir == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "file URL has no path", nil)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", mapError(err)
+	}
+	return abs, nil
 }

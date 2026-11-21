@@ -12,6 +12,7 @@ const (
 	msgPayloadCannotDecrypt   = "payload cannot be decrypted"
 	msgPayloadNotEncrypted    = "payload is not encrypted"
 	msgTenantRequired         = "tenant is required"
+	msgTenantInvalid          = "tenant id is not valid"
 	msgTenantNoKeyset         = "tenant has no keyset"
 	msgKeysetCannotUnwrap     = "keyset of the tenant cannot be unwrapped"
 	msgKeysetCannotWrap       = "keyset of the tenant cannot be wrapped"

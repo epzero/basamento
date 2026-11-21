@@ -48,13 +48,29 @@ Feature: Evaluating expressions deterministically
       | {1.5: 'a', -2.5: 'd', 0.0: 'b'}.map(k, k)         | [-2.5, 0, 1.5]              |
       | {1.5: 'a', -5.0 / 0.0: 'd', 0.0: 'b', 5.0 / 0.0: 'e'}.map(k, string(k)) | ["-Inf", "0", "1.5", "+Inf"] |
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-021 @id:EXPR-021-04
+  @REQ-EXPR-021 @id:EXPR-021-04
   Scenario: A map whose keys include a NaN orders the NaN after every other number
     Given an expression environment declaring no variables
     When the expression "[{1.5: 1, 0.0 / 0.0: 2, -2.5: 3}.map(k, string(k)), {1.5: 1, 0.0 / 0.0: 2, -5.0 / 0.0: 3, 0.0: 4}.map(k, string(k))]" is evaluated 100 times
     Then every result is [["-2.5", "1.5", "NaN"], ["-Inf", "0", "1.5", "NaN"]]
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-022 @id:EXPR-022-01
+  @REQ-EXPR-021 @id:EXPR-021-05
+  Scenario Outline: Map equality and lookup compare numeric keys by value
+    Given an expression environment declaring no variables
+    When the expression "<expression>" is evaluated
+    Then the result is <result>
+
+    Examples:
+      | expression                               | result |
+      | {1: 'a', 2.0: 'b'} == {1u: 'a', 2: 'b'}  | true   |
+      | {1: 'a', 2.0: 'b'} == {1.0: 'a', 2: 'b'} | true   |
+      | {1: 'a', 2.0: 'b'}[1u]                   | "a"    |
+      | {1.0: 'a', 2: 'b'}[1]                    | "a"    |
+      | {1: 'a', 2.0: 'b'}[1.0]                  | "a"    |
+      | {1u: 'a', 2.0: 'b'}[2.0]                 | "b"    |
+      | {1: 'a', 'x': 0} == {'1': 'a', 'x': 0}   | false  |
+
+  @REQ-EXPR-022 @id:EXPR-022-01
   Scenario Outline: A map with a key of no order fails when it is iterated, keeping every entry
     Given an expression environment declaring no variables
     When the expression "<expression>" is evaluated
@@ -68,7 +84,7 @@ Feature: Evaluating expressions deterministically
       | {timestamp('2026-11-16T09:00:00Z'): 1}.map(k, k)      |
       | {[1, 2]: 'a'}.all(k, true)                            |
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-022 @id:EXPR-022-02
+  @REQ-EXPR-022 @id:EXPR-022-02
   Scenario: A map with a key of no order succeeds when its keys are not iterated
     Given an expression environment declaring no variables
     When the expression "{1: 'a', duration('1s'): 'b'}.size()" is evaluated

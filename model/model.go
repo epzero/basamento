@@ -4,10 +4,19 @@
 // poll, webhook, WebSocket, command line) are adapter details. Callers either
 // block (Invoke) or follow events. See ADR-0006 and docs/architecture/model-layer.md.
 //
-// Chat messages and tool definitions use github.com/cloudwego/eino/schema once
-// WP-L3-01 lands; here they travel as JSON so this contract stays dependency-free.
+// Chat messages and tool definitions travel as JSON of github.com/cloudwego/eino/schema
+// values, so the contract types do not depend on eino itself. The chat adapter
+// in model/chat maps them to eino's types; the embedding adapter here maps
+// Request.Texts to an eino Embedder. Registry holds the part every adapter owes
+// regardless of protocol: idempotent starts, the ordered event log, the
+// result, cancellation and lookup. It forgets ended invocations past a
+// retention window and an ended bound, so an adapter's memory does not grow
+// with every call it ever served (REQ-MODEL-088).
 //
-// Status: contract only (WP-L3-*).
+// Provider construction (vendor SDKs, eino-ext, OpenAI-compatible endpoints for
+// MiniMax and GLM) and routing are WP-L3-04. Structured-output shaping lives in
+// model/structured and the call middleware (attempt budget, retries, timeouts,
+// metering, call log) in model/middleware.
 package model
 
 import (
@@ -91,13 +100,17 @@ type Request struct {
 	Tools        json.RawMessage       `json:"tools,omitempty"`
 	OutputSchema json.RawMessage       `json:"output_schema,omitempty"` // structured output
 	Text         map[string]string     `json:"text,omitempty"`
+	Texts        []string              `json:"texts,omitempty"` // embedding inputs, in order
 	Assets       map[string][]AssetRef `json:"assets,omitempty"`
 	Params       json.RawMessage       `json:"params,omitempty"`
 	Seed         *int64                `json:"seed,omitempty"`
 	ClientRef    string                `json:"client_ref"`
 }
 
-// Handle identifies a started invocation.
+// Handle identifies a started invocation. It is valid only for the tenant
+// that started the invocation. Provider may be empty on a handle returned by
+// Lookup or replayed from storage; identity is the (tenant, client ref) pair.
+// A non-empty Provider that does not match the registry's is not_found.
 type Handle struct {
 	Provider  string `json:"provider"`
 	ID        string `json:"id"` // vendor id, or an adapter-local id for streamed calls
@@ -164,10 +177,13 @@ type Result struct {
 	Error    json.RawMessage `json:"error,omitempty"`
 }
 
-// Invoker is implemented by every provider adapter.
+// Invoker is implemented by every provider adapter. Every call uses the tenant
+// of ctx; handles are valid only for the tenant that started the invocation.
 type Invoker interface {
 	Describe(ctx context.Context) ([]Descriptor, error)
-	// Start begins an invocation and returns at once. It is idempotent per ClientRef.
+	// Start begins an invocation and returns at once. It is idempotent per ClientRef
+	// while the provider's registry retains that invocation: after the client ref is
+	// evicted, a start begins a new invocation (REQ-MODEL-088).
 	Start(ctx context.Context, r Request) (Handle, error)
 	// Events delivers partial output with Seq > after; the channel closes when the invocation ends.
 	Events(ctx context.Context, h Handle, after int64) (<-chan Event, error)
@@ -181,7 +197,9 @@ type Invoker interface {
 }
 
 // Invoke starts an invocation and waits for its result: the blocking form of
-// the contract, for callers that do not follow events.
+// the contract, for callers that do not follow events. The adapter keeps
+// publishing into its event buffer while Invoke waits, so a blocking caller
+// cannot starve the invocation.
 func Invoke(ctx context.Context, p Invoker, r Request) (Result, error) {
 	h, err := p.Start(ctx, r)
 	if err != nil {

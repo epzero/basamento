@@ -4,9 +4,11 @@
 //	gate agent whoami | list | release [-instance <id>]
 //	gate agent status <status> [-note <text>] [-issue <id>]   # how this session ended; the next one reads it
 //	gate wp [-state ready] [-json]   # every work package: done, in-progress, ready or blocked
-//	gate docs [-write]       # generated diagrams match layering.yaml and the roadmap
+//	gate docs [-write]       # generated diagrams, CODEOWNERS and specs/README.md statuses
 //	gate review plan [-base <ref>] [-head <ref>]   # risk tier, review depth and REVIEW.md files of a change
 //	gate layering
+//	gate hygiene [-base <ref>] # test determinism, production isolation and conflict markers; with -base <ref> also spec/code separation
+//	gate gomod                  # every tracked go.mod names the same go directive
 //	gate spec lint            # lint + traceability
 //	gate spec lock            # every scenario approved at its current text
 //	gate spec trace [-json]   # requirement → scenario matrix
@@ -14,6 +16,8 @@
 //	gate spec human -id A -status accepted|rejected -by <github-login> [-note …]
 //	gate spec queue           # human review queue, most critical first
 //	gate release-check        # P0 scenarios need human acceptance before a release
+//	gate nightly              # scheduled nightly workflow ok, failed or stale (exit 0/1/2; JSON from gh on stdin)
+//	gate bdd-skips            # print gate: scenario runs skipped: … from .gate/bdd.json
 //	gate redgreen -base <ref> # newly active scenarios must fail at base
 //
 // See docs/engineering/qa-gate.md and docs/engineering/agent-workflow.md.
@@ -50,7 +54,7 @@ func main() {
 		must(fs.Parse(os.Args[3:]))
 		files, err := gate.ChangedFiles(root, *base, *head)
 		must(err)
-		plan, err := gate.PlanReview(root, *base, files)
+		plan, err := gate.PlanReview(root, *base, *head, files)
 		must(err)
 		if *asJSON {
 			enc := json.NewEncoder(os.Stdout)
@@ -99,6 +103,23 @@ func main() {
 		errs, err := gate.Layering(root)
 		must(err)
 		report("layering", errs)
+	case "hygiene":
+		fs := flag.NewFlagSet("hygiene", flag.ExitOnError)
+		base := fs.String("base", "", "optional git ref for diff-level checks (spec/code separation)")
+		must(fs.Parse(os.Args[2:]))
+		errs, err := gate.Hygiene(root, *base)
+		must(err)
+		report("hygiene", errs)
+	case "gomod":
+		errs, err := gate.CheckSameGoModLine(root)
+		must(err)
+		report("gomod", errs)
+	case "module-roots":
+		roots, err := gate.ModuleRoots(root)
+		must(err)
+		for _, r := range roots {
+			fmt.Println(r)
+		}
 	case "spec":
 		if len(os.Args) < 3 {
 			usage()
@@ -108,6 +129,18 @@ func main() {
 		l, err := gate.ReadLedger(root)
 		must(err)
 		report("release-check", gate.ReleaseCheck(l))
+	case "nightly":
+		out, err := gate.EvaluateNightly(os.Stdin, time.Now())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		fmt.Println(gate.FormatNightlyLine(out))
+		os.Exit(out.ExitCode())
+	case "bdd-skips":
+		modRoot, err := gate.RepoRoot(root)
+		must(err)
+		must(printBDDSkips(modRoot))
 	case "redgreen":
 		fs := flag.NewFlagSet("redgreen", flag.ExitOnError)
 		base := fs.String("base", "", "git ref to compare against")
@@ -322,6 +355,6 @@ func must(err error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | spec lint|lock|trace|approve|human|queue | release-check | redgreen -base <ref>")
+	fmt.Fprintln(os.Stderr, "usage: gate agent new|whoami|list|status|release | wp | review plan [-base <ref>] [-head <ref>] | docs [-write] | layering | hygiene [-base <ref>] | gomod | module-roots | spec lint|lock|trace|approve|human|queue | release-check | nightly | bdd-skips | redgreen -base <ref>")
 	os.Exit(2)
 }

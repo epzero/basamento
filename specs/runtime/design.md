@@ -38,9 +38,11 @@ run's tenant, never an empty string or a field the caller passed.
 ## Local runtime (WP-L5-01)
 
 Decisions for `runtime/local` that leave `REQ-RT-005` … `REQ-RT-019`,
-`REQ-RT-021` … `REQ-RT-027` and `REQ-RT-042` … `REQ-RT-044` in
-`local.feature` to the implementer. This work package changes no contract
-file.
+`REQ-RT-021` … `REQ-RT-027`, `REQ-RT-042` … `REQ-RT-044` and
+`REQ-RT-046` … `REQ-RT-054` in `local.feature` to the implementer. This
+work package needs an additive core change: a timer capability on the clock
+`New` accepts (`After`), implemented by `core.SystemClock` and
+`coretest.FakeClock` (fires on Advance). No runtime contract file changes.
 
 ### Ports the composition root supplies
 
@@ -76,8 +78,19 @@ goroutine goes on and reads futures through `Select` or `Get`.
   future. `Resolve` for a gate the journal already holds returns a
   `*core.Error` with code `conflict` (the contract's code, not a new one); the
   run does not see it.
-- **Select** (`REQ-RT-011`): returns the lowest index whose future is ready,
-  at call time or when the first pending future completes.
+- **Select** (`REQ-RT-011`): returns the call-order index of the operation
+  whose future became ready first. Operations already ready when the wait
+  begins, and futures that complete in the same clock reading (one clock
+  advance is one reading for `REQ-RT-008`), are tied and the lowest index
+  among them wins. `RT-011-04` is the discriminating case: the higher-index
+  `"1h"` timer completes in the first of two clock advances and wins, even
+  though the lower-index `"2h"` timer is also ready by the time the wait is
+  answered. `RT-011-02` is the tie case: one advance makes both timers ready
+  and the lowest index wins. The alternative reading — lowest index among
+  everything ready when the wait is answered — is rejected: it depends on how
+  fast the run goroutine wakes, breaks gate determinism (`bdd-convention.md`
+  §1.5, `spec-review.md` R5), and would make the flow host's first-failure
+  rule (`REQ-FLOW-052`) non-deterministic.
 - **Child runs** (`REQ-RT-014`, `REQ-RT-015`): `Child` starts a run of the
   child flow under `ChildOptions.ID` in the parent's tenant, and the future
   yields the child's output. When a parent closes, each of its children still
@@ -133,13 +146,81 @@ own runs, even when another tenant has a run with the same id (`REQ-RT-026`).
 `terminated` (a child closed by its parent under `terminate`, `REQ-RT-015`) is
 one of the `Run` states in `specs/glossary.md`.
 
+### Run ids, start keys and child ids
+
+All three identifiers are resolved under the context tenant, before any work
+starts. A `StartRequest.RunID` that already names a run of that tenant fails
+with `conflict` (`REQ-RT-046`); the same id in another tenant is a different
+run, as `RT-021-01` already shows. A `StartRequest.IdempotencyKey` is mapped
+per tenant too: a repeat of a non-empty key in the same tenant returns the first
+run's reference and runs no step (`REQ-RT-047`), while the same key in two
+tenants yields two runs (`REQ-RT-048`, `RT-048-01`). Empty keys are not stored
+in the dedupe map, so each start with an empty key creates a new run
+(`REQ-RT-047`, `RT-047-02`). The map is kept for the process's life, like
+the journal (see Retention below).
+
+A child id names a child of one parent and one flow. `Child` with the id of a
+child already started by this parent for this flow returns that child's future
+instead of starting another (`REQ-RT-049`, `RT-049-01`): this is how a parent
+re-attaches after a retry, while the child is still in flight. An id that
+already names any other run of the tenant — a child of a different parent
+(`RT-050-02`), a child of another flow (`RT-050-01`) or a top-level run
+(`RT-050-03`) — fails with `conflict` (`REQ-RT-050`); it never silently
+replaces the existing run.
+
+### List paging
+
+`List` returns matching runs in the order they were started and, when the page
+is short of the matches, a paging cursor naming that page's end. The cursor is
+opaque: a client passes it back unchanged and does not interpret it; the
+runtime is free to change its encoding. A cursor the runtime did not issue, or
+one whose position no longer exists, fails with `invalid_argument`
+(`REQ-RT-052`). A cursor carries the tenant it was issued to; a query under a
+different tenant fails with `invalid_argument` rather than returning any run
+(`REQ-RT-053`, `RT-053-01`), so paging never widens tenant visibility. The
+denial happens before the page is read, like the tenant checks in
+`REQ-RT-042` … `REQ-RT-044`.
+
+### A local runtime needs a timer clock
+
+`New` takes a clock and requires a timer clock — one that can schedule timers
+(`After`), not just report time (`Now`). `New` type-asserts/accepts a clock with
+`After`; a `core.Clock` with only `Now` fails construction with an error
+(`REQ-RT-054`, `RT-054-01`): timers could not move and `REQ-RT-008` could not
+hold. Passing nil selects `core.SystemClock`, which is a timer clock. The gate
+injects `coretest.FakeClock`, which fires timers on `Advance`.
+
+### Panics stay inside one run or step
+
+The flow host and each step function run behind a recover at their boundary;
+no panic escapes to bring down the process or another run. A panic in the flow
+host fails that run, as an unhandled error would. A panic in a step function
+fails the step with code `internal`, marked non-retryable, so no retry follows
+(`REQ-RT-016`); if the flow does not handle it, the run fails as for any other
+unhandled step error. The failure is recorded in the journal so `Describe` and
+`Future.Get` report it. These are runtime boundary rules, not a contract
+change. The recovered value is logged once per recovery through the runtime's
+logger, bounded in size, and is not part of any error a caller receives.
+
+### Retention is the process's life
+
+Runs, their journals and outboxes, and the start-idempotency-key map stay in
+memory for as long as the local runtime's process lives; nothing is evicted.
+`REQ-RT-006` already says a new runtime has no record of an earlier one's
+runs. A long-lived embedding therefore grows without bound and needs a
+retention policy (for example evicting closed runs and their keys after an
+age). No such policy is specified here; adding one is a new requirement and a
+spec change.
+
 ### Changes outside `runtime/local`
 
-None are needed: `runtime/runtime.go` already has `Caps`, `StepOptions`,
+An additive timer capability on the clock `New` accepts (`After`), implemented
+by `core.SystemClock` and `coretest.FakeClock` (fires on Advance), as stated
+above. `runtime/runtime.go` already has `Caps`, `StepOptions`,
 `ChildOptions.ParentClose`, the `terminated` state and every code used, and
-the package `runtime/local` exists in `layering.yaml`. If the implementer
-finds that a contract change is needed, it lands first in a pull request of
-its own.
+the package `runtime/local` exists in `layering.yaml`. No runtime contract
+file changes. If the implementer finds that a further contract change is
+needed, it lands first in a pull request of its own.
 
 ## Temporal runtime (WP-L5-02)
 
@@ -308,31 +389,53 @@ runtime asks the server for its version and refuses to serve, with code
 `unsupported`, when it is outside the range (`REQ-RT-037`). This check uses no
 new method on `runtime.Runtime` or `runtime.Caps`.
 
-The gate has no way to run an older or newer server build. The Temporal **test
-server** — the SDK's dev server whose features the scenarios use through
-time skipping — runs at the pinned version (`1.32.2` in `Background` and
-`RT-037-01`). `RT-037-02` passes the runtime a **simulated Temporal server
-version** for the version check `Serve` makes, which fails with `unsupported`
-when outside `1.32.x`.
+The gate downloads no server binary. The harness runs `runtime/temporal`
+workflow and activity code on the SDK's `TestWorkflowEnvironment`, which is
+in-process and owns its own skipping clock; no Temporal dev server is
+downloaded or started.
 
 ### How the scenarios run deterministically
 
-In `runtime/temporal` tests (`_test.go` and `internal/bdd`), the harness starts
-an in-process Temporal test server on an **ephemeral loopback port
-(`127.0.0.1:0`)** with time skipping enabled; the embedded profile's server
-(WP-L5-03) and fixed port `7233` are never used. The scenarios speak test time
-only (`RT-041-01`'s `1 day of test time`) and time skipping advances the
-workflow clock to the next timer or retry at once: no wall clock, no sleep, no
-timing assumption.
+The harness runs the workflow and activities on the SDK's
+`TestWorkflowEnvironment`, whose clock skips to the next timer or retry at
+once. "1 day of test time" in `RT-041-01`/`RT-041-02` is the environment clock
+skipping straight to that point; there is no wall clock and no sleep.
 
-Histories are read from the test server's client (`GetWorkflowHistory`,
-including payload metadata and `ContinuedAsNew` events). The tenant, the blob
-store, the payload codec and the simulated key service come from the gate: the
-payload codec and its simulated key service are WP-L1-04's
-(`internal/bdd/steps/secrets.go`), the blob store is WP-L1-02's store, and the
-two are composed here as the data converter this package takes from the
-composition root. The implementer uses the step library of the other work
-packages this work package needs (`specs/secrets/`, `specs/blob/`), not a copy.
+The runtime's data converter is the payload codec of WP-L1-04 composed with the
+blob claim-check codec of WP-L1-02; the harness wraps that converter in a
+recorder. Every payload the runtime hands to the SDK on encode passes through
+the recorder, so "the run history holds ...", "every payload in the run
+history ..." and "the Temporal test server holds no run history for that start"
+(`RT-028-01`, `RT-029-01`, `RT-031-01`, `RT-031-02`, `RT-032-01`, `RT-033-01`,
+`RT-040-01`, `RT-042-07`) are read from what the recorder saw — the payloads that would be
+written to history. An empty recorder is "no run history". The tenant, the blob
+store, the payload codec and the simulated key service still come from the
+gate: the codec and key service are WP-L1-04's (`internal/bdd/steps/secrets.go`),
+the blob store is WP-L1-02's, and the two are composed here as the data
+converter the package takes from the composition root. The implementer uses the
+step library of the other work packages this work package needs
+(`specs/secrets/`, `specs/blob/`), not a copy.
+
+ContinueAsNew (`RT-034-01` … `RT-038-01`): at a `Checkpoint` past the threshold,
+the workflow returns the SDK's continue-as-new error with the continuation
+input; the harness then starts the next execution under the same run id, as the
+server does, so "continued as new N times" counts those restarts. Before each Checkpoint, the harness sets `SetCurrentHistoryLength` to a value
+clearly on the scenario's intended side of the threshold (well above for
+`RT-034-01`/`RT-036-*`/`RT-038-01`, well below for `RT-035-*`), so the
+comparison is deterministic without depending on how many events the SDK would
+count.
+
+Serve version check (`RT-037-01`/`02`): a minimal in-process gRPC
+`WorkflowService`, test-only code in `internal/bdd`, listens on `127.0.0.1:0`
+and answers `GetSystemInfo` with the scenario's version — `1.32.2` in
+`Background` and `RT-037-01`, and `1.31.9` and `1.33.0` in `RT-037-02`. The
+Background step "Given a Temporal test server at version …" and "the Temporal
+test server" in `RT-037-01` name that stub (and the harness world), never
+`StartDevServer` or a downloaded binary. The runtime dials it through the real
+client path; no server binary is downloaded.
+
+Against a real server, WP-L5-03 (embedded server) and WP-L5-04 (conformance,
+crash resume, replay) run the same workflows in real time, in the slow lane.
 
 ### Changed outside `runtime/temporal`
 

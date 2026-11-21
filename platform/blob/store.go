@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"gocloud.dev/blob"
@@ -14,13 +15,22 @@ import (
 
 // Store is a tenant-scoped content store over one bucket.
 type Store struct {
-	bucket   bucketBackend
-	clock    core.Clock
-	maxTTL   time.Duration
-	embedded bool
-	baseURL  string
-	signKey  []byte
-	putLocks keyedMu
+	bucket       bucketBackend
+	clock        core.Clock
+	maxTTL       time.Duration
+	embedded     bool
+	baseURL      string
+	signKey      []byte
+	putLocks     keyedMu
+	stageLocks   keyedMu // per (tenant, staging key); in-process only (see doc.go)
+	rand         io.Reader
+	lastSweep    time.Time
+	sweepRetryAt time.Time
+	sweepMu      sync.Mutex
+}
+
+func stageLockKey(tid core.TenantID, stageKey string) string {
+	return string(tid) + "/stage/" + stageKey
 }
 
 // Close releases the underlying bucket.
@@ -32,9 +42,6 @@ func (s *Store) tenantOK(ctx context.Context) (core.TenantID, error) {
 	tid, ok := core.TenantFrom(ctx)
 	if !ok {
 		return "", core.NewError(core.CodeInvalidArgument, "tenant required", nil)
-	}
-	if err := validateTenantSegment(string(tid)); err != nil {
-		return "", err
 	}
 	return tid, nil
 }

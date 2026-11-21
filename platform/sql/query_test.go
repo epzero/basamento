@@ -240,6 +240,283 @@ func TestRewritePlaceholdersPostgres(t *testing.T) {
 	}
 }
 
+// Regression probes for U&'…' using the standard single-quote rule (not escape rules).
+// Only a backslash inside U&' distinguishes the two; doubled-quote continuations match
+// both rules and belong in the scanner contract table, not here.
+func TestRewritePostgresPlaceholderUescapeProbes(t *testing.T) {
+	t.Parallel()
+	e := &Execer{dialect: dialectPostgres}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "uescape_backslash_not_escape_string",
+			in:   `SELECT U&'\' UESCAPE '!' AS s, ?`,
+			want: `SELECT U&'\' UESCAPE '!' AS s, $1`,
+		},
+		{
+			name: "uescape_backslash_after_content_hides_trailing_placeholders",
+			in:   `SELECT U&'\' AS s, ?, ?`,
+			want: `SELECT U&'\' AS s, $1, $2`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := e.rewrite(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+type postgresScannerContractRow struct {
+	construct     string
+	in            string
+	want          string
+	wantErr       bool
+	knownGap      string
+	gapReason     string
+	supported     bool
+	outOfContract bool
+}
+
+func TestRewritePostgresPlaceholderScannerContract(t *testing.T) {
+	t.Parallel()
+	e := &Execer{dialect: dialectPostgres}
+	rows := []postgresScannerContractRow{
+		{
+			construct: "standard_single_quoted",
+			in:        `SELECT '?' AS q, ?`,
+			want:      `SELECT '?' AS q, $1`,
+			supported: true,
+		},
+		{
+			construct: "escape_string_e",
+			in:        `SELECT E'\\?' AS q, ?`,
+			want:      `SELECT E'\\?' AS q, $1`,
+			supported: true,
+		},
+		{
+			construct: "byte_string_b",
+			in:        `SELECT B'??', ?`,
+			want:      `SELECT B'??', $1`,
+			supported: true,
+		},
+		{
+			construct: "hex_string_x",
+			in:        `SELECT X'AB?', ?`,
+			want:      `SELECT X'AB?', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_doubled_quote",
+			in:        `SELECT U&'''?''', ?`,
+			want:      `SELECT U&'''?''', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_lower",
+			in:        `SELECT u&'a', ?`,
+			want:      `SELECT u&'a', $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag",
+			in:        `SELECT $tag$? literal$tag$, ?`,
+			want:      `SELECT $tag$? literal$tag$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_non_ascii_latin",
+			in:        `SELECT $é$?$é$ WHERE id = ?`,
+			want:      `SELECT $é$?$é$ WHERE id = $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_greek",
+			in:        `SELECT $Ω$?$Ω$, ?`,
+			want:      `SELECT $Ω$?$Ω$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_cjk",
+			in:        `SELECT $中$?$中$, ?`,
+			want:      `SELECT $中$?$中$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_tag_mixed_ascii_nonascii_digit",
+			in:        `SELECT $a€1$?$a€1$, ?`,
+			want:      `SELECT $a€1$?$a€1$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_non_ascii_body_nested_different_tag",
+			in:        `SELECT $é$?$ê$?$é$, ?`,
+			want:      `SELECT $é$?$ê$?$é$, $1`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_non_ascii_at_eof",
+			in:        `SELECT $é$?`,
+			want:      `SELECT $é$?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_tag_after_bind",
+			in:        `SELECT ?, $a$ ?`,
+			want:      `SELECT $1, $a$ ?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_unclosed_empty_tag_after_bind",
+			in:        `SELECT ?, $$ ?`,
+			want:      `SELECT $1, $$ ?`,
+			supported: true,
+		},
+		{
+			construct: "dollar_quoted_closed_then_unclosed_non_ascii",
+			in:        `SELECT $t$?$t$, ?, $é$?`,
+			want:      `SELECT $t$?$t$, $1, $é$?`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_trailing_at_eof",
+			in:        `SELECT U&'a'`,
+			want:      `SELECT U&'a'`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_unterminated_quote_at_eof",
+			in:        `SELECT ?, U&'`,
+			want:      `SELECT $1, U&'`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_unterminated_with_content_at_eof",
+			in:        `SELECT ?, U&'a?`,
+			want:      `SELECT $1, U&'a?`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_prefix_without_quote_at_eof",
+			in:        `SELECT ?, U&`,
+			want:      `SELECT $1, U&`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_u_amp_adjacent_literals",
+			in:        `SELECT U&'a'U&'b', ?`,
+			want:      `SELECT U&'a'U&'b', $1`,
+			supported: true,
+		},
+		{
+			construct: "reject_dollar_number_after_single_quoted",
+			in:        `SELECT 'x'$1, ?`,
+			wantErr:   true,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_uescape_operand_doubled_single_quote_literal",
+			in:        `SELECT U&'in\0003side?' UESCAPE '''', ?`,
+			want:      `SELECT U&'in\0003side?' UESCAPE '''', $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_string_uescape_double_quote_escape_char",
+			in:        `SELECT U&'in\0003side?' UESCAPE '"', ?`,
+			want:      `SELECT U&'in\0003side?' UESCAPE '"', $1`,
+			supported: true,
+		},
+		{
+			construct: "crlf_line_endings_and_comment",
+			in:        "SELECT ?\r\nWHERE x = ? -- bind ?\r\nAND y = ?",
+			want:      "SELECT $1\r\nWHERE x = $2 -- bind ?\r\nAND y = $3",
+			supported: true,
+		},
+		{
+			construct: "dollar_quote_identifier_boundary",
+			in:        `SELECT foo$tag$?, ?`,
+			want:      `SELECT foo$tag$$1, $2`,
+			supported: true,
+		},
+		{
+			construct: "double_quoted_identifier",
+			in:        `SELECT "?" FROM t WHERE id = ?`,
+			want:      `SELECT "?" FROM t WHERE id = $1`,
+			supported: true,
+		},
+		{
+			construct: "unicode_identifier_u_amp_double_quoted",
+			in:        `SELECT U&"foo", ?`,
+			want:      `SELECT U&"foo", $1`,
+			supported: true,
+		},
+		{
+			construct: "line_comment",
+			in:        "SELECT ? -- bind ?\nFROM t WHERE x = ?",
+			want:      "SELECT $1 -- bind ?\nFROM t WHERE x = $2",
+			supported: true,
+		},
+		{
+			construct: "nested_block_comment",
+			in:        "SELECT /* /* ? */ ? */ 1 WHERE x = ?",
+			want:      "SELECT /* /* ? */ ? */ 1 WHERE x = $1",
+			supported: true,
+		},
+		{
+			construct: "standard_conforming_strings_off",
+			in:        `SELECT 'x\' AS s, ?`,
+			knownGap:  `SELECT 'x\' AS s, $1`,
+			gapReason: "plain '…' strings always use standard_conforming_strings=on rules; backslash does not escape the closing quote",
+			supported: false,
+		},
+		{
+			construct:     "jsonb_exists_operator",
+			in:            `SELECT col ? 'key'`,
+			knownGap:      `SELECT col $1 'key'`,
+			gapReason:     "jsonb ? operator is out of contract; use jsonb_exists instead",
+			supported:     false,
+			outOfContract: true,
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.construct, func(t *testing.T) {
+			t.Parallel()
+			got, err := e.rewrite(row.in)
+			if row.wantErr {
+				if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+					t.Fatalf("got err %v want invalid_argument", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := row.want
+			if !row.supported {
+				want = row.knownGap
+			}
+			if got != want {
+				t.Fatalf("got %q want %q", got, want)
+			}
+			if row.gapReason != "" && row.supported {
+				t.Fatal("gapReason set on supported row")
+			}
+			if !row.supported && row.knownGap == "" {
+				t.Fatal("unsupported row missing knownGap")
+			}
+		})
+	}
+}
+
 func TestTextOrderClauseRejectsInvalidIdent(t *testing.T) {
 	_, err := TextOrderClause("postgres", `key"; DROP TABLE items;--`)
 	if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {

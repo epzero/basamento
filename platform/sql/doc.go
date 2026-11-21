@@ -43,10 +43,18 @@
 // password and the values of the credential query parameters (password, sslpassword,
 // passfile, sslcert, sslkey, sslrootcert) with the literal ***. When the URL carried
 // any of them, driver text is replaced by the fixed cause "driver error withheld".
+// [MapError] applies the same mapping to a driver error taken straight from database/sql
+// row iteration, which bypasses [Execer] and [Row]; repository code calls it on
+// [database/sql.Rows.Scan] and [database/sql.Rows.Err] results.
 //
 // # Transactions and SQL
 //
 // [Store.InTx] rejects a nested InTx on the same store when fn uses the ctx InTx
 // provides. [Execer] documents the ? placeholder contract on both dialects.
 // [TextOrderClause] takes a simple SQL identifier for the column name.
+//
+// Postgres ?-to-$n scanning follows the dialect lexer for strings, comments, and
+// dollar quotes, including standard single-quote rules for U&'…' strings; plain
+// single-quoted strings always assume standard_conforming_strings = on.
+// Jsonb operators ?, ?|, and ?& are out of contract for SQL passed through the store.
 package sql

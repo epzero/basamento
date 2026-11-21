@@ -26,24 +26,24 @@ Capabilities:
 | Capability | Status |
 | --- | --- |
 | [`core`](core/requirements.md) | Implemented (ids). |
-| [`flow-engine`](flow-engine/requirements.md) | Planned (WP-L4-*). |
-| [`runtime`](runtime/requirements.md) | Temporal implemented (WP-L5-02); local and embedded planned (WP-L5-01, WP-L5-03). |
+| [`flow-engine`](flow-engine/requirements.md) | In progress (IR and compiler, WP-L4-01); machine, builder and host planned (WP-L4-02, 03, 04). |
+| [`runtime`](runtime/requirements.md) | In progress (local runtime, WP-L5-01; Temporal, WP-L5-02); embedded and conformance planned (WP-L5-03, 04). |
 | [`streaming`](streaming/requirements.md) | Planned (WP-L6-*). |
 | [`models`](models/requirements.md) | Planned (WP-L3-*). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`secrets`](secrets/requirements.md) | Implemented (WP-L1-04). |
-| [`credentials`](credentials/requirements.md) | Planned (WP-L1-06). |
+| [`credentials`](credentials/requirements.md) | Implemented (WP-L1-06). |
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
 | [`prompt`](prompt/requirements.md) | Implemented (WP-L3-05). |
 | [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
-| [`config`](config/requirements.md) | Planned (WP-L1-05). |
-| [`telemetry`](telemetry/requirements.md) | Planned (WP-L1-07). |
-| [`schema`](schema/requirements.md) | Implemented (WP-L2-02). |
+| [`config`](config/requirements.md) | Implemented (WP-L1-05). |
+| [`telemetry`](telemetry/requirements.md) | Implemented (WP-L1-07). |
+| [`schema`](schema/requirements.md) | Implemented (WP-L2-02, EP0-126). |
 | [`tools`](tools/requirements.md) | Planned (WP-L7-02). |
 | [`inspector`](inspector/requirements.md) | Planned (WP-L6-04). |
-| [`bus`](bus/requirements.md) | Planned (WP-L1-03). |
+| [`bus`](bus/requirements.md) | Implemented (WP-L1-03, `platform/bus`, BDD fake `internal/bdd/bustest`). |
 | [`expr`](expr/requirements.md) | Implemented (WP-L2-01). |
-| [`blob`](blob/requirements.md) | Implemented (WP-L1-02); uploads planned (WP-L1-08). |
+| [`blob`](blob/requirements.md) | Implemented (WP-L1-02, WP-L1-08). |
 | [`sql`](sql/requirements.md) | Implemented (WP-L1-01). |
