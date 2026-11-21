@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/tool"
 )
@@ -58,6 +59,27 @@ type toolWorld struct {
 
 	hostEnv   map[string]string
 	hostFiles map[string]bool
+
+	layerClock *stepClock
+}
+
+// stepClock is the scenario clock plus a signal for the layer's heartbeat
+// grace wait. The harness must advance the scenario clock only after the layer
+// has registered that wait, or the advance would miss it and the call would
+// never settle.
+type stepClock struct {
+	*coretest.FakeClock
+	grace chan struct{}
+}
+
+func (c *stepClock) After(d time.Duration) <-chan time.Time {
+	if d == tool.Heartbeat {
+		select {
+		case c.grace <- struct{}{}:
+		default:
+		}
+	}
+	return c.FakeClock.After(d)
 }
 
 type toolDef struct {
@@ -95,10 +117,12 @@ type toolFlow struct {
 }
 
 type pendingCall struct {
-	done    chan struct{}
-	clock   tool.Clock
-	outcome tool.Outcome
-	err     error
+	done      chan struct{}
+	clock     tool.Clock
+	heartbeat bool
+	timeout   time.Duration
+	outcome   tool.Outcome
+	err       error
 }
 
 func newToolWorld() *toolWorld {
@@ -126,8 +150,11 @@ func (w *toolWorld) teardown() {
 }
 
 func (w *toolWorld) layer(wr *World) *tool.Layer {
+	if w.layerClock == nil {
+		w.layerClock = &stepClock{FakeClock: wr.Core.clock, grace: make(chan struct{}, 1)}
+	}
 	return tool.New(tool.Config{
-		Clock:       wr.Core.clock,
+		Clock:       w.layerClock,
 		Blob:        w.blob,
 		Credentials: w.creds,
 		Log:         slog.New(slog.NewTextHandler(w.logBuf, nil)),
@@ -288,7 +315,11 @@ func (w *toolWorld) call(ctx context.Context, agent, name string, args json.RawM
 		return w.layer(world(ctx)).Step(ctx, set, tool.Call{Name: name, Args: args})
 	}
 	if d.progress || (d.sandbox != "" && w.sandboxes[d.sandbox] != nil && w.sandboxes[d.sandbox].runUntilStopped) {
-		p := &pendingCall{done: make(chan struct{}), clock: clk}
+		timeout := d.Timeout
+		if timeout <= 0 {
+			timeout = tool.DefaultTimeout
+		}
+		p := &pendingCall{done: make(chan struct{}), clock: clk, heartbeat: d.progress, timeout: timeout}
 		w.pending = p
 		go func() {
 			p.outcome, p.err = run()
@@ -332,6 +363,17 @@ func (w *toolWorld) await() error {
 
 func (w *toolWorld) advance(wr *World, d time.Duration) error {
 	wr.Core.clock.Advance(d)
+	if p := w.pending; p != nil && p.heartbeat && !p.clock.Now().Before(w.callStart.Add(p.timeout)) {
+		// The layer bounds the wait for a tool that stops at its next
+		// heartbeat by one heartbeat on the scenario clock. Advance that
+		// heartbeat once the layer has registered the wait, so the advance
+		// cannot miss it.
+		select {
+		case <-w.layerClock.grace:
+		case <-p.done:
+		}
+		wr.Core.clock.Advance(tool.Heartbeat)
+	}
 	return w.await()
 }
 

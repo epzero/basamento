@@ -3,10 +3,13 @@ package tool
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -118,12 +121,9 @@ func (c *MCPClient) Tools(ctx context.Context, existing *Set) ([]Tool, error) {
 				fmt.Sprintf("mcp server %q offers %q, which is already in the caller's tools", c.server.Name, name),
 				map[string]any{"tool": name})
 		}
-		input := json.RawMessage(`{}`)
-		if remote.InputSchema != nil {
-			raw, err := json.Marshal(remote.InputSchema)
-			if err == nil {
-				input = raw
-			}
+		input, err := c.inputSchema(remote)
+		if err != nil {
+			return nil, err
 		}
 		tools = append(tools, Tool{
 			Name:        name,
@@ -134,6 +134,22 @@ func (c *MCPClient) Tools(ctx context.Context, existing *Set) ([]Tool, error) {
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools, nil
+}
+
+// inputSchema serializes a server tool's declared input schema. A schema that
+// cannot be serialized fails the listing: offering the tool with an empty
+// schema would silently turn its argument validation off (REQ-TOOL-002).
+func (c *MCPClient) inputSchema(remote *mcp.Tool) (json.RawMessage, error) {
+	if remote.InputSchema == nil {
+		return json.RawMessage(`{}`), nil
+	}
+	raw, err := json.Marshal(remote.InputSchema)
+	if err != nil {
+		return nil, core.NewError(core.CodeInternal,
+			fmt.Sprintf("mcp server %q: tool %q has an input schema that cannot be serialized",
+				c.server.Name, remote.Name), nil)
+	}
+	return raw, nil
 }
 
 // Call forwards one call to the server. The credential, when configured, is
@@ -271,14 +287,38 @@ func mcpError(server, op string, err error, secret string) error {
 		fmt.Sprintf("mcp server %q is unavailable", server), nil)
 }
 
-// scrubSecret removes a resolved credential from text the server controls.
-// The credential is never written to an event, a history entry, an error or a
-// log, even when the server echoes it back.
+// scrubSecret removes a resolved credential, and the encodings a server
+// commonly echoes it in, from text the server controls. The credential is
+// never written to an event, a history entry, an error or a log, even when
+// the server echoes it back (REQ-TOOL-017).
 func scrubSecret(text, secret string) string {
-	if secret == "" {
+	if secret == "" || text == "" {
 		return text
 	}
-	return strings.ReplaceAll(text, secret, "[redacted]")
+	for _, form := range secretForms(secret) {
+		text = strings.ReplaceAll(text, form, "[redacted]")
+	}
+	return text
+}
+
+// secretForms is the credential and its common encodings, longest first so a
+// shorter form never masks part of a longer one. It covers the base64
+// alphabets (padded and raw), percent-encoding and hex, which is how a server
+// that logs or echoes a credential usually carries it.
+func secretForms(secret string) []string {
+	raw := []byte(secret)
+	forms := []string{secret}
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.RawStdEncoding,
+		base64.URLEncoding, base64.RawURLEncoding,
+	} {
+		forms = append(forms, enc.EncodeToString(raw))
+	}
+	hexed := hex.EncodeToString(raw)
+	forms = append(forms, hexed, strings.ToUpper(hexed),
+		url.QueryEscape(secret), url.PathEscape(secret))
+	sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	return forms
 }
 
 func scrubJSON(raw json.RawMessage, secret string) json.RawMessage {

@@ -127,53 +127,113 @@ func (l *Layer) Step(ctx context.Context, set *Set, call Call) (Outcome, error) 
 		done <- completed{result: res, err: err}
 	}()
 
-	select {
-	case <-deadline:
-		cancel()
+	out, cause := awaitBounded(done, deadline, ctx)
+	cancel()
+	switch cause {
+	case waitDeadline:
 		// Acknowledge the stop before the outcome is recorded: a replay must
 		// not find the tool still running. A tool that ignores its context is
-		// bounded by one heartbeat.
-		select {
-		case <-done:
-		case <-time.After(Heartbeat):
-			l.log().Warn("tool did not stop after its time limit", "tool", t.Name)
-		}
+		// bounded by one heartbeat, on the layer's clock.
+		awaitStop(clock, l.log(), done, "tool did not stop after its time limit", "tool", t.Name)
 		return Outcome{
 			Failed:  true,
 			Code:    core.CodeTimeout,
 			Message: fmt.Sprintf("tool %q exceeded its time limit of %s", t.Name, timeout),
 		}, nil
-	case <-ctx.Done():
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(Heartbeat):
-			l.log().Warn("tool did not stop after its call was cancelled", "tool", t.Name)
-		}
+	case waitCancelled:
+		awaitStop(clock, l.log(), done, "tool did not stop after its call was cancelled", "tool", t.Name)
 		return Outcome{}, core.NewError(core.CodeCancelled,
 			fmt.Sprintf("tool %q: call cancelled", t.Name), nil)
-	case out := <-done:
-		cancel()
-		if out.panic != nil {
-			l.log().Error("tool panicked", "tool", t.Name, "panic", fmt.Sprint(out.panic))
-			return Outcome{
-				Failed:  true,
-				Code:    core.CodeInternal,
-				Message: fmt.Sprintf("tool %q panicked", t.Name),
-			}, nil
+	}
+	if out.panic != nil {
+		l.log().Error("tool panicked", "tool", t.Name, "panic", fmt.Sprint(out.panic))
+		return Outcome{
+			Failed:  true,
+			Code:    core.CodeInternal,
+			Message: fmt.Sprintf("tool %q panicked", t.Name),
+		}, nil
+	}
+	if out.err != nil {
+		// A tool that returns because the call was cancelled is not failing on
+		// its own: the call is cancelled, however the stop reached the layer.
+		if ctx.Err() != nil && errors.Is(out.err, ctx.Err()) {
+			return Outcome{}, core.NewError(core.CodeCancelled,
+				fmt.Sprintf("tool %q: call cancelled", t.Name), nil)
 		}
-		if out.err != nil {
-			return Outcome{
-				Failed:  true,
-				Code:    core.CodeOf(out.err),
-				Message: errorMessage(out.err),
-			}, nil
+		return Outcome{
+			Failed:  true,
+			Code:    core.CodeOf(out.err),
+			Message: errorMessage(out.err),
+		}, nil
+	}
+	res, err := l.spill(ctx, t, out.result)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: res}, nil
+}
+
+// waitCause says how a bounded call ended.
+type waitCause int
+
+const (
+	waitFinished waitCause = iota
+	waitDeadline
+	waitCancelled
+)
+
+// awaitBounded waits for a bounded call to end and says how. When more than one
+// source is ready it applies a fixed priority — a finished call, then the
+// deadline, then cancellation — so the same inputs always give the same
+// outcome. A bare select would pick one of several ready cases at random.
+func awaitBounded[T any](done <-chan T, deadline <-chan time.Time, ctx context.Context) (T, waitCause) {
+	var (
+		out               T
+		finished, expired bool
+	)
+	for {
+		if !finished {
+			select {
+			case out = <-done:
+				finished = true
+			default:
+			}
 		}
-		res, err := l.spill(ctx, t, out.result)
-		if err != nil {
-			return Outcome{}, err
+		if !expired {
+			select {
+			case <-deadline:
+				expired = true
+			default:
+			}
 		}
-		return Outcome{Result: res}, nil
+		switch {
+		case finished:
+			return out, waitFinished
+		case expired:
+			return out, waitDeadline
+		case ctx.Err() != nil:
+			return out, waitCancelled
+		}
+		// Nothing is ready: block until something is, then apply the priority
+		// again in case another source became ready at the same moment.
+		select {
+		case out = <-done:
+			finished = true
+		case <-deadline:
+			expired = true
+		case <-ctx.Done():
+		}
+	}
+}
+
+// awaitStop waits one heartbeat for a bounded call to observe its
+// cancellation, on the layer's clock: a fake clock in a replay bounds this
+// wait the same way it bounds the deadline, instead of running on wall time.
+func awaitStop[T any](clock Clock, log *slog.Logger, done <-chan T, message string, args ...any) {
+	select {
+	case <-done:
+	case <-clock.After(Heartbeat):
+		log.Warn(message, args...)
 	}
 }
 

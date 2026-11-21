@@ -105,6 +105,43 @@ func fixedClock() *coretest.FakeClock {
 	return coretest.NewFakeClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 }
 
+// recordingClock is the fake clock plus a record of every After duration, so
+// a test can prove a wait used the layer's clock instead of the wall clock.
+// A heartbeat grace wait fires at once, so a test never waits on wall time;
+// every other duration goes to the fake clock and is advanced by the test.
+type recordingClock struct {
+	*coretest.FakeClock
+	mu    sync.Mutex
+	after []time.Duration
+}
+
+func newRecordingClock() *recordingClock {
+	return &recordingClock{FakeClock: fixedClock()}
+}
+
+func (c *recordingClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	c.after = append(c.after, d)
+	c.mu.Unlock()
+	if d == tool.Heartbeat {
+		ch := make(chan time.Time, 1)
+		ch <- c.Now()
+		return ch
+	}
+	return c.FakeClock.After(d)
+}
+
+func (c *recordingClock) waited(d time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, got := range c.after {
+		if got == d {
+			return true
+		}
+	}
+	return false
+}
+
 func TestStepRefusesToolOutsideAllowlist(t *testing.T) {
 	ran := false
 	other := tool.Tool{Name: "delete_file", Run: func(context.Context, json.RawMessage) (tool.Result, error) {
@@ -534,4 +571,69 @@ func TestStepWaitsForTheToolToStopAtItsTimeLimit(t *testing.T) {
 	default:
 		t.Fatal("Step returned before the tool acknowledged the stop")
 	}
+}
+
+// CLOCK-01: the post-timeout and post-cancel grace waits must run on the
+// layer's clock. With time.After they would run on wall time under a fake
+// clock, so a replay and a test would diverge from production.
+func TestStepGraceWaitsUseTheLayerClock(t *testing.T) {
+	t.Run("after the time limit", func(t *testing.T) {
+		clock := newRecordingClock()
+		started := make(chan struct{})
+		set := &tool.Set{Tools: []tool.Tool{{
+			Name:    "slow-report",
+			Timeout: 30 * time.Second,
+			Run: func(ctx context.Context, _ json.RawMessage) (tool.Result, error) {
+				close(started)
+				<-ctx.Done()
+				return tool.Result{}, ctx.Err()
+			},
+		}}}
+		result := make(chan tool.Outcome, 1)
+		go func() {
+			out, _ := layerWith(clock, newMemBlob(), nil).Step(context.Background(), set,
+				tool.Call{Name: "slow-report", Args: json.RawMessage(`{}`)})
+			result <- out
+		}()
+		<-started
+		clock.Advance(30 * time.Second)
+		if out := <-result; !out.Failed || out.Code != core.CodeTimeout {
+			t.Fatalf("outcome %+v, want timeout", out)
+		}
+		if !clock.waited(tool.Heartbeat) {
+			t.Fatal("the grace wait after the time limit did not use the layer's clock")
+		}
+	})
+
+	t.Run("after cancellation", func(t *testing.T) {
+		clock := newRecordingClock()
+		ctx, cancel := context.WithCancel(context.Background())
+		started := make(chan struct{})
+		release := make(chan struct{})
+		set := &tool.Set{Tools: []tool.Tool{{
+			Name: "search",
+			Run: func(context.Context, json.RawMessage) (tool.Result, error) {
+				// A tool that ignores its context: the layer bounds the wait
+				// after cancellation by one heartbeat.
+				close(started)
+				<-release
+				return tool.Result{}, nil
+			},
+		}}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := layerWith(clock, newMemBlob(), nil).Step(ctx, set,
+				tool.Call{Name: "search", Args: json.RawMessage(`{}`)})
+			done <- err
+		}()
+		<-started
+		cancel()
+		if err := <-done; err == nil || core.CodeOf(err) != core.CodeCancelled {
+			t.Fatalf("error %v, want cancelled", err)
+		}
+		close(release)
+		if !clock.waited(tool.Heartbeat) {
+			t.Fatal("the grace wait after cancellation did not use the layer's clock")
+		}
+	})
 }

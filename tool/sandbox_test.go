@@ -26,6 +26,8 @@ type scriptedSandbox struct {
 	err         error
 	panic       bool
 	block       bool
+	ignoreCtx   bool
+	release     chan struct{}
 	started     chan struct{}
 	stopped     chan struct{}
 	startedOnce sync.Once
@@ -50,6 +52,10 @@ func (s *scriptedSandbox) Run(ctx context.Context, spec tool.SandboxSpec, comman
 	}
 	if s.err != nil {
 		return tool.SandboxResult{}, s.err
+	}
+	if s.ignoreCtx {
+		<-s.release
+		return tool.SandboxResult{}, nil
 	}
 	if s.block {
 		<-ctx.Done()
@@ -319,4 +325,49 @@ func TestRunSandboxRejectsReservedEnvironmentNames(t *testing.T) {
 			}
 		})
 	}
+}
+
+// CLOCK-01: the sandbox's post-timeout and post-cancel grace waits must run on
+// the layer's clock. With time.After they would run on wall time under a fake
+// clock, so a replay and a test would diverge from production.
+func TestRunSandboxGraceWaitsUseTheLayerClock(t *testing.T) {
+	t.Run("after the time limit", func(t *testing.T) {
+		clock := newRecordingClock()
+		sb := &scriptedSandbox{block: true, started: make(chan struct{}), stopped: make(chan struct{})}
+		result := make(chan error, 1)
+		go func() {
+			_, err := layerWith(clock, newMemBlob(), nil).RunSandbox(context.Background(), sb,
+				tool.SandboxSpec{TimeLimit: 60 * time.Second}, []string{"make", "test"})
+			result <- err
+		}()
+		<-sb.started
+		clock.Advance(60 * time.Second)
+		if err := <-result; err == nil || core.CodeOf(err) != core.CodeTimeout {
+			t.Fatalf("error %v, want timeout", err)
+		}
+		if !clock.waited(tool.Heartbeat) {
+			t.Fatal("the grace wait after the time limit did not use the layer's clock")
+		}
+	})
+
+	t.Run("after cancellation", func(t *testing.T) {
+		clock := newRecordingClock()
+		ctx, cancel := context.WithCancel(context.Background())
+		sb := &scriptedSandbox{ignoreCtx: true, release: make(chan struct{}), started: make(chan struct{})}
+		result := make(chan error, 1)
+		go func() {
+			_, err := layerWith(clock, newMemBlob(), nil).RunSandbox(ctx, sb,
+				tool.SandboxSpec{TimeLimit: 60 * time.Second}, []string{"make", "test"})
+			result <- err
+		}()
+		<-sb.started
+		cancel()
+		if err := <-result; err == nil || core.CodeOf(err) != core.CodeCancelled {
+			t.Fatalf("error %v, want cancelled", err)
+		}
+		close(sb.release)
+		if !clock.waited(tool.Heartbeat) {
+			t.Fatal("the grace wait after cancellation did not use the layer's clock")
+		}
+	})
 }

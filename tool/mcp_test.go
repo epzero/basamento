@@ -2,10 +2,13 @@ package tool_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -496,9 +499,19 @@ func TestSetMergeRejectsDuplicateNames(t *testing.T) {
 
 func TestMCPEchoedCredentialIsScrubbed(t *testing.T) {
 	const secret = "sk-weather-7f3a"
+	forms := map[string]string{
+		"literal": secret,
+		"base64":  base64.StdEncoding.EncodeToString([]byte(secret)),
+		"hex":     hex.EncodeToString([]byte(secret)),
+		"url":     url.QueryEscape(secret),
+	}
+	answer, err := json.Marshal(forms)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
 	sim := newMCPSim()
 	sim.addTool("echo", "", "city")
-	sim.answer["echo"] = json.RawMessage(`"` + secret + `"`)
+	sim.answer["echo"] = answer
 	creds := &memCredentials{values: map[string][]byte{"cred://weather-key": []byte(secret)}}
 	client := tool.NewMCPClient(tool.MCPServer{Name: "weather", CredRef: "cred://weather-key", Dial: sim.dial}, creds)
 	tools, err := client.Tools(context.Background(), nil)
@@ -509,21 +522,25 @@ func TestMCPEchoedCredentialIsScrubbed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if strings.Contains(string(res.Content), secret) {
-		t.Fatalf("result %s carries the credential", res.Content)
+	for name, form := range forms {
+		if strings.Contains(string(res.Content), form) {
+			t.Fatalf("result %s carries the credential as %s", res.Content, name)
+		}
 	}
 	if !strings.Contains(string(res.Content), "[redacted]") {
 		t.Fatalf("result %s is not scrubbed", res.Content)
 	}
 
 	sim.mu.Lock()
-	sim.fail["echo"] = "bad key " + secret
+	sim.fail["echo"] = "bad key " + secret + " / " + forms["base64"] + " / " + forms["hex"]
 	sim.mu.Unlock()
 	_, err = tools[0].Run(context.Background(), json.RawMessage(`{"city":"Porto"}`))
 	if err == nil || core.CodeOf(err) != core.CodeVendor {
 		t.Fatalf("error %v, want vendor_error", err)
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("error %q carries the credential", err)
+	for name, form := range forms {
+		if strings.Contains(err.Error(), form) {
+			t.Fatalf("error %q carries the credential as %s", err, name)
+		}
 	}
 }

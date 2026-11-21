@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -84,7 +85,8 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 	done := make(chan completed, 1)
 	// Register the deadline before the driver can run: a driver that moves the
 	// test clock as soon as it starts must not outrun the timer.
-	deadline := l.clock().After(limit)
+	clock := l.clock()
+	deadline := clock.After(limit)
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -95,39 +97,34 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 		done <- completed{result: res, err: err}
 	}()
 
-	select {
-	case <-deadline:
-		cancel()
+	out, cause := awaitBounded(done, deadline, ctx)
+	cancel()
+	switch cause {
+	case waitDeadline:
 		// Acknowledge the stop before the outcome is recorded: a replay must
 		// not find the command still running. A driver that ignores its
-		// context is bounded by one heartbeat.
-		select {
-		case <-done:
-		case <-time.After(Heartbeat):
-			l.log().Warn("sandbox did not stop after its time limit")
-		}
+		// context is bounded by one heartbeat, on the layer's clock.
+		awaitStop(clock, l.log(), done, "sandbox did not stop after its time limit")
 		return Result{}, core.NewError(core.CodeTimeout,
 			fmt.Sprintf("sandbox: command exceeded its time limit of %s", limit), nil)
-	case <-ctx.Done():
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(Heartbeat):
-			l.log().Warn("sandbox did not stop after its call was cancelled")
-		}
+	case waitCancelled:
+		awaitStop(clock, l.log(), done, "sandbox did not stop after its call was cancelled")
 		return Result{}, core.NewError(core.CodeCancelled, "sandbox: command cancelled", nil)
-	case out := <-done:
-		cancel()
-		if out.panic != nil {
-			l.log().Error("sandbox driver panicked", "panic", fmt.Sprint(out.panic))
-			return Result{}, core.NewError(core.CodeInternal, "sandbox: the sandbox failed", nil)
-		}
-		if out.err != nil {
-			l.log().Error("sandbox driver failed", "error", out.err)
-			return Result{}, core.NewError(core.CodeInternal, "sandbox: the sandbox failed", nil)
-		}
-		return sandboxResult(out.result, maxOut), nil
 	}
+	if out.panic != nil {
+		l.log().Error("sandbox driver panicked", "panic", fmt.Sprint(out.panic))
+		return Result{}, core.NewError(core.CodeInternal, "sandbox: the sandbox failed", nil)
+	}
+	if out.err != nil {
+		// A driver that returns because the call was cancelled is not failing
+		// on its own: the call is cancelled, however the stop reached the layer.
+		if ctx.Err() != nil && errors.Is(out.err, ctx.Err()) {
+			return Result{}, core.NewError(core.CodeCancelled, "sandbox: command cancelled", nil)
+		}
+		l.log().Error("sandbox driver failed", "error", out.err)
+		return Result{}, core.NewError(core.CodeInternal, "sandbox: the sandbox failed", nil)
+	}
+	return sandboxResult(out.result, maxOut), nil
 }
 
 // sandboxResult applies the output limit: the first bytes up to max are kept,
