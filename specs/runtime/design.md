@@ -407,7 +407,7 @@ recorder. Every payload the runtime hands to the SDK on encode passes through
 the recorder, so "the run history holds ...", "every payload in the run
 history ..." and "the Temporal test server holds no run history for that start"
 (`RT-028-01`, `RT-029-01`, `RT-031-01`, `RT-031-02`, `RT-032-01`, `RT-033-01`,
-`RT-042-07`) are read from what the recorder saw — the payloads that would be
+`RT-040-01`, `RT-042-07`) are read from what the recorder saw — the payloads that would be
 written to history. An empty recorder is "no run history". The tenant, the blob
 store, the payload codec and the simulated key service still come from the
 gate: the codec and key service are WP-L1-04's (`internal/bdd/steps/secrets.go`),
