@@ -166,7 +166,10 @@ func (l *Layer) Step(ctx context.Context, set *Set, call Call) (Outcome, error) 
 			Message: errorMessage(out.err),
 		}, nil
 	}
-	res, err := l.spill(ctx, t, out.result)
+	// The call finished successfully, so the result is the outcome even if the
+	// caller was cancelled meanwhile: spill it detached from that cancellation,
+	// as other post-success blob writes do.
+	res, err := l.spill(context.WithoutCancel(ctx), t, out.result)
 	if err != nil {
 		return Outcome{}, err
 	}

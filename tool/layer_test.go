@@ -408,6 +408,53 @@ func TestStepSpillsAnOversizedResult(t *testing.T) {
 	}
 }
 
+// cancellingBlob cancels the caller's context as a write starts — the way a
+// cancellation lands during post-success I/O — then fails when its own context
+// is cancelled, as a real store does.
+type cancellingBlob struct {
+	*memBlob
+	cancel context.CancelFunc
+}
+
+func (b *cancellingBlob) Put(ctx context.Context, key string, r io.Reader, contentType string) error {
+	b.cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return b.memBlob.Put(ctx, key, r, contentType)
+}
+
+// A successful call keeps its outcome when the caller is cancelled while the
+// oversized result is being stored: spilling runs detached from that
+// cancellation, so the result is still returned by reference.
+func TestStepSpillsASuccessfulResultWhenTheCallerIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	content := json.RawMessage(`"` + strings.Repeat("a", 2046) + `"`)
+	blob := &cancellingBlob{memBlob: newMemBlob(), cancel: cancel}
+	set := &tool.Set{Tools: []tool.Tool{{
+		Name:      "dump",
+		MaxResult: 1024,
+		Run: func(context.Context, json.RawMessage) (tool.Result, error) {
+			return tool.Result{Content: content}, nil
+		},
+	}}}
+	out, err := tool.New(tool.Config{Clock: fixedClock(), Blob: blob}).Step(ctx, set,
+		tool.Call{Name: "dump", Args: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if out.Failed {
+		t.Fatalf("outcome %+v", out)
+	}
+	if out.Result.BlobRef == "" || out.Result.Content != nil {
+		t.Fatalf("result %+v, want only a blob reference", out.Result)
+	}
+	if got := blob.len(out.Result.BlobRef); got != len(content) {
+		t.Fatalf("blob holds %d bytes, want %d", got, len(content))
+	}
+}
+
 func TestStepKeepsAResultAtTheLimit(t *testing.T) {
 	content := json.RawMessage(`"` + strings.Repeat("a", 1022) + `"`)
 	blob := newMemBlob()
