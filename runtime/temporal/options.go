@@ -3,6 +3,8 @@ package temporal
 import (
 	"log/slog"
 
+	"go.temporal.io/sdk/client"
+
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/secrets"
 )
@@ -36,4 +38,7 @@ type Options struct {
 	// CheckpointEventThreshold selects when Checkpoint continues as new; 0 means
 	// DefaultCheckpointEventThreshold (2000); negative disables continue-as-new.
 	CheckpointEventThreshold int
+	// Client carries host, namespace, TLS and credentials for the Temporal service.
+	// DataConverter and ContextPropagators are owned by the runtime and must not be set.
+	Client client.Options
 }

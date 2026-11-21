@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -19,8 +20,9 @@ type registeredStep struct {
 	defaults runtime.StepDefaults
 }
 
-// Runtime registers the Temporal flow-host workflow and step activities. It
-// does not yet implement runtime.Runtime (WP-L5-02 pull request (c)).
+// Runtime registers the Temporal flow-host workflow and step activities and
+// implements the durable execution control plane (Start, Resolve, Cancel,
+// Describe, List, Capabilities). Serve is implemented separately (WP-L5-02).
 type Runtime struct {
 	mu                  sync.Mutex
 	host                runtime.FlowHost
@@ -30,6 +32,13 @@ type Runtime struct {
 	logger              *slog.Logger
 	outbox              Outbox
 	checkpointThreshold int
+
+	clientOpts client.Options
+	clientMu   sync.Mutex
+	client     client.Client
+	closed     bool
+	dial       func(client.Options) (client.Client, error)
+	newRunID   func() (string, error)
 }
 
 // New returns a Temporal runtime shell. The shared data converter performs blob
@@ -37,6 +46,12 @@ type Runtime struct {
 // so SDK deadlock detection does not count that I/O (slow stores delay the task,
 // not the detector).
 func New(opts Options) (*Runtime, error) {
+	if opts.Client.DataConverter != nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "temporal: DataConverter is set by the runtime", nil)
+	}
+	if len(opts.Client.ContextPropagators) > 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "temporal: ContextPropagators are set by the runtime", nil)
+	}
 	if opts.Blobs == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: blob store is required", nil)
 	}
@@ -68,6 +83,12 @@ func New(opts Options) (*Runtime, error) {
 	if ckptThreshold == 0 {
 		ckptThreshold = DefaultCheckpointEventThreshold
 	}
+	clientOpts := opts.Client
+	clientOpts.DataConverter = dc
+	clientOpts.ContextPropagators = []workflow.ContextPropagator{TenantPropagator{}}
+	if clientOpts.Logger == nil && opts.Logger != nil {
+		clientOpts.Logger = workflowLogger(opts.Logger)
+	}
 	return &Runtime{
 		steps:               map[string]registeredStep{},
 		converter:           dc,
@@ -75,6 +96,9 @@ func New(opts Options) (*Runtime, error) {
 		logger:              opts.Logger,
 		outbox:              opts.Outbox,
 		checkpointThreshold: ckptThreshold,
+		clientOpts:          clientOpts,
+		dial:                client.Dial,
+		newRunID:            defaultNewRunID,
 	}, nil
 }
 
