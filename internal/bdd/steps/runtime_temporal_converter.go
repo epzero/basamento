@@ -22,9 +22,10 @@ type contextAwareConverter interface {
 }
 
 // recordingConverter decorates the production data converter for BDD: it models
-// a tenant-aware client when the SDK test environment calls ToPayload without a
-// context, records history payloads, and injects the RT-032/033 faults on activity
-// results (activity.IsActivity is true in WithContext for activity encodes).
+// a tenant-aware client when the SDK encodes without a Go context, records history
+// payloads, and injects the RT-032/033 faults on activity results (activity.IsActivity
+// is true in WithContext for activity encodes). Production WithWorkflowContext is
+// preserved when inWorkflow is set so claim-check runs on the workflow-bound path.
 type recordingConverter struct {
 	inner         converter.DataConverter
 	enc           *secrets.Codec
@@ -35,6 +36,7 @@ type recordingConverter struct {
 	faultInjected *bool
 	mu            sync.Mutex
 	inActivity    bool
+	inWorkflow    bool
 }
 
 func (d *recordingConverter) aware() contextAwareConverter {
@@ -46,7 +48,7 @@ func (d *recordingConverter) WithContext(ctx context.Context) converter.DataConv
 	c := recordingConverter{
 		inner: d.inner, enc: d.enc, tenant: d.tenant, recorded: d.recorded,
 		faultMode: d.faultMode, faultKey: d.faultKey, faultInjected: d.faultInjected,
-		inActivity: activity.IsActivity(ctx),
+		inActivity: activity.IsActivity(ctx), inWorkflow: d.inWorkflow,
 	}
 	if ca := d.aware(); ca != nil {
 		c.inner = ca.WithContext(ctx)
@@ -58,7 +60,7 @@ func (d *recordingConverter) WithWorkflowContext(ctx workflow.Context) converter
 	c := recordingConverter{
 		inner: d.inner, enc: d.enc, tenant: d.tenant, recorded: d.recorded,
 		faultMode: d.faultMode, faultKey: d.faultKey, faultInjected: d.faultInjected,
-		inActivity: d.inActivity,
+		inActivity: d.inActivity, inWorkflow: true,
 	}
 	if ca := d.aware(); ca != nil {
 		c.inner = ca.WithWorkflowContext(ctx)
@@ -67,9 +69,9 @@ func (d *recordingConverter) WithWorkflowContext(ctx workflow.Context) converter
 }
 
 func (d *recordingConverter) delegate() converter.DataConverter {
-	if ca := d.aware(); ca != nil && d.tenant != "" {
+	if ca := d.aware(); ca != nil && d.tenant != "" && !d.inWorkflow {
 		// The SDK test environment encodes workflow input and GetWorkflowResult without
-		// a Go context; a real client always calls with the tenant in ctx (F1).
+		// a Go context; a real client always calls with the tenant in ctx.
 		return ca.WithContext(core.WithTenant(context.Background(), d.tenant))
 	}
 	return d.inner

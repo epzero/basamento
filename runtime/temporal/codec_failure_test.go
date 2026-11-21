@@ -242,6 +242,91 @@ func TestCodecTransientGetFailsWorkflowTask(t *testing.T) {
 	}
 }
 
+func TestCodecCancelledPutFailsWorkflowTask(t *testing.T) {
+	var runs int
+	fb := &faultBlob{
+		inner:  testBlobStore(t),
+		putErr: core.NewError(core.CodeCancelled, "SECRET-PUT-SLOW", nil),
+	}
+	rt, env := testEnvWithBlobs(t, fb, nil)
+	in := largeStepInput(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var out json.RawMessage
+		return out, dc.Step("big", in, runtime.StepOptions{}).Get(&out)
+	})
+	_ = rt.RegisterStep("big", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		runs++
+		return json.RawMessage(`"ok"`), nil
+	}, runtime.StepDefaults{})
+	_ = rt.Register(env)
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "c"}, RunID: "r1"})
+	var panicErr *sdktemporal.PanicError
+	if !errors.As(env.GetWorkflowError(), &panicErr) {
+		t.Fatalf("workflow error %T %v", env.GetWorkflowError(), env.GetWorkflowError())
+	}
+	if !strings.Contains(panicErr.Error(), "cancelled") || strings.Contains(panicErr.Error(), "SECRET") {
+		t.Fatalf("panic message %q", panicErr.Error())
+	}
+	if runs != 0 {
+		t.Fatalf("step runs %d", runs)
+	}
+}
+
+func TestCodecCancelledGetFailsWorkflowTask(t *testing.T) {
+	var runs int
+	fb := &faultBlob{inner: testBlobStore(t)}
+	rt, env := testEnvWithBlobs(t, fb, nil)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var out json.RawMessage
+		return out, dc.Step("echo", nil, runtime.StepOptions{}).Get(&out)
+	})
+	_ = rt.RegisterStep("echo", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		runs++
+		fb.getErr = core.NewError(core.CodeCancelled, "SECRET-GET-SLOW", nil)
+		fb.armGet()
+		return largeStepResult(), nil
+	}, runtime.StepDefaults{})
+	_ = rt.Register(env)
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "c"}, RunID: "r1"})
+	var panicErr *sdktemporal.PanicError
+	if !errors.As(env.GetWorkflowError(), &panicErr) {
+		t.Fatalf("wf err %v", env.GetWorkflowError())
+	}
+	if !strings.Contains(panicErr.Error(), "cancelled") || strings.Contains(panicErr.Error(), "SECRET") {
+		t.Fatalf("%q", panicErr.Error())
+	}
+	if runs != 1 {
+		t.Fatalf("runs %d", runs)
+	}
+}
+
+func TestCodecPermanentCancelledPutFailsFlow(t *testing.T) {
+	fb := &faultBlob{
+		inner:  testBlobStore(t),
+		putErr: core.NewError(core.CodeInvalidArgument, "bad blob", nil),
+	}
+	rt, env := testEnvWithBlobs(t, fb, nil)
+	in := largeStepInput(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var out json.RawMessage
+		return out, dc.Step("big", in, runtime.StepOptions{}).Get(&out)
+	})
+	_ = rt.RegisterStep("big", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`"ok"`), nil
+	}, runtime.StepDefaults{})
+	_ = rt.Register(env)
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "c"}, RunID: "r1"})
+	if env.GetWorkflowError() == nil {
+		t.Fatal("expected failure")
+	}
+	if core.CodeOf(activityToCore(env.GetWorkflowError())) != core.CodeInvalidArgument {
+		t.Fatalf("code %v", env.GetWorkflowError())
+	}
+}
+
 func TestCodecPermanentGetFailsStep(t *testing.T) {
 	fb := &faultBlob{inner: testBlobStore(t)}
 	rt, env := testEnvWithBlobs(t, fb, nil)
