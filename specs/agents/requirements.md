@@ -14,6 +14,18 @@ node named by the model: the model asks for it with a `handoff_to` request,
 which the loop reads before it makes any tool call of that turn. What goes
 into the next turn is decided by the **memory policy**.
 
+### Numbering
+
+The gaps in the REQ-AGENT sequence are retired numbers, not missing work.
+REQ-AGENT-006 was deleted in the WP-L7-01 spec self-review, with allowlists
+deferred to WP-L7-02 (tools and MCP); REQ-AGENT-013, 014 and 015 were deleted
+in the same review and folded into the cap requirements 008-012; and
+REQ-AGENT-021, 022 and 026 were deleted in that review with no reason recorded
+beyond the deletion. These numbers are retired permanently and must not be
+reused: new requirements start at REQ-AGENT-031. Recorded from the commit
+history of the original spec PR (commit fe7dd17, sub-commit "spec(agents):
+apply self-review of the WP-L7-01 draft").
+
 ### REQ-AGENT-001 — One model turn per step
 While an agent run is running, the agent loop shall make each model turn one step of the run whose result holds that turn's model output.
 
