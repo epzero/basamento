@@ -98,7 +98,7 @@ func (d *dataConverter) logWorkflowCodec(pe *core.Error) {
 	)
 }
 
-func (d *dataConverter) ToPayload(value interface{}) (p *commonpb.Payload, err error) {
+func (d *dataConverter) ToPayload(value interface{}) (*commonpb.Payload, error) {
 	ctx, cancel, err := d.codecCtx()
 	if err != nil {
 		return nil, err

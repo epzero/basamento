@@ -64,8 +64,12 @@ func TestCodecTransientWorkflowInputDecodeFailsWorkflowTask(t *testing.T) {
 	if hostRan {
 		t.Fatal("host ran")
 	}
-	if strings.Contains(panicErr.Error(), "SECRET") {
-		t.Fatalf("leak %q", panicErr.Error())
+	msg := panicErr.Error()
+	if !strings.Contains(msg, string(core.CodeUnavailable)) {
+		t.Fatalf("panic message %q", msg)
+	}
+	if strings.Contains(msg, "SECRET") {
+		t.Fatalf("leak %q", msg)
 	}
 	if !strings.Contains(buf.String(), "SECRET-READ") {
 		t.Fatalf("log %q", buf.String())
@@ -87,8 +91,12 @@ func TestCodecTransientWorkflowResultEncodeFailsWorkflowTask(t *testing.T) {
 	if !errors.As(env.GetWorkflowError(), &panicErr) {
 		t.Fatalf("wf err %v", env.GetWorkflowError())
 	}
-	if strings.Contains(panicErr.Error(), "SECRET") {
-		t.Fatalf("leak %q", panicErr.Error())
+	msg := panicErr.Error()
+	if !strings.Contains(msg, string(core.CodeUnavailable)) {
+		t.Fatalf("panic message %q", msg)
+	}
+	if strings.Contains(msg, "SECRET") {
+		t.Fatalf("leak %q", msg)
 	}
 	if !strings.Contains(buf.String(), "SECRET-PUT") {
 		t.Fatalf("log %q", buf.String())
@@ -232,7 +240,7 @@ type fakeWfFuture struct {
 }
 
 func (f *fakeWfFuture) Get(sdkworkflow.Context, interface{}) error { return f.err }
-func (f *fakeWfFuture) IsReady() bool                           { return f.ready }
+func (f *fakeWfFuture) IsReady() bool                              { return f.ready }
 
 func TestStepFutureGetMapsCancelThroughActivityToCore(t *testing.T) {
 	sf := &stepFuture{f: &fakeWfFuture{err: sdktemporal.NewCanceledError("c"), ready: true}}

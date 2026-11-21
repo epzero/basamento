@@ -31,6 +31,11 @@ func (r *Runtime) hostWorkflow(ctx workflow.Context, in HostInput) (json.RawMess
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				// Transient codec errors from the workflow-bound converter inside flow
+				// code must fail the workflow task, not the run.
+				if _, ok := recovered.(taskFailure); ok {
+					panic(recovered)
+				}
 				err = flowPanicErr()
 				r.logPanic(tenant, runID, "", recovered)
 			}
