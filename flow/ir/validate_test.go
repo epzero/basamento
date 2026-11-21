@@ -540,6 +540,34 @@ func TestValidateRejectsGuardedMapChild(t *testing.T) {
 		"a map child runs once per element")
 }
 
+// The machine starts a map's child from spec.node, so the arc from the map to
+// its child is implicit. A child that routes back to its map is a cycle even
+// with no map -> child edge, and it needs a guarded node like any other
+// (REQ-FLOW-003).
+func TestValidateRejectsUnguardedMapChildCycle(t *testing.T) {
+	f := mapFlow()
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout_item", To: "fanout"},
+	}
+	requireInvalid(t, Validate(f), `node "fanout"`, "guard")
+}
+
+// The map is routed to on every lap, so a guard on it bounds the loop.
+func TestValidateAcceptsGuardedMapChildCycle(t *testing.T) {
+	f := mapFlow()
+	mapNode := f.Nodes["fanout"]
+	mapNode.Guard = &flow.Guard{MaxVisits: 3}
+	f.Nodes["fanout"] = mapNode
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout_item", To: "fanout"},
+	}
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The map-child guard is reported before the cycle search, so a guarded map
 // cycle names the child guard rather than looking bounded (design.md §2.6).
 func TestValidateReportsGuardedMapChildBeforeCycle(t *testing.T) {
