@@ -97,8 +97,11 @@ Every provider ships with a **simulator** and contract tests (WP-L3-04).
 The `model` node is a node handler in `model/node` (ADR-0011):
 
 1. **Validate** params against the descriptor schema (REQ-MODEL-010).
-2. **Reserve** the CEL price estimate against the run budget, or fail with
-   `budget_exceeded` (REQ-MODEL-006, REQ-MODEL-007).
+2. **Price and reserve** the CEL estimate against the run budget, or fail with
+   `budget_exceeded` (REQ-MODEL-006, REQ-MODEL-007). Pricing is a durable step
+   whose recorded quote pins the estimate, the price entry with its rates and
+   the start time; a replay reserves, settles and fails closed by that pin,
+   never by a price layer that changed after the call started (REQ-MODEL-078).
 3. **Start** step with `ClientRef = hash(run, node path, visit, input)`. It is
    stable across retries of one logical invocation (REQ-MODEL-004) and
    different for the next one: a node visited again on a cycle, or another
@@ -110,9 +113,14 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    (REQ-MODEL-008). Outputs from a successful invocation with no blob store
    configured fail the node instead of being dropped.
 6. **Settle**: charge the actual cost or release the reservation. The cost is
-   the provider's, or else the price formula on the actual usage. Every priced
-   invocation reserves against the run's budget; a priced call with no run
-   budget fails before it starts. Only a model with no price runs unmetered.
+   the provider's, or else the price formula on the actual usage. An invocation
+   that started but reports neither a cost nor a usage is charged the reserved
+   estimate: its actual charge is unknown, so the node fails closed. A
+   cancelled invocation that reports no cost releases it instead
+   (REQ-MODEL-009). Every priced invocation reserves against the run's budget;
+   a priced call with no run budget fails before it starts with `internal`, and
+   an unpriced model with a budget fails `unsupported` (REQ-MODEL-073). Only a
+   model with no price and no budget runs unmetered.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.
@@ -214,5 +222,8 @@ or models.dev) and reviewed like a golden file. Nothing fetches prices at run
 time, so the same commit prices the same call the same way. `model/catalog`
 loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
 and tenant layers above it, and keeps the entry and start time of a call in a
-quote until settlement. A model's own formula must return a whole number of
-milli-points in integer arithmetic; rates and priced amounts are never negative.
+quote until settlement. The quote is serializable and the model node records it
+in a durable pricing step, so a replay settles by the entry that was reserved
+even when a layer changed in between (REQ-MODEL-078). A model's own formula must
+return a whole number of milli-points in integer arithmetic; rates and priced
+amounts are never negative.

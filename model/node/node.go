@@ -134,8 +134,8 @@ type Deps struct {
 	// invocation with outputs and no blob store fails the node instead of
 	// dropping them.
 	Blobs platform.Blob
-	// Fetch downloads an output. Nil uses HTTP for a URL and the filesystem
-	// for a path.
+	// Fetch downloads an output. Nil uses HTTPS for a URL (public addresses
+	// only, no redirects) and the filesystem for a path.
 	Fetch Fetcher
 	// MaxStartAttempts bounds the start attempts of one invocation; zero
 	// means DefaultStartAttempts.
@@ -171,9 +171,10 @@ func New(d Deps) (*Handler, error) {
 // the invocation, waits for its result, ingests outputs and settles the
 // reservation, in that order (docs/architecture/model-layer.md §4).
 //
-// The returned error is a platform error: invalid_argument, budget_exceeded,
-// unsupported, vendor_error, cancelled, ambiguous_start or the provider's own
-// code. The reservation is settled on every path after it was taken. When the
+// The returned error is a platform error: invalid_argument, internal,
+// budget_exceeded, unsupported, vendor_error, cancelled, ambiguous_start or
+// the provider's own code. internal covers a priced call with no run budget.
+// The reservation is settled on every path after it was taken. When the
 // invocation started but its actual charge is unknown, the node fails closed
 // and charges the reserved estimate rather than releasing it.
 func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMessage) (out Output, retErr error) {
