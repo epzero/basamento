@@ -43,6 +43,14 @@ func TestFormatPanicStackTruncates(t *testing.T) {
 	}
 }
 
+type stringerVal struct{ msg string }
+
+func (s stringerVal) String() string { return s.msg }
+
+type errPanics struct{}
+
+func (errPanics) Error() string { panic("inside Error") }
+
 func TestFormatPanicValueBounds(t *testing.T) {
 	exact := strings.Repeat("a", maxPanicValue)
 	if got := formatPanicValue(exact); got != exact {
@@ -69,15 +77,41 @@ func TestFormatPanicValueBounds(t *testing.T) {
 		t.Fatalf("multibyte body runes %d, want %d", utf8.RuneCountInString(body), maxPanicValue)
 	}
 
-	errVal := errors.New("boom")
-	if got := formatPanicValue(errVal); got != "boom" {
+	if got := formatPanicValue(errors.New("boom")); got != "boom" {
 		t.Fatalf("error value %q", got)
 	}
-	gotInt := formatPanicValue(42)
-	if gotInt == formatPanicValue("42") {
-		t.Fatal("int must format through fmt, not as a string")
+	if got := formatPanicValue(42); got != "42" {
+		t.Fatalf("int value %q", got)
 	}
-	if !strings.HasSuffix(gotInt, "... (truncated)") {
-		t.Fatalf("int fmt width exceeds rune cap, got len %d", len(gotInt))
+	if got := formatPanicValue(struct{ N int }{42}); got != "{42}" {
+		t.Fatalf("struct value %q", got)
+	}
+	if got := formatPanicValue(stringerVal{msg: "from-stringer"}); got != "from-stringer" {
+		t.Fatalf("Stringer %q", got)
+	}
+	func() {
+		defer func() {
+			if recover() != nil {
+				t.Fatal("formatPanicValue must not panic when Error panics")
+			}
+		}()
+		got := formatPanicValue(errPanics{})
+		if !strings.Contains(got, "PANIC=") {
+			t.Fatalf("Error panic formatting %q, want PANIC=", got)
+		}
+	}()
+
+	slice := []string{strings.Repeat("a", maxPanicValue*2)}
+	got = formatPanicValue(slice)
+	if !strings.HasSuffix(got, "... (truncated)") {
+		t.Fatal("slice: missing marker")
+	}
+	body = strings.TrimSuffix(got, "... (truncated)")
+	if utf8.RuneCountInString(body) != maxPanicValue {
+		t.Fatalf("slice body runes %d, want %d", utf8.RuneCountInString(body), maxPanicValue)
+	}
+	// Sanity: fmt stringifies the slice without zero-padding element strings.
+	if !strings.HasPrefix(body, "[") {
+		t.Fatalf("slice body should look formatted, got prefix %q", body[:min(8, len(body))])
 	}
 }

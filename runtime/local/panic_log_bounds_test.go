@@ -10,6 +10,26 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
+func TestStepPanicLogIntValue(t *testing.T) {
+	log := &captureHandler{}
+	f := newLoggedFixture(t, log)
+	defer f.close(t)
+	if err := f.rt.RegisterStep("int", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		panic(42)
+	}, runtime.StepDefaults{}); err != nil {
+		t.Fatal(err)
+	}
+	f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		_ = dc.Step("int", nil, runtime.StepOptions{}).Get(nil)
+		return json.RawMessage(`{}`), nil
+	})
+	f.start(t, "acme", "r1", "parent", `{}`)
+	f.waitState(t, "acme", "r1", stateCompleted)
+	if got := attrString(log.last(), "panic"); got != "42" {
+		t.Fatalf("panic field %q, want 42", got)
+	}
+}
+
 func TestStepPanicLogBoundsHugeValue(t *testing.T) {
 	log := &captureHandler{}
 	f := newLoggedFixture(t, log)
@@ -64,7 +84,6 @@ func TestStepPanicLogBoundsDeepStack(t *testing.T) {
 	})
 	f.start(t, "acme", "r1", "parent", `{}`)
 	f.waitState(t, "acme", "r1", stateCompleted)
-	const stackLogCap = 16 << 10
 	stack := attrString(log.last(), "stack")
 	if len(stack) > stackLogCap+len("... (stack truncated)")+1 {
 		t.Fatalf("stack len %d, want bounded", len(stack))

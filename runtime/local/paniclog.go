@@ -16,8 +16,9 @@ const (
 
 // logPanic records one Error for a recovered flow or step panic. It runs outside
 // the run lock from the recovering goroutine. A nil Runtime logger uses
-// slog.Default() at call time. Panic values and stacks are truncated before
-// formatting so a huge panic or deep recursion cannot megabyte-size log records.
+// slog.Default() at call time. The formatted panic value is cut at maxPanicValue
+// runes and the stack at maxPanicStack bytes so a huge panic or deep recursion
+// cannot produce a megabyte log record.
 func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered any) {
 	logger := r.logger
 	if logger == nil {
@@ -36,7 +37,13 @@ func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered a
 }
 
 func formatPanicValue(recovered any) string {
-	s := fmt.Sprintf("%.*v", maxPanicValue+1, recovered)
+	if s, ok := recovered.(string); ok {
+		return truncatePanicValueRunes(s)
+	}
+	return truncatePanicValueRunes(fmt.Sprintf("%v", recovered))
+}
+
+func truncatePanicValueRunes(s string) string {
 	n := 0
 	for i := range s {
 		if n == maxPanicValue {
