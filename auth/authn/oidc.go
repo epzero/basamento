@@ -120,9 +120,11 @@ func (o *OIDC) Authenticate(ctx context.Context, raw string) (Principal, error) 
 		return o.keys.VerificationKey(ctx, kid)
 	})
 	if err != nil || token == nil || !token.Valid {
-		// The key function runs only after the token parsed; mapping a cancelled
-		// or timed-out context to cancelled/timeout reveals nothing the caller
-		// does not already know. JWKS fetch failures stay unauthenticated.
+		// Key lookup context errors: the caller's cancellation or deadline, and a
+		// JWKS fetch's own deadline, map to cancelled/timeout so clients can
+		// retry an unreachable issuer. Every other key-lookup failure, including
+		// a non-context JWKS fetch error, stays unauthenticated; nothing echoes
+		// the token, a claim, or a JWKS URL.
 		if errors.Is(err, context.Canceled) {
 			return Principal{}, core.NewError(core.CodeCancelled, "cancelled", nil)
 		}

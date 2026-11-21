@@ -9,6 +9,8 @@
 // opaque bearer tokens: NewToken mints a secret once, Token.Verify compares it
 // in constant time and enforces its fixed expiry (REQ-AUTH-005).
 //
-// Every failure is a *core.Error with code unauthenticated and a message that
-// never carries the credential, a claim or a verification-key detail.
+// OIDC verification uses cancelled or timeout for caller context errors and JWKS
+// fetch deadlines; other verification failures are unauthenticated. Local
+// bearer verification is always unauthenticated. No message carries a
+// credential, a claim, or a JWKS URL.
 package authn

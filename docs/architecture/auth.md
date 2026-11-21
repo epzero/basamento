@@ -32,7 +32,10 @@ no usable signing key leaves the previous keys in place. Clock skew
 is an explicit leeway capped at five minutes, zero by default. The token's
 `tenant` claim (name configurable) must satisfy the tenant grammar when present.
 When absent, `Principal.Tenant` is empty; request wiring must refuse such a
-principal wherever a tenant is required.
+principal wherever a tenant is required. Bearer JWT verification returns
+`cancelled` or `timeout` when the caller's context is done or a JWKS lookup
+hits its fetch deadline; every other verification or fetch failure is
+`unauthenticated`. Errors never carry the token, a claim, or the JWKS URL.
 
 Local-mode bearer tokens are opaque 256-bit secrets. Only their SHA-256 hash is
 stored; verification compares hashes in constant time and enforces a fixed
