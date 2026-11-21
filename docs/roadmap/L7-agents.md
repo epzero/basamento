@@ -3,7 +3,7 @@
 ### WP-L7-01 — Agent loop
 Depends: WP-L3-02, WP-L5-01.
 Owns: `agent`.
-One model turn per step; caps on steps, cost, tokens and time; handoff; memory policy.
+One model turn per step; caps on steps, cost, tokens and time; handoff; context-window policy (memory policy).
 
 ### WP-L7-02 — Tools and MCP
 Depends: WP-L7-01.
