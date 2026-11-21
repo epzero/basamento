@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	commonpb "go.temporal.io/api/common/v1"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/converter"
 	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -156,6 +157,8 @@ func (w *temporalWorld) runChain(cfg chainRunConfig) error {
 	w.mu.Lock()
 	w.activeTenant = cfg.tenant
 	w.faultInjected = false
+	w.bddOutbox().wantTenant = cfg.tenant
+	w.bddOutbox().wantRun = runtime.RunRef{RunID: cfg.runID, TenantID: cfg.tenant}
 	w.continuations = 0
 	w.stepBDoneExec = -1
 	w.continueFromExec = -1
@@ -181,6 +184,9 @@ func (w *temporalWorld) runChain(cfg chainRunConfig) error {
 		w.env = env
 		w.dataConv = dataConv
 		w.setTenantOnEnv(env, cfg.tenant)
+		// The Emit activity derives the run id from the scheduling workflow id,
+		// so the test client starts with the run id as the workflow id.
+		env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: cfg.runID})
 		if cfg.gate != nil {
 			w.armGateCallback(env, cfg.gate, &continuations)
 		}
