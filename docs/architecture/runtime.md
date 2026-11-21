@@ -99,6 +99,7 @@ behaviour is spec-silent and covered only by unit tests or this document.
 | `Child` re-attach to an already-linked child returns the first call's future; the first close policy wins, later policies are ignored | spec-silent (unit tests) |
 | Parent close on a child applies that child's close policies to its own children (top-down); `abandon` on the middle link leaves descendants running | spec-silent (unit tests) |
 | `Child` on a parent that is not `running` returns `cancelled` and starts no run; an already-linked child still returns its recorded future | spec-silent (unit tests) |
+| `Child` whose parent closes after the child run starts but before it is linked is never linked, never delivers its result, and is stopped (terminate) regardless of close policy; the returned future is `cancelled` | spec-silent (unit tests) |
 | `List` cursor paging: opaque version-1 token (`base64.RawURLEncoding` of JSON `{"v":1,"tenant":"<id>","pos":<n>}`), tenant-bound, `pos` is that tenant's start-order ordinal; clients must not parse it (BDD steps craft one token in this form for RT-052-01); invalid, out-of-range or foreign-tenant cursor → `invalid_argument` before any run is read | RT-051…053, RT-026 lists runs |
 | Every started run stays in memory (no retention) | RT-006 / design §Local |
 | `New` requires a timer clock (`After`); failure message names timer scheduling | RT-054-01 |
