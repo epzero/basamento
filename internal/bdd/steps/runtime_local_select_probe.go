@@ -5,10 +5,10 @@ import (
 	"sync"
 )
 
-// selectProbe is a harness future passed last to dc.Select. local.Select polls
-// every future's Ready() in index order before it subscribes; the probe is
-// never ready, so once its Ready() runs the at-call phase is over and later
-// timer completions are ordered by firstCompleted, not the lowest-index tie rule.
+// selectProbe is a harness future passed last to dc.Select. At call time Select
+// observes run-owned futures under the run lock; the probe is never ready, so
+// once its Ready() runs the at-call snapshot is done and later completions
+// compete by completion seq via firstCompleted.
 type selectProbe struct {
 	once  sync.Once
 	began func()

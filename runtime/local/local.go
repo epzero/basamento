@@ -69,7 +69,7 @@ type Runtime struct {
 	ids    core.Ids
 	logger *slog.Logger
 	host   runtime.FlowHost
-	steps map[string]registeredStep
+	steps  map[string]registeredStep
 
 	runs  map[runKey]*run
 	order []*run

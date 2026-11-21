@@ -16,8 +16,9 @@ type listCursorPayload struct {
 }
 
 // encodeListCursor returns the opaque paging token naming position pos in the
-// tenant's start-ordered run list. The token is not signed: a forged position
-// within the tenant's own range only lists that tenant's runs.
+// tenant's start-ordered run list. The tenant id is embedded in clear text; it
+// is not a secret and binds the cursor to that tenant. The token is not signed:
+// a forged position within the tenant's own range only lists that tenant's runs.
 func encodeListCursor(tenant core.TenantID, pos int) (string, error) {
 	raw, err := json.Marshal(listCursorPayload{V: listCursorVersion, Tenant: string(tenant), Pos: pos})
 	if err != nil {
