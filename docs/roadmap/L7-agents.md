@@ -1,7 +1,7 @@
 # L7 — Agents and tools
 
 ### WP-L7-01 — Agent loop
-Depends: WP-L3-02, WP-L5-01.
+Depends: WP-L3-02, WP-L3-04, WP-L5-01.
 Owns: `agent`.
 One model turn per step; caps on steps, cost, tokens and time; handoff; context-window policy (memory policy).
 

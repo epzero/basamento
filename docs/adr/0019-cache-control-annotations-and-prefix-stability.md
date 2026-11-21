@@ -211,9 +211,10 @@ breakpoint ignores it; no call fails.
   no cache policy. A later spec can add one additively.
 - **Trusted code only.** The hint is set by trusted flow code (`agent`, a
   prompt caller, the model node), never from a client request; the API edge
-  strips a client-supplied cache field. The rolling marker may sit on a tool
-  result, which is content the model reads anyway; the request is bounded by
-  the agent's input token limit (REQ-AGENT-027) and the provider's limits.
+  (WP-L6-03) does not map a client-supplied cache field into the request. The
+  rolling marker may sit on a tool result, which is content the model reads
+  anyway; the request is bounded by the agent's input token limit
+  (REQ-AGENT-027) and the provider's limits.
 - **Handoff.** A handoff starts the target agent with a new system prefix; the
   target's first turn is a new stable prefix. That is expected, not a
   REQ-AGENT-031 violation.
@@ -434,9 +435,11 @@ hint and is unaffected.
   `model.Request` while constitution §7 requires history payloads to be
   encrypted. This ADR adds no payload — the hint is three booleans — and does
   not change journaling; a separate ticket tracks encryption.
-- **An agent with no system message.** An agent that sends no system message
-  sets no `System` breakpoint and the adapter sees no system anchor. The
-  no-system request path is WP-L7-01's; this ADR does not change it.
+- **An agent with no system message and no turns.** Such an agent sends zero
+  messages, and `model/chat.Start` rejects a request with no messages with
+  `invalid_argument`, so it cannot run at all today; the adapter never sees a
+  system anchor. The no-system request path is WP-L7-01's ticket; this ADR
+  does not change it.
 - **Cache isolation on the shared pool.** Provider caches are
   credential-scoped, and a shared key can make `Usage.CachedTokens` a
   cross-tenant confirmation oracle. This ADR adds no cache key and
@@ -558,6 +561,7 @@ mapping note from `specs/prompt/design.md`, and the split cache-hint rows from
 | `specs/models/design.md` | C3: `model.Usage` has five fields (was "exactly four"), the `W` term, `C + W > I` and the negative-`W` check; C4: the `counted × max(input, cache_write)` estimate; remove the "Cache writes are not priced" note. | caster |
 | `specs/agents/requirements.md` | REQ-AGENT-031. | caster |
 | `specs/agents/cache.feature` | AGENT-031-01 and AGENT-031-02. | caster |
+| `docs/roadmap/L7-agents.md` | WP-L7-01 depends on WP-L3-04 for `Request.Cache` and the cache-write contract. | this change |
 
 Rows outside WP-L3-04's owned directory (`model`, `model/chat`,
 `model/catalog`, `contracts/basamento/invoke`) are cross-directory changes
