@@ -10,6 +10,13 @@
 // composition root adapts a flow node to Node and hands the handler to the flow
 // host (ADR-0011).
 //
+// The loop does not own long-term memory, permission gating or lifecycle
+// policy: those belong to the host, the composition root and the flow around
+// the agent node. It takes the `System` messages and the `input_tokens` limit
+// and does the rest by replay: a turn's messages are rebuilt from the run's
+// recorded turns. An in-loop policy engine for them would be a second,
+// non-deterministic one, which the constitution's determinism article rejects.
+//
 // Status: implemented (WP-L7-01). Tools, allowlists, MCP and sandboxes are
 // WP-L7-02; conversations are WP-L7-03.
 package agent
