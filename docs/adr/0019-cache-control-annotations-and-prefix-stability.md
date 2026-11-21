@@ -253,12 +253,13 @@ Proposed requirement, using the next free number
 retired):
 
 > **REQ-AGENT-031 — Consecutive turns share the cacheable prefix**
-> When the agent loop builds the request for a model turn after the first, it
-> shall set the request's cache hint to mark the last non-empty system message
-> when the request has one, the last non-empty tool definition when it has one,
-> and the last message, and it shall build the request so that the previous
-> turn's messages are a byte prefix of its own messages when the memory policy
-> drops no turn and the tool set is unchanged; the stable prefix hash
+> When the agent loop builds the request for a model turn, it shall set the
+> request's cache hint to mark the last non-empty system message when the
+> request has one, the last non-empty tool definition when it has one, and the
+> last non-empty content block of the last non-empty message; for a turn after
+> the first, it shall also build the request so that the previous turn's
+> messages are a byte prefix of its own messages when the memory policy drops
+> no turn and the tool set is unchanged, and the stable prefix hash
 > (`model.PrefixHash`) of the two requests shall be equal.
 
 Proposed scenarios for caster to draft in `specs/agents/cache.feature`, not
