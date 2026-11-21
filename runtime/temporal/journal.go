@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/runtime"
 )
 
 // DefaultCheckpointEventThreshold is used when Options.CheckpointEventThreshold
@@ -50,8 +51,10 @@ type StepOutcome struct {
 	Err    *JournalError   `json:"err,omitempty"`
 }
 
-// ChildOutcome records one finished child keyed by child run id.
+// ChildOutcome records one finished child keyed by child run id. Flow is
+// recorded so a reused id naming another flow is a conflict, not a stale hit.
 type ChildOutcome struct {
+	Flow   runtime.FlowRef `json:"flow"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Err    *JournalError   `json:"err,omitempty"`
 }

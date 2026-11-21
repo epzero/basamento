@@ -31,6 +31,7 @@ type durableContext struct {
 
 	stepFutures  map[string]runtime.Future
 	childFutures map[string]runtime.Future
+	childFlows   map[string]runtime.FlowRef
 	gates        map[string]*gateState
 
 	timerIdx, selectIdx, nowIdx             int
@@ -67,6 +68,7 @@ func newDurableContext(wfCtx workflow.Context, rt *Runtime, in HostInput, tenant
 		cont:          cont,
 		stepFutures:   map[string]runtime.Future{},
 		childFutures:  map[string]runtime.Future{},
+		childFlows:    map[string]runtime.FlowRef{},
 		gates:         map[string]*gateState{},
 		idSeq:         map[string]int{},
 		randoms:       map[string]*rand.Rand{},
@@ -253,29 +255,66 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 		childID = dc.NewID("child")
 	}
 	if out, ok := dc.cont.Children[childID]; ok {
+		if out.Flow != flow {
+			return newImmediate(childFlowConflict(childID))
+		}
 		return journalChildFuture(out)
 	}
 	if existing := dc.childFutures[childID]; existing != nil {
+		if dc.childFlows[childID] != flow {
+			return newImmediate(childFlowConflict(childID))
+		}
 		return existing
 	}
 	raw, err := rawInput(in)
 	if err != nil {
 		return newImmediate(err)
 	}
+	childWfID := workflowID(dc.tenant, childID)
+	if childWfID == "" {
+		return newImmediate(core.NewError(core.CodeInvalidArgument,
+			"temporal: child id cannot contain \"/\"", map[string]any{"child": childID}))
+	}
 	cwo := workflow.ChildWorkflowOptions{
-		WorkflowID:        workflowID(dc.tenant, childID),
+		WorkflowID:        childWfID,
 		ParentClosePolicy: policy,
 		TaskQueue:         dc.rt.taskQueue,
 	}
 	ctx := workflow.WithChildOptions(dc.wfCtx, cwo)
 	childIn := HostInput{Flow: flow, Input: raw, RunID: childID}
-	fut := workflow.ExecuteChildWorkflow(ctx, HostWorkflowName, childIn)
+	var fut workflow.ChildWorkflowFuture
+	var early runtime.Future
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				if _, ok := recovered.(taskFailure); ok {
+					panic(recovered)
+				}
+				var pe *core.Error
+				if errors.As(errorFromPanic(recovered), &pe) {
+					early = newImmediate(pe)
+					return
+				}
+				panic(recovered)
+			}
+		}()
+		fut = workflow.ExecuteChildWorkflow(ctx, HostWorkflowName, childIn)
+	}()
+	if early != nil {
+		dc.trackInFlight(early)
+		return early
+	}
 	wrapped := &childFuture{ctx: dc.wfCtx, f: fut, done: func(res json.RawMessage, err error) {
-		dc.recordChild(childID, res, err)
+		dc.recordChild(childID, flow, res, err)
 	}}
 	dc.childFutures[childID] = wrapped
+	dc.childFlows[childID] = flow
 	dc.trackInFlight(wrapped)
 	return wrapped
+}
+
+func childFlowConflict(id string) error {
+	return core.NewError(core.CodeConflict, "temporal: child id already names a different flow", map[string]any{"child": id})
 }
 
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
@@ -371,9 +410,13 @@ func (dc *durableContext) recordStep(key string, res json.RawMessage, err error)
 	dc.cont.Steps[key] = StepOutcome{Result: append(json.RawMessage(nil), res...), Err: errToJournal(err)}
 }
 
-func (dc *durableContext) recordChild(id string, res json.RawMessage, err error) {
+func (dc *durableContext) recordChild(id string, flow runtime.FlowRef, res json.RawMessage, err error) {
 	dc.cont.ensure()
-	dc.cont.Children[id] = ChildOutcome{Result: append(json.RawMessage(nil), res...), Err: errToJournal(err)}
+	dc.cont.Children[id] = ChildOutcome{
+		Flow:   flow,
+		Result: append(json.RawMessage(nil), res...),
+		Err:    errToJournal(err),
+	}
 }
 
 func journalStepFuture(out StepOutcome) runtime.Future {

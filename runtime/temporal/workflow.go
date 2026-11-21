@@ -19,6 +19,24 @@ type HostInput struct {
 	Continuation *Continuation   `json:"continuation,omitempty"`
 }
 
+// UnmarshalJSON accepts both the "run_id" field and the "RunID" spelling, so
+// a history recorded with either name replays with its original run id and
+// therefore its original Rand seed and child/Emit run references.
+func (in *HostInput) UnmarshalJSON(data []byte) error {
+	type hostInput HostInput
+	aux := struct {
+		*hostInput
+		LegacyRunID string `json:"RunID"`
+	}{hostInput: (*hostInput)(in)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if in.RunID == "" {
+		in.RunID = aux.LegacyRunID
+	}
+	return nil
+}
+
 // hostWorkflow runs the registered flow host behind a DurableContext.
 func (r *Runtime) hostWorkflow(ctx workflow.Context, in HostInput) (json.RawMessage, error) {
 	tenant := tenantFromWorkflow(ctx)

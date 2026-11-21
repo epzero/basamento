@@ -3,6 +3,7 @@ package temporal
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -360,5 +361,139 @@ func TestWorkflowIDHelper(t *testing.T) {
 	}
 	if got := workflowID("acme", "run-1"); got != "acme/run-1" {
 		t.Fatalf("tenant-scoped: got %q want acme/run-1", got)
+	}
+	if got := workflowID("acme/eu", "run-1"); got != "" {
+		t.Fatalf("invalid tenant: got %q want no id", got)
+	}
+	if got := workflowID("acme", "run/1"); got != "" {
+		t.Fatalf("run id with slash: got %q want no id", got)
+	}
+	for _, tc := range []struct {
+		tenant, wfID, want string
+	}{
+		{"acme", "acme/run-1", "run-1"},
+		{"acme", "run-1", "run-1"},
+		{"", "run-1", "run-1"},
+	} {
+		if got := runIDFromWorkflowID(core.TenantID(tc.tenant), tc.wfID); got != tc.want {
+			t.Fatalf("runIDFromWorkflowID(%q, %q) = %q want %q", tc.tenant, tc.wfID, got, tc.want)
+		}
+	}
+}
+
+func TestChildSameIDDifferentFlowConflicts(t *testing.T) {
+	rt, env := testEnv(t)
+	registerSubflowHandlers(t, rt, map[string]func(runtime.DurableContext) (json.RawMessage, error){
+		"parent": func(dc runtime.DurableContext) (json.RawMessage, error) {
+			var first json.RawMessage
+			if err := dc.Child(runtime.FlowRef{Name: "child-a"}, nil, runtime.ChildOptions{ID: "c1"}).Get(&first); err != nil {
+				return nil, err
+			}
+			err := dc.Child(runtime.FlowRef{Name: "child-b"}, nil, runtime.ChildOptions{ID: "c1"}).Get(nil)
+			var pe *core.Error
+			if !errors.As(err, &pe) {
+				return nil, fmt.Errorf("second child: %w", err)
+			}
+			return json.Marshal(map[string]string{"code": string(pe.Code), "first": string(first)})
+		},
+		"child-a": func(runtime.DurableContext) (json.RawMessage, error) { return json.RawMessage(`"a"`), nil },
+		"child-b": func(runtime.DurableContext) (json.RawMessage, error) { return json.RawMessage(`"b"`), nil },
+	})
+	registerAcmeEnv(t, rt, env)
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "parent"}, RunID: "r1"})
+	var got map[string]string
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["code"] != string(core.CodeConflict) || got["first"] != `"a"` {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChildSameIDDifferentFlowInFlightConflicts(t *testing.T) {
+	rt, env := testEnv(t)
+	registerSubflowHandlers(t, rt, map[string]func(runtime.DurableContext) (json.RawMessage, error){
+		"parent": func(dc runtime.DurableContext) (json.RawMessage, error) {
+			first := dc.Child(runtime.FlowRef{Name: "child-a"}, nil, runtime.ChildOptions{ID: "c1"})
+			err := dc.Child(runtime.FlowRef{Name: "child-b"}, nil, runtime.ChildOptions{ID: "c1"}).Get(nil)
+			if gerr := first.Get(nil); gerr != nil {
+				return nil, gerr
+			}
+			var pe *core.Error
+			if !errors.As(err, &pe) {
+				return nil, fmt.Errorf("second child: %w", err)
+			}
+			return json.Marshal(map[string]string{"code": string(pe.Code)})
+		},
+		"child-a": func(runtime.DurableContext) (json.RawMessage, error) { return json.RawMessage(`"a"`), nil },
+		"child-b": func(runtime.DurableContext) (json.RawMessage, error) { return json.RawMessage(`"b"`), nil },
+	})
+	registerAcmeEnv(t, rt, env)
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "parent"}, RunID: "r1"})
+	var got map[string]string
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["code"] != string(core.CodeConflict) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChildSameIDDifferentFlowInContinuationConflicts(t *testing.T) {
+	rt, env := testEnv(t)
+	registerSubflowHandlers(t, rt, map[string]func(runtime.DurableContext) (json.RawMessage, error){
+		"parent": func(dc runtime.DurableContext) (json.RawMessage, error) {
+			err := dc.Child(runtime.FlowRef{Name: "child-b"}, nil, runtime.ChildOptions{ID: "c1"}).Get(nil)
+			var pe *core.Error
+			if !errors.As(err, &pe) {
+				return nil, fmt.Errorf("child: %w", err)
+			}
+			return json.Marshal(map[string]string{"code": string(pe.Code)})
+		},
+		"child-b": func(runtime.DurableContext) (json.RawMessage, error) { return json.RawMessage(`"b"`), nil },
+	})
+	registerAcmeEnv(t, rt, env)
+	cont := &Continuation{Children: map[string]ChildOutcome{
+		"c1": {Flow: runtime.FlowRef{Name: "child-a"}, Result: json.RawMessage(`"a"`)},
+	}}
+	cont.ensure()
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "parent"}, RunID: "r1", Continuation: cont})
+	var got map[string]string
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["code"] != string(core.CodeConflict) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestChildSameFlowInContinuationReturnsJournaledResult(t *testing.T) {
+	rt, env := testEnv(t)
+	var starts atomic.Int32
+	registerSubflowHandlers(t, rt, map[string]func(runtime.DurableContext) (json.RawMessage, error){
+		"parent": func(dc runtime.DurableContext) (json.RawMessage, error) {
+			var out json.RawMessage
+			if err := dc.Child(runtime.FlowRef{Name: "child-a"}, nil, runtime.ChildOptions{ID: "c1"}).Get(&out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		},
+		"child-a": func(runtime.DurableContext) (json.RawMessage, error) {
+			starts.Add(1)
+			return json.RawMessage(`"a"`), nil
+		},
+	})
+	registerAcmeEnv(t, rt, env)
+	cont := &Continuation{Children: map[string]ChildOutcome{
+		"c1": {Flow: runtime.FlowRef{Name: "child-a"}, Result: json.RawMessage(`"a"`)},
+	}}
+	cont.ensure()
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "parent"}, RunID: "r1", Continuation: cont})
+	var out json.RawMessage
+	if err := env.GetWorkflowResult(&out); err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"a"` || starts.Load() != 0 {
+		t.Fatalf("out %s starts %d", out, starts.Load())
 	}
 }

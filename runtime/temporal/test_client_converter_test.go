@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"testing"
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/converter"
@@ -16,10 +17,12 @@ import (
 // environment does not pass a workflow deadlock detector into activity encodes
 // (real workers use an unbound converter on the activity side).
 type clientConverter struct {
-	base       converter.DataConverter
-	inner      converter.DataConverter
-	tenant     core.TenantID
-	inWorkflow bool
+	base         converter.DataConverter
+	inner        converter.DataConverter
+	tenant       core.TenantID
+	ctxTenant    core.TenantID
+	hasCtxTenant bool
+	inWorkflow   bool
 }
 
 func (c *clientConverter) baseConverter() converter.DataConverter {
@@ -55,6 +58,7 @@ func (c *clientConverter) WithContext(ctx context.Context) converter.DataConvert
 	out := *c
 	base := c.baseConverter()
 	out.base = base
+	out.ctxTenant, out.hasCtxTenant = core.TenantFrom(ctx)
 	if a := c.awareOf(base); a != nil {
 		out.inner = a.WithContext(ctx)
 	}
@@ -73,8 +77,13 @@ func (c *clientConverter) WithWorkflowContext(ctx workflow.Context) converter.Da
 }
 
 func (c *clientConverter) delegate() converter.DataConverter {
-	if a := c.aware(); a != nil && c.tenant != "" && !c.inWorkflow {
-		return a.WithContext(core.WithTenant(context.Background(), c.tenant))
+	if a := c.aware(); a != nil && !c.inWorkflow {
+		if c.hasCtxTenant {
+			return a.WithContext(core.WithTenant(context.Background(), c.ctxTenant))
+		}
+		if c.tenant != "" {
+			return a.WithContext(core.WithTenant(context.Background(), c.tenant))
+		}
 	}
 	return c.inner
 }
@@ -96,4 +105,28 @@ func (c *clientConverter) ToString(payload *commonpb.Payload) string {
 }
 func (c *clientConverter) ToStrings(payloads *commonpb.Payloads) []string {
 	return c.delegate().ToStrings(payloads)
+}
+
+func TestClientConverterUsesContextTenantAndRejectsWrongTenant(t *testing.T) {
+	rt, err := New(testOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &clientConverter{inner: rt.DataConverter(), tenant: "fallback"}
+	acme := core.WithTenant(context.Background(), "acme")
+	p, err := c.WithContext(acme).ToPayload("secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out string
+	if err := c.WithContext(acme).FromPayload(p, &out); err != nil {
+		t.Fatalf("context tenant not used: %v", err)
+	}
+	if out != "secret" {
+		t.Fatalf("decoded %q want secret", out)
+	}
+	beta := core.WithTenant(context.Background(), "beta")
+	if err := c.WithContext(beta).FromPayload(p, &out); err == nil {
+		t.Fatal("payload decoded for the wrong tenant")
+	}
 }

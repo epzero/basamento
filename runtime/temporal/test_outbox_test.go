@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,9 +13,10 @@ import (
 )
 
 type testOutbox struct {
-	mu    sync.Mutex
-	seen  map[uint64]runtime.ProgressEvent
-	calls []outboxAppendRecord
+	mu         sync.Mutex
+	seen       map[uint64]runtime.ProgressEvent
+	calls      []outboxAppendRecord
+	wantTenant core.TenantID
 }
 
 type outboxAppendRecord struct {
@@ -26,7 +28,21 @@ type outboxAppendRecord struct {
 }
 
 func newTestOutbox() *testOutbox {
-	return &testOutbox{seen: map[uint64]runtime.ProgressEvent{}}
+	return &testOutbox{seen: map[uint64]runtime.ProgressEvent{}, wantTenant: "acme"}
+}
+
+// checkRun asserts the sink is handed the run the test started, so a forged or
+// unbound run id is caught instead of silently stored.
+func (o *testOutbox) checkRun(run runtime.RunRef) error {
+	if o.wantTenant != "" && run.TenantID != o.wantTenant {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("temporal: run tenant %q is not the test tenant %q", run.TenantID, o.wantTenant), nil)
+	}
+	if run.RunID == "" || strings.ContainsRune(run.RunID, '/') {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("temporal: run id %q is not a bare run id", run.RunID), nil)
+	}
+	return nil
 }
 
 func outboxRecord(ctx context.Context, run runtime.RunRef, seq uint64, ev runtime.ProgressEvent) (outboxAppendRecord, error) {
@@ -70,6 +86,9 @@ func (o *testOutbox) storeCall(call outboxAppendRecord, ev runtime.ProgressEvent
 }
 
 func (o *testOutbox) appendStrict(ctx context.Context, run runtime.RunRef, seq uint64, ev runtime.ProgressEvent) error {
+	if err := o.checkRun(run); err != nil {
+		return err
+	}
 	call, err := outboxRecord(ctx, run, seq, ev)
 	if err != nil {
 		return err
@@ -119,6 +138,9 @@ func newRecordingOutbox() *recordingOutbox {
 }
 
 func (o *recordingOutbox) Append(ctx context.Context, run runtime.RunRef, seq uint64, ev runtime.ProgressEvent) error {
+	if err := o.checkRun(run); err != nil {
+		return err
+	}
 	call, err := outboxRecord(ctx, run, seq, ev)
 	if err != nil {
 		return err

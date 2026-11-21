@@ -3,6 +3,7 @@ package temporal
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -22,12 +23,9 @@ type GateResolution struct {
 }
 
 type gateState struct {
-	spec        runtime.GateSpec
 	wfFut       workflow.Future
 	set         workflow.Settable
 	settle      bool
-	err         error
-	payload     json.RawMessage
 	timerCancel workflow.CancelFunc
 }
 
@@ -53,7 +51,7 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 		}
 	}
 	wfFut, set := workflow.NewFuture(dc.wfCtx)
-	g := &gateState{spec: spec, wfFut: wfFut, set: set}
+	g := &gateState{wfFut: wfFut, set: set}
 	dc.gates[spec.Name] = g
 	j := dc.ensureGateJournal(spec)
 	dc.armGateTimeoutFromJournal(spec.Name, j)
@@ -63,7 +61,7 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 func (dc *durableContext) awaitAfterCancel(spec runtime.GateSpec) runtime.Future {
 	wfFut, set := workflow.NewFuture(dc.wfCtx)
 	err := core.NewError(core.CodeCancelled, "temporal: gate cancelled", nil)
-	g := &gateState{spec: spec, wfFut: wfFut, set: set, settle: true, err: err}
+	g := &gateState{wfFut: wfFut, set: set, settle: true}
 	dc.gates[spec.Name] = g
 	set.SetError(err)
 	dc.ensureGateJournal(spec)
@@ -125,8 +123,6 @@ func (dc *durableContext) settleGate(name string, payload json.RawMessage, err e
 	}
 	if g != nil {
 		g.settle = true
-		g.payload = append(json.RawMessage(nil), payload...)
-		g.err = err
 		if g.timerCancel != nil {
 			g.timerCancel()
 			g.timerCancel = nil
@@ -225,8 +221,15 @@ func (dc *durableContext) startGateCancelWatcher() {
 	workflow.Go(dc.wfCtx, func(ctx workflow.Context) {
 		selector := workflow.NewSelector(ctx)
 		selector.AddReceive(ctx.Done(), func(workflow.ReceiveChannel, bool) {
-			for name, g := range dc.gates {
-				if g != nil && !g.settle {
+			// Settle in name order: map iteration is random, and a flow that
+			// selects over two gates must take the same branch on replay.
+			names := make([]string, 0, len(dc.gates))
+			for name := range dc.gates {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				if g := dc.gates[name]; g != nil && !g.settle {
 					dc.settleGate(name, nil, core.NewError(core.CodeCancelled, "temporal: gate cancelled", nil))
 				}
 			}

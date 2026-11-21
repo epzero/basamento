@@ -256,7 +256,7 @@ func TestCheckpointAfterEveryStepTerminates(t *testing.T) {
 
 func TestContinuationJSONShape(t *testing.T) {
 	td := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-	contGolden := `{"steps":{"s":{"result":"ok"}},"children":{"child-1":{"result":"child-ok"}},"gates":{"g1":{"name":"g1","timeout_ns":1000000000,"deadline":"2024-06-15T12:05:00Z","resolved":true,"payload":"p"},"g2":{"name":"g2","timeout_ns":2000000000,"deadline":"2024-06-15T12:10:00Z","ended_by_timeout":true},"g3":{"name":"g3","deadline":"2024-06-15T12:00:00Z","ended_by_cancel":true}},"timers":[{"deadline":"2024-06-15T12:01:00Z","fired":true},{"deadline":"2024-06-15T13:00:00Z","fired":false}],"selects":[1,0],"nows":["2024-06-15T12:00:00Z","2024-06-15T12:30:00Z"],"emitted":2,"checkpoints":1}`
+	contGolden := `{"steps":{"s":{"result":"ok"}},"children":{"child-1":{"flow":{"Name":"child-flow","Hash":""},"result":"child-ok"}},"gates":{"g1":{"name":"g1","timeout_ns":1000000000,"deadline":"2024-06-15T12:05:00Z","resolved":true,"payload":"p"},"g2":{"name":"g2","timeout_ns":2000000000,"deadline":"2024-06-15T12:10:00Z","ended_by_timeout":true},"g3":{"name":"g3","deadline":"2024-06-15T12:00:00Z","ended_by_cancel":true}},"timers":[{"deadline":"2024-06-15T12:01:00Z","fired":true},{"deadline":"2024-06-15T13:00:00Z","fired":false}],"selects":[1,0],"nows":["2024-06-15T12:00:00Z","2024-06-15T12:30:00Z"],"emitted":2,"checkpoints":1}`
 	hostWithGolden := `{"flow":{"Name":"flow-a","Hash":""},"input":"in","run_id":"run-1","continuation":` + contGolden + `}`
 	hostNoContGolden := `{"flow":{"Name":"flow-b","Hash":""},"input":null,"run_id":"run-2"}`
 
@@ -265,7 +265,7 @@ func TestContinuationJSONShape(t *testing.T) {
 			"s": {Result: json.RawMessage(`"ok"`)},
 		},
 		Children: map[string]ChildOutcome{
-			"child-1": {Result: json.RawMessage(`"child-ok"`)},
+			"child-1": {Flow: runtime.FlowRef{Name: "child-flow"}, Result: json.RawMessage(`"child-ok"`)},
 		},
 		Gates: map[string]GateJournal{
 			"g1": {

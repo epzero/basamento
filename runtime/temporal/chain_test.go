@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/client"
 	sdktemporal "go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
@@ -68,6 +69,9 @@ func runChain(t *testing.T, rt *Runtime, in HostInput, opts chainOptions) chainR
 		conv := &clientConverter{inner: rt.DataConverter(), tenant: core.TenantID(opts.tenant)}
 		env.SetDataConverter(conv)
 		setTestTenantHeader(env, opts.tenant)
+		// The Emit activity derives the run id from the scheduling workflow id,
+		// so the test client starts with the run id as the workflow id.
+		env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: cur.RunID})
 		start := chainFixedStart
 		if opts.startFor != nil {
 			start = opts.startFor(res.Execs)

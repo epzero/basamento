@@ -60,7 +60,9 @@ func (dc *durableContext) Emit(ev runtime.ProgressEvent) error {
 	if done, err := dc.emitReplay(call); done {
 		return err
 	}
-	seq := dc.cont.Emitted + 1
+	// A terminal failure consumes its seq: a later, different event must not
+	// reuse it, because a store-then-error sink may already hold it.
+	seq := dc.cont.Emitted + uint64(len(dc.cont.EmitFailures)) + 1
 	raw := append(json.RawMessage(nil), ev.Data...)
 	actCtx := workflow.WithActivityOptions(dc.wfCtx, workflow.ActivityOptions{
 		TaskQueue:           dc.rt.taskQueue,
@@ -106,14 +108,19 @@ func (dc *durableContext) Emit(ev runtime.ProgressEvent) error {
 		}
 		return coreErr
 	}
-	dc.cont.Emitted = seq
+	dc.cont.Emitted++
 	return nil
 }
 
 func (r *Runtime) runEmitActivity(ctx context.Context, in emitActivityInput) error {
 	tenant, _ := core.TenantFrom(ctx)
+	runID := runIDFromWorkflowID(tenant, workflowIDFromActivity(ctx))
+	if runID == "" || in.RunID != runID {
+		return activityApplicationError(core.NewError(core.CodeInvalidArgument,
+			"temporal: emit run id does not match the scheduling workflow", nil))
+	}
 	ev := runtime.ProgressEvent{Type: in.Type, Data: append(json.RawMessage(nil), in.Data...)}
-	ref := runtime.RunRef{RunID: in.RunID, TenantID: tenant}
+	ref := runtime.RunRef{RunID: runID, TenantID: tenant}
 	if err := r.outbox.Append(ctx, ref, in.Seq, ev); err != nil {
 		return activityApplicationError(err)
 	}

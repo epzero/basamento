@@ -41,21 +41,23 @@ func (TenantPropagator) Extract(ctx context.Context, reader workflow.HeaderReade
 	if err := converter.GetDefaultDataConverter().FromPayload(p, &tenant); err != nil {
 		return ctx, err
 	}
-	if tenant == "" {
-		return ctx, nil
+	if id := checkedTenant(core.TenantID(tenant)); id != "" {
+		return core.WithTenant(ctx, id), nil
 	}
-	return core.WithTenant(ctx, core.TenantID(tenant)), nil
+	return ctx, nil
 }
 
 // InjectFromWorkflow copies the workflow tenant into activity headers.
 func (TenantPropagator) InjectFromWorkflow(ctx workflow.Context, writer workflow.HeaderWriter) error {
 	if v := ctx.Value(tenantWorkflowKey{}); v != nil {
-		if id, ok := v.(core.TenantID); ok && id != "" {
-			p, err := converter.GetDefaultDataConverter().ToPayload(string(id))
-			if err != nil {
-				return err
+		if id, ok := v.(core.TenantID); ok {
+			if id = checkedTenant(id); id != "" {
+				p, err := converter.GetDefaultDataConverter().ToPayload(string(id))
+				if err != nil {
+					return err
+				}
+				writer.Set(tenantHeaderKey, p)
 			}
-			writer.Set(tenantHeaderKey, p)
 		}
 	}
 	return nil
@@ -71,17 +73,30 @@ func (TenantPropagator) ExtractToWorkflow(ctx workflow.Context, reader workflow.
 	if err := converter.GetDefaultDataConverter().FromPayload(p, &tenant); err != nil {
 		return ctx, err
 	}
-	if tenant == "" {
-		return ctx, nil
+	if id := checkedTenant(core.TenantID(tenant)); id != "" {
+		return workflow.WithValue(ctx, tenantWorkflowKey{}, id), nil
 	}
-	return workflow.WithValue(ctx, tenantWorkflowKey{}, core.TenantID(tenant)), nil
+	return ctx, nil
 }
 
 func tenantFromWorkflow(ctx workflow.Context) core.TenantID {
 	if v := ctx.Value(tenantWorkflowKey{}); v != nil {
 		if id, ok := v.(core.TenantID); ok {
-			return id
+			return checkedTenant(id)
 		}
 	}
 	return ""
+}
+
+// checkedTenant returns id when it satisfies the tenant grammar and "" otherwise.
+// core.TenantFrom is the single implementation of that rule.
+func checkedTenant(id core.TenantID) core.TenantID {
+	if id == "" {
+		return ""
+	}
+	got, ok := core.TenantFrom(core.WithTenant(context.Background(), id))
+	if !ok || got != id {
+		return ""
+	}
+	return got
 }

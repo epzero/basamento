@@ -270,7 +270,7 @@ func TestEmitFailureIsJournaledAndReplayedAsFailure(t *testing.T) {
 	if res.Execs != 2 {
 		t.Fatalf("execs %d", res.Execs)
 	}
-	assertOutboxAppendsEqual(t, ob.callsCopy(), []outboxAppendRecord{{seq: 1, typ: "fail"}, {seq: 1, typ: "ok"}})
+	assertOutboxAppendsEqual(t, ob.callsCopy(), []outboxAppendRecord{{seq: 1, typ: "fail"}, {seq: 2, typ: "ok"}})
 	if types := ob.types(); len(types) != 1 || types[0] != "ok" {
 		t.Fatalf("types %+v want only ok stored", types)
 	}
