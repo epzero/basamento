@@ -110,6 +110,46 @@ func TestCompileRejectsGateAcceptIfThatIsNotBoolean(t *testing.T) {
 	requireInvalid(t, errOf(t, f), `node "check" gate accept_if`, "bool")
 }
 
+// A map starts its child from spec.node, so the arc from the map to its child
+// is implicit and the edge list does not carry it. A child that routes back to
+// its map is a loop the machine runs for ever, and the compiler must judge it
+// like any other cycle (REQ-FLOW-003).
+func TestCompileRejectsAnUnguardedMapChildCycle(t *testing.T) {
+	requireInvalid(t, errOf(t, mapChildCycleFlow()), `node "fanout"`, "guard")
+}
+
+// The same loop with a bounded node on it compiles: the map's guard counts
+// the visits of the map, which the machine routes to.
+func TestCompileAcceptsAGuardedMapChildCycle(t *testing.T) {
+	f := mapChildCycleFlow()
+	node := f.Nodes["fanout"]
+	node.Guard = &flow.Guard{MaxVisits: 3}
+	f.Nodes["fanout"] = node
+	if _, err := Compile(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mapChildCycleFlow is a flow whose only loop is the implicit arc from the
+// map to its child and the edge from the child back to the map.
+func mapChildCycleFlow() *flow.IR {
+	return &flow.IR{
+		Name:    "map-cycle",
+		Version: 1,
+		State: flow.StateSpec{
+			Schema: json.RawMessage(`{"type":"object","properties":{"items":{"type":"array","items":{"type":"object"}}}}`),
+		},
+		Nodes: map[string]flow.Node{
+			"fanout":      {Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"fanout_item"}`)},
+			"fanout_item": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "fanout"},
+			{From: "fanout_item", To: "fanout"},
+		},
+	}
+}
+
 func TestCompileRejectsMapOverThatDoesNotTypeCheck(t *testing.T) {
 	f := typedFlow()
 	node := f.Nodes["check"]

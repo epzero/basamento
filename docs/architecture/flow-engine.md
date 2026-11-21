@@ -69,7 +69,10 @@ model invocation, see `model-layer.md`), `agent`, `tool` (effectful steps), `map
   definition at most 1 MiB (REQ-FLOW-045, REQ-FLOW-046).
 - Requires at least one guarded node on every cycle. A guard's `max_visits` or
   `cost_mpts` is the budget that bounds a cycle (REQ-FLOW-003); a `while`
-  condition only chooses when the cycle leaves.
+  condition only chooses when the cycle leaves. A `map` starts its child from
+  `spec.node` rather than routing to it, so the arc from the map to its child
+  is implicit: a child that routes back to its map is a cycle and needs a
+  guarded node like any other.
 - Rejects unknown node kinds.
 - Accepts `START` and `FAIL` as edge endpoints without declaring nodes of
   those names; a node named `START` or `FAIL`, an edge into `START`, an edge
