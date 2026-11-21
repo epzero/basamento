@@ -2,7 +2,9 @@
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
 **Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
-(`runtime/local`, WP-L5-01); `temporal` **Planned** (WP-L5-02).
+(`runtime/local`, WP-L5-01); `temporal` **In progress** — data path
+(`runtime/temporal`, WP-L5-02 pull request (a); control plane and Await still
+planned in the same WP).
 Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
@@ -79,7 +81,32 @@ Settings for the embedded profile:
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.
 
-## 6. Local runtime: behaviours the specs leave open
+## 6. Temporal runtime: data path (WP-L5-02, pull request (a))
+
+`runtime/temporal` registers the flow host as a Temporal workflow and each step
+as an activity. This change delivers:
+
+- A **payload data converter** shared by workflow and activity workers: tenant
+  encryption (`platform/secrets`), blob claim-check over the threshold (default
+  5 KB on encrypted size), markers use encoding `basamento/claim-check` and only
+  history ever holds `binary/encrypted`.
+- A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
+  `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
+  `Emit` and `Checkpoint` return `unsupported` until the next changes of
+  WP-L5-02.
+- **Step activity** retry mapping aligned with the local runtime (`MaxAttempts`
+  0 → 3, `NonRetryable` codes, core error codes across the boundary).
+- **Registration** (`Runtime.RegisterFlowHost`, `RegisterStep`,
+  `RegisterWorkflowsActivities`) without the control-plane `runtime.Runtime`
+  methods (those arrive in pull request (c)).
+
+The in-process BDD harness wraps the converter in a recorder and drives
+`testsuite.TestWorkflowEnvironment` with the simulated key service and tenant
+blob store. It proves claim-check, encryption, retry limits, and decode rejects
+for bad history (RT-028…033, RT-041). Real-server version pinning and the
+control plane are WP-L5-02 (c) and WP-L5-03.
+
+## 7. Local runtime: behaviours the specs leave open
 
 These are implementation choices for `runtime/local` (WP-L5-01). Where a row
 names a requirement or scenario id, the gate exercises it; otherwise the
