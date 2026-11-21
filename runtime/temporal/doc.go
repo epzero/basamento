@@ -11,7 +11,10 @@
 // internal with a fixed message; the original text is logged only, bounded like
 // panic values. The tenant header is plaintext by necessity. The workflow-bound
 // converter fails transient codec errors as workflow tasks (sanitized panic);
-// permanent errors are returned. Workflow-bound I/O is capped at 30 s per call.
+// permanent errors are returned. Workflow-bound I/O is capped at 30 s per call so a
+// hung blob or key request cannot block a worker thread forever; if that bound
+// expires the workflow task fails (sanitized panic) and the server retries, and the
+// run outcome is unchanged once I/O succeeds.
 //
 // Claim-checked blobs are content-addressed and immutable; replay or activity retry
 // may write additional ciphertext blobs with no garbage collection in this phase.

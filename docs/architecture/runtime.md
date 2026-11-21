@@ -96,7 +96,8 @@ as an activity. This change delivers:
   worker `DeadlockDetectionTimeout`).
 - **Payload codec errors:** only the **workflow-bound** data converter (the clone
   from `WithWorkflowContext`) applies the transient policy: `unavailable`,
-  `timeout`, `rate_limited`, or retryable `core.Error` values are logged (bounded
+  `timeout`, `rate_limited`, `cancelled` (only from the I/O bound), or retryable
+  `core.Error` values are logged (bounded
   message, code, tenant, workflow id) and panic as a sanitized `taskFailure`, so
   the **workflow task** fails and the server retries (the run is not failed).
   Permanent errors are returned. That covers step argument and result encode/decode,
@@ -104,7 +105,9 @@ as an activity. This change delivers:
   (b)/(c). Client and activity converters (`WithContext`) return errors without
   panicking. Permanent step-argument encode failures are still surfaced to the
   flow as a failed `Step` future (`Step` recovers the SDK panic). Workflow I/O is
-  bounded at 30 s per converter call. Workers must keep the SDK default
+  bounded at 30 s per converter call so a hung store cannot block a worker thread;
+  bound expiry and `cancelled` from that context are transient (workflow task
+  failure, server retry), never a permanent flow error. Workers must keep the SDK default
   `WorkflowPanicPolicy` (`BlockWorkflow`); `FailWorkflow` would turn task failures
   into permanent run failures (pull request (c) pins worker options). User panics
   in the flow host still fail the run once with `temporal: the flow host panicked`;
