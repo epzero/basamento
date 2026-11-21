@@ -80,6 +80,12 @@ If a model turn requests a handoff to an agent whose node the flow does not defi
 ### REQ-AGENT-030 — Multiple handoffs in one turn fail
 If a model turn requests more than one handoff, then the agent run shall fail with code `invalid_argument` without making a tool-call step.
 
+### REQ-AGENT-031 — Input becomes the first user message
+When an agent run starts without a handoff, the agent loop shall seed the message history with one user message from the node input — a JSON string contributes its decoded text, any other non-empty JSON contributes its compact JSON bytes, and empty or whitespace-only input contributes no message — and that seed shall be the first turn, kept whole by the memory policy, weighted by the content estimate and not counted as a model turn for the step cap, while a handoff target shall not be seeded again because its history is the carried turns.
+
+### REQ-AGENT-032 — No user message fails before the model call
+If the assembled request has no non-system message, then the agent loop shall fail the agent run with code `invalid_argument` and message `agent "<node>": the run has no user message` before making any cost reservation or invoking the model.
+
 ### REQ-AGENT-023 — The memory policy keeps the start
 If the messages of a model turn exceed the agent's input token limit when starting the turn, then the memory policy shall keep the agent's system messages and the agent run's first model turn.
 
