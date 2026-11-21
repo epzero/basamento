@@ -18,7 +18,7 @@ func (f *stepFuture) Get(out any) error {
 	var raw json.RawMessage
 	err := f.f.Get(f.ctx, &raw)
 	if err != nil {
-		return FromActivityError(err)
+		return activityToCore(err)
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
@@ -42,19 +42,20 @@ type timerFuture struct {
 
 func (f *timerFuture) Get(out any) error {
 	if err := f.f.Get(f.ctx, nil); err != nil {
-		return FromActivityError(err)
+		return activityToCore(err)
 	}
 	return nil
 }
 
 func (f *timerFuture) Ready() bool { return f.f.IsReady() }
 
-// failedFuture is an already-failed durable operation.
-type failedFuture struct {
+// immediateFuture is already complete (zero-duration sleep or a cached error).
+type immediateFuture struct {
 	err error
 }
 
-func (f *failedFuture) Get(any) error { return f.err }
-func (f *failedFuture) Ready() bool   { return true }
+func (f *immediateFuture) Get(any) error { return f.err }
+func (f *immediateFuture) Ready() bool   { return true }
 
-func newFailed(err error) runtime.Future { return &failedFuture{err: err} }
+func newDone(err error) runtime.Future   { return &immediateFuture{err: err} }
+func newFailed(err error) runtime.Future { return &immediateFuture{err: err} }

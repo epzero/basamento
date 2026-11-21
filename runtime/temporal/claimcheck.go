@@ -30,22 +30,14 @@ type storedPayload struct {
 	Data     []byte            `json:"data"`
 }
 
-// Encoded is a payload as run history holds it after encoding.
-type Encoded struct {
-	Payload    secrets.Payload
-	ClaimCheck bool // true when Payload is an encrypted claim-check marker
-}
-
-// Codec composes tenant encryption (WP-L1-04) and blob claim-check (WP-L1-02).
-type Codec struct {
+// payloadCodec composes tenant encryption (WP-L1-04) and blob claim-check (WP-L1-02).
+type payloadCodec struct {
 	enc       *secrets.Codec
 	blobs     platform.Blob
 	threshold int
 }
 
-// NewCodec returns the claim-check and encryption codec. A nil encryption codec
-// or blob store is refused with invalid_argument.
-func NewCodec(enc *secrets.Codec, blobs platform.Blob, threshold int) (*Codec, error) {
+func newPayloadCodec(enc *secrets.Codec, blobs platform.Blob, threshold int) (*payloadCodec, error) {
 	if enc == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: payload codec needs an encryption codec", nil)
 	}
@@ -55,45 +47,41 @@ func NewCodec(enc *secrets.Codec, blobs platform.Blob, threshold int) (*Codec, e
 	if threshold <= 0 {
 		threshold = DefaultClaimCheckBytes
 	}
-	return &Codec{enc: enc, blobs: blobs, threshold: threshold}, nil
+	return &payloadCodec{enc: enc, blobs: blobs, threshold: threshold}, nil
 }
 
 // Encode encrypts p for the tenant in ctx and claim-checks when the encrypted
 // form exceeds the threshold (REQ-RT-028, REQ-RT-031).
-func (c *Codec) Encode(ctx context.Context, p secrets.Payload) (Encoded, error) {
+func (c *payloadCodec) Encode(ctx context.Context, p secrets.Payload) (secrets.Payload, error) {
 	enc, err := c.enc.Encode(ctx, p)
 	if err != nil {
-		return Encoded{}, err
+		return secrets.Payload{}, err
 	}
 	if len(enc.Data) <= c.threshold {
-		return Encoded{Payload: enc}, nil
+		return enc, nil
 	}
 	stored, err := json.Marshal(storedPayload{Metadata: enc.Metadata, Data: enc.Data})
 	if err != nil {
-		return Encoded{}, core.NewError(core.CodeInternal, "temporal: encode claim-checked payload", map[string]any{"cause": err.Error()})
+		return secrets.Payload{}, core.NewError(core.CodeInternal, "temporal: encode claim-checked payload", map[string]any{"cause": err.Error()})
 	}
 	key := blob.ContentKeyOf(stored)
 	if err := c.blobs.Put(ctx, key, bytes.NewReader(stored), "application/json"); err != nil {
-		return Encoded{}, err
+		return secrets.Payload{}, err
 	}
 	marker, err := json.Marshal(claimCheckMarker{Key: key, Size: len(enc.Data)})
 	if err != nil {
-		return Encoded{}, core.NewError(core.CodeInternal, "temporal: encode claim-check marker", map[string]any{"cause": err.Error()})
+		return secrets.Payload{}, core.NewError(core.CodeInternal, "temporal: encode claim-check marker", map[string]any{"cause": err.Error()})
 	}
 	plain := secrets.Payload{
 		Metadata: map[string][]byte{"encoding": []byte(ClaimCheckEncoding)},
 		Data:     marker,
 	}
-	encMarker, err := c.enc.Encode(ctx, plain)
-	if err != nil {
-		return Encoded{}, err
-	}
-	return Encoded{Payload: encMarker, ClaimCheck: true}, nil
+	return c.enc.Encode(ctx, plain)
 }
 
 // Decode decrypts a history payload for the tenant in ctx (REQ-RT-029,
 // REQ-RT-032, REQ-RT-033).
-func (c *Codec) Decode(ctx context.Context, p secrets.Payload) (secrets.Payload, error) {
+func (c *payloadCodec) Decode(ctx context.Context, p secrets.Payload) (secrets.Payload, error) {
 	if string(p.Metadata["encoding"]) != secrets.EncodingEncrypted {
 		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: history payload is not encrypted", nil)
 	}

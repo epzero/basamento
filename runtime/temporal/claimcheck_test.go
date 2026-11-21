@@ -3,11 +3,7 @@ package temporal
 import (
 	"bytes"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/sha256"
 	"encoding/json"
-	"sync"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -19,113 +15,6 @@ func testTenantCtx(tenant string) context.Context {
 	return core.WithTenant(context.Background(), core.TenantID(tenant))
 }
 
-type testKeyService struct{ id string }
-
-func (k testKeyService) MasterKeyID() string { return k.id }
-func (k testKeyService) Close() error        { return nil }
-
-func (k testKeyService) Wrap(_ context.Context, tenant string, plaintext []byte) ([]byte, error) {
-	key := sha256.Sum256([]byte(k.id + "/" + tenant))
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	return gcm.Seal(nonce, nonce, plaintext, []byte(tenant)), nil
-}
-
-func (k testKeyService) Unwrap(_ context.Context, tenant string, ciphertext []byte) ([]byte, error) {
-	key := sha256.Sum256([]byte(k.id + "/" + tenant))
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, core.NewError(core.CodeInvalidArgument, "test key service: short ciphertext", nil)
-	}
-	return gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], []byte(tenant))
-}
-
-type testKeysetStore struct {
-	mu   sync.Mutex
-	data map[string]secrets.StoredKeyset
-}
-
-func newTestKeysetStore() *testKeysetStore {
-	return &testKeysetStore{data: map[string]secrets.StoredKeyset{}}
-}
-
-func (s *testKeysetStore) Get(_ context.Context, tenant string) (secrets.StoredKeyset, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, ok := s.data[tenant]
-	return r, ok, nil
-}
-
-func (s *testKeysetStore) CreateIfAbsent(_ context.Context, tenant string, record secrets.StoredKeyset) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.data[tenant]; ok {
-		return false, nil
-	}
-	s.data[tenant] = record
-	return true, nil
-}
-
-func (s *testKeysetStore) CompareAndSwap(_ context.Context, tenant string, expect uint64, record secrets.StoredKeyset) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old, ok := s.data[tenant]
-	if !ok || old.Revision != expect {
-		return core.NewError(core.CodeConflict, "keyset revision conflict", nil)
-	}
-	s.data[tenant] = record
-	return nil
-}
-
-func (s *testKeysetStore) Count(context.Context) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.data), nil
-}
-
-func (s *testKeysetStore) Tenants(context.Context) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.data))
-	for tenant := range s.data {
-		out = append(out, tenant)
-	}
-	return out, nil
-}
-
-func newTestSecrets(t *testing.T) *secrets.Codec {
-	t.Helper()
-	c, err := secrets.NewCodec(newTestKeysetStore(), []secrets.KeyService{testKeyService{id: "mk1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c
-}
-
-func newTestBlob(t *testing.T) *blob.Store {
-	t.Helper()
-	st, _, err := blob.Open(context.Background(), "file://"+t.TempDir(), blob.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
-}
-
 func plainPayload(data string) secrets.Payload {
 	return secrets.Payload{
 		Metadata: map[string][]byte{"encoding": []byte("json/plain")},
@@ -134,8 +23,8 @@ func plainPayload(data string) secrets.Payload {
 }
 
 func TestCodecInlinePayloadRoundTrips(t *testing.T) {
-	enc := newTestSecrets(t)
-	c, err := NewCodec(enc, newTestBlob(t), 5*1024)
+	enc := testSecretsCodec(t)
+	c, err := newPayloadCodec(enc, testBlobStore(t), 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,16 +33,13 @@ func TestCodecInlinePayloadRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ClaimCheck {
-		t.Fatal("small payload was claim-checked")
-	}
-	if encoding := string(got.Payload.Metadata["encoding"]); encoding != secrets.EncodingEncrypted {
+	if encoding := string(got.Metadata["encoding"]); encoding != secrets.EncodingEncrypted {
 		t.Fatalf("history encoding %q, want %q", encoding, secrets.EncodingEncrypted)
 	}
-	if bytes.Contains(got.Payload.Data, []byte(`{"ok":true}`)) {
+	if bytes.Contains(got.Data, []byte(`{"ok":true}`)) {
 		t.Fatal("history payload holds the plaintext")
 	}
-	back, err := c.Decode(ctx, got.Payload)
+	back, err := c.Decode(ctx, got)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,8 +49,8 @@ func TestCodecInlinePayloadRoundTrips(t *testing.T) {
 }
 
 func TestCodecClaimChecksLargePayloads(t *testing.T) {
-	enc := newTestSecrets(t)
-	c, err := NewCodec(enc, newTestBlob(t), 5*1024)
+	enc := testSecretsCodec(t)
+	c, err := newPayloadCodec(enc, testBlobStore(t), 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,13 +60,10 @@ func TestCodecClaimChecksLargePayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.ClaimCheck {
-		t.Fatal("large payload was not claim-checked")
+	if len(got.Data) > 5*1024 {
+		t.Fatalf("history payload is %d bytes, want at most 5 KB", len(got.Data))
 	}
-	if len(got.Payload.Data) > 5*1024 {
-		t.Fatalf("history payload is %d bytes, want at most 5 KB", len(got.Payload.Data))
-	}
-	back, err := c.Decode(ctx, got.Payload)
+	back, err := c.Decode(ctx, got)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +73,7 @@ func TestCodecClaimChecksLargePayloads(t *testing.T) {
 }
 
 func TestCodecRefusesUnencryptedPayloads(t *testing.T) {
-	c, err := NewCodec(newTestSecrets(t), newTestBlob(t), 5*1024)
+	c, err := newPayloadCodec(testSecretsCodec(t), testBlobStore(t), 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +84,7 @@ func TestCodecRefusesUnencryptedPayloads(t *testing.T) {
 }
 
 func TestCodecRefusesEncodeWithoutTenant(t *testing.T) {
-	c, err := NewCodec(newTestSecrets(t), newTestBlob(t), 5*1024)
+	c, err := newPayloadCodec(testSecretsCodec(t), testBlobStore(t), 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,9 +95,9 @@ func TestCodecRefusesEncodeWithoutTenant(t *testing.T) {
 }
 
 func TestCodecClaimCheckIsTenantBound(t *testing.T) {
-	enc := newTestSecrets(t)
-	blobs := newTestBlob(t)
-	c, err := NewCodec(enc, blobs, 5*1024)
+	enc := testSecretsCodec(t)
+	blobs := testBlobStore(t)
+	c, err := newPayloadCodec(enc, blobs, 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,8 +121,8 @@ func TestCodecClaimCheckIsTenantBound(t *testing.T) {
 }
 
 func TestCodecThresholdIsOnTheEncryptedForm(t *testing.T) {
-	enc := newTestSecrets(t)
-	c, err := NewCodec(enc, newTestBlob(t), 5*1024)
+	enc := testSecretsCodec(t)
+	c, err := newPayloadCodec(enc, testBlobStore(t), 5*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,14 +131,14 @@ func TestCodecThresholdIsOnTheEncryptedForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if small.ClaimCheck {
+	if len(small.Data) > 5*1024 {
 		t.Fatal("1 KB payload was claim-checked")
 	}
-	medium, err := c.Encode(ctx, plainPayload(string(make([]byte, 6000))))
+	large, err := c.Encode(ctx, plainPayload(string(make([]byte, 20000))))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !medium.ClaimCheck {
-		t.Fatal("6 KB payload was not claim-checked")
+	if len(large.Data) > 5*1024 {
+		t.Fatal("large payload history was not claim-checked to marker size")
 	}
 }

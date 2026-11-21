@@ -1,3 +1,4 @@
+// Panic logging mirrors runtime/local/paniclog.go; layering forbids sharing the file.
 package temporal
 
 import (

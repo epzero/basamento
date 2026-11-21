@@ -77,11 +77,11 @@ func (TenantPropagator) ExtractToWorkflow(ctx workflow.Context, reader workflow.
 	return workflow.WithValue(ctx, tenantWorkflowKey{}, core.TenantID(tenant)), nil
 }
 
-// withWorkflowTenant seeds workflow context from workflow input when no header
-// was injected (in-process test environments).
-func withWorkflowTenant(ctx workflow.Context, tenant core.TenantID) workflow.Context {
-	if tenant == "" {
-		return ctx
+func tenantFromWorkflow(ctx workflow.Context) core.TenantID {
+	if v := ctx.Value(tenantWorkflowKey{}); v != nil {
+		if id, ok := v.(core.TenantID); ok {
+			return id
+		}
 	}
-	return workflow.WithValue(ctx, tenantWorkflowKey{}, tenant)
+	return ""
 }

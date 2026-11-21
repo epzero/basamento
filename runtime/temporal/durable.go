@@ -20,7 +20,8 @@ type durableContext struct {
 	tenant      core.TenantID
 	stepFutures map[string]runtime.Future
 	randoms     map[string]*rand.Rand
-	idSeq       map[string]int // mutated only inside SideEffect callbacks on first run
+	// idSeq and randoms change during the run; PR (b) must carry them across ContinueAsNew.
+	idSeq map[string]int
 }
 
 func newDurableContext(wfCtx workflow.Context, rt *Runtime, runID string, tenant core.TenantID) *durableContext {
@@ -31,6 +32,7 @@ func newDurableContext(wfCtx workflow.Context, rt *Runtime, runID string, tenant
 		tenant:      tenant,
 		stepFutures: map[string]runtime.Future{},
 		randoms:     map[string]*rand.Rand{},
+		idSeq:       map[string]int{},
 	}
 }
 
@@ -44,37 +46,29 @@ func (dc *durableContext) Context() context.Context {
 
 func (dc *durableContext) Now() time.Time { return workflow.Now(dc.wfCtx) }
 
-func (dc *durableContext) Capabilities() runtime.Caps { return dc.rt.Capabilities() }
+func (dc *durableContext) Capabilities() runtime.Caps {
+	return runtime.Caps{Durable: true, PolyglotQueues: true}
+}
 
 func (dc *durableContext) NewID(kind string) string {
-	var id string
-	_ = workflow.SideEffect(dc.wfCtx, func(ctx workflow.Context) interface{} {
-		if dc.idSeq == nil {
-			dc.idSeq = map[string]int{}
-		}
-		dc.idSeq[kind]++
-		return fmt.Sprintf("%s_%d", kind, dc.idSeq[kind])
-	}).Get(&id)
-	return id
+	dc.idSeq[kind]++
+	return fmt.Sprintf("%s_%d", kind, dc.idSeq[kind])
 }
 
 func (dc *durableContext) Rand(key string) *rand.Rand {
 	if src := dc.randoms[key]; src != nil {
 		return src
 	}
-	var seed uint64
-	_ = workflow.SideEffect(dc.wfCtx, func(ctx workflow.Context) interface{} {
-		runID := workflow.GetInfo(ctx).WorkflowExecution.RunID
-		if dc.runID != "" {
-			runID = dc.runID
-		}
-		h := fnv64(runID)
-		h ^= fnv64(key)
-		return h
-	}).Get(&seed)
-	src := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
+	src := seededRand(dc.runID, key)
 	dc.randoms[key] = src
 	return src
+}
+
+func seededRand(runID, key string) *rand.Rand {
+	h := fnv64(runID)
+	h ^= fnv64(key)
+	h *= 1099511628211
+	return rand.New(rand.NewPCG(h, h^0x9e3779b97f4a7c15))
 }
 
 func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runtime.Future {
@@ -116,10 +110,9 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 		HeartbeatTimeout:    opts.Heartbeat,
 		RetryPolicy:         activityRetryPolicy(opts),
 	})
-	fut := workflow.ExecuteActivity(actCtx, StepActivityName, stepActivityInput{
+	fut := workflow.ExecuteActivity(actCtx, stepActivityName, stepActivityInput{
 		Name: name,
 		In:   raw,
-		Opts: opts,
 	})
 	wrapped := &stepFuture{ctx: actCtx, f: fut}
 	dc.stepFutures[name] = wrapped
@@ -128,7 +121,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 
 func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 	if d <= 0 {
-		return &failedFuture{err: nil}
+		return newDone(nil)
 	}
 	fut := workflow.NewTimer(dc.wfCtx, d)
 	return &timerFuture{ctx: dc.wfCtx, f: fut}
@@ -152,7 +145,7 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 			sel.AddFuture(tf.f, func(workflow.Future) { chosen = idx })
 		case *timerFuture:
 			sel.AddFuture(tf.f, func(workflow.Future) { chosen = idx })
-		case *failedFuture:
+		case *immediateFuture:
 			if tf.Ready() {
 				return idx, nil
 			}

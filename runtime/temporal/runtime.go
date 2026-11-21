@@ -3,6 +3,7 @@ package temporal
 import (
 	"log/slog"
 	"sync"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
@@ -25,36 +26,41 @@ type Runtime struct {
 	mu        sync.Mutex
 	host      runtime.FlowHost
 	steps     map[string]registeredStep
-	codec     *Codec
+	converter converter.DataConverter
 	blobs     platform.Blob
 	taskQueue string
 	logger    *slog.Logger
-	threshold int
 }
 
-// New returns a Temporal runtime shell. A nil blob store or codec is refused.
+// New returns a Temporal runtime shell.
 func New(opts Options) (*Runtime, error) {
 	if opts.Blobs == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: blob store is required", nil)
 	}
-	threshold := opts.Threshold
+	if opts.Payloads == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "temporal: payload codec is required", nil)
+	}
+	threshold := opts.ClaimCheckBytes
 	if threshold <= 0 {
 		threshold = DefaultClaimCheckBytes
 	}
-	if opts.Codec == nil {
-		return nil, core.NewError(core.CodeInvalidArgument, "temporal: payload codec is required", nil)
+	codec, err := newPayloadCodec(opts.Payloads, opts.Blobs, threshold)
+	if err != nil {
+		return nil, err
 	}
-	codec := opts.Codec
+	dc, err := newDataConverter(codec)
+	if err != nil {
+		return nil, err
+	}
 	queue := opts.TaskQueue
 	if queue == "" {
 		queue = DefaultTaskQueue
 	}
 	return &Runtime{
 		steps:     map[string]registeredStep{},
-		codec:     codec,
+		converter: dc,
 		blobs:     opts.Blobs,
 		taskQueue: queue,
-		threshold: threshold,
 		logger:    opts.Logger,
 	}, nil
 }
@@ -87,37 +93,22 @@ func (r *Runtime) RegisterStep(name string, fn runtime.StepFunc, d runtime.StepD
 	return nil
 }
 
-// Capabilities reports durable Temporal traits for flow code (REQ-RT-039).
-func (r *Runtime) Capabilities() runtime.Caps {
-	return runtime.Caps{
-		Durable:         true,
-		SyncGateUpdates: true,
-		ContinueAsNew:   true,
-		PolyglotQueues:  true,
-	}
+// DataConverter returns the shared context-aware converter for clients and workers.
+func (r *Runtime) DataConverter() converter.DataConverter {
+	return r.converter
 }
 
-// BuildDataConverter returns the shared context-aware converter, optionally
-// recording every encoded history payload for tests.
-func (r *Runtime) BuildDataConverter(observe func(Encoded)) (converter.DataConverter, error) {
-	return NewDataConverter(r.codec, observe)
-}
-
-// RegisterWorkflowsActivities registers the host workflow and step activity on
-// a worker or test environment registry.
-func (r *Runtime) RegisterWorkflowsActivities(reg worker.Registry) error {
+// Register installs the host workflow and step activity on a worker registry.
+func (r *Runtime) Register(reg worker.Registry) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.host == nil {
 		return core.NewError(core.CodeUnavailable, "temporal: no flow host is registered", nil)
 	}
 	reg.RegisterWorkflowWithOptions(r.hostWorkflow, workflow.RegisterOptions{Name: HostWorkflowName})
-	reg.RegisterActivityWithOptions(r.runStepActivity, activity.RegisterOptions{Name: StepActivityName})
+	reg.RegisterActivityWithOptions(r.runStepActivity, activity.RegisterOptions{Name: stepActivityName})
 	return nil
 }
 
-// TaskQueue returns the default task queue name.
-func (r *Runtime) TaskQueue() string { return r.taskQueue }
-
-// Codec returns the payload codec for direct unit tests.
-func (r *Runtime) Codec() *Codec { return r.codec }
+// defaultStartToClose is the activity start-to-close timeout when none is set.
+const defaultStartToClose = 24 * time.Hour

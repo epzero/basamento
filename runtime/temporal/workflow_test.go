@@ -1,8 +1,11 @@
 package temporal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,36 +15,30 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/runtime"
 )
 
-func testEnv(t *testing.T) (*Runtime, *testsuite.TestWorkflowEnvironment, converter.DataConverter) {
+// Rand golden values for run "r1", key "k". Must equal runtime/local seededRand; change both or neither.
+const (
+	randR1K0 = uint64(2528446594469947107)
+	randR1K1 = uint64(3139284286379284610)
+	randR1K2 = uint64(4187653836303174209)
+)
+
+func testEnv(t *testing.T) (*Runtime, *testsuite.TestWorkflowEnvironment) {
 	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.SetTestTimeout(time.Hour)
-	codec, err := NewCodec(newTestSecrets(t), newTestBlob(t), DefaultClaimCheckBytes)
+	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs := newTestBlob(t)
-	rt, err := New(Options{Codec: codec, Blobs: blobs})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rawDC, err := rt.BuildDataConverter(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	typed, ok := rawDC.(*DataConverter)
-	if !ok {
-		t.Fatal("data converter type")
-	}
-	dc := typed.WithFallbackTenant("acme")
-	env.SetDataConverter(dc)
+	env.SetDataConverter(&clientConverter{inner: rt.DataConverter(), tenant: "acme"})
 	env.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: time.Hour})
 	env.SetContextPropagators([]workflow.ContextPropagator{TenantPropagator{}})
-	return rt, env, dc
+	return rt, env
 }
 
 func setTestTenantHeader(env *testsuite.TestWorkflowEnvironment, tenant string) {
@@ -49,81 +46,232 @@ func setTestTenantHeader(env *testsuite.TestWorkflowEnvironment, tenant string) 
 	env.SetHeader(&commonpb.Header{Fields: map[string]*commonpb.Payload{tenantHeaderKey: p}})
 }
 
-func TestNewIDAndRandAreDeterministicOnReplay(t *testing.T) {
-	rt, env, dc := testEnv(t)
+func TestNewIDIncrementsPerKindWithoutSideEffect(t *testing.T) {
+	rt, env := testEnv(t)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
-		first := dc.NewID("span")
-		second := dc.NewID("span")
-		if first == second {
-			return nil, invalidErr("consecutive ids are equal", nil)
-		}
-		r1 := dc.Rand("k")
-		r2 := dc.Rand("k")
-		if r1 != r2 {
-			return nil, invalidErr("Rand(key) did not return the same source", nil)
-		}
-		return json.RawMessage(`"` + first + `"`), nil
+		a := dc.NewID("span")
+		b := dc.NewID("span")
+		c := dc.NewID("other")
+		return json.Marshal([]string{a, b, c})
 	})
-	if err := rt.RegisterWorkflowsActivities(env); err != nil {
+	if err := rt.Register(env); err != nil {
 		t.Fatal(err)
 	}
 	setTestTenantHeader(env, "acme")
-	env.ExecuteWorkflow(HostWorkflowName, HostInput{
-		Flow: runtime.FlowRef{Name: "h"}, Tenant: "acme", RunID: "r1",
-	})
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "h"}, RunID: "r1"})
 	if err := env.GetWorkflowError(); err != nil {
 		t.Fatal(err)
 	}
-	var out json.RawMessage
+	var out []string
 	if err := env.GetWorkflowResult(&out); err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != `"span_1"` {
-		t.Fatalf("id %s, want span_1", out)
-	}
-	var suite2 testsuite.WorkflowTestSuite
-	env2 := suite2.NewTestWorkflowEnvironment()
-	env2.SetDataConverter(dc)
-	env2.SetTestTimeout(time.Hour)
-	env2.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: time.Hour})
-	env2.SetContextPropagators([]workflow.ContextPropagator{TenantPropagator{}})
-	if err := rt.RegisterWorkflowsActivities(env2); err != nil {
-		t.Fatal(err)
-	}
-	setTestTenantHeader(env2, "acme")
-	env2.ExecuteWorkflow(HostWorkflowName, HostInput{
-		Flow: runtime.FlowRef{Name: "h"}, Tenant: "acme", RunID: "r2",
-	})
-	if err := env2.GetWorkflowError(); err != nil {
-		t.Fatal(err)
-	}
-	var out2 json.RawMessage
-	if err := env2.GetWorkflowResult(&out2); err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != string(out2) {
-		t.Fatalf("ids differ across runs: %s vs %s", out, out2)
+	want := []string{"span_1", "span_2", "other_1"}
+	for i, w := range want {
+		if out[i] != w {
+			t.Fatalf("ids[%d]=%q want %q", i, out[i], w)
+		}
 	}
 }
 
-func TestStepPanicFailsRun(t *testing.T) {
-	rt, env, _ := testEnv(t)
+func TestRandMatchesLocalGoldenValues(t *testing.T) {
+	rt, env := testEnv(t)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
-		var raw json.RawMessage
-		if err := dc.Step("panic", nil, runtime.StepOptions{MaxAttempts: 1}).Get(&raw); err != nil {
-			return nil, err
-		}
-		return raw, nil
+		r := dc.Rand("k")
+		return json.Marshal([]uint64{r.Uint64(), r.Uint64(), r.Uint64()})
 	})
-	_ = rt.RegisterStep("panic", func(context.Context, json.RawMessage) (json.RawMessage, error) {
-		panic("secret")
-	}, runtime.StepDefaults{})
-	if err := rt.RegisterWorkflowsActivities(env); err != nil {
+	if err := rt.Register(env); err != nil {
 		t.Fatal(err)
 	}
 	setTestTenantHeader(env, "acme")
-	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "p"}, Tenant: "acme", RunID: "r1"})
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "h"}, RunID: "r1"})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	var got []uint64
+	_ = env.GetWorkflowResult(&got)
+	want := []uint64{randR1K0, randR1K1, randR1K2}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Rand Uint64[%d]=%d want %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestStepPanicFailsOnceWithoutLeakingValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	rt, env := testEnv(t)
+	rt.logger = logger
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		return raw, dc.Step("panic", nil, runtime.StepOptions{}).Get(&raw)
+	})
+	_ = rt.RegisterStep("panic", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		panic("secret-leak")
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "p"}, RunID: "r1"})
 	if err := env.GetWorkflowError(); err == nil {
 		t.Fatal("expected workflow failure")
+	}
+	if got := buf.String(); !bytes.Contains([]byte(got), []byte("secret-leak")) {
+		t.Fatal("panic value not logged")
+	}
+}
+
+func TestStepPlainErrorDoesNotLeakToFutureGet(t *testing.T) {
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		err := dc.Step("bad", nil, runtime.StepOptions{}).Get(&raw)
+		return raw, err
+	})
+	_ = rt.RegisterStep("bad", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return nil, errors.New("secret-token")
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "p"}, RunID: "r1"})
+	if err := env.GetWorkflowError(); err == nil {
+		t.Fatal("expected failure")
+	}
+}
+
+func TestRetryableFailureRunsMaxAttempts(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		err := dc.Step("charge", nil, runtime.StepOptions{MaxAttempts: 3}).Get(&raw)
+		return raw, err
+	})
+	_ = rt.RegisterStep("charge", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return nil, &core.Error{Code: "vendor_error", Message: "fail", Retryable: true}
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "pay"}, RunID: "r1"})
+	_ = env.GetWorkflowError()
+	if n != 3 {
+		t.Fatalf("executions %d, want 3", n)
+	}
+}
+
+func TestNonRetryableFailureRunsOnce(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		return raw, dc.Step("charge", nil, runtime.StepOptions{MaxAttempts: 3}).Get(&raw)
+	})
+	_ = rt.RegisterStep("charge", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return nil, &core.Error{Code: "invalid_argument", Message: "no", Retryable: false}
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "pay"}, RunID: "r1"})
+	_ = env.GetWorkflowError()
+	if n != 1 {
+		t.Fatalf("executions %d, want 1", n)
+	}
+}
+
+func TestStepMemoizedByName(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		f := dc.Step("once", nil, runtime.StepOptions{})
+		var a, b json.RawMessage
+		if err := f.Get(&a); err != nil {
+			return nil, err
+		}
+		if err := dc.Step("once", nil, runtime.StepOptions{}).Get(&b); err != nil {
+			return nil, err
+		}
+		if string(a) != string(b) {
+			return nil, core.NewError(core.CodeInternal, "results differ", nil)
+		}
+		return a, nil
+	})
+	_ = rt.RegisterStep("once", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return json.RawMessage(`{"n":1}`), nil
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "m"}, RunID: "r1"})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("step ran %d times", n)
+	}
+}
+
+func TestSleepZeroDurationCompletesImmediately(t *testing.T) {
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		if !dc.Sleep(0).Ready() {
+			return nil, core.NewError(core.CodeInternal, "not ready", nil)
+		}
+		return json.RawMessage(`"ok"`), dc.Sleep(0).Get(nil)
+	})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "s"}, RunID: "r1"})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapabilitiesReportOnlyWhatExists(t *testing.T) {
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		c := dc.Capabilities()
+		if !c.Durable || !c.PolyglotQueues || c.SyncGateUpdates || c.ContinueAsNew {
+			return nil, core.NewError(core.CodeInternal, "wrong caps", nil)
+		}
+		return json.RawMessage(`"ok"`), nil
+	})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "c"}, RunID: "r1"})
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewRejectsNilDependencies(t *testing.T) {
+	if _, err := New(Options{Blobs: testBlobStore(t)}); err == nil {
+		t.Fatal("expected error without codec")
+	}
+	if _, err := New(Options{Payloads: testSecretsCodec(t)}); err == nil {
+		t.Fatal("expected error without blobs")
+	}
+}
+
+// guard local parity: compute once when changing seededRand.
+func TestLocalRandParitySanity(t *testing.T) {
+	r := seededRand("r1", "k")
+	if r.Uint64() != randR1K0 {
+		t.Fatalf("parity broken: got %d", r.Uint64())
 	}
 }

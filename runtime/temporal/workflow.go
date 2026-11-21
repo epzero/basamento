@@ -14,31 +14,34 @@ import (
 // HostInput is the workflow argument that starts the flow host. PR (b) may extend
 // it with checkpoint thresholds and continuation state.
 type HostInput struct {
-	Flow   runtime.FlowRef
-	Input  json.RawMessage
-	RunID  string
-	Tenant core.TenantID
+	Flow  runtime.FlowRef
+	Input json.RawMessage
+	RunID string
 }
 
 // hostWorkflow runs the registered flow host behind a DurableContext.
 func (r *Runtime) hostWorkflow(ctx workflow.Context, in HostInput) (json.RawMessage, error) {
-	ctx = withWorkflowTenant(ctx, in.Tenant)
+	tenant := tenantFromWorkflow(ctx)
+	runID := in.RunID
+	if runID == "" {
+		runID = workflow.GetInfo(ctx).WorkflowExecution.ID
+	}
 	var out json.RawMessage
 	var err error
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				err = flowPanicErr()
-				r.logPanic(in.Tenant, in.RunID, "", recovered)
+				r.logPanic(tenant, runID, "", recovered)
 			}
 		}()
-		dc := newDurableContext(ctx, r, in.RunID, in.Tenant)
+		dc := newDurableContext(ctx, r, runID, tenant)
 		out, err = r.host(dc, in.Flow, in.Input)
 	}()
-	return out, wrapWorkflowError(err)
+	return out, r.wrapWorkflowError(tenant, runID, err)
 }
 
-func wrapWorkflowError(err error) error {
+func (r *Runtime) wrapWorkflowError(tenant core.TenantID, runID string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -46,5 +49,6 @@ func wrapWorkflowError(err error) error {
 	if errors.As(err, &pe) {
 		return temporal.NewApplicationError(pe.Message, string(pe.Code), pe.Retryable)
 	}
-	return err
+	r.logFlowFailure(tenant, runID, err)
+	return temporal.NewApplicationError("temporal: flow failed", string(core.CodeInternal), false)
 }
