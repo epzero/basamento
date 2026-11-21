@@ -153,11 +153,18 @@ func (c *Catalog) program(src string) (*expr.Program, error) {
 	}
 	c.progMu.Lock()
 	defer c.progMu.Unlock()
-	p, ok := c.programs[src]
-	if !ok {
-		return nil, internalError("price expression was not compiled at set time",
-			fmt.Errorf("missing compiled program for %q", src))
+	if p, ok := c.programs[src]; ok {
+		return p, nil
 	}
+	// A replayed quote can pin an expression no current layer holds: the
+	// deployment changed since the call started. The source was validated
+	// when the call was priced, so compile it now and settle by the pin
+	// (REQ-MODEL-078).
+	p, err := c.env.Compile(src, nil)
+	if err != nil {
+		return nil, internalError("compile a replayed price expression", err)
+	}
+	c.programs[src] = p
 	return p, nil
 }
 

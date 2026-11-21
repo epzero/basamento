@@ -205,25 +205,23 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	// priced call with no run budget, or one the price table cannot price,
 	// fails before the provider is reached. A genuinely unpriced model may
 	// still run unmetered; with a budget, an unpriced model fails with
-	// unsupported (REQ-MODEL-073).
-	var quote catalog.Quote
-	priced := false
+	// unsupported (REQ-MODEL-073). Pricing is a durable step: its recorded pin
+	// is what every execution, first and replay, reserves and settles by, so a
+	// changed price layer cannot reprice a started call (REQ-MODEL-078).
 	budget, metered := BudgetFrom(dc.Context())
-	quote, err = h.deps.Catalog.Start(dc.Context(), catalog.Request{
-		Model:       cfg.Model,
-		Params:      in.Params,
-		InputTokens: inputTokens(cfg, in),
-		OutputLimit: outputLimit(cfg, in),
-		// Price at the run's clock, not the catalog's process clock, so a
-		// replay prices a time-based rule at the same instant (REQ-MODEL-078).
-		At: dc.Now(),
-	})
+	pricedOut, err := h.priceInvocation(dc, cfg, in, ref, metered)
 	if err != nil {
-		if metered || core.CodeOf(err) != core.CodeUnsupported {
-			return Output{}, err
-		}
-	} else {
-		priced = true
+		return Output{}, err
+	}
+	if pricedOut.Quote == nil && !pricedOut.Unpriced {
+		return Output{}, core.NewError(core.CodeInternal,
+			fmt.Sprintf("model node %q: the price step returned no quote", cfg.Name),
+			map[string]any{"node": cfg.Name, "model": cfg.Model})
+	}
+	var quote catalog.Quote
+	priced := pricedOut.Quote != nil
+	if priced {
+		quote = *pricedOut.Quote
 	}
 	if priced && !metered {
 		return Output{}, core.NewError(core.CodeInternal,
@@ -344,10 +342,61 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	return out, nil
 }
 
+// priceInvocation runs the price step. Its result is the durable pin the
+// rest of the visit uses: the estimate, the price entry and the instant the
+// call was priced at.
+func (h *Handler) priceInvocation(dc runtime.DurableContext, cfg Config, in Input, ref string, metered bool) (priceOutcome, error) {
+	name := stepName(cfg, "price", ref)
+	nonRetryable := []string{string(core.CodeUnsupported), string(core.CodeInvalidArgument)}
+	if err := h.register(name, h.priceStep, stepDefaults(nonRetryable...)); err != nil {
+		return priceOutcome{}, err
+	}
+	opts := stepDefaults(nonRetryable...).Options
+	opts.IdempotencyKey = name
+	var out priceOutcome
+	if err := dc.Step(name, priceIn{
+		Model:       cfg.Model,
+		Params:      in.Params,
+		InputTokens: inputTokens(cfg, in),
+		OutputLimit: outputLimit(cfg, in),
+		// Price at the run's clock, not the catalog's process clock, so a
+		// replay prices a time-based rule at the same instant (REQ-MODEL-078).
+		At:      dc.Now(),
+		Metered: metered,
+	}, opts).Get(&out); err != nil {
+		return priceOutcome{}, err
+	}
+	return out, nil
+}
+
+// priceStep is the durable step behind priceInvocation. It records an
+// unpriced model as a successful outcome when the run has no budget; with a
+// budget the catalog's unsupported error stops the step without retrying.
+func (h *Handler) priceStep(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var in priceIn
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "model node: invalid price step input", nil)
+	}
+	quote, err := h.deps.Catalog.Start(ctx, catalog.Request{
+		Model:       in.Model,
+		Params:      in.Params,
+		InputTokens: in.InputTokens,
+		OutputLimit: in.OutputLimit,
+		At:          in.At,
+	})
+	if err != nil {
+		if core.CodeOf(err) == core.CodeUnsupported && !in.Metered {
+			return json.Marshal(priceOutcome{Unpriced: true})
+		}
+		return nil, err
+	}
+	return json.Marshal(priceOutcome{Quote: &quote})
+}
+
 // startInvocation runs the start step.
 func (h *Handler) startInvocation(dc runtime.DurableContext, cfg Config, req model.Request, ref string) (StartOutcome, error) {
 	name := stepName(cfg, "start", ref)
-	if err := h.register(name, h.startStep); err != nil {
+	if err := h.register(name, h.startStep, stepDefaults()); err != nil {
 		return StartOutcome{}, err
 	}
 	var out StartOutcome
@@ -398,7 +447,7 @@ func (h *Handler) resolveAmbiguous(dc runtime.DurableContext, cfg Config, ref st
 		return *payload.Handle, nil
 	}
 	name := stepName(cfg, "lookup", ref)
-	if err := h.register(name, h.lookupStep); err != nil {
+	if err := h.register(name, h.lookupStep, stepDefaults()); err != nil {
 		return model.Handle{}, err
 	}
 	var out lookupOutcome
@@ -435,7 +484,7 @@ func (h *Handler) lookupStep(ctx context.Context, raw json.RawMessage) (json.Raw
 // result it reports (REQ-MODEL-009).
 func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle model.Handle, ref string) (followOutcome, error) {
 	name := stepName(cfg, "follow", ref)
-	if err := h.register(name, h.followStep); err != nil {
+	if err := h.register(name, h.followStep, stepDefaults()); err != nil {
 		return followOutcome{}, err
 	}
 	var out followOutcome
@@ -512,10 +561,19 @@ func (h *Handler) actualCost(result model.Result, quote catalog.Quote, priced, c
 	return charge.MilliPoints, nil
 }
 
+// stepDefaults are the options shared by the handler's steps. A step's
+// registration and its call use the same defaults.
+func stepDefaults(nonRetryable ...string) runtime.StepDefaults {
+	return runtime.StepDefaults{Options: runtime.StepOptions{
+		Heartbeat:    stepHeartbeat,
+		NonRetryable: nonRetryable,
+	}}
+}
+
 // register installs one of the handler's steps with the runtime, once per
 // name until the memo is swept. A conflict is success: another run of the same
 // flow registered the same name, and that step's function is the same.
-func (h *Handler) register(name string, fn runtime.StepFunc) error {
+func (h *Handler) register(name string, fn runtime.StepFunc, defaults runtime.StepDefaults) error {
 	if h.deps.Steps == nil {
 		return nil
 	}
@@ -527,7 +585,7 @@ func (h *Handler) register(name string, fn runtime.StepFunc) error {
 	if len(h.registered) >= maxRegisteredSteps {
 		h.registered = map[string]bool{}
 	}
-	err := h.deps.Steps.RegisterStep(name, fn, runtime.StepDefaults{Options: runtime.StepOptions{Heartbeat: stepHeartbeat}})
+	err := h.deps.Steps.RegisterStep(name, fn, defaults)
 	if err != nil && core.CodeOf(err) != core.CodeConflict {
 		return err
 	}
@@ -660,4 +718,22 @@ type followIn struct {
 type followOutcome struct {
 	Result    model.Result `json:"result"`
 	Cancelled bool         `json:"cancelled,omitempty"`
+}
+
+// priceIn is the price step's payload.
+type priceIn struct {
+	Model       string          `json:"model"`
+	Params      json.RawMessage `json:"params,omitempty"`
+	InputTokens int64           `json:"input_tokens,omitempty"`
+	OutputLimit int64           `json:"output_limit,omitempty"`
+	At          time.Time       `json:"at"`
+	Metered     bool            `json:"metered,omitempty"`
+}
+
+// priceOutcome is the price step's recorded result. Exactly one of Quote and
+// Unpriced is set: a pin to reserve and settle by, or a model the price table
+// has no entry for.
+type priceOutcome struct {
+	Quote    *catalog.Quote `json:"quote,omitempty"`
+	Unpriced bool           `json:"unpriced,omitempty"`
 }
