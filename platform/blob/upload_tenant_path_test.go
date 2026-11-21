@@ -35,7 +35,7 @@ func TestUploadURLTenantPathEscape(t *testing.T) {
 			putURL := rewriteLocalURL(srv, up.URL)
 			req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("ok")))
 			req.Header.Set("Content-Type", "text/plain")
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := srv.Client().Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}

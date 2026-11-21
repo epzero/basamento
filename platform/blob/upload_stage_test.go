@@ -88,17 +88,17 @@ func TestConcurrentCommitOneWins(t *testing.T) {
 
 func TestReplayPUTBlockedWhileCommit403(t *testing.T) {
 	t.Parallel()
-	st, h := openEmbeddedHandler(t)
+	st, srv := openEmbeddedHandler(t)
 	defer func() { _ = st.Close() }()
 	ctx := core.WithTenant(context.Background(), "acme")
 	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 1024, ContentType: "text/plain", TTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
-	putURL := rewriteLocalURL(h, up.URL)
+	putURL := rewriteLocalURL(srv, up.URL)
 	req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("hello")))
 	req.Header.Set("Content-Type", "text/plain")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil || resp.StatusCode != http.StatusCreated {
 		t.Fatalf("first put: %v %d", err, resp.StatusCode)
 	}
@@ -108,7 +108,7 @@ func TestReplayPUTBlockedWhileCommit403(t *testing.T) {
 	go func() {
 		req, _ := http.NewRequest(http.MethodPut, putURL, pr)
 		req.Header.Set("Content-Type", "text/plain")
-		res, err := http.DefaultClient.Do(req)
+		res, err := srv.Client().Do(req)
 		if err != nil {
 			status <- 0
 			return
@@ -137,22 +137,22 @@ func TestReplayPUTBlockedWhileCommit403(t *testing.T) {
 
 func TestOversizeReplayKeepsFirstBody(t *testing.T) {
 	t.Parallel()
-	st, h := openEmbeddedHandler(t)
+	st, srv := openEmbeddedHandler(t)
 	defer func() { _ = st.Close() }()
 	ctx := core.WithTenant(context.Background(), "acme")
 	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: 5, ContentType: "text/plain", TTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
-	putURL := rewriteLocalURL(h, up.URL)
+	putURL := rewriteLocalURL(srv, up.URL)
 	req1, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("hello")))
 	req1.Header.Set("Content-Type", "text/plain")
-	resp, _ := http.DefaultClient.Do(req1)
+	resp, _ := srv.Client().Do(req1)
 	_ = resp.Body.Close()
 	big := bytes.NewReader(make([]byte, 6))
 	req2, _ := http.NewRequest(http.MethodPut, putURL, big)
 	req2.Header.Set("Content-Type", "text/plain")
-	resp2, _ := http.DefaultClient.Do(req2)
+	resp2, _ := srv.Client().Do(req2)
 	if resp2.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status %d", resp2.StatusCode)
 	}
@@ -330,17 +330,17 @@ func TestPresignFailureRemovesSlot(t *testing.T) {
 
 func TestHandlerMaxInt64EmptyBodyNotAccepted(t *testing.T) {
 	t.Parallel()
-	st, h := openEmbeddedHandler(t)
+	st, srv := openEmbeddedHandler(t)
 	defer func() { _ = st.Close() }()
 	ctx := core.WithTenant(context.Background(), "acme")
 	up, err := st.StartUpload(ctx, platform.UploadOptions{MaxSize: math.MaxInt64, ContentType: "application/octet-stream", TTL: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
-	putURL := rewriteLocalURL(h, up.URL)
+	putURL := rewriteLocalURL(srv, up.URL)
 	req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader(nil))
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

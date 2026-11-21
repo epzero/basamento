@@ -61,7 +61,7 @@ func TestHandlerNosniffAndContentLength(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	u = strings.Replace(u, "http://blob.test", srv.URL, 1)
-	resp, err := http.Get(u)
+	resp, err := srv.Client().Get(u)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestHandlerSecureHeadersHTMLAndSVG(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				resp, err := http.DefaultClient.Do(req)
+				resp, err := srv.Client().Do(req)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -217,7 +217,7 @@ func TestProxiedTenantPathEscapeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	testURL := srv.URL + pu.EscapedPath() + "?" + pu.RawQuery
-	resp, err := http.Get(testURL)
+	resp, err := srv.Client().Get(testURL)
 	if err != nil {
 		t.Fatal(err)
 	}

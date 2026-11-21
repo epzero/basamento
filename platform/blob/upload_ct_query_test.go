@@ -27,7 +27,7 @@ func TestUploadPUTWithPlusContentType(t *testing.T) {
 	putURL := rewriteLocalURL(srv, up.URL)
 	req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("body")))
 	req.Header.Set("Content-Type", ct)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestUploadQueryContentTypeRoundTrip(t *testing.T) {
 			putURL := rewriteLocalURL(srv, up.URL)
 			req, _ := http.NewRequest(http.MethodPut, putURL, bytes.NewReader([]byte("x")))
 			req.Header.Set("Content-Type", ct)
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := srv.Client().Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
