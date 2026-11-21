@@ -170,3 +170,27 @@ func TestBudgetRoundTripsThroughContext(t *testing.T) {
 		t.Fatal("plain context reports a budget")
 	}
 }
+
+func TestRemainingGoesNegativeAfterASettlementOverrunsTheCeiling(t *testing.T) {
+	t.Parallel()
+	b := NewMemory(10)
+	if _, bounded := b.Remaining(); !bounded {
+		t.Fatal("a finite budget is unbounded")
+	}
+	if err := b.Reserve("k", 1); err != nil {
+		t.Fatal(err)
+	}
+	if remaining, _ := b.Remaining(); remaining != 9 {
+		t.Fatalf("remaining = %d, want 9", remaining)
+	}
+	if err := b.Settle("k", 20); err != nil {
+		t.Fatal(err)
+	}
+	remaining, bounded := b.Remaining()
+	if !bounded || remaining != -10 {
+		t.Fatalf("remaining = %d bounded %v, want -10", remaining, bounded)
+	}
+	if _, bounded := NewMemory(-1).Remaining(); bounded {
+		t.Fatal("an unlimited budget is bounded")
+	}
+}

@@ -24,6 +24,11 @@ type Budget interface {
 	// releasing the rest. It is a no-op for a key with no open reservation;
 	// the first settlement of a key wins.
 	Settle(key string, actual int64) error
+	// Remaining reports the milli-points left under the run's ceiling and
+	// whether the account has one. A settlement may carry the account past
+	// its ceiling when the actual charge exceeds the reservation; the
+	// remaining is then negative, and the node fails the run closed.
+	Remaining() (remaining int64, bounded bool)
 }
 
 // budgetKey carries the run's budget through the run context. The composition
@@ -163,6 +168,16 @@ func (m *Memory) Reserved(key string) int64 {
 		return e.amount
 	}
 	return 0
+}
+
+// Remaining implements Budget.
+func (m *Memory) Remaining() (int64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.limit < 0 {
+		return 0, false
+	}
+	return m.limit - m.charged - m.held, true
 }
 
 // Settled reports whether key's reservation was closed.

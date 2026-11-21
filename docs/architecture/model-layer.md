@@ -102,13 +102,19 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    whose recorded quote pins the estimate, the price entry with its rates and
    the start time; a replay reserves, settles and fails closed by that pin,
    never by a price layer that changed after the call started (REQ-MODEL-078).
+   The estimate counts the node's configured input tokens and output limit and
+   the request's own `max_tokens`; a flow input may raise those counts but
+   never lower them, so a caller cannot understate the reservation.
 3. **Start** step with `ClientRef = hash(run, node path, visit, input)`. It is
    stable across retries of one logical invocation (REQ-MODEL-004) and
    different for the next one: a node visited again on a cycle, or another
    item of a `map`, starts a new invocation even when its input is the same.
    The node path includes the `map` index and the enclosing subflows.
-4. **Follow** events to the bus (`streaming.md`), and wait for the result in a
-   heartbeating step, or through a gate resolved by a webhook.
+4. **Follow** the invocation and wait for its end: the node drains the
+   provider's event stream inside a heartbeating step (the durable record keeps
+   the final result, not the log), or waits through a gate resolved by a
+   webhook. Publishing progress deltas to the bus is the streaming layer's job
+   (`streaming.md`, WP-L6-02); the node only drains.
 5. **Ingest** output files into content-addressed blob storage with provenance
    (REQ-MODEL-008). Outputs from a successful invocation with no blob store
    configured fail the node instead of being dropped. A URL output is fetched
@@ -122,10 +128,13 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    cancelled invocation that reports no cost releases it instead
    (REQ-MODEL-009). A failed settlement is retried with the actual charge when
    it is known, not with the estimate: first-wins would otherwise lock in an
-   undercharge. Every priced invocation reserves against the run's budget;
-   a priced call with no run budget fails before it starts with `internal`, and
-   an unpriced model with a budget fails `unsupported` (REQ-MODEL-073). Only a
-   model with no price and no budget runs unmetered.
+   undercharge. A settlement that carries the run past its budget ceiling is
+   recorded and then fails the node with `budget_exceeded`: the provider
+   already ran, so hiding the charge would understate the spend, but the run
+   stops instead of spending further. Every priced invocation reserves against
+   the run's budget; a priced call with no run budget fails before it starts
+   with `internal`, and an unpriced model with a budget fails `unsupported`
+   (REQ-MODEL-073). Only a model with no price and no budget runs unmetered.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.

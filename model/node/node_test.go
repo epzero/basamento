@@ -674,6 +674,7 @@ type failingBudget struct{ err error }
 
 func (b failingBudget) Reserve(string, int64) error { return nil }
 func (b failingBudget) Settle(string, int64) error  { return b.err }
+func (b failingBudget) Remaining() (int64, bool)    { return 0, false }
 
 func TestHandleReturnsSettlementErrors(t *testing.T) {
 	t.Parallel()
@@ -983,5 +984,213 @@ func TestRegisterTreatsAConflictAsSuccess(t *testing.T) {
 	}
 	if reg.calls != 1 {
 		t.Fatalf("registrations = %d, want 1", reg.calls)
+	}
+}
+
+func TestHandleIngestsOutputsBeforeSettlingTheReservation(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{
+		State:    model.StateSucceeded,
+		CostMpts: 480,
+		Outputs:  []model.Output{{URL: "https://vendor.test/a.png", Media: "image", Mime: "image/png"}},
+	}
+	reg := newFakeRegistrar()
+	budget := NewMemory(5000)
+	heldDuringIngest := int64(-1)
+	h := testHandler(t, Deps{
+		Invoker: inv,
+		Catalog: videoCatalog(t),
+		Steps:   reg,
+		Blobs:   newMemBlob(),
+		Fetch: func(context.Context, model.Output) ([]byte, string, error) {
+			// ADR-0006 orders ingest before settle: the reservation is still
+			// held while the output is being stored.
+			heldDuringIngest = budget.HeldTotal()
+			return []byte("image"), "image/png", nil
+		},
+	})
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	out, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heldDuringIngest != 500 {
+		t.Fatalf("held during ingest = %d, want the open reservation 500", heldDuringIngest)
+	}
+	if len(out.Assets) != 1 {
+		t.Fatalf("assets = %d, want 1", len(out.Assets))
+	}
+	if got := budget.Charged(out.ClientRef); got != 480 {
+		t.Fatalf("charged = %d, want the actual 480 after ingest", got)
+	}
+}
+
+func TestHandleChargesTheActualWhenAnIngestFails(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{
+		State:    model.StateSucceeded,
+		CostMpts: 480,
+		Outputs:  []model.Output{{URL: "https://vendor.test/a.png", Media: "image"}},
+	}
+	reg := newFakeRegistrar()
+	budget := NewMemory(5000)
+	h := testHandler(t, Deps{
+		Invoker: inv,
+		Catalog: videoCatalog(t),
+		Steps:   reg,
+		Blobs:   newMemBlob(),
+		Fetch: func(context.Context, model.Output) ([]byte, string, error) {
+			return nil, "", errors.New("the vendor is gone")
+		},
+	})
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("err = %v, want vendor", err)
+	}
+	// The invocation ran and its cost is known: a failed ingest must not let
+	// the deferred settlement fall back to the estimate.
+	if got := budget.Charged(inv.refs[0]); got != 480 {
+		t.Fatalf("charged = %d, want the pinned actual 480", got)
+	}
+	if !budget.Settled(inv.refs[0]) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(inv.refs[0]))
+	}
+}
+
+func TestHandleSettlesByTheTerminalStateWhenTheRunIsCancelled(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// The provider finished before the cancellation reached it, and reports no
+	// usage: the run's cancel bit must not release the reservation for zero.
+	inv.result = model.Result{State: model.StateSucceeded}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dc := &fakeDC{
+		ctx:   WithBudget(ctx, budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	if got := budget.Charged(inv.refs[0]); got != 500 {
+		t.Fatalf("charged = %d, want the reserved estimate 500: the provider succeeded", got)
+	}
+}
+
+func TestHandleEstimateDoesNotTrustAnUnderstatedInputCount(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateSucceeded, Usage: &model.Usage{InputTokens: 1000}}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: tokenCatalog(t), Steps: reg})
+	budget := NewMemory(100000)
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	// The flow input declares one token, but the node's spec counts a million:
+	// the input may raise the estimate, never lower it.
+	cfg := Config{Name: "chat", Model: "sim-chat", Op: model.CapChat, InputTokens: 1_000_000}
+	if _, err := h.Handle(dc, cfg, json.RawMessage(`{"input_tokens":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := budget.Reserved(inv.refs[0]); got != 1000 {
+		t.Fatalf("reserved = %d, want the configured count's 1000", got)
+	}
+}
+
+func TestHandleEstimateCountsTheRequestsMaxTokens(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateSucceeded, Usage: &model.Usage{InputTokens: 1000}}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: tokenCatalog(t), Steps: reg})
+	budget := NewMemory(100000)
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	// The request's own max_tokens is the output limit the provider applies,
+	// so the reservation counts it too: 1000 input at 1000/million is 1
+	// milli-point and a million output at 8000/million is 8000.
+	cfg := Config{Name: "chat", Model: "sim-chat", Op: model.CapChat, InputTokens: 1000}
+	if _, err := h.Handle(dc, cfg, json.RawMessage(`{"params":{"max_tokens":1000000}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := budget.Reserved(inv.refs[0]); got != 8001 {
+		t.Fatalf("reserved = %d, want 8001 counting the request's max_tokens", got)
+	}
+}
+
+func TestHandleFailsClosedWhenTheActualChargeCarriesTheRunPastItsBudget(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// The estimate reserves one milli-point; the provider reports a million
+	// output tokens, so the actual charge is 8001 and the run's ceiling is 10.
+	inv.result = model.Result{
+		State: model.StateSucceeded,
+		Usage: &model.Usage{InputTokens: 1000, OutputTokens: 1_000_000},
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: tokenCatalog(t), Steps: reg})
+	budget := NewMemory(10)
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	out, err := h.Handle(dc, Config{Name: "chat", Model: "sim-chat", Op: model.CapChat, InputTokens: 1000}, json.RawMessage(`{}`))
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("err = %v, want budget_exceeded", err)
+	}
+	// The charge is recorded rather than hidden; the node fails so the run
+	// stops spending after an understated reservation.
+	if got := budget.Charged(inv.refs[0]); got != 8001 {
+		t.Fatalf("charged = %d, want the actual 8001", got)
+	}
+	if out.CostMpts != 8001 {
+		t.Fatalf("cost = %d, want the actual 8001", out.CostMpts)
 	}
 }

@@ -315,15 +315,20 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 		return Output{}, err
 	}
 
-	// Settle before anything that can fail after the invocation ended: the
-	// provider already ran and may have charged.
+	// The provider already ran and may have charged, so read its terminal
+	// state now. The run's cancel bit is not the invocation's outcome: only
+	// the result says whether the provider succeeded, failed or cancelled,
+	// and settlement reads that state, never the bit (REQ-MODEL-009).
 	result := followed.Result
-	actual, err := h.actualCost(result, quote, priced, followed.Cancelled)
+	actual, err := h.actualCost(result, quote, priced, result.State == model.StateCancelled)
 	if err != nil {
 		return Output{}, err
 	}
-	if err := settle(actual); err != nil {
-		return out, err
+	// Pin the known charge before anything after the invocation can fail: the
+	// deferred settlement retries this figure, never the estimate, so a failed
+	// settlement cannot first-win an undercharge.
+	if priced {
+		charged, chargeKnown = actual, true
 	}
 
 	out.State = result.State
@@ -331,17 +336,24 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	out.Vectors = result.Vectors
 	out.Usage = result.Usage
 
-	// A cancellation or a failed invocation never ingests: checking it first
+	// A cancelled or failed invocation has nothing to ingest: settling first
 	// keeps an ingest failure from masking the real outcome (REQ-MODEL-009).
-	if followed.Cancelled {
+	if followed.Cancelled || result.State == model.StateCancelled {
+		if err := settle(actual); err != nil {
+			return out, err
+		}
 		return out, core.NewError(core.CodeCancelled, "model node: invocation cancelled with the run", nil)
 	}
 	if result.State == model.StateFailed {
+		if err := settle(actual); err != nil {
+			return out, err
+		}
 		return out, failureError(result)
 	}
 	if len(result.Outputs) > 0 {
 		// REQ-MODEL-008 requires ingestion; silently dropping a successful
-		// invocation's outputs would lose them, so fail closed instead.
+		// invocation's outputs would lose them, so fail closed instead. The
+		// deferred settlement still charges the pinned actual charge.
 		if h.deps.Blobs == nil {
 			return out, core.NewError(core.CodeInternal,
 				"model node: the invocation returned output files but no blob store is configured",
@@ -352,6 +364,15 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 			return out, err
 		}
 		out.Assets = assets
+	}
+	// Settlement follows a successful ingest (ADR-0006, model-layer.md §4).
+	// Any failure above still settles through the defer, by the pinned actual
+	// charge rather than the estimate.
+	if err := settle(actual); err != nil {
+		return out, err
+	}
+	if err := checkBudgetCeiling(budget, priced, actual); err != nil {
+		return out, err
 	}
 	return out, nil
 }
@@ -494,8 +515,9 @@ func (h *Handler) lookupStep(ctx context.Context, raw json.RawMessage) (json.Raw
 }
 
 // followInvocation follows the invocation's events and waits for its end. A
-// run cancellation cancels the invocation at the provider and settles by the
-// result it reports (REQ-MODEL-009).
+// run cancellation cancels the invocation at the provider and records the
+// result it reports; the result's own state, not the run's cancel bit, is what
+// settlement charges (REQ-MODEL-009).
 func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle model.Handle, ref string) (followOutcome, error) {
 	name := stepName(cfg, "follow", ref)
 	if err := h.register(name, h.followStep, stepDefaults()); err != nil {
@@ -545,6 +567,9 @@ func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.Raw
 // longer reaches. A failed cancel does not skip the result: the invocation may
 // still be running, and only the provider's final state can settle it. If the
 // result cannot be read either, the node falls back to the reserved estimate.
+// Cancelled only tells Handle that the run cancelled the invocation; the
+// result's state decides the charge, so a provider that already succeeded is
+// not released for zero.
 func (h *Handler) cancelAndResult(ctx context.Context, handle model.Handle) (followOutcome, error) {
 	detached := context.WithoutCancel(ctx)
 	cancelErr := h.deps.Invoker.Cancel(detached, handle)
@@ -659,18 +684,63 @@ func request(cfg Config, in Input, ref string) model.Request {
 	}
 }
 
+// inputTokens is the estimate's counted input tokens. A flow input may raise
+// the node's configured count for a larger call, but never lower it: an
+// understated override would reserve too little and let settlement charge far
+// past the budget (REQ-MODEL-077).
 func inputTokens(cfg Config, in Input) int64 {
-	if in.InputTokens > 0 {
+	if in.InputTokens > cfg.InputTokens {
 		return in.InputTokens
 	}
 	return cfg.InputTokens
 }
 
+// outputLimit is the estimate's output token limit: the largest of the node's
+// configured limit, a flow input's limit and the request's own max_tokens. A
+// caller can raise the reservation but not understate it.
 func outputLimit(cfg Config, in Input) int64 {
-	if in.OutputLimit > 0 {
-		return in.OutputLimit
+	limit := cfg.OutputLimit
+	if in.OutputLimit > limit {
+		limit = in.OutputLimit
 	}
-	return cfg.OutputLimit
+	if maxTokens := requestMaxTokens(in.Params); maxTokens > limit {
+		limit = maxTokens
+	}
+	return limit
+}
+
+// requestMaxTokens reads the call's max_tokens parameter, the cap the chat
+// adapter sends to the provider. Invalid or absent params count as no limit;
+// parameter validation has already rejected a call whose schema they break.
+func requestMaxTokens(params json.RawMessage) int64 {
+	if len(bytes.TrimSpace(params)) == 0 {
+		return 0
+	}
+	var p struct {
+		MaxTokens int64 `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.MaxTokens < 0 {
+		return 0
+	}
+	return p.MaxTokens
+}
+
+// checkBudgetCeiling fails the node when the settled actual charge carried the
+// run past its budget ceiling. The charge is already recorded: the provider
+// ran, so hiding it would understate the spend, but the run stops instead of
+// spending further on an understated reservation (REQ-MODEL-006,
+// REQ-MODEL-007).
+func checkBudgetCeiling(budget Budget, priced bool, actual int64) error {
+	if !priced || budget == nil {
+		return nil
+	}
+	remaining, bounded := budget.Remaining()
+	if !bounded || remaining >= 0 {
+		return nil
+	}
+	return core.NewError(core.CodeBudgetExceeded,
+		"model node: the actual charge carried the run past its budget",
+		map[string]any{"actual": actual, "over": -remaining})
 }
 
 // checkCapability rejects a call the model does not declare.
