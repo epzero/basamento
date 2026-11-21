@@ -37,7 +37,7 @@ Capabilities:
 | [`conversations`](conversations/requirements.md) | Planned (WP-L7-03). |
 | [`presets`](presets/requirements.md) | Planned (WP-L10-01). |
 | [`prompt`](prompt/requirements.md) | Implemented (WP-L3-05). |
-| [`agents`](agents/requirements.md) | Planned (WP-L7-*). |
+| [`agents`](agents/requirements.md) | In progress (WP-L7-01); 3 @planned scenarios for AL-01/AL-02 activation. |
 | [`config`](config/requirements.md) | Implemented (WP-L1-05). |
 | [`telemetry`](telemetry/requirements.md) | Implemented (WP-L1-07). |
 | [`schema`](schema/requirements.md) | Implemented (WP-L2-02, EP0-126). |

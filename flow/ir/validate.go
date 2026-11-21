@@ -314,6 +314,27 @@ func mapChildFieldError(id, field string) error {
 		map[string]any{"node": id})
 }
 
+// mapChildren returns the child of every map node whose spec names one. The
+// machine starts a map's child from spec.node instead of routing to it, so
+// the arc from the map to its child is implicit and the edge list does not
+// carry it. A map whose spec names no child is left out: validateMaps has
+// already rejected it, and the graph built here must not invent an arc.
+func mapChildren(f *flow.IR) map[string]string {
+	children := make(map[string]string)
+	for _, id := range sortedKeys(f.Nodes) {
+		node := f.Nodes[id]
+		if node.Kind != "map" {
+			continue
+		}
+		child, err := mapChild(id, node)
+		if err != nil {
+			continue
+		}
+		children[id] = child
+	}
+	return children
+}
+
 func validateReachable(f *flow.IR) error {
 	// Outgoing edges are indexed once: rescanning the edge list per dequeued
 	// node made validation quadratic in the size of the flow.
@@ -321,11 +342,20 @@ func validateReachable(f *flow.IR) error {
 	for _, edge := range f.Edges {
 		out[edge.From] = append(out[edge.From], edge.To)
 	}
+	children := mapChildren(f)
 	reached := map[string]bool{Start: true}
 	queue := []string{Start}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
+		// A map starts its child from the node's spec, with no edge into it,
+		// so reaching the map reaches the child too. validateMaps has already
+		// proven the child exists; continuation then follows the child's
+		// outgoing edges, which is where the machine routes after the fan-out.
+		if child, ok := children[current]; ok && !reached[child] {
+			reached[child] = true
+			queue = append(queue, child)
+		}
 		for _, next := range out[current] {
 			if next == Fail || reached[next] {
 				continue
@@ -358,6 +388,19 @@ func validateCycles(f *flow.IR) error {
 			continue
 		}
 		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
+	}
+	// The machine starts a map's child from spec.node rather than routing to
+	// it, so the arc from the map to its child is implicit. A child that routes
+	// back to its map is a loop the machine runs for ever, and the edge list
+	// alone does not show it: the arc has to be in the graph the cycle search
+	// walks (REQ-FLOW-003).
+	children := mapChildren(f)
+	for _, id := range sortedKeys(children) {
+		child := children[id]
+		if _, ok := adjacency[child]; !ok {
+			continue
+		}
+		adjacency[id] = append(adjacency[id], child)
 	}
 	for _, component := range stronglyConnected(adjacency) {
 		if !isCycle(component, adjacency) || hasGuardedNode(f, component) {

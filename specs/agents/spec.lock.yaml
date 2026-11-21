@@ -186,6 +186,18 @@ scenarios:
         note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
         human:
             status: pending
+    AGENT-012-03:
+        hash: sha256:6e59a7b7b604594509d50c7c99d7695adf2ac464dfa660a789e090d30042815d
+        reqs:
+            - REQ-AGENT-012
+        tier: P2
+        author: claude-code:spec-author:f688b4
+        reviewer: cursor:spec-reviewer:1d740a
+        approved_at: "2026-11-21"
+        note: 'Fix-path coverage: time cap every turn when checks>1 (AL-01); unknown system and no-usage turn weights for REQ-AGENT-027 (AL-02).'
+        ref: https://github.com/epzero/basamento/pull/150
+        human:
+            status: pending
     AGENT-016-01:
         hash: sha256:290b82facf3b448b65a82ffc645f4bfdf812f227086267eb97302995bb5625f0
         reqs:
@@ -378,6 +390,30 @@ scenarios:
         reviewer: antigravity:spec-reviewer:f43b40
         approved_at: "2026-11-18"
         note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
+        human:
+            status: pending
+    AGENT-027-02:
+        hash: sha256:343d5c66f1581c75f2a41bbcf2a3d6e62fa20eca2479553b55988a1b11fbb21c
+        reqs:
+            - REQ-AGENT-027
+        tier: P2
+        author: claude-code:spec-author:f688b4
+        reviewer: cursor:spec-reviewer:1d740a
+        approved_at: "2026-11-21"
+        note: 'Fix-path coverage: time cap every turn when checks>1 (AL-01); unknown system and no-usage turn weights for REQ-AGENT-027 (AL-02).'
+        ref: https://github.com/epzero/basamento/pull/150
+        human:
+            status: pending
+    AGENT-027-03:
+        hash: sha256:d9189cb56910859eddbd6ba229b5b57fddc12c4920a9c3798028d98db6efbb8d
+        reqs:
+            - REQ-AGENT-027
+        tier: P2
+        author: claude-code:spec-author:f688b4
+        reviewer: cursor:spec-reviewer:1d740a
+        approved_at: "2026-11-21"
+        note: 'Fix-path coverage: time cap every turn when checks>1 (AL-01); unknown system and no-usage turn weights for REQ-AGENT-027 (AL-02).'
+        ref: https://github.com/epzero/basamento/pull/150
         human:
             status: pending
     AGENT-028-01:

@@ -100,12 +100,16 @@ change to package `flow`. The node id is the node's key in `flow.IR.Nodes`, and
 | `model` | the model id of every turn | — |
 | `system` | the system messages, kept first by the memory policy | none |
 | `tools` | the tools offered to the model (allowlists and tool access rules are WP-L7-02) | none |
-| `checks` | model turns between checks of the time cap and cancellation: **1** | 1 |
+| `checks` | accepted for compatibility; no effect — cancellation and the time cap are checked before every model turn (REQ-AGENT-012, REQ-AGENT-028) | 1 |
 | `caps.steps` | the step cap, in model turns | none = no cap |
 | `caps.cost_mpts` | the cost cap, in milli-points | none = no cap |
 | `caps.tokens` | the token cap, counted as input plus output tokens | none = no cap |
 | `caps.time` | the time cap, a duration on the run clock | none = no cap |
-| `input_tokens` | the input token limit of the model, in tokens | the model's descriptor |
+| `input_tokens` | the input token limit of the model, in tokens | `0` = no limit |
+
+`input_tokens` is not derived from the model: `model.Descriptor` carries no
+input-token limit, so an agent node that omits it has no limit and keeps the
+whole message history.
 
 A cap that is absent is not applied. For step, token and cost caps, reaching
 the cap (`==`) is within the cap; only a turn that would exceed (`>`) the cap is
@@ -193,6 +197,14 @@ messages), and any new tool results. If total message tokens exceed
    backward from the latest turn (`n-1` down to `2`) a whole turn at a time: a
    model turn with the tool-call results it asked for (REQ-AGENT-024,
    REQ-AGENT-025).
+
+When counting tokens, a tool-result message reports no usage of its own: its
+input tokens are estimated from its content at four bytes per token, rounded up,
+plus one token for the message envelope. With `input_tokens > 0`, the same
+content-based estimate also applies to a system message that declares no token
+count and to a turn that reports no usage, so no message is free; otherwise a
+turn's weight is its recorded usage tokens plus the estimated tokens of its tool
+results. The kept set is measured once its messages are assembled.
 
 The count of dropped messages is recorded in the turn's step result (`turn-<n>`),
 not kept elsewhere: the run's messages stay complete for its output. A kept set

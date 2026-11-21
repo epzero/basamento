@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-01 @runtime:any @level:component
+@wp:WP-L7-01 @runtime:any @level:component
 Feature: Caps on steps, cost, tokens and time
 
   Background:
@@ -71,6 +71,16 @@ Feature: Caps on steps, cost, tokens and time
     When an agent run of "worker" completes
     Then the agent run is completed with output "Done."
     And the scripted model received 2 invocations
+
+  @planned @wp:WP-L7-01 @REQ-AGENT-012 @id:AGENT-012-03
+  Scenario: The time cap is not deferred to an amortized check boundary
+    Given agent "worker" has a time cap of 1 minute
+    And agent "worker" checks its caps every 3 turns
+    And the scripted model of "worker" requests tool "search" in each of 3 turns, and the tool call of model turn 1 takes 60 seconds on the run clock
+    When an agent run of "worker" runs
+    Then the agent run is completed with state "time_cap_reached"
+    And the scripted model received 1 invocation
+    And the agent run output holds only model turn 1
 
   @REQ-AGENT-028 @id:AGENT-028-01
   Scenario: Cancelling between turns starts no further turn

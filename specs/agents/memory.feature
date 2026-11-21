@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-01 @runtime:any @level:component
+@wp:WP-L7-01 @runtime:any @level:component
 Feature: Memory policy: what goes into the next turn
 
   Background:
@@ -43,3 +43,19 @@ Feature: Memory policy: what goes into the next turn
     When an agent run of "worker" runs
     Then the agent run fails with code "invalid_argument"
     And the scripted model received 0 invocations
+
+  @planned @wp:WP-L7-01 @REQ-AGENT-027 @id:AGENT-027-02
+  Scenario: An undeclared system message is estimated and fails the run over the limit
+    Given agent "worker" has a system message "You are a meticulous reviewer who must read every line of the supplied document before answering any question about it." with no declared token count and an input token limit of 10 tokens
+    And the scripted model of "worker" answers "Done." in 1 turn
+    When an agent run of "worker" runs
+    Then the agent run fails with code "invalid_argument"
+    And the scripted model received 0 invocations
+
+  @planned @wp:WP-L7-01 @REQ-AGENT-027 @id:AGENT-027-03
+  Scenario: A turn with no reported usage is estimated and fails the run over the limit
+    Given agent "worker" has no system message and an input token limit of 10 tokens
+    And the scripted model of "worker" answers "I have read the entire document carefully and here is my very detailed answer with all the supporting evidence and references that you asked me to include." and requests tool "search", then answers "Done." in 2 turns, reporting no usage
+    When an agent run of "worker" runs
+    Then the agent run fails with code "invalid_argument"
+    And the scripted model received 1 invocation
