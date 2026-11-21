@@ -89,7 +89,18 @@ as an activity. This change delivers:
 - A **payload data converter** shared by workflow and activity workers: tenant
   encryption (`platform/secrets`), blob claim-check over the threshold (default
   5 KB on encrypted size), markers use encoding `basamento/claim-check` and only
-  history ever holds `binary/encrypted`.
+  history ever holds `binary/encrypted`. The converter may perform blob I/O inside
+  workflow code; `New` wraps it with `workflow.DataConverterWithoutDeadlockDetection`
+  so the SDK worker deadlock detector does not count that I/O (a slow store delays
+  the workflow task subject to server task timeout; pull request (c) will document
+  worker `DeadlockDetectionTimeout`).
+- **Payload codec errors in workflow code:** `unavailable`, `timeout`,
+  `rate_limited`, and retryable `core.Error` values fail the **workflow task**
+  (server retries the run). Other codec errors become a failed `Step` future with
+  the real code; the flow host must not turn transient outages into a permanently
+  failed run. User panics in the flow host still fail the run once with
+  `temporal: the flow host panicked`; SDK non-determinism and illegal-state panics
+  are out of scope here.
 - A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
   `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
   `Emit` and `Checkpoint` return `unsupported` until the next changes of

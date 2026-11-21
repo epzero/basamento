@@ -30,7 +30,10 @@ type Runtime struct {
 	logger    *slog.Logger
 }
 
-// New returns a Temporal runtime shell.
+// New returns a Temporal runtime shell. The shared data converter performs blob
+// I/O inside workflow code; New wraps it with workflow.DataConverterWithoutDeadlockDetection
+// so SDK deadlock detection does not count that I/O (slow stores delay the task,
+// not the detector).
 func New(opts Options) (*Runtime, error) {
 	if opts.Blobs == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: blob store is required", nil)
@@ -50,6 +53,8 @@ func New(opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Blob I/O during workflow encode/decode must not count against the SDK deadlock detector.
+	dc = workflow.DataConverterWithoutDeadlockDetection(dc)
 	queue := opts.TaskQueue
 	if queue == "" {
 		queue = DefaultTaskQueue

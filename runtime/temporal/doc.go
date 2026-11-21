@@ -14,8 +14,10 @@
 // Claim-checked blobs are content-addressed and immutable; replay or activity retry
 // may write additional ciphertext blobs with no garbage collection in this phase.
 //
-// The composition root uses Options and New; (*Runtime).Register wires workers;
-// (*Runtime).DataConverter shares the codec with clients. Tests and BDD wrap
+// The composition root uses Options and New; New wraps the payload codec in
+// workflow.DataConverterWithoutDeadlockDetection for workflow-safe blob I/O.
+// (*Runtime).Register wires workers; (*Runtime).DataConverter shares the
+// wrapped converter with clients and workers. Tests and BDD wrap
 // DataConverter to model tenant-aware clients and record history (not in prod).
 //
 // Status: in progress (WP-L5-02, EP0-31); embedded server packaging is WP-L5-03.

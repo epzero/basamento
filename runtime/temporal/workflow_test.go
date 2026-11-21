@@ -203,6 +203,75 @@ func TestRetryableFailureRunsMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestStepNonRetryableCodeStopsAfterOneAttempt(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		return raw, dc.Step("charge", nil, runtime.StepOptions{
+			MaxAttempts:  3,
+			NonRetryable: []string{"vendor_error"},
+		}).Get(&raw)
+	})
+	_ = rt.RegisterStep("charge", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return nil, &core.Error{Code: "vendor_error", Message: "fail", Retryable: true}
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "pay"}, RunID: "r1"})
+	_ = env.GetWorkflowError()
+	if n != 1 {
+		t.Fatalf("executions %d, want 1", n)
+	}
+}
+
+func TestStepNonRetryableFromDefaults(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		return raw, dc.Step("charge", nil, runtime.StepOptions{MaxAttempts: 3}).Get(&raw)
+	})
+	_ = rt.RegisterStep("charge", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return nil, &core.Error{Code: "vendor_error", Message: "fail", Retryable: true}
+	}, runtime.StepDefaults{Options: runtime.StepOptions{NonRetryable: []string{"vendor_error"}}})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "pay"}, RunID: "r1"})
+	_ = env.GetWorkflowError()
+	if n != 1 {
+		t.Fatalf("executions %d, want 1", n)
+	}
+}
+
+func TestRetryableVendorErrorUsesMaxAttempts(t *testing.T) {
+	var n int
+	rt, env := testEnv(t)
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var raw json.RawMessage
+		return raw, dc.Step("charge", nil, runtime.StepOptions{MaxAttempts: 3}).Get(&raw)
+	})
+	_ = rt.RegisterStep("charge", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
+		return nil, &core.Error{Code: "vendor_error", Message: "fail", Retryable: true}
+	}, runtime.StepDefaults{})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "pay"}, RunID: "r1"})
+	_ = env.GetWorkflowError()
+	if n != 3 {
+		t.Fatalf("executions %d, want 3", n)
+	}
+}
+
 func TestNonRetryableFailureRunsOnce(t *testing.T) {
 	var n int
 	rt, env := testEnv(t)

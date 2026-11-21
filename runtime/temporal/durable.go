@@ -108,11 +108,31 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 		HeartbeatTimeout:    opts.Heartbeat,
 		RetryPolicy:         activityRetryPolicy(opts),
 	})
-	fut := workflow.ExecuteActivity(actCtx, stepActivityName, stepActivityInput{
-		Name: name,
-		In:   raw,
-	})
-	wrapped := &stepFuture{ctx: actCtx, f: fut}
+	wfID := workflow.GetInfo(dc.wfCtx).WorkflowExecution.ID
+	var fut workflow.Future
+	var early runtime.Future
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				// Encode panics before any activity command is created; safe to memoize permanent failures.
+				if pe := dc.rt.handleCodecPanic(dc.tenant, wfID, name, recovered); pe != nil {
+					early = newImmediate(pe)
+					dc.stepFutures[name] = early
+				}
+			}
+		}()
+		fut = workflow.ExecuteActivity(actCtx, stepActivityName, stepActivityInput{
+			Name: name,
+			In:   raw,
+		})
+	}()
+	if early != nil {
+		return early
+	}
+	wrapped := &stepFuture{
+		ctx: actCtx, f: fut,
+		rt: dc.rt, tenant: dc.tenant, wfID: wfID, step: name,
+	}
 	dc.stepFutures[name] = wrapped
 	return wrapped
 }
