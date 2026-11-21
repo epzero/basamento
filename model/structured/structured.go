@@ -283,11 +283,15 @@ func answerBytes(message json.RawMessage) (json.RawMessage, bool) {
 // member is ever added, dropped or rewritten.
 func repairJSON(s string) ([]byte, bool) {
 	s = stripFences(strings.TrimSpace(s))
+	// Normalise the string delimiters before taking the outer value: the
+	// value scanner tracks straight quotes only, so a typographic quote that
+	// still delimited a string would let a } or ] inside that string end the
+	// value early (REQ-MODEL-065: bytes inside a string are content).
+	s = normalizeQuotes(s)
 	s = outerValue(s)
 	if s == "" {
 		return nil, false
 	}
-	s = normalizeQuotes(s)
 	s = removeTrailingCommas(s)
 	s = escapeInvalidEscapes(s)
 	if !json.Valid([]byte(s)) {
