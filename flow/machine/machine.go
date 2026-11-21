@@ -81,10 +81,11 @@ func New(def *flow.IR, opts ...Option) (*Machine, error) {
 	m.pureSuperstepLimit = computePureSuperstepLimit(def, m.maxPureSupersteps)
 	mapChildOwners := map[string]string{}
 	for _, edge := range def.Edges {
-		if edge.From == ir.Start && edge.When != "" {
-			return nil, invalid("flow: the edge from START takes no condition", map[string]any{
-				"edge": edge.From + " -> " + edge.To,
-			})
+		// Defense in depth: ir.Validate normally rejects the definition first
+		// (design.md §2.6); this keeps the machine's own check with the
+		// validator's message in case validation is bypassed.
+		if err := checkStartEdge(edge); err != nil {
+			return nil, err
 		}
 		compiled := compiledEdge{to: edge.To}
 		if edge.When != "" {
@@ -705,6 +706,18 @@ func compileSet(env *expr.Env, node flow.Node) (*valueExpr, error) {
 		return nil, err
 	}
 	return compileValue(env, src)
+}
+
+// checkStartEdge rejects a condition on the edge from START: the first
+// superstep has nothing to route on, so the machine would ignore it
+// (REQ-FLOW-066). The message is the validator's, so the same defect reads
+// the same whether ir.Validate or the machine reports it (design.md §2.6).
+func checkStartEdge(edge flow.Edge) error {
+	if edge.From != ir.Start || edge.When == "" {
+		return nil
+	}
+	return invalid(fmt.Sprintf("flow: edge %q -> %q takes no condition", edge.From, edge.To),
+		map[string]any{"from": edge.From, "to": edge.To})
 }
 
 func parseMapSpec(node flow.Node) (over, child string, err error) {

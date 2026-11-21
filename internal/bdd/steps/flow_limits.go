@@ -71,11 +71,15 @@ func (w *flowWorld) chainFlow(count int) {
 	w.addEdge(ids[len(ids)-1], ir.Fail, "")
 }
 
-// sizedFlow declares the one-node flow whose edge condition is the expression given.
+// sizedFlow declares a two-node flow whose second edge carries the expression
+// given. The expression is not on the edge from START, which takes none
+// (REQ-FLOW-066).
 func (w *flowWorld) sizedFlow(when string) {
 	w.ir = newIR("sized")
-	w.addEdge(ir.Start, "check", when)
-	w.addEdge("check", ir.Fail, "")
+	w.addNode("done")
+	w.addEdge(ir.Start, "check", "")
+	w.addEdge("check", "done", when)
+	w.addEdge("done", ir.Fail, "")
 }
 
 // padEdges adds edges to FAIL, cycling through the nodes in id order, until the

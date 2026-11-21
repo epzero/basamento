@@ -28,8 +28,9 @@ var nodeKinds = map[string]bool{
 
 // Validate checks everything the compiler can know from the definition alone:
 // the compiler's limits, the state schema and its reducers, node names, kinds
-// and reserved names, edge endpoints, exactly one edge from START,
-// reachability and guarded cycles. Expression typing is flow/compile's job.
+// and reserved names, edge endpoints, exactly one unconditional edge from
+// START, map children the machine cannot run, reachability and guarded cycles.
+// Expression typing is flow/compile's job.
 //
 // The limits come first, so an over-limit definition is rejected before any
 // graph work and never reaches the cycle search (specs/flow-engine/design.md
@@ -57,6 +58,9 @@ func Validate(f *flow.IR) error {
 		return err
 	}
 	if err := validateEdges(f); err != nil {
+		return err
+	}
+	if err := validateMaps(f); err != nil {
 		return err
 	}
 	if err := validateReachable(f); err != nil {
@@ -198,6 +202,7 @@ func validateNodes(f *flow.IR) error {
 
 func validateEdges(f *flow.IR) error {
 	startEdges := 0
+	var startEdge flow.Edge
 	for _, edge := range f.Edges {
 		label := fmt.Sprintf("flow: edge %q -> %q", edge.From, edge.To)
 		details := map[string]any{"from": edge.From, "to": edge.To}
@@ -213,12 +218,81 @@ func validateEdges(f *flow.IR) error {
 		}
 		if edge.From == Start {
 			startEdges++
+			startEdge = edge
 		}
 	}
 	if startEdges != 1 {
 		return invalid(fmt.Sprintf("flow: flow needs exactly one edge from %q, got %d", Start, startEdges), map[string]any{"edges": startEdges})
 	}
+	// START is where a run enters, before any node has routed, so the first
+	// superstep has nothing to route on and the machine would ignore the
+	// condition (REQ-FLOW-066).
+	if startEdge.When != "" {
+		return invalid(fmt.Sprintf("flow: edge %q -> %q takes no condition", startEdge.From, startEdge.To),
+			map[string]any{"from": startEdge.From, "to": startEdge.To})
+	}
 	return nil
+}
+
+// validateMaps rejects the map definitions the machine cannot run once a run is
+// in flight (REQ-FLOW-062 to REQ-FLOW-065). Nodes are scanned in id order, so
+// two map nodes using one child always report them in the same order, and the
+// check runs before the cycle search: a guarded map child is REQ-FLOW-065, not
+// a cycle that looks bounded (design.md §2.6).
+func validateMaps(f *flow.IR) error {
+	owners := map[string]string{}
+	for _, id := range sortedKeys(f.Nodes) {
+		node := f.Nodes[id]
+		if node.Kind != "map" {
+			continue
+		}
+		child, err := mapChild(id, node)
+		if err != nil {
+			return err
+		}
+		childNode, exists := f.Nodes[child]
+		if !exists {
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q does not exist", id, child),
+				map[string]any{"node": id, "child": child})
+		}
+		if childNode.Guard != nil {
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q has a guard: a guard counts visits of nodes the machine routes to and a map child runs once per element", id, child),
+				map[string]any{"node": id, "child": child})
+		}
+		switch childNode.Kind {
+		case "set", "map", "parallel":
+			return invalid(fmt.Sprintf("flow: map node %q: child node %q has kind %q, which the machine runs itself", id, child, childNode.Kind),
+				map[string]any{"node": id, "child": child, "kind": childNode.Kind})
+		}
+		if owner, ok := owners[child]; ok {
+			return invalid(fmt.Sprintf("flow: map nodes %q and %q both use child node %q", owner, id, child),
+				map[string]any{"maps": []string{owner, id}, "child": child})
+		}
+		owners[child] = id
+	}
+	return nil
+}
+
+// mapChild returns a map node's child name. The child is decided by the
+// spec's "node" field alone, so the child checks run even when "over" is
+// empty or missing: flow/compile leaves empty spec expressions alone, while
+// flow/machine's parseMapSpec requires a non-empty "over" before it runs a
+// map. That accept/reject split is pre-existing; a follow-up ticket will
+// settle whether compile should reject an empty "over" for a map. A spec
+// whose node is absent or not a non-empty string names no child the machine
+// can run, so the compiler rejects it here (EP0-149).
+func mapChild(id string, node flow.Node) (string, error) {
+	var spec struct {
+		Node json.RawMessage `json:"node"`
+	}
+	var child string
+	bad := json.Unmarshal(node.Spec, &spec) != nil ||
+		json.Unmarshal(spec.Node, &child) != nil || child == ""
+	if bad {
+		return "", invalid(fmt.Sprintf("flow: map node %q: spec needs a non-empty \"node\" child name", id),
+			map[string]any{"node": id})
+	}
+	return child, nil
 }
 
 func validateReachable(f *flow.IR) error {

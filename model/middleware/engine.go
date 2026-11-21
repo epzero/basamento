@@ -122,6 +122,15 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		if cfg.Price != nil {
 			cost = cfg.Price(usage)
 		}
+		// The outcome is decided after validation: an attempt whose output
+		// arrived but missed the schema did not succeed (REQ-MODEL-044,
+		// REQ-MODEL-062), and the call log, recording and result must all say
+		// so before the ladder moves on.
+		validAnswer := json.RawMessage(nil)
+		schemaOK := attemptErr == nil && !timedOut
+		if schemaOK && spec != nil {
+			validAnswer, schemaOK = spec.Validate(res.Message)
+		}
 		rec := AttemptRecord{
 			Number: attempt, Rung: rung, ClientRef: ref,
 			Start: started, End: ended, Usage: usage, CostMpts: cost, Events: events,
@@ -133,6 +142,9 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		case attemptErr != nil:
 			rec.Outcome = OutcomeFailed
 			rec.Code = core.CodeOf(attemptErr)
+		case !schemaOK:
+			rec.Outcome = OutcomeFailed
+			rec.Code = core.CodeInvalidArgument
 		default:
 			rec.Outcome = OutcomeSucceeded
 		}
@@ -166,8 +178,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 		}
 
 		if spec != nil {
-			answer, ok := spec.Validate(res.Message)
-			if !ok {
+			if !schemaOK {
 				lastAnswer = res.Message
 				if rungIdx+1 < len(rungs) {
 					rungIdx++
@@ -180,7 +191,7 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 				}
 				continue
 			}
-			return e.done(res, answer, nil)
+			return e.done(res, validAnswer, nil)
 		}
 		return e.done(res, nil, nil)
 	}
@@ -205,18 +216,23 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	var mu sync.Mutex
-	timedOut := false
-	what := ""
+	// The first completed outcome wins: a timer that fires before the attempt
+	// returns cancels it and makes it a timeout; a timer that fires after the
+	// attempt returned must not discard the result it produced. sync.Once
+	// orders the two claims (SystemRuntime timers race with the return).
+	var (
+		once     sync.Once
+		timedOut bool
+		what     string
+	)
 	fire := func(reason string) {
-		mu.Lock()
-		if !timedOut {
+		once.Do(func() {
 			timedOut = true
 			what = reason
-		}
-		mu.Unlock()
-		cancel()
+			cancel()
+		})
 	}
+	complete := func() { once.Do(func() {}) }
 
 	first := e.rt.AfterFunc(timeouts.FirstChunk, func() { fire("first-chunk") })
 	total := e.rt.AfterFunc(timeouts.AttemptTotal, func() { fire("attempt total") })
@@ -246,6 +262,9 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	}
 
 	res, err := e.cfg.Provider.Attempt(ctx, a, emit)
+	// Claim the attempt's completion before stopping the timers, so a timer
+	// that already started late cannot turn this result into a timeout.
+	complete()
 	if first != nil {
 		first.Stop()
 	}
@@ -255,10 +274,16 @@ func (e *engine) runAttempt(parent context.Context, a Attempt, callDeadline time
 	}
 	stopIdle()
 
-	mu.Lock()
 	to, reason := timedOut, what
-	mu.Unlock()
 	if to {
+		// A provider run the middleware could not cancel may still be
+		// alive; report that failure instead of a retryable timeout so the
+		// call does not start a second invocation under a new client ref
+		// (REQ-MODEL-005, REQ-MODEL-009).
+		var ce *cancelError
+		if errors.As(err, &ce) {
+			return res, false, events, err
+		}
 		return res, true, events, timeoutError(reason)
 	}
 	if err != nil {

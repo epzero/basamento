@@ -9,6 +9,61 @@ import (
 	"github.com/epzero/basamento/model"
 )
 
+// lateTimerRuntime fires every timer's function when it is stopped, modelling
+// the SystemRuntime race where a timer callback has already started by the
+// time the attempt returns and Stop runs.
+type lateTimerRuntime struct {
+	now   time.Time
+	fired int
+}
+
+func (r *lateTimerRuntime) Now() time.Time { return r.now }
+
+func (r *lateTimerRuntime) Sleep(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+
+func (r *lateTimerRuntime) AfterFunc(_ time.Duration, f func()) Timer {
+	return &lateFireTimer{rt: r, f: f}
+}
+
+type lateFireTimer struct {
+	rt      *lateTimerRuntime
+	f       func()
+	stopped bool
+}
+
+func (t *lateFireTimer) Stop() {
+	if t.stopped {
+		return
+	}
+	t.stopped = true
+	t.rt.fired++
+	t.f()
+}
+
+func TestLateTimerAfterAttemptReturnDoesNotDiscardSuccess(t *testing.T) {
+	rt := &lateTimerRuntime{now: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)}
+	p := &scriptedProvider{}
+	p.run = func(context.Context, *scriptedProvider, Attempt, func(model.Event)) (model.Result, error) {
+		return succeeded("late success", nil), nil
+	}
+	cfg := baseConfig(newVirtualRuntime(rt.now), p)
+	cfg.Runtime = rt
+	cfg.Attempts = 1
+	res, err := Call(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if rt.fired == 0 {
+		t.Fatal("no timer fired late; the test path was not exercised")
+	}
+	if p.invoked != 1 {
+		t.Fatalf("invocations = %d, want 1", p.invoked)
+	}
+	if res.Attempts[0].Outcome != OutcomeSucceeded {
+		t.Fatalf("attempt 1 = %s, want succeeded", res.Attempts[0].Outcome)
+	}
+}
+
 func TestFirstChunkTimeoutCancelsAndRetries(t *testing.T) {
 	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	p := &scriptedProvider{rt: rt}
