@@ -266,6 +266,9 @@ func TestNewJWKSRejectsBadURL(t *testing.T) {
 		{"empty url", JWKSOptions{URL: "", Clock: clock}, "auth.oidc.jwks"},
 		{"negative min refresh", JWKSOptions{URL: base.URL, Clock: clock, MinRefresh: -time.Second}, "auth.oidc.jwks"},
 		{"nil clock", JWKSOptions{URL: base.URL}, "auth.oidc.jwks"},
+		{"url with user", JWKSOptions{URL: "https://user@issuer.test/jwks", Clock: clock}, "auth.oidc.jwks"},
+		{"url with user and password", JWKSOptions{URL: "https://user:secret@issuer.test/jwks", Clock: clock}, "auth.oidc.jwks"},
+		{"url with empty user", JWKSOptions{URL: "https://@issuer.test/jwks", Clock: clock}, "auth.oidc.jwks"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -283,6 +286,7 @@ func TestNewJWKSRejectsBadURL(t *testing.T) {
 func TestJWKSAcceptsHTTPLoopbackURL(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	for _, rawURL := range []string{
+		"https://issuer.test/jwks?query=1",
 		"http://127.0.0.1:9/jwks",
 		"http://localhost:9/jwks",
 		"http://[::1]:9/jwks",
@@ -311,17 +315,25 @@ func TestJWKSBlockedFetchDoesNotStallCacheHit(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	key := rsaPrivateKey(t)
 	release := make(chan struct{})
+	blocked := make(chan struct{})
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var blockedOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := requests.Add(1)
 		if n == 1 {
 			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{rsaJWK("k1", &key.PublicKey)}})
 			return
 		}
+		blockedOnce.Do(func() { close(blocked) })
 		<-release
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{rsaJWK("k2", &key.PublicKey)}})
 	}))
-	t.Cleanup(server.Close)
+	var releaseOnce sync.Once
+	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		closeRelease()
+		server.Close()
+	})
 	set := testJWKS(t, server.URL, clock, defaultMinRefresh)
 	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
 		t.Fatal(err)
@@ -334,12 +346,11 @@ func TestJWKSBlockedFetchDoesNotStallCacheHit(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	for requests.Load() < 2 {
-		if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
-			t.Fatalf("cached k1 during fetch: %v", err)
-		}
+	<-blocked
+	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
+		t.Fatalf("cached k1 during fetch: %v", err)
 	}
-	close(release)
+	closeRelease()
 	<-done
 }
 
@@ -382,6 +393,138 @@ func TestJWKSSingleFlight(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestJWKSCooldownAfterClockStepBack(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow())
+	key := rsaPrivateKey(t)
+	var mu sync.Mutex
+	kid := "k1"
+	server, requests := jwksServer(t, func() []map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return []map[string]any{rsaJWK(kid, &key.PublicKey)}
+	})
+	set := testJWKS(t, server.URL, clock, defaultMinRefresh)
+	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if *requests != 1 {
+		t.Fatalf("requests = %d, want 1", *requests)
+	}
+	t0 := clock.Now()
+	clock.Set(t0.Add(-time.Hour))
+	mu.Lock()
+	kid = "k2"
+	mu.Unlock()
+	if _, err := set.VerificationKey(context.Background(), "k2"); err != nil {
+		t.Fatal(err)
+	}
+	if *requests != 2 {
+		t.Fatalf("after clock step back: requests = %d, want 2", *requests)
+	}
+	if _, err := set.VerificationKey(context.Background(), "missing"); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("immediate second miss: %v", err)
+	}
+	if *requests != 2 {
+		t.Fatalf("within cooldown: requests = %d, want 2", *requests)
+	}
+	clock.Advance(defaultMinRefresh)
+	if _, err := set.VerificationKey(context.Background(), "missing"); !errors.Is(err, ErrUnknownKey) {
+		t.Fatal(err)
+	}
+	if *requests != 3 {
+		t.Fatalf("after advance: requests = %d, want 3", *requests)
+	}
+}
+
+func TestJWKSRememberFetchErrorOnEmptyCache(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow())
+	key := rsaPrivateKey(t)
+	var mu sync.Mutex
+	status := http.StatusInternalServerError
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		st := status
+		mu.Unlock()
+		if st != http.StatusOK {
+			w.WriteHeader(st)
+			_, _ = w.Write([]byte("no"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{rsaJWK("k1", &key.PublicKey)}})
+	}))
+	t.Cleanup(server.Close)
+	set := testJWKS(t, server.URL, clock, defaultMinRefresh)
+	_, err := set.VerificationKey(context.Background(), "k1")
+	if err == nil || errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("first lookup: %v", err)
+	}
+	want := err.Error()
+	_, err = set.VerificationKey(context.Background(), "k1")
+	if err == nil || errors.Is(err, ErrUnknownKey) || err.Error() != want {
+		t.Fatalf("second lookup in cooldown: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	mu.Lock()
+	status = http.StatusOK
+	mu.Unlock()
+	clock.Advance(defaultMinRefresh)
+	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
+		t.Fatal(err)
+	}
+	set.mu.Lock()
+	set.keys = nil
+	set.mu.Unlock()
+	if _, err := set.lookupAfterRefresh(context.Background(), "other"); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("after success with empty cache on cooldown: %v", err)
+	}
+}
+
+func TestJWKSFetchFailureKeepsUnknownKeyWithPopulatedCache(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow())
+	key := rsaPrivateKey(t)
+	ok := true
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if ok {
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{rsaJWK("k1", &key.PublicKey)}})
+			return
+		}
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	set := testJWKS(t, server.URL, clock, defaultMinRefresh)
+	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	ok = false
+	clock.Advance(defaultMinRefresh)
+	_, err := set.VerificationKey(context.Background(), "missing")
+	if err == nil || errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("failed refresh: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("failed refresh: requests = %d, want 2", requests)
+	}
+	_, err = set.VerificationKey(context.Background(), "missing")
+	if !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("cooldown with populated cache: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("cooldown: requests = %d, want 2", requests)
+	}
+	if _, err := set.VerificationKey(context.Background(), "k1"); err != nil {
+		t.Fatal(err)
 	}
 }
 

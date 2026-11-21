@@ -22,8 +22,10 @@ OIDC verification requires the issuer, the audience, a non-expired `exp` and a
 signature by one of the issuer's keys. A `JWKS` key set is cached; fetches use
 https (http only to loopback), the default HTTP client does not follow redirects,
 and at most one refresh attempt per `MinRefresh` interval (30 s by default), so a
-token signed with a brand-new key may be rejected until the next attempt. A fetch
-response with no usable signing key leaves the previous keys in place. Clock skew
+token signed with a brand-new key may be rejected until the next attempt. The JWKS
+URL must not carry credentials. While the cache is empty, a recent fetch failure is
+reported again inside the cooldown instead of `ErrUnknownKey`. A fetch response with
+no usable signing key leaves the previous keys in place. Clock skew
 is an explicit leeway capped at five minutes, zero by default. The token's
 `tenant` claim (name configurable) must satisfy the tenant grammar when present.
 When absent, `Principal.Tenant` is empty; request wiring must refuse such a

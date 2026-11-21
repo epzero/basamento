@@ -37,7 +37,7 @@ const maxJWKSBytes = 1 << 20
 // JWKSOptions configures a JWKS key set read from an issuer URL.
 type JWKSOptions struct {
 	// URL is the issuer JWKS endpoint. It must be https, or http when the host
-	// is loopback. Credentials in the URL are never echoed in errors.
+	// is loopback, and must not carry credentials (userinfo).
 	URL string
 	// Client performs fetches. When nil, the default client applies a 10 s
 	// timeout and does not follow redirects; a supplied client keeps its own
@@ -63,6 +63,7 @@ type JWKS struct {
 	mu          sync.RWMutex
 	keys        map[string]any
 	lastAttempt time.Time
+	lastErr     error
 
 	flightMu sync.Mutex
 	flight   *jwksFlight
@@ -87,6 +88,9 @@ func NewJWKS(opts JWKSOptions) (*JWKS, error) {
 	u, err := url.Parse(opts.URL)
 	if err != nil || u.Host == "" {
 		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must be an http or https URL", map[string]any{"key": "auth.oidc.jwks"})
+	}
+	if u.User != nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must not carry credentials", map[string]any{"key": "auth.oidc.jwks"})
 	}
 	switch u.Scheme {
 	case "https":
@@ -137,9 +141,14 @@ func (j *JWKS) lookupAfterRefresh(ctx context.Context, kid string) (any, error) 
 	if cooldown {
 		j.mu.RLock()
 		key, ok := j.matchLocked(kid)
+		stale := len(j.keys) == 0 && j.lastErr != nil
+		lastErr := j.lastErr
 		j.mu.RUnlock()
 		if ok {
 			return key, nil
+		}
+		if stale {
+			return nil, lastErr
 		}
 		return nil, ErrUnknownKey
 	}
@@ -170,7 +179,7 @@ func (j *JWKS) beginRefresh(ctx context.Context) (*jwksFlight, bool) {
 
 	j.mu.Lock()
 	now := j.clock.Now()
-	if !j.lastAttempt.IsZero() && now.Sub(j.lastAttempt) < j.minRefresh {
+	if cooldownActive(j.lastAttempt, now, j.minRefresh) {
 		j.mu.Unlock()
 		j.flightMu.Unlock()
 		return nil, true
@@ -186,6 +195,9 @@ func (j *JWKS) beginRefresh(ctx context.Context) (*jwksFlight, bool) {
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), j.fetchTimeout)
 		defer cancel()
 		w.err = j.fetch(fetchCtx)
+		j.mu.Lock()
+		j.lastErr = w.err // a successful fetch clears the last error
+		j.mu.Unlock()
 		close(w.done)
 		j.flightMu.Lock()
 		j.flight = nil
@@ -193,6 +205,20 @@ func (j *JWKS) beginRefresh(ctx context.Context) (*jwksFlight, bool) {
 	}()
 
 	return w, false
+}
+
+// cooldownActive reports whether a refresh attempt must wait until minRefresh
+// after lastAttempt. A negative elapsed interval (clock stepped backwards) is
+// treated as elapsed so rotation is not blocked indefinitely.
+func cooldownActive(lastAttempt, now time.Time, minRefresh time.Duration) bool {
+	if lastAttempt.IsZero() {
+		return false
+	}
+	elapsed := now.Sub(lastAttempt)
+	if elapsed < 0 {
+		return false
+	}
+	return elapsed < minRefresh
 }
 
 func (j *JWKS) matchLocked(kid string) (any, bool) {
