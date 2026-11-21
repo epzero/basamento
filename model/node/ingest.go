@@ -76,7 +76,7 @@ func ParamHash(params json.RawMessage) string {
 // a replayed run stores each file at most once.
 func (h *Handler) ingestOutputs(dc runtime.DurableContext, cfg Config, req model.Request, result model.Result, cost int64, ref string) ([]Asset, error) {
 	name := stepName(cfg, "ingest", ref)
-	if err := h.register(name, h.ingestStep); err != nil {
+	if err := h.register(name, h.ingestStep, stepDefaults()); err != nil {
 		return nil, err
 	}
 	var out struct {

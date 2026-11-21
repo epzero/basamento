@@ -97,6 +97,10 @@ type fakeDC struct {
 	awaited     []string
 	emitted     []string
 	gatePayload json.RawMessage
+	// recorded replays and records durable step outputs. A non-nil map is a
+	// run whose steps were recorded: a present name returns its recorded
+	// result instead of running, and a fresh result is stored.
+	recorded map[string]json.RawMessage
 }
 
 func (d *fakeDC) Context() context.Context { return d.ctx }
@@ -131,6 +135,9 @@ func (d *fakeDC) Child(runtime.FlowRef, any, runtime.ChildOptions) runtime.Futur
 	return doneFuture{result: json.RawMessage(`null`)}
 }
 func (d *fakeDC) Step(name string, in any, _ runtime.StepOptions) runtime.Future {
+	if raw, ok := d.recorded[name]; ok {
+		return doneFuture{result: raw}
+	}
 	fn, ok := d.steps[name]
 	if !ok {
 		return doneFuture{err: core.NewError(core.CodeUnsupported, "step not registered", map[string]any{"step": name})}
@@ -140,6 +147,9 @@ func (d *fakeDC) Step(name string, in any, _ runtime.StepOptions) runtime.Future
 		return doneFuture{err: err}
 	}
 	out, err := fn(d.ctx, raw)
+	if err == nil && d.recorded != nil {
+		d.recorded[name] = append(json.RawMessage(nil), out...)
+	}
 	return doneFuture{result: out, err: err}
 }
 
@@ -555,6 +565,57 @@ func TestHandlePricesAtTheRunClock(t *testing.T) {
 	}
 }
 
+func TestHandleReplaySettlesByThePinnedPrice(t *testing.T) {
+	t.Parallel()
+	cat := videoCatalog(t)
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// A usage forces settlement through the price formula rather than the
+	// no-usage estimate path.
+	inv.result = model.Result{State: model.StateSucceeded, Usage: &model.Usage{}}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: cat, Steps: reg})
+	recorded := map[string]json.RawMessage{}
+	run := func(budget *Memory) Output {
+		dc := &fakeDC{
+			ctx:      WithBudget(t.Context(), budget),
+			now:      time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+			steps:    reg.fns,
+			recorded: recorded,
+		}
+		out, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	firstBudget := NewMemory(50000)
+	first := run(firstBudget)
+	if first.ReservedMpts != 500 || first.CostMpts != 500 {
+		t.Fatalf("first run = %+v, want the entry's 500 reserved and charged", first)
+	}
+
+	// The deployment changes after the call started. The replay must settle
+	// by the recorded quote, not price the same params again.
+	if err := cat.SetDeploymentPrice("sim-video", catalog.Price{Formula: "params.duration_s * 900"}); err != nil {
+		t.Fatal(err)
+	}
+	replayBudget := NewMemory(50000)
+	replayed := run(replayBudget)
+	if replayed.ReservedMpts != 500 || replayed.CostMpts != 500 {
+		t.Fatalf("replay = %+v, want the pinned entry's 500, not the new entry's 4500", replayed)
+	}
+	if got := replayBudget.Charged(replayed.ClientRef); got != 500 {
+		t.Fatalf("charged = %d, want the pinned entry's 500", got)
+	}
+	if len(inv.refs) != 1 {
+		t.Fatalf("provider starts = %d, want 1: the replay reuses the recorded start", len(inv.refs))
+	}
+}
+
 func TestHandleChargesTheEstimateWhenTheInvocationFailsAfterStarting(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()
@@ -770,7 +831,7 @@ func TestRegisterBoundsTheStepMemo(t *testing.T) {
 	h := testHandler(t, Deps{Invoker: newScriptInvoker(), Catalog: videoCatalog(t), Steps: reg})
 	fn := func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }
 	for i := 0; i <= maxRegisteredSteps+1; i++ {
-		if err := h.register(fmt.Sprintf("model.step-%d", i), fn); err != nil {
+		if err := h.register(fmt.Sprintf("model.step-%d", i), fn, stepDefaults()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -799,7 +860,7 @@ func TestRegisterTreatsAConflictAsSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	fn := func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }
-	if err := h.register("model.generate.start.ref", fn); err != nil {
+	if err := h.register("model.generate.start.ref", fn, stepDefaults()); err != nil {
 		t.Fatalf("register = %v, want conflict tolerated", err)
 	}
 	if reg.calls != 1 {

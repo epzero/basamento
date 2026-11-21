@@ -26,9 +26,10 @@ type Catalog struct {
 
 	env *expr.Env
 	// programs holds one compiled program per distinct expression source ever
-	// accepted at set time; nothing is evicted. The number of price entries a
-	// deployment can hold is the bound; a future tenant-facing price API must
-	// bound it.
+	// priced: one accepted at set time, or one pinned in a quote and replayed
+	// after its layer changed. Nothing is evicted. The number of price entries
+	// a deployment has held is the practical bound; a future tenant-facing
+	// price API must bound it.
 	programs map[string]*expr.Program
 	progMu   sync.Mutex
 }
