@@ -251,21 +251,23 @@ holds, which is data the run receives and not part of the definition.
 
 ### 2.6 Definition errors the machine cannot repair (REQ-FLOW-062 … 066)
 
-`flow/ir.Validate` rejects six defects that leave a definition unrunnable — a
-`map` spec whose `node` is absent, not a string or empty, a `map` child that is
-not a declared node, a `map` child of a kind the machine runs itself (`set`,
-`parallel`, `map`), one child used by two `map` nodes, a `map` child carrying a
-guard, and a condition on the edge from `START` — with code `invalid_argument`,
-naming the `map` node and its child, both `map` nodes, or the edge. The `map`
-child checks decide the child from the spec's `node` field alone, not from both
-`over` and `node` the way `flow/machine`'s `parseMapSpec` reads them, and they
-scan `IR.Nodes` in sorted id order, so two `map` nodes using one child always
-report them in the same order.
+`flow/ir.Validate` rejects five defects that leave a definition unrunnable — a
+`map` child that is not a declared node, a `map` child of a kind the machine
+runs itself (`set`, `parallel`, `map`), one child used by two `map` nodes, a
+`map` child carrying a guard, and a condition on the edge from `START` — with
+code `invalid_argument`, naming the `map` node and its child, both `map`
+nodes, or the edge. The `map` child checks decide the child from the spec's
+`node` field alone, not from both `over` and `node` the way `flow/machine`'s
+`parseMapSpec` reads them, and they scan `IR.Nodes` in sorted id order, so two
+`map` nodes using one child always report them in the same order. A `map` spec
+whose `node` is absent, not a string, or empty names no child the machine can
+run, so the compiler rejects it before any child check with
+`flow: map node "fanout": spec needs a non-empty "node" child name`.
 
-- **A spec with no map node**: a `map` spec whose `node` is absent, not a string
-  or empty names no child the machine can run, so the compiler rejects it before
-  any child check. Message:
-  `flow: map node "fanout": spec needs a non-empty "node" child name`.
+A `map` with no `over` is rejected under REQ-FLOW-067 with code
+`invalid_argument`, naming the `map` node and the `over` field:
+`flow: map node "fanout": spec needs a non-empty "over" expression`.
+
 - **A child that is not a node** (REQ-FLOW-062): the machine emits no `run_node`
   command for the child, so the host would never run it. Message:
   `flow: map node "fanout": child node "ghost" does not exist`.
@@ -296,16 +298,17 @@ other edge checks, which have already established that exactly one edge leaves
 before reachability and the cycle search. A `map` child with a guard is
 therefore reported as REQ-FLOW-065, not as a bounded cycle by REQ-FLOW-003.
 
-**Defence in depth.** The five original defects are checks `flow/machine.New`
-makes for itself before it compiles an expression, with the same code and the
-same wording; they stay there, because an IR can be built in Go without the
-compiler (ADR-0003) and a machine must refuse to run one it cannot run. The sixth,
-a `map` spec with no usable `node`, breaks the "same wording" claim: the
+**Defence in depth.** These five are the checks `flow/machine.New` makes for
+itself before it compiles an expression, with the same code and the same
+wording; they stay there, because an IR can be built in Go without the
+compiler (ADR-0003) and a machine must refuse to run one it cannot run. The
+shape check for a missing usable `node` breaks the "same wording" claim: the
 machine's own missing-`node` check lives in `parseMapSpec` and says
 `map spec needs over and node`, while the validator says
 `flow: map node "fanout": spec needs a non-empty "node" child name`. The
-compiler adds all six so the author sees the error when the flow is registered
-(`flow/compile.Compile`, `flow/ir.Validate`) rather than when a run starts.
+compiler adds the five defects and that shape check so the author sees the
+error when the flow is registered (`flow/compile.Compile`, `flow/ir.Validate`)
+rather than when a run starts.
 `flow/builder` keeps a node spec as written (REQ-FLOW-012) and has no `map`
 check of its own: it checks only what its declarations make knowable, and the
 compiler is the one validator — a second copy would be a second source of
