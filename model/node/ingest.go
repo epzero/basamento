@@ -12,8 +12,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -119,7 +122,7 @@ func (h *Handler) ingestStep(ctx context.Context, raw json.RawMessage) (json.Raw
 	}
 	fetch := h.deps.Fetch
 	if fetch == nil {
-		fetch = defaultFetcher
+		fetch = defaultFetcher(h.deps.OutputRoot)
 	}
 	provenance := Provenance{
 		Model:      in.Model,
@@ -183,15 +186,23 @@ func sha256Sum(data []byte) []byte {
 
 // defaultFetcher reads an output from its URL or, for a command-line provider,
 // its path. A URL must be https and must not resolve to an address this
-// process should not reach; redirects are refused.
-func defaultFetcher(ctx context.Context, out model.Output) ([]byte, string, error) {
-	return outputFetcher{lookupIP: net.DefaultResolver.LookupIPAddr}.fetch(ctx, out)
+// process should not reach; redirects are refused. A path is only read under
+// root: an empty root rejects every path, so a network adapter cannot name an
+// arbitrary file on this host.
+func defaultFetcher(root string) Fetcher {
+	return func(ctx context.Context, out model.Output) ([]byte, string, error) {
+		return outputFetcher{root: root, lookupIP: net.DefaultResolver.LookupIPAddr}.fetch(ctx, out)
+	}
 }
 
 // outputFetcher is the production fetcher. Its resolver, dialer and TLS
 // configuration are fields so tests can exercise the address checks without a
 // network.
 type outputFetcher struct {
+	// root is the directory a command-line provider writes output files to.
+	// A path output is only read when it resolves under it; empty rejects
+	// every path output.
+	root     string
 	lookupIP func(context.Context, string) ([]net.IPAddr, error)
 	// dial opens the TCP connection. Nil uses a net.Dialer. The fetcher always
 	// dials the address it resolved and checked, never a host name.
@@ -217,7 +228,11 @@ func (f outputFetcher) fetch(ctx context.Context, out model.Output) ([]byte, str
 	case out.URL != "":
 		return f.fetchURL(ctx, out.URL)
 	case out.Path != "":
-		data, err := readBounded(out.Path, maxOutputBytes)
+		path, err := sandboxPath(f.root, out.Path)
+		if err != nil {
+			return nil, "", err
+		}
+		data, err := readBounded(path, maxOutputBytes)
 		return data, out.Mime, err
 	default:
 		return nil, "", errors.New("output has no URL or path")
@@ -319,15 +334,66 @@ func readBounded(path string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(file, limit+1))
 }
 
-// publicAddress reports whether ip is safe to fetch an output from: not
-// loopback, private, link-local, unspecified or multicast.
+// nonPublicPrefixes are ranges that are global unicast in Go's classification
+// but are not addresses to fetch from: carrier-grade NAT, benchmarking,
+// documentation, IETF protocol assignments, the reserved block and IPv6
+// documentation. RFC 6890 lists them as special-purpose.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"
+	netip.MustParsePrefix("100.64.0.0/10"),   // carrier-grade NAT
+	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
+	netip.MustParsePrefix("192.0.2.0/24"),    // documentation (TEST-NET-1)
+	netip.MustParsePrefix("192.88.99.0/24"),  // 6to4 relay anycast (deprecated)
+	netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
+	netip.MustParsePrefix("198.51.100.0/24"), // documentation (TEST-NET-2)
+	netip.MustParsePrefix("203.0.113.0/24"),  // documentation (TEST-NET-3)
+	netip.MustParsePrefix("240.0.0.0/4"),     // reserved
+	netip.MustParsePrefix("2001:2::/48"),     // benchmarking
+	netip.MustParsePrefix("2001:db8::/32"),   // documentation
+	netip.MustParsePrefix("3fff::/20"),       // documentation
+}
+
+// publicAddress reports whether ip is safe to fetch an output from: a global
+// unicast address outside the special-purpose ranges, so not loopback,
+// private, link-local, unspecified, multicast, carrier-grade NAT or any other
+// block that is not a public peer.
 func publicAddress(ip net.IP) bool {
-	if ip == nil {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return false
 	}
-	return !ip.IsLoopback() && !ip.IsPrivate() &&
-		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() &&
-		!ip.IsUnspecified() && !ip.IsMulticast()
+	addr = addr.Unmap()
+	if !addr.IsValid() || !addr.IsGlobalUnicast() || addr.IsPrivate() {
+		return false
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+// sandboxPath resolves path under root and reports whether it stays inside.
+// Both sides are resolved through symlinks, so a link inside the root that
+// points outside it is refused too.
+func sandboxPath(root, path string) (string, error) {
+	if root == "" {
+		return "", errors.New("output path is not allowed: no output root is configured")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", errors.New("output root is unavailable")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", errors.New("output path cannot be resolved")
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", errors.New("output path is outside the output root")
+	}
+	return resolved, nil
 }
 
 // outputHost is the non-sensitive part of an output's source for error

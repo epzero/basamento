@@ -285,8 +285,10 @@ func TestHandleOpensTheAmbiguousStartGate(t *testing.T) {
 	if core.CodeOf(err) != core.CodeAmbiguousStart {
 		t.Fatalf("err = %v, want ambiguous_start", err)
 	}
-	if len(dc.awaited) != 1 || dc.awaited[0] != AmbiguousStartGate {
-		t.Fatalf("awaited = %v, want [%s]", dc.awaited, AmbiguousStartGate)
+	// The gate name carries this invocation's ref: parallel map items must
+	// not collide on one gate.
+	if len(dc.awaited) != 1 || dc.awaited[0] != AmbiguousStartGate+"."+inv.refs[0] {
+		t.Fatalf("awaited = %v, want [%s.%s]", dc.awaited, AmbiguousStartGate, inv.refs[0])
 	}
 	if inv.starts != 1 {
 		t.Fatalf("starts = %d, want 1: a blind restart would charge twice", inv.starts)
@@ -695,6 +697,122 @@ func TestHandleReturnsSettlementErrors(t *testing.T) {
 	}
 	if out.CostMpts != 0 {
 		t.Fatalf("cost = %d, want no reported charge after a failed settlement", out.CostMpts)
+	}
+}
+
+// flakyBudget fails the first failed settlements before delegating to a
+// Memory budget, and records every amount it was asked to settle.
+type flakyBudget struct {
+	*Memory
+	fails   int
+	amounts []int64
+}
+
+func (b *flakyBudget) Settle(key string, actual int64) error {
+	b.amounts = append(b.amounts, actual)
+	if b.fails > 0 {
+		b.fails--
+		return errors.New("the budget is unavailable")
+	}
+	return b.Memory.Settle(key, actual)
+}
+
+func TestHandleRetriesAFailedSettlementWithTheActualCharge(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateSucceeded, CostMpts: 480}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := &flakyBudget{Memory: NewMemory(5000), fails: 1}
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if err == nil {
+		t.Fatal("the failed settlement was not reported")
+	}
+	ref := inv.refs[0]
+	// The retry must settle the known actual charge, not first-win the
+	// reserved estimate (500), which would make the undercharge permanent.
+	if got := budget.Charged(ref); got != 480 {
+		t.Fatalf("charged = %d, want the actual 480", got)
+	}
+	if len(budget.amounts) != 2 || budget.amounts[1] != 480 {
+		t.Fatalf("settle amounts = %v, want [480 480]", budget.amounts)
+	}
+}
+
+func TestHandleSettlesTheFinalStateWhenCancelFails(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.cancel = func(model.Handle) error {
+		return core.NewError(core.CodeUnavailable, "the provider did not answer the cancel", nil)
+	}
+	inv.resultFn = func() (model.Result, error) {
+		return model.Result{State: model.StateCancelled, CostMpts: 200}, nil
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dc := &fakeDC{
+		ctx:   WithBudget(ctx, budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	// A failed cancel must not skip the final result: the provider's final
+	// state (200) settles the reservation, not the reserved estimate (500).
+	if got := budget.Charged(inv.refs[0]); got != 200 {
+		t.Fatalf("charged = %d, want the provider's final 200", got)
+	}
+	if inv.resultCtxErr != nil {
+		t.Fatalf("result read with %v, want a detached context", inv.resultCtxErr)
+	}
+}
+
+func TestHandleFailsClosedWhenACancelledStartCannotBeResolved(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	ctx, cancel := context.WithCancel(t.Context())
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		// The run is cancelled while the attempt is in flight and the lookup
+		// cannot find the invocation.
+		cancel()
+		return model.Handle{}, retryable()
+	}
+	inv.lookup = func(string) (*model.Handle, error) {
+		return nil, core.NewError(core.CodeUnsupported, "no lookup", nil)
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	dc := &fakeDC{ctx: WithBudget(ctx, budget), now: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC), steps: reg.fns}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeAmbiguousStart {
+		t.Fatalf("err = %v, want ambiguous_start", err)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 500 {
+		t.Fatalf("charged = %d, want the reserved estimate 500: the start may have landed", got)
+	}
+	if !budget.Settled(ref) {
+		t.Fatal("the reservation is still open")
 	}
 }
 

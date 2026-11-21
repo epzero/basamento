@@ -17,9 +17,11 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
-// AmbiguousStartGate is the gate a run waits at when a start's outcome is
-// unknown and the provider cannot resolve it by lookup (REQ-MODEL-005). A
+// AmbiguousStartGate is the gate family a run waits at when a start's outcome
+// is unknown and the provider cannot resolve it by lookup (REQ-MODEL-005). A
 // person resolves it with a payload naming the invocation, if there is one.
+// The node waits at one instance per invocation, AmbiguousStartGate + "." +
+// the client ref, so parallel map items never share a gate.
 const AmbiguousStartGate = "ambiguous_start"
 
 // visitToken is the id kind the node draws once per visit of one node in one
@@ -137,6 +139,12 @@ type Deps struct {
 	// Fetch downloads an output. Nil uses HTTPS for a URL (public addresses
 	// only, no redirects) and the filesystem for a path.
 	Fetch Fetcher
+	// OutputRoot is the directory a command-line provider writes output files
+	// to. A result's Path is only read when it resolves under this root; an
+	// empty root rejects every path output, so a network provider cannot make
+	// the node read an arbitrary file. The root is set by the composition for
+	// local providers, never by a provider's result.
+	OutputRoot string
 	// MaxStartAttempts bounds the start attempts of one invocation; zero
 	// means DefaultStartAttempts.
 	MaxStartAttempts int
@@ -240,6 +248,11 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 
 	out = Output{ClientRef: ref}
 	var charged int64
+	// chargeKnown reports that a settlement was attempted with a known actual
+	// charge. If that attempt fails, the deferred settlement retries that
+	// amount instead of first-winning the reserved estimate, which would make
+	// an undercharge permanent.
+	chargeKnown := false
 	settled := false
 	if priced {
 		if err := budget.Reserve(ref, quote.Estimate); err != nil {
@@ -258,7 +271,7 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 			return
 		}
 		actual := charged
-		if started {
+		if !chargeKnown && started {
 			actual = quote.Estimate
 		}
 		// Do not mark the reservation settled unless the budget accepted it:
@@ -274,11 +287,11 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	}()
 	settle := func(actual int64) error {
 		if priced && !settled {
+			charged, chargeKnown = actual, true
 			if err := budget.Settle(ref, actual); err != nil {
 				return err
 			}
 			settled = true
-			charged = actual
 		}
 		out.CostMpts = actual
 		return nil
@@ -431,7 +444,7 @@ func (h *Handler) resolveAmbiguous(dc runtime.DurableContext, cfg Config, ref st
 		Handle *model.Handle `json:"handle,omitempty"`
 	}
 	if err := dc.Await(runtime.GateSpec{
-		Name:   AmbiguousStartGate,
+		Name:   AmbiguousStartGate + "." + ref,
 		Schema: json.RawMessage(`{"type":"object"}`),
 	}).Get(&payload); err != nil {
 		return model.Handle{}, err
@@ -513,24 +526,36 @@ func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.Raw
 	for range events {
 	}
 	if ctx.Err() != nil {
-		// The run was cancelled while the invocation was in flight. Cancel at
-		// the provider with a context the cancellation no longer reaches, then
-		// take the final state the provider reports.
-		detached := context.WithoutCancel(ctx)
-		if err := h.deps.Invoker.Cancel(detached, in.Handle); err != nil && !errors.Is(err, context.Canceled) {
-			return nil, model.MapError(err)
-		}
-		result, err := h.deps.Invoker.Result(detached, in.Handle)
+		out, err := h.cancelAndResult(ctx, in.Handle)
 		if err != nil {
-			return nil, model.MapError(err)
+			return nil, err
 		}
-		return json.Marshal(followOutcome{Result: result, Cancelled: true})
+		return json.Marshal(out)
 	}
 	result, err := h.deps.Invoker.Result(ctx, in.Handle)
 	if err != nil {
 		return nil, model.MapError(err)
 	}
 	return json.Marshal(followOutcome{Result: result})
+}
+
+// cancelAndResult cancels a cancelled run's invocation at the provider and
+// takes the final state it reports, so the reservation settles by the actual
+// charge (REQ-MODEL-009). Both calls run on a context the cancellation no
+// longer reaches. A failed cancel does not skip the result: the invocation may
+// still be running, and only the provider's final state can settle it. If the
+// result cannot be read either, the node falls back to the reserved estimate.
+func (h *Handler) cancelAndResult(ctx context.Context, handle model.Handle) (followOutcome, error) {
+	detached := context.WithoutCancel(ctx)
+	cancelErr := h.deps.Invoker.Cancel(detached, handle)
+	result, err := h.deps.Invoker.Result(detached, handle)
+	if err != nil {
+		if cancelErr != nil && !errors.Is(cancelErr, context.Canceled) {
+			return followOutcome{}, model.MapError(cancelErr)
+		}
+		return followOutcome{}, model.MapError(err)
+	}
+	return followOutcome{Result: result, Cancelled: true}, nil
 }
 
 // actualCost is what the run is charged: the cost the provider reports, or

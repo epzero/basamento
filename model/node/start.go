@@ -72,7 +72,17 @@ func (s Starter) Start(ctx context.Context, req model.Request) (StartOutcome, er
 			return StartOutcome{Handle: handle, Attempts: i + 1}, nil
 		}
 		if ctx.Err() != nil {
-			return StartOutcome{Attempts: i + 1}, model.MapError(err)
+			// The run was cancelled while the attempt was in flight, so the
+			// start may have reached the provider. Resolve it with a context
+			// the cancellation no longer reaches: a found invocation is
+			// followed (and settled) as usual, and anything else is ambiguous
+			// so the reservation settles by the estimate instead of releasing
+			// money a landed start may have spent (REQ-MODEL-005).
+			found, lookupErr := s.Invoker.Lookup(context.WithoutCancel(ctx), req.ClientRef)
+			if lookupErr == nil && found != nil {
+				return StartOutcome{Handle: *found, Attempts: i + 1, Resolved: true}, nil
+			}
+			return StartOutcome{Attempts: i + 1, Ambiguous: true}, nil
 		}
 		if !core.IsRetryable(err) {
 			return StartOutcome{Attempts: i + 1}, model.MapError(err)

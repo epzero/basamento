@@ -456,7 +456,7 @@ func (w *nodeWorld) waitGate(gate string) error {
 	w.mu.Lock()
 	at := w.atGate
 	w.mu.Unlock()
-	if at == gate {
+	if gateIs(at, gate) {
 		return nil
 	}
 	select {
@@ -464,7 +464,7 @@ func (w *nodeWorld) waitGate(gate string) error {
 		w.mu.Lock()
 		w.atGate = got
 		w.mu.Unlock()
-		if got != gate {
+		if !gateIs(got, gate) {
 			return fmt.Errorf("the run waits at gate %q, want %q", got, gate)
 		}
 		return nil
@@ -473,6 +473,13 @@ func (w *nodeWorld) waitGate(gate string) error {
 	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for gate %q", gate)
 	}
+}
+
+// gateIs reports whether name is gate or one of its per-invocation instances:
+// the model node appends the client ref so parallel map items wait at distinct
+// gates (REQ-MODEL-005).
+func gateIs(name, gate string) bool {
+	return name == gate || strings.HasPrefix(name, gate+".")
 }
 
 // active reports whether the scenario has a run in flight.

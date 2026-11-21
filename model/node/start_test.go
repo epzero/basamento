@@ -22,6 +22,16 @@ type scriptInvoker struct {
 	events    []model.Event
 	eventsErr error
 	result    model.Result
+	// resultFn, when set, overrides result and can fail the Result call.
+	resultFn func() (model.Result, error)
+	// cancel overrides Cancel; nil returns nil.
+	cancel func(model.Handle) error
+
+	cancels int
+	// lookupCtxErr records the context error each Lookup saw, so a test can
+	// prove the lookup ran on a detached context.
+	lookupCtxErrs []error
+	resultCtxErr  error
 }
 
 func newScriptInvoker() *scriptInvoker {
@@ -38,8 +48,9 @@ func (s *scriptInvoker) Start(_ context.Context, req model.Request) (model.Handl
 	return s.start(s.starts, req)
 }
 
-func (s *scriptInvoker) Lookup(_ context.Context, clientRef string) (*model.Handle, error) {
+func (s *scriptInvoker) Lookup(ctx context.Context, clientRef string) (*model.Handle, error) {
 	s.lookups++
+	s.lookupCtxErrs = append(s.lookupCtxErrs, ctx.Err())
 	if s.lookup == nil {
 		return nil, nil
 	}
@@ -58,14 +69,24 @@ func (s *scriptInvoker) Events(context.Context, model.Handle, int64) (<-chan mod
 	return ch, nil
 }
 
-func (s *scriptInvoker) Result(context.Context, model.Handle) (model.Result, error) {
+func (s *scriptInvoker) Result(ctx context.Context, _ model.Handle) (model.Result, error) {
+	s.resultCtxErr = ctx.Err()
+	if s.resultFn != nil {
+		return s.resultFn()
+	}
 	if s.result.State == "" {
 		return model.Result{State: model.StateSucceeded}, nil
 	}
 	return s.result, nil
 }
 
-func (s *scriptInvoker) Cancel(context.Context, model.Handle) error { return nil }
+func (s *scriptInvoker) Cancel(_ context.Context, handle model.Handle) error {
+	s.cancels++
+	if s.cancel != nil {
+		return s.cancel(handle)
+	}
+	return nil
+}
 
 func retryable() error {
 	return &core.Error{Code: core.CodeTimeout, Message: "no response", Retryable: true}
@@ -219,5 +240,50 @@ func TestStartNeedsAnInvoker(t *testing.T) {
 	_, err := Starter{}.Start(t.Context(), model.Request{ClientRef: "ref-1"})
 	if core.CodeOf(err) != core.CodeInternal {
 		t.Fatalf("err = %v, want internal", err)
+	}
+}
+
+func TestStartResolvesACancelledAttemptWithADetachedLookup(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		// The run is cancelled while the attempt is in flight: the provider
+		// may have accepted it.
+		cancel()
+		return model.Handle{}, retryable()
+	}
+	inv.lookup = func(ref string) (*model.Handle, error) {
+		return &model.Handle{Provider: "sim", ID: "v1", ClientRef: ref}, nil
+	}
+	outcome, err := Starter{Invoker: inv}.Start(ctx, model.Request{ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.Resolved || outcome.Ambiguous || outcome.Handle.ID != "v1" {
+		t.Fatalf("outcome = %+v, want the invocation resolved by lookup", outcome)
+	}
+	if len(inv.lookupCtxErrs) != 1 || inv.lookupCtxErrs[0] != nil {
+		t.Fatalf("lookup context errors = %v, want one detached lookup", inv.lookupCtxErrs)
+	}
+}
+
+func TestStartMarksACancelledAttemptAmbiguousWhenLookupMisses(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	inv := newScriptInvoker()
+	inv.start = func(int, model.Request) (model.Handle, error) {
+		cancel()
+		return model.Handle{}, retryable()
+	}
+	outcome, err := Starter{Invoker: inv}.Start(ctx, model.Request{ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatalf("err = %v, want an ambiguous outcome rather than a plain error", err)
+	}
+	if !outcome.Ambiguous {
+		t.Fatalf("outcome = %+v, want ambiguous: the start may have landed", outcome)
+	}
+	if len(inv.lookupCtxErrs) != 1 || inv.lookupCtxErrs[0] != nil {
+		t.Fatalf("lookup context errors = %v, want one detached lookup", inv.lookupCtxErrs)
 	}
 }
