@@ -3,6 +3,7 @@ package tool_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -29,6 +30,7 @@ type scriptedSandbox struct {
 	stopped     chan struct{}
 	startedOnce sync.Once
 	stoppedOnce sync.Once
+	onRun       func()
 }
 
 func (s *scriptedSandbox) Run(ctx context.Context, spec tool.SandboxSpec, command []string) (tool.SandboxResult, error) {
@@ -37,6 +39,9 @@ func (s *scriptedSandbox) Run(ctx context.Context, spec tool.SandboxSpec, comman
 	s.command = command
 	s.runs++
 	s.mu.Unlock()
+	if s.onRun != nil {
+		s.onRun()
+	}
 	if s.started != nil {
 		s.startedOnce.Do(func() { close(s.started) })
 	}
@@ -155,5 +160,163 @@ func TestRunSandboxWithoutADriverIsInternal(t *testing.T) {
 		tool.SandboxSpec{}, []string{"true"})
 	if err == nil || core.CodeOf(err) != core.CodeInternal {
 		t.Fatalf("error %v, want internal", err)
+	}
+}
+
+func TestRunSandboxRegistersTheDeadlineBeforeTheDriverRuns(t *testing.T) {
+	clock := fixedClock()
+	sb := &scriptedSandbox{
+		block:   true,
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+		onRun:   func() { clock.Advance(60 * time.Second) },
+	}
+	type done struct {
+		res tool.Result
+		err error
+	}
+	result := make(chan done, 1)
+	go func() {
+		res, err := layerWith(clock, newMemBlob(), nil).RunSandbox(context.Background(), sb,
+			tool.SandboxSpec{TimeLimit: 60 * time.Second}, []string{"make", "test"})
+		result <- done{res, err}
+	}()
+	got := <-result
+	if got.err == nil || core.CodeOf(got.err) != core.CodeTimeout {
+		t.Fatalf("error %v, want timeout", got.err)
+	}
+}
+
+func TestRunSandboxWaitsForTheDriverToStopAtItsTimeLimit(t *testing.T) {
+	clock := fixedClock()
+	sb := &scriptedSandbox{block: true, started: make(chan struct{}), stopped: make(chan struct{})}
+	result := make(chan error, 1)
+	go func() {
+		_, err := layerWith(clock, newMemBlob(), nil).RunSandbox(context.Background(), sb,
+			tool.SandboxSpec{TimeLimit: 60 * time.Second}, []string{"make", "test"})
+		result <- err
+	}()
+	<-sb.started
+	clock.Advance(60 * time.Second)
+	if err := <-result; err == nil || core.CodeOf(err) != core.CodeTimeout {
+		t.Fatalf("error %v, want timeout", err)
+	}
+	select {
+	case <-sb.stopped:
+	default:
+		t.Fatal("RunSandbox returned before the driver acknowledged the stop")
+	}
+}
+
+func TestRunSandboxCarriesBothStreams(t *testing.T) {
+	sb := &scriptedSandbox{answer: tool.SandboxResult{Stdout: []byte("out"), Stderr: []byte("err")}}
+	res, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,
+		tool.SandboxSpec{}, []string{"go", "test"})
+	if err != nil {
+		t.Fatalf("RunSandbox: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(res.Content, &got); err != nil {
+		t.Fatalf("content %s: %v", res.Content, err)
+	}
+	if got["stdout"] != "out" || got["stderr"] != "err" {
+		t.Fatalf("content %s does not carry both streams", res.Content)
+	}
+}
+
+func TestRunSandboxBase64EncodesNonUTF8Output(t *testing.T) {
+	raw := []byte{0xff, 0xfe, 'x'}
+	sb := &scriptedSandbox{answer: tool.SandboxResult{Stdout: raw}}
+	res, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,
+		tool.SandboxSpec{}, []string{"cat", "bin"})
+	if err != nil {
+		t.Fatalf("RunSandbox: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(res.Content, &got); err != nil {
+		t.Fatalf("content %s: %v", res.Content, err)
+	}
+	if want := base64.StdEncoding.EncodeToString(raw); got["stdout_base64"] != want {
+		t.Fatalf("content %s, want stdout_base64 %q", res.Content, want)
+	}
+}
+
+func TestRunSandboxResolvesCredentialRefsBeforeTheRun(t *testing.T) {
+	creds := &memCredentials{values: map[string][]byte{"cred://db": []byte("s3cret")}}
+	sb := &scriptedSandbox{answer: tool.SandboxResult{Stdout: []byte("ok")}}
+	layer := tool.New(tool.Config{Clock: fixedClock(), Credentials: creds})
+	_, err := layer.RunSandbox(context.Background(), sb,
+		tool.SandboxSpec{CredRefs: map[string]string{"DB_PASSWORD": "cred://db"}}, []string{"true"})
+	if err != nil {
+		t.Fatalf("RunSandbox: %v", err)
+	}
+	if got := sb.spec.CredRefs["DB_PASSWORD"]; got != "s3cret" {
+		t.Fatalf("driver env %v, want the resolved credential", sb.spec.CredRefs)
+	}
+}
+
+func TestRunSandboxCredentialFailureLeaksNothing(t *testing.T) {
+	creds := &memCredentials{values: map[string][]byte{}}
+	sb := &scriptedSandbox{}
+	layer := tool.New(tool.Config{Clock: fixedClock(), Credentials: creds})
+	_, err := layer.RunSandbox(context.Background(), sb,
+		tool.SandboxSpec{CredRefs: map[string]string{"DB_PASSWORD": "cred://db"}}, []string{"true"})
+	if err == nil {
+		t.Fatal("RunSandbox succeeded without the credential")
+	}
+	if core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("error %v, want not_found", err)
+	}
+	for _, leak := range []string{"cred://db", "s3cret"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("error %q leaks %q", err, leak)
+		}
+	}
+	if sb.runs != 0 {
+		t.Fatalf("the driver ran %d times", sb.runs)
+	}
+}
+
+func TestRunSandboxWithoutCredentialStoreIsUnauthenticated(t *testing.T) {
+	sb := &scriptedSandbox{}
+	_, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,
+		tool.SandboxSpec{CredRefs: map[string]string{"DB_PASSWORD": "cred://db"}}, []string{"true"})
+	if err == nil || core.CodeOf(err) != core.CodeUnauthenticated {
+		t.Fatalf("error %v, want unauthenticated", err)
+	}
+	if sb.runs != 0 {
+		t.Fatalf("the driver ran %d times", sb.runs)
+	}
+}
+
+func TestRunSandboxRejectsUnsafeFiles(t *testing.T) {
+	for _, name := range []string{"", "../escape", "/abs", "a/../../b", `a\b`} {
+		t.Run(name, func(t *testing.T) {
+			sb := &scriptedSandbox{}
+			_, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,
+				tool.SandboxSpec{Files: map[string][]byte{name: []byte("x")}}, []string{"true"})
+			if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("error %v, want invalid_argument", err)
+			}
+			if sb.runs != 0 {
+				t.Fatalf("the driver ran %d times", sb.runs)
+			}
+		})
+	}
+}
+
+func TestRunSandboxRejectsReservedEnvironmentNames(t *testing.T) {
+	for _, name := range []string{"", "A=B", "A\x00B", "PATH", "LD_PRELOAD", "ld_library_path", "HOME"} {
+		t.Run(name, func(t *testing.T) {
+			sb := &scriptedSandbox{}
+			_, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,
+				tool.SandboxSpec{CredRefs: map[string]string{name: "cred://db"}}, []string{"true"})
+			if err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("error %v, want invalid_argument", err)
+			}
+			if sb.runs != 0 {
+				t.Fatalf("the driver ran %d times", sb.runs)
+			}
+		})
 	}
 }

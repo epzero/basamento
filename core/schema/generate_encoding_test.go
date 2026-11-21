@@ -310,3 +310,13 @@ func TestTextEncodingWinsInsideContainers(t *testing.T) {
 	validateGenerated(t, mapValue,
 		[]string{`{"v":{"k":"stamp"}}`, `{"v":null}`}, []string{`{"v":{"k":{}}}`})
 }
+
+func TestNamedFieldWithOwnEncodingIsGenerated(t *testing.T) {
+	sample := struct {
+		json.Number
+		N json.Number `json:"n"`
+	}{}
+	validateGenerated(t, sample,
+		[]string{`{"Number":0,"n":1.5}`, `{"Number":-2,"n":3}`},
+		[]string{`{"Number":0,"n":"1"}`, `{"Number":"1","n":2}`})
+}

@@ -2,9 +2,13 @@ package tool
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/epzero/basamento/core"
 )
@@ -25,7 +29,7 @@ type SandboxSpec struct {
 	MaxOutput int               // bytes kept in total; 0 = DefaultSandboxOutput
 	Network   []string          // hosts or CIDRs; empty = no network
 	Files     map[string][]byte // the only files the command sees, under its work dir
-	CredRefs  map[string]string // env var name -> cred:// name, resolved at the run
+	CredRefs  map[string]string // env var name -> cred:// name, resolved by RunSandbox before the run
 }
 
 // Sandbox is the port for commands run outside the host. A driver gives the
@@ -61,6 +65,15 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 		maxOut = DefaultSandboxOutput
 	}
 
+	if err := validateSandboxSpec(spec); err != nil {
+		return Result{}, err
+	}
+	resolved, err := l.resolveSandboxCredentials(ctx, spec.CredRefs)
+	if err != nil {
+		return Result{}, err
+	}
+	spec.CredRefs = resolved
+
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type completed struct {
@@ -69,6 +82,9 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 		panic  any
 	}
 	done := make(chan completed, 1)
+	// Register the deadline before the driver can run: a driver that moves the
+	// test clock as soon as it starts must not outrun the timer.
+	deadline := l.clock().After(limit)
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -80,12 +96,25 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 	}()
 
 	select {
-	case <-l.clock().After(limit):
+	case <-deadline:
 		cancel()
+		// Acknowledge the stop before the outcome is recorded: a replay must
+		// not find the command still running. A driver that ignores its
+		// context is bounded by one heartbeat.
+		select {
+		case <-done:
+		case <-time.After(Heartbeat):
+			l.log().Warn("sandbox did not stop after its time limit")
+		}
 		return Result{}, core.NewError(core.CodeTimeout,
 			fmt.Sprintf("sandbox: command exceeded its time limit of %s", limit), nil)
 	case <-ctx.Done():
 		cancel()
+		select {
+		case <-done:
+		case <-time.After(Heartbeat):
+			l.log().Warn("sandbox did not stop after its call was cancelled")
+		}
 		return Result{}, core.NewError(core.CodeCancelled, "sandbox: command cancelled", nil)
 	case out := <-done:
 		cancel()
@@ -103,6 +132,8 @@ func (l *Layer) RunSandbox(ctx context.Context, sb Sandbox, spec SandboxSpec, co
 
 // sandboxResult applies the output limit: the first bytes up to max are kept,
 // the rest discarded, and the output is marked truncated (REQ-TOOL-020).
+// Stdout and stderr are carried separately; a stream that is not UTF-8 is
+// base64-encoded so no byte is rewritten.
 func sandboxResult(res SandboxResult, max int) Result {
 	stdout, stderr := res.Stdout, res.Stderr
 	truncated := res.Truncated
@@ -120,14 +151,135 @@ func sandboxResult(res SandboxResult, max int) Result {
 	if len(stderr) > remaining {
 		stderr = stderr[:remaining]
 	}
-	output := stdout
-	if len(output) == 0 && len(stderr) > 0 {
-		output = stderr
-	}
-	content, _ := json.Marshal(string(output))
 	return Result{
-		Content:    content,
+		Content:    sandboxContent(stdout, stderr),
 		ExitStatus: res.ExitStatus,
 		Truncated:  truncated,
 	}
+}
+
+// sandboxContent keeps the single-stream shape scenarios and models expect (a
+// JSON string) and switches to an object only when both streams carry output.
+// A non-UTF-8 stream is base64, under "<stream>_base64".
+func sandboxContent(stdout, stderr []byte) json.RawMessage {
+	switch {
+	case len(stdout) == 0 && len(stderr) == 0:
+		content, _ := json.Marshal("")
+		return content
+	case len(stderr) == 0:
+		return streamContent("stdout", stdout)
+	case len(stdout) == 0:
+		return streamContent("stderr", stderr)
+	}
+	doc := map[string]any{}
+	addStream(doc, "stdout", stdout)
+	addStream(doc, "stderr", stderr)
+	content, _ := json.Marshal(doc)
+	return content
+}
+
+func streamContent(name string, value []byte) json.RawMessage {
+	if utf8.Valid(value) {
+		content, _ := json.Marshal(string(value))
+		return content
+	}
+	doc := map[string]any{}
+	addStream(doc, name, value)
+	content, _ := json.Marshal(doc)
+	return content
+}
+
+func addStream(doc map[string]any, name string, value []byte) {
+	if utf8.Valid(value) {
+		doc[name] = string(value)
+		return
+	}
+	doc[name+"_base64"] = base64.StdEncoding.EncodeToString(value)
+}
+
+// validateSandboxSpec rejects a spec whose files could escape the work
+// directory or whose environment names would override the driver's own.
+func validateSandboxSpec(spec SandboxSpec) error {
+	for name := range spec.Files {
+		if !sandboxFilePath(name) {
+			return core.NewError(core.CodeInvalidArgument,
+				fmt.Sprintf("sandbox: file %q is not a relative path inside the work directory", name), nil)
+		}
+	}
+	for name := range spec.CredRefs {
+		if !sandboxEnvName(name) {
+			return core.NewError(core.CodeInvalidArgument,
+				fmt.Sprintf("sandbox: environment variable %q is not allowed", name), nil)
+		}
+	}
+	return nil
+}
+
+func sandboxFilePath(name string) bool {
+	if name == "" || strings.ContainsRune(name, 0) || strings.Contains(name, `\`) || path.IsAbs(name) {
+		return false
+	}
+	clean := path.Clean(name)
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+// reservedSandboxEnv are the names a command's own loader or shell reads
+// before the command runs; a credential must not set them.
+var reservedSandboxEnv = map[string]bool{
+	"PATH":              true,
+	"HOME":              true,
+	"SHELL":             true,
+	"IFS":               true,
+	"ENV":               true,
+	"BASH_ENV":          true,
+	"PWD":               true,
+	"TMPDIR":            true,
+	"HOSTNAME":          true,
+	"LD_PRELOAD":        true,
+	"LD_LIBRARY_PATH":   true,
+	"LD_AUDIT":          true,
+	"LD_DEBUG":          true,
+	"LD_PROFILE":        true,
+	"GCONV_PATH":        true,
+	"NLSPATH":           true,
+	"PYTHONPATH":        true,
+	"NODE_OPTIONS":      true,
+	"PERL5LIB":          true,
+	"RUBYLIB":           true,
+	"JAVA_TOOL_OPTIONS": true,
+	"_JAVA_OPTIONS":     true,
+	"CLASSPATH":         true,
+}
+
+func sandboxEnvName(name string) bool {
+	if name == "" || strings.ContainsAny(name, "=\x00") {
+		return false
+	}
+	return !reservedSandboxEnv[strings.ToUpper(name)]
+}
+
+// resolveSandboxCredentials resolves every reference before the driver runs,
+// so a driver never sees a reference or a store error. A failure names the
+// environment variable, never the reference or its value.
+func (l *Layer) resolveSandboxCredentials(ctx context.Context, refs map[string]string) (map[string]string, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	if l.cfg.Credentials == nil {
+		return nil, core.NewError(core.CodeUnauthenticated, "sandbox: no credential store", nil)
+	}
+	resolved := make(map[string]string, len(refs))
+	for name, ref := range refs {
+		secret, err := l.cfg.Credentials.Resolve(ctx, ref)
+		if err != nil {
+			code := core.CodeOf(err)
+			if code != core.CodeUnavailable && code != core.CodeNotFound {
+				code = core.CodeUnauthenticated
+			}
+			return nil, core.NewError(code,
+				fmt.Sprintf("sandbox: the credential for %q could not be resolved", name), nil)
+		}
+		resolved[name] = string(secret)
+	}
+	return resolved, nil
 }

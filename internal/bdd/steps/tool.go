@@ -414,13 +414,14 @@ type bddMCPSim struct {
 	answers  map[string]json.RawMessage
 	failures map[string]string
 	calls    []bddMCPCall
-	creds    [][]byte
+	dialCred []byte
 	lastLink *bddDropTransport
 }
 
 type bddMCPCall struct {
 	name string
 	args json.RawMessage
+	cred []byte
 }
 
 type bddDropTransport struct {
@@ -481,7 +482,11 @@ func (s *bddMCPSim) addTool(name, description, required, typ string) {
 func (s *bddMCPSim) handler(name string) mcp.ToolHandler {
 	return func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		s.mu.Lock()
-		s.calls = append(s.calls, bddMCPCall{name: name, args: append(json.RawMessage(nil), req.Params.Arguments...)})
+		s.calls = append(s.calls, bddMCPCall{
+			name: name,
+			args: append(json.RawMessage(nil), req.Params.Arguments...),
+			cred: append([]byte(nil), s.dialCred...),
+		})
 		drop := s.drop
 		failure := s.failures[name]
 		answer := s.answers[name]
@@ -511,9 +516,7 @@ func (s *bddMCPSim) handler(name string) mcp.ToolHandler {
 func (s *bddMCPSim) dial(ctx context.Context, credential []byte) (mcp.Transport, error) {
 	s.mu.Lock()
 	offline := s.offline
-	if len(credential) > 0 {
-		s.creds = append(s.creds, append([]byte(nil), credential...))
-	}
+	s.dialCred = append([]byte(nil), credential...)
 	s.mu.Unlock()
 	if offline {
 		return nil, errors.New("offline")
@@ -548,8 +551,8 @@ func (s *bddMCPSim) totalCalls() int {
 func (s *bddMCPSim) receivedCredential(secret string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, value := range s.creds {
-		if string(value) == secret {
+	for _, call := range s.calls {
+		if string(call.cred) == secret {
 			return true
 		}
 	}
@@ -575,6 +578,14 @@ type bddSandbox struct {
 	startOnce       sync.Once
 	stopCh          chan struct{}
 	stopOnce        sync.Once
+
+	hostEnv   map[string]string
+	hostFiles map[string]bool
+	leakHost  bool
+	seenEnv   map[string]string
+	seenFiles map[string]bool
+	seenMeta  bool
+	seenNet   []string
 }
 
 type bddSandboxAnswer struct {
@@ -585,7 +596,14 @@ type bddSandboxAnswer struct {
 func (w *toolWorld) sandbox(name string) *bddSandbox {
 	s := w.sandboxes[name]
 	if s == nil {
-		s = &bddSandbox{name: name, answers: map[string]bddSandboxAnswer{}, startCh: make(chan struct{}), stopCh: make(chan struct{})}
+		s = &bddSandbox{
+			name:      name,
+			answers:   map[string]bddSandboxAnswer{},
+			hostEnv:   w.hostEnv,
+			hostFiles: w.hostFiles,
+			startCh:   make(chan struct{}),
+			stopCh:    make(chan struct{}),
+		}
 		w.sandboxes[name] = s
 	}
 	return s
@@ -614,6 +632,28 @@ func (s *bddSandbox) Run(ctx context.Context, spec tool.SandboxSpec, command []s
 	s.commands = append(s.commands, strings.Join(command, " "))
 	runUntilStopped := s.runUntilStopped
 	answer := s.answers[strings.Join(command, " ")]
+	// What the command actually sees. A driver must give it the spec's
+	// surface only; a leaking driver starts from the host's and fails the
+	// scenario's assertions and output checks.
+	env := map[string]string{"HOME": "/work"}
+	for name, value := range spec.CredRefs {
+		env[name] = value
+	}
+	files := map[string]bool{}
+	for name := range spec.Files {
+		files[name] = true
+	}
+	if s.leakHost {
+		for name, value := range s.hostEnv {
+			env[name] = value
+		}
+		for name := range s.hostFiles {
+			files[name] = true
+		}
+	}
+	s.seenEnv, s.seenFiles = env, files
+	s.seenMeta = s.leakHost
+	s.seenNet = append([]string(nil), spec.Network...)
 	s.mu.Unlock()
 	if runUntilStopped {
 		<-ctx.Done()
@@ -1410,8 +1450,15 @@ func registerToolSandbox(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the host environment defines "([^"]*)" and host file "([^"]*)" exists$`, func(ctx context.Context, env, file string) error {
 		w := world(ctx).Tool
-		w.hostEnv[env] = "top-secret"
+		name, _, _ := strings.Cut(env, "=")
+		w.hostEnv[name] = "top-secret"
 		w.hostFiles[file] = true
+		for _, sb := range w.sandboxes {
+			sb.mu.Lock()
+			sb.hostEnv = w.hostEnv
+			sb.hostFiles = w.hostFiles
+			sb.mu.Unlock()
+		}
 		return nil
 	})
 	sc.Step(`^sandbox "([^"]*)" has no network access$`, func(ctx context.Context, name string) error {
@@ -1475,25 +1522,51 @@ func registerToolSandbox(sc *godog.ScenarioContext) {
 		return world(ctx).Tool.call(ctx, agent, name, args)
 	})
 	sc.Step(`^the sandbox "([^"]*)" received (\d+) host environment variables?, (\d+) host files?, no instance metadata access and no network grant$`, func(ctx context.Context, name string, envs, files int) error {
-		sb := world(ctx).Tool.sandbox(name)
+		w := world(ctx).Tool
+		sb := w.sandbox(name)
 		sb.mu.Lock()
-		spec := sb.gotSpec
+		seenEnv := make(map[string]string, len(sb.seenEnv))
+		for k, v := range sb.seenEnv {
+			seenEnv[k] = v
+		}
+		seenFiles := make(map[string]bool, len(sb.seenFiles))
+		for k, v := range sb.seenFiles {
+			seenFiles[k] = v
+		}
+		seenMeta := sb.seenMeta
+		seenNet := append([]string(nil), sb.seenNet...)
 		sb.mu.Unlock()
-		if len(spec.Files) != files {
-			return fmt.Errorf("the sandbox received %d host files, want %d", len(spec.Files), files)
+
+		hostEnvs := 0
+		for env := range w.hostEnv {
+			if _, ok := seenEnv[env]; ok {
+				hostEnvs++
+			}
 		}
-		if len(spec.Network) != 0 {
-			return fmt.Errorf("the sandbox received network %v, want none", spec.Network)
+		hostFiles := 0
+		for file := range w.hostFiles {
+			if seenFiles[file] {
+				hostFiles++
+			}
 		}
-		if len(spec.CredRefs) != envs {
-			return fmt.Errorf("the sandbox received %d environment variables, want %d", len(spec.CredRefs), envs)
+		if hostEnvs != envs {
+			return fmt.Errorf("the command saw %d host environment variables, want %d", hostEnvs, envs)
+		}
+		if hostFiles != files {
+			return fmt.Errorf("the command saw %d host files, want %d", hostFiles, files)
+		}
+		if seenMeta {
+			return fmt.Errorf("the command could reach instance metadata")
+		}
+		if len(seenNet) != 0 {
+			return fmt.Errorf("the command had network %v, want none", seenNet)
 		}
 		return nil
 	})
 	sc.Step(`^the sandbox "([^"]*)" received the network grant "([^"]*)" and nothing else$`, func(ctx context.Context, name, host string) error {
 		sb := world(ctx).Tool.sandbox(name)
 		sb.mu.Lock()
-		network := append([]string(nil), sb.gotSpec.Network...)
+		network := append([]string(nil), sb.seenNet...)
 		sb.mu.Unlock()
 		if len(network) != 1 || network[0] != host {
 			return fmt.Errorf("the sandbox received network %v, want only %q", network, host)

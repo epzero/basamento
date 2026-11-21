@@ -471,3 +471,67 @@ func TestSetGetAndNames(t *testing.T) {
 		t.Fatal("a nil set has names")
 	}
 }
+
+func TestStepRegistersTheDeadlineBeforeTheToolRuns(t *testing.T) {
+	clock := fixedClock()
+	set := &tool.Set{Tools: []tool.Tool{{
+		Name:    "slow-report",
+		Timeout: 30 * time.Second,
+		Run: func(ctx context.Context, _ json.RawMessage) (tool.Result, error) {
+			// A tool that advances the fake clock as soon as it starts: the
+			// layer must have registered the deadline before this point.
+			clock.Advance(30 * time.Second)
+			<-ctx.Done()
+			return tool.Result{}, ctx.Err()
+		},
+	}}}
+	type done struct {
+		out tool.Outcome
+		err error
+	}
+	result := make(chan done, 1)
+	go func() {
+		out, err := layerWith(clock, newMemBlob(), nil).Step(context.Background(), set,
+			tool.Call{Name: "slow-report", Args: json.RawMessage(`{}`)})
+		result <- done{out, err}
+	}()
+	got := <-result
+	if got.err != nil {
+		t.Fatalf("Step: %v", got.err)
+	}
+	if !got.out.Failed || got.out.Code != core.CodeTimeout {
+		t.Fatalf("outcome %+v, want timeout", got.out)
+	}
+}
+
+func TestStepWaitsForTheToolToStopAtItsTimeLimit(t *testing.T) {
+	clock := fixedClock()
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	set := &tool.Set{Tools: []tool.Tool{{
+		Name:    "slow-report",
+		Timeout: 30 * time.Second,
+		Run: func(ctx context.Context, _ json.RawMessage) (tool.Result, error) {
+			close(started)
+			<-ctx.Done()
+			close(stopped)
+			return tool.Result{}, ctx.Err()
+		},
+	}}}
+	result := make(chan tool.Outcome, 1)
+	go func() {
+		out, _ := layerWith(clock, newMemBlob(), nil).Step(context.Background(), set,
+			tool.Call{Name: "slow-report", Args: json.RawMessage(`{}`)})
+		result <- out
+	}()
+	<-started
+	clock.Advance(30 * time.Second)
+	if out := <-result; !out.Failed || out.Code != core.CodeTimeout {
+		t.Fatalf("outcome %+v, want timeout", out)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("Step returned before the tool acknowledged the stop")
+	}
+}

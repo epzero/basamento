@@ -11,9 +11,13 @@
 // call again (REQ-TOOL-003, ADR-0011).
 //
 // MCPClient lists a server's tools under mcp_<server>__<tool> names and
-// forwards calls over the MCP Go SDK. Sandbox is the port for commands run
-// outside the host; Layer.RunSandbox enforces the time and output limits
-// around a driver.
+// forwards calls over the MCP Go SDK; a server's credential is resolved per
+// call and scrubbed from anything the server sends back. Sandbox is the port
+// for commands run outside the host; Layer.RunSandbox resolves the spec's
+// credential references before the driver runs, rejects files that escape the
+// work directory or reserved environment names, and enforces the time and
+// output limits around a driver. Stdout and stderr are carried separately,
+// with non-UTF-8 output base64-encoded.
 //
 // Status: implemented (WP-L7-02). Concrete sandbox drivers are a follow-up
 // work package; the gate exercises the port against a simulated sandbox.

@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -24,7 +26,7 @@ type Tool struct {
 
 // Result is a successful tool result.
 type Result struct {
-	Content    json.RawMessage // or a JSON string, for a tool whose result is text
+	Content    json.RawMessage // or a JSON string, for a tool whose result is text; a sandbox result with both streams is an object
 	BlobRef    string          // set instead of Content when the result exceeded MaxResult
 	ExitStatus int             // set by a sandbox command (REQ-TOOL-021)
 	Truncated  bool            // set by a sandbox result whose output was cut (REQ-TOOL-020)
@@ -46,6 +48,30 @@ func (s *Set) Get(name string) (Tool, bool) {
 		}
 	}
 	return Tool{}, false
+}
+
+// Merge adds another set's tools to s, keeping the set sorted. A name that
+// appears in both sets is rejected with code conflict: a duplicate would make
+// Get return whichever came first, which could route a call to the wrong
+// server with its credential.
+func (s *Set) Merge(other *Set) error {
+	if other == nil || len(other.Tools) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(s.Tools)+len(other.Tools))
+	for _, t := range s.Tools {
+		seen[t.Name] = true
+	}
+	for _, t := range other.Tools {
+		if seen[t.Name] {
+			return core.NewError(core.CodeConflict,
+				fmt.Sprintf("tool %q is offered more than once", t.Name), map[string]any{"tool": t.Name})
+		}
+		seen[t.Name] = true
+	}
+	s.Tools = append(s.Tools, other.Tools...)
+	sort.Slice(s.Tools, func(i, j int) bool { return s.Tools[i].Name < s.Tools[j].Name })
+	return nil
 }
 
 // Names returns the set's tool names, in order.

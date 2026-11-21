@@ -1,10 +1,12 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -32,8 +34,7 @@ type MCPClient struct {
 	server MCPServer
 	creds  platform.Credentials
 
-	mu      sync.Mutex
-	session *mcp.ClientSession
+	mu sync.Mutex
 }
 
 // NewMCPClient returns a client for server. creds may be nil when the server
@@ -48,14 +49,24 @@ func MCPToolName(server, tool string) string {
 	return "mcp_" + sanitizeServer(server) + "__" + tool
 }
 
+// sanitizeServer maps a server name to the name segment used in a tool name.
+// A run of characters outside [A-Za-z0-9] becomes one '_', so the segment can
+// never contain the "__" separator that ends the server part. Two servers can
+// still sanitize to the same segment; Set.Merge rejects the resulting
+// duplicate tool names instead of letting Get pick the first.
 func sanitizeServer(name string) string {
 	var b strings.Builder
+	lastUnderscore := false
 	for _, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			b.WriteRune(r)
+			lastUnderscore = false
 		default:
-			b.WriteByte('_')
+			if !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
 		}
 	}
 	return b.String()
@@ -74,16 +85,20 @@ func (c *MCPClient) Tools(ctx context.Context, existing *Set) ([]Tool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	_ = c.closeLocked()
-	session, err := c.connect(ctx)
+	credential, err := c.credential(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c.session = session
+	session, err := c.connect(ctx, credential)
+	if err != nil {
+		return nil, err
+	}
+	// The listing session is not kept: every offer reads the server afresh
+	// (REQ-TOOL-016), so holding its connection would leak one per offer.
+	defer func() { _ = session.Close() }()
 	result, err := session.ListTools(ctx, nil)
 	if err != nil {
-		_ = c.closeLocked()
-		return nil, mcpError(c.server.Name, "list tools", err)
+		return nil, mcpError(c.server.Name, "list tools", err, string(credential))
 	}
 
 	tools := make([]Tool, 0, len(result.Tools))
@@ -131,7 +146,11 @@ func (c *MCPClient) Call(ctx context.Context, call Call) (Result, error) {
 		return Result{}, core.NewError(core.CodeNotFound,
 			fmt.Sprintf("mcp server %q does not offer %q", c.server.Name, call.Name), nil)
 	}
-	session, err := c.connect(ctx)
+	credential, err := c.credential(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	session, err := c.connect(ctx, credential)
 	if err != nil {
 		return Result{}, err
 	}
@@ -139,17 +158,24 @@ func (c *MCPClient) Call(ctx context.Context, call Call) (Result, error) {
 
 	var args any
 	if len(call.Args) > 0 {
-		if err := json.Unmarshal(call.Args, &args); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(call.Args))
+		decoder.UseNumber()
+		if err := decoder.Decode(&args); err != nil {
+			return Result{}, core.NewError(core.CodeInvalidArgument,
+				fmt.Sprintf("tool %q: arguments are not valid JSON", call.Name), nil)
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
 			return Result{}, core.NewError(core.CodeInvalidArgument,
 				fmt.Sprintf("tool %q: arguments are not valid JSON", call.Name), nil)
 		}
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: remote, Arguments: args})
 	if err != nil {
-		return Result{}, mcpError(c.server.Name, "call "+remote, err)
+		return Result{}, mcpError(c.server.Name, "call "+remote, err, string(credential))
 	}
 	if result.IsError {
-		message := contentText(result.Content)
+		message := scrubSecret(contentText(result.Content), string(credential))
 		if len(message) > DefaultMaxResult {
 			message = message[:DefaultMaxResult]
 		}
@@ -163,30 +189,14 @@ func (c *MCPClient) Call(ctx context.Context, call Call) (Result, error) {
 		return Result{}, core.NewError(core.CodeInternal,
 			fmt.Sprintf("mcp server %q returned a result that is not JSON", c.server.Name), nil)
 	}
-	return Result{Content: content}, nil
+	return Result{Content: scrubJSON(content, string(credential))}, nil
 }
 
-// Close closes the cached list session.
-func (c *MCPClient) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.closeLocked()
-}
+// Close releases any resources held by the client. Listings and calls open
+// and close their own session, so there is nothing left to close.
+func (c *MCPClient) Close() error { return nil }
 
-func (c *MCPClient) closeLocked() error {
-	if c.session == nil {
-		return nil
-	}
-	err := c.session.Close()
-	c.session = nil
-	return err
-}
-
-func (c *MCPClient) connect(ctx context.Context) (*mcp.ClientSession, error) {
-	credential, err := c.credential(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (c *MCPClient) connect(ctx context.Context, credential []byte) (*mcp.ClientSession, error) {
 	if c.server.Dial == nil {
 		return nil, core.NewError(core.CodeUnavailable,
 			fmt.Sprintf("mcp server %q is unreachable", c.server.Name), nil)
@@ -249,16 +259,63 @@ func (c *MCPClient) remoteName(name string) (string, bool) {
 // mcpError maps an SDK error to the platform's codes: a JSON-RPC error is the
 // server's own answer (vendor_error); anything else is a lost or failed
 // connection (unavailable), never retried (REQ-TOOL-014, REQ-TOOL-015).
-func mcpError(server, op string, err error) error {
+func mcpError(server, op string, err error, secret string) error {
 	var rpcErr *jsonrpc.Error
 	if errors.As(err, &rpcErr) {
-		return core.NewError(core.CodeVendor, rpcErr.Message, map[string]any{
+		return core.NewError(core.CodeVendor, scrubSecret(rpcErr.Message, secret), map[string]any{
 			"server": server,
 			"op":     op,
 		})
 	}
 	return core.NewError(core.CodeUnavailable,
 		fmt.Sprintf("mcp server %q is unavailable", server), nil)
+}
+
+// scrubSecret removes a resolved credential from text the server controls.
+// The credential is never written to an event, a history entry, an error or a
+// log, even when the server echoes it back.
+func scrubSecret(text, secret string) string {
+	if secret == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, secret, "[redacted]")
+}
+
+func scrubJSON(raw json.RawMessage, secret string) json.RawMessage {
+	if secret == "" || len(raw) == 0 {
+		return raw
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return json.RawMessage(scrubSecret(string(raw), secret))
+	}
+	out, err := json.Marshal(scrubValue(value, secret))
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func scrubValue(value any, secret string) any {
+	switch v := value.(type) {
+	case string:
+		return scrubSecret(v, secret)
+	case []any:
+		for i := range v {
+			v[i] = scrubValue(v[i], secret)
+		}
+		return v
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[scrubSecret(key, secret)] = scrubValue(item, secret)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // contentJSON turns the server's content into the tool result. A single text

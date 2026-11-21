@@ -243,11 +243,19 @@ func patchGeneratedSchema(raw json.RawMessage, t reflect.Type, opts *genOptions)
 }
 
 func patchSchemaNode(node map[string]any, t reflect.Type, opts *genOptions) error {
+	nullable := false
 	for t.Kind() == reflect.Pointer {
 		ensureNullAdmitted(node)
+		nullable = true
 		t = t.Elem()
 	}
 	if typeEncoding(t) != ruleNone {
+		if err := applyTypeOverride(node, t, opts); err != nil {
+			return err
+		}
+		if nullable {
+			ensureNullAdmitted(node)
+		}
 		return nil
 	}
 	switch t.Kind() {
@@ -261,6 +269,36 @@ func patchSchemaNode(node map[string]any, t reflect.Type, opts *genOptions) erro
 		if ap, ok := node["additionalProperties"].(map[string]any); ok {
 			return patchSchemaNode(ap, t.Elem(), opts)
 		}
+	}
+	return nil
+}
+
+// applyTypeOverride replaces a node with the encoding override the library
+// was not allowed to see at an anonymous embedded position, so a named field
+// of the same type keeps its own encoding instead of the library's shape.
+func applyTypeOverride(node map[string]any, t reflect.Type, opts *genOptions) error {
+	s := opts.full.TypeSchemas[t]
+	if s == nil {
+		return nil
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return invalidArgf("marshal type override: %v", err)
+	}
+	var replacement map[string]any
+	if err := json.Unmarshal(raw, &replacement); err != nil {
+		// The empty schema marshals as true: every JSON value is allowed.
+		if string(raw) == "true" {
+			replacement = map[string]any{}
+		} else {
+			return invalidArgf("parse type override: %v", err)
+		}
+	}
+	for key := range node {
+		delete(node, key)
+	}
+	for key, value := range replacement {
+		node[key] = value
 	}
 	return nil
 }

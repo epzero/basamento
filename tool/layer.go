@@ -114,6 +114,9 @@ func (l *Layer) Step(ctx context.Context, set *Set, call Call) (Outcome, error) 
 		panic  any
 	}
 	done := make(chan completed, 1)
+	// Register the deadline before the tool can run: a tool that moves the
+	// test clock as soon as it starts must not outrun the timer.
+	deadline := clock.After(timeout)
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -125,8 +128,16 @@ func (l *Layer) Step(ctx context.Context, set *Set, call Call) (Outcome, error) 
 	}()
 
 	select {
-	case <-clock.After(timeout):
+	case <-deadline:
 		cancel()
+		// Acknowledge the stop before the outcome is recorded: a replay must
+		// not find the tool still running. A tool that ignores its context is
+		// bounded by one heartbeat.
+		select {
+		case <-done:
+		case <-time.After(Heartbeat):
+			l.log().Warn("tool did not stop after its time limit", "tool", t.Name)
+		}
 		return Outcome{
 			Failed:  true,
 			Code:    core.CodeTimeout,
@@ -134,6 +145,11 @@ func (l *Layer) Step(ctx context.Context, set *Set, call Call) (Outcome, error) 
 		}, nil
 	case <-ctx.Done():
 		cancel()
+		select {
+		case <-done:
+		case <-time.After(Heartbeat):
+			l.log().Warn("tool did not stop after its call was cancelled", "tool", t.Name)
+		}
 		return Outcome{}, core.NewError(core.CodeCancelled,
 			fmt.Sprintf("tool %q: call cancelled", t.Name), nil)
 	case out := <-done:

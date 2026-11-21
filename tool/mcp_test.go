@@ -28,6 +28,7 @@ type mcpSim struct {
 	drop     bool
 	offline  bool
 	creds    [][]byte
+	closes   int
 	lastLink *dropTransport
 }
 
@@ -40,18 +41,34 @@ type mcpCall struct {
 // drop it mid-call: closing the client end never waits for the server handler.
 type dropTransport struct {
 	mcp.Transport
-	mu   sync.Mutex
-	conn mcp.Connection
+	mu      sync.Mutex
+	conn    mcp.Connection
+	onClose func()
 }
 
 func (t *dropTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	conn, err := t.Transport.Connect(ctx)
-	if err == nil {
-		t.mu.Lock()
-		t.conn = conn
-		t.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
-	return conn, err
+	t.mu.Lock()
+	t.conn = conn
+	t.mu.Unlock()
+	if t.onClose != nil {
+		return &trackingConn{Connection: conn, onClose: t.onClose}, nil
+	}
+	return conn, nil
+}
+
+// trackingConn reports when the SDK closes a connection.
+type trackingConn struct {
+	mcp.Connection
+	onClose func()
+}
+
+func (c *trackingConn) Close() error {
+	c.onClose()
+	return c.Connection.Close()
 }
 
 func (t *dropTransport) drop() {
@@ -126,7 +143,11 @@ func (s *mcpSim) dial(ctx context.Context, credential []byte) (mcp.Transport, er
 		return nil, errors.New("offline")
 	}
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	link := &dropTransport{Transport: clientTransport}
+	link := &dropTransport{Transport: clientTransport, onClose: func() {
+		s.mu.Lock()
+		s.closes++
+		s.mu.Unlock()
+	}}
 	s.mu.Lock()
 	s.lastLink = link
 	s.mu.Unlock()
@@ -144,6 +165,12 @@ func (s *mcpSim) callCount(name string) int {
 		}
 	}
 	return count
+}
+
+func (s *mcpSim) closedConnections() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closes
 }
 
 func (s *mcpSim) lastCredential() []byte {
@@ -405,3 +432,98 @@ func (c *memCredentials) Delete(_ context.Context, name string) error {
 }
 
 func (c *memCredentials) Names(context.Context) ([]string, error) { return nil, nil }
+
+func TestMCPArgumentsKeepLargeIntegers(t *testing.T) {
+	sim := newMCPSim()
+	sim.addTool("echo", "", "id")
+	client := tool.NewMCPClient(tool.MCPServer{Name: "weather", Dial: sim.dial}, nil)
+	tools, err := client.Tools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	if _, err := tools[0].Run(context.Background(), json.RawMessage(`{"id":9007199254740993}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+	if len(sim.calls) != 1 {
+		t.Fatalf("server received %d calls", len(sim.calls))
+	}
+	if !strings.Contains(string(sim.calls[0].args), "9007199254740993") {
+		t.Fatalf("server received %s, want the exact integer", sim.calls[0].args)
+	}
+}
+
+func TestMCPListingSessionIsClosedAfterTheList(t *testing.T) {
+	sim := newMCPSim()
+	sim.addTool("forecast", "", "city")
+	client := tool.NewMCPClient(tool.MCPServer{Name: "weather", Dial: sim.dial}, nil)
+	if _, err := client.Tools(context.Background(), nil); err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	if got := sim.closedConnections(); got != 1 {
+		t.Fatalf("%d listing connections closed, want 1", got)
+	}
+	if _, err := client.Tools(context.Background(), nil); err != nil {
+		t.Fatalf("second Tools: %v", err)
+	}
+	if got := sim.closedConnections(); got != 2 {
+		t.Fatalf("%d listing connections closed after two offers, want 2", got)
+	}
+}
+
+func TestMCPToolNameServerPartHasNoSeparator(t *testing.T) {
+	for _, server := range []string{"a__b", "a  b", "a_-b", "pay_eu"} {
+		name := tool.MCPToolName(server, "forecast")
+		serverPart := strings.TrimSuffix(strings.TrimPrefix(name, "mcp_"), "__forecast")
+		if strings.Contains(serverPart, "__") {
+			t.Errorf("MCPToolName(%q) = %q: the server part contains the separator", server, name)
+		}
+	}
+}
+
+func TestSetMergeRejectsDuplicateNames(t *testing.T) {
+	first := &tool.Set{Tools: []tool.Tool{{Name: "mcp_pay_eu__charge"}}}
+	second := &tool.Set{Tools: []tool.Tool{{Name: "mcp_pay_eu__charge"}}}
+	err := first.Merge(second)
+	if err == nil || core.CodeOf(err) != core.CodeConflict {
+		t.Fatalf("error %v, want conflict", err)
+	}
+	if len(first.Tools) != 1 {
+		t.Fatalf("the set changed on a rejected merge: %v", first.Tools)
+	}
+}
+
+func TestMCPEchoedCredentialIsScrubbed(t *testing.T) {
+	const secret = "sk-weather-7f3a"
+	sim := newMCPSim()
+	sim.addTool("echo", "", "city")
+	sim.answer["echo"] = json.RawMessage(`"` + secret + `"`)
+	creds := &memCredentials{values: map[string][]byte{"cred://weather-key": []byte(secret)}}
+	client := tool.NewMCPClient(tool.MCPServer{Name: "weather", CredRef: "cred://weather-key", Dial: sim.dial}, creds)
+	tools, err := client.Tools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	res, err := tools[0].Run(context.Background(), json.RawMessage(`{"city":"Porto"}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(string(res.Content), secret) {
+		t.Fatalf("result %s carries the credential", res.Content)
+	}
+	if !strings.Contains(string(res.Content), "[redacted]") {
+		t.Fatalf("result %s is not scrubbed", res.Content)
+	}
+
+	sim.mu.Lock()
+	sim.fail["echo"] = "bad key " + secret
+	sim.mu.Unlock()
+	_, err = tools[0].Run(context.Background(), json.RawMessage(`{"city":"Porto"}`))
+	if err == nil || core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("error %v, want vendor_error", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error %q carries the credential", err)
+	}
+}
