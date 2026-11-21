@@ -199,7 +199,8 @@ fails the step with code `internal`, marked non-retryable, so no retry follows
 (`REQ-RT-016`); if the flow does not handle it, the run fails as for any other
 unhandled step error. The failure is recorded in the journal so `Describe` and
 `Future.Get` report it. These are runtime boundary rules, not a contract
-change.
+change. The recovered value is logged once per recovery through the runtime's
+logger, bounded in size, and is not part of any error a caller receives.
 
 ### Retention is the process's life
 
@@ -388,31 +389,48 @@ runtime asks the server for its version and refuses to serve, with code
 `unsupported`, when it is outside the range (`REQ-RT-037`). This check uses no
 new method on `runtime.Runtime` or `runtime.Caps`.
 
-The gate has no way to run an older or newer server build. The Temporal **test
-server** — the SDK's dev server whose features the scenarios use through
-time skipping — runs at the pinned version (`1.32.2` in `Background` and
-`RT-037-01`). `RT-037-02` passes the runtime a **simulated Temporal server
-version** for the version check `Serve` makes, which fails with `unsupported`
-when outside `1.32.x`.
+The gate downloads no server binary. The harness runs `runtime/temporal`
+workflow and activity code on the SDK's `TestWorkflowEnvironment`, which is
+in-process and owns its own skipping clock; no Temporal dev server is
+downloaded or started.
 
 ### How the scenarios run deterministically
 
-In `runtime/temporal` tests (`_test.go` and `internal/bdd`), the harness starts
-an in-process Temporal test server on an **ephemeral loopback port
-(`127.0.0.1:0`)** with time skipping enabled; the embedded profile's server
-(WP-L5-03) and fixed port `7233` are never used. The scenarios speak test time
-only (`RT-041-01`'s `1 day of test time`) and time skipping advances the
-workflow clock to the next timer or retry at once: no wall clock, no sleep, no
-timing assumption.
+The harness runs the workflow and activities on the SDK's
+`TestWorkflowEnvironment`, whose clock skips to the next timer or retry at
+once. "1 day of test time" in `RT-041-01`/`RT-041-02` is the environment clock
+skipping straight to that point; there is no wall clock and no sleep.
 
-Histories are read from the test server's client (`GetWorkflowHistory`,
-including payload metadata and `ContinuedAsNew` events). The tenant, the blob
-store, the payload codec and the simulated key service come from the gate: the
-payload codec and its simulated key service are WP-L1-04's
-(`internal/bdd/steps/secrets.go`), the blob store is WP-L1-02's store, and the
-two are composed here as the data converter this package takes from the
-composition root. The implementer uses the step library of the other work
-packages this work package needs (`specs/secrets/`, `specs/blob/`), not a copy.
+The runtime's data converter is the payload codec of WP-L1-04 composed with the
+blob claim-check codec of WP-L1-02; the harness wraps that converter in a
+recorder. Every payload the runtime hands to the SDK on its way to the server
+passes through the recorder, so "the run history holds ..." and "every payload
+in the run history ..." (`RT-028-01`, `RT-029-01`, `RT-031-01`, `RT-032-01`,
+`RT-033-01`) are read from what the recorder saw — exactly the payloads the SDK
+hands to the server for history. The tenant, the blob store, the payload codec
+and the simulated key service still come from the gate: the codec and key
+service are WP-L1-04's (`internal/bdd/steps/secrets.go`), the blob store is
+WP-L1-02's, and the two are composed here as the data converter the package
+takes from the composition root. The implementer uses the step library of the
+other work packages this work package needs (`specs/secrets/`, `specs/blob/`),
+not a copy.
+
+ContinueAsNew (`RT-034-01` … `RT-038-01`): at a `Checkpoint` past the threshold,
+the workflow returns the SDK's continue-as-new error with the continuation
+input; the harness then starts the next execution under the same run id, as the
+server does, so "continued as new N times" counts those restarts. The harness
+controls the reported history length (`SetCurrentHistoryLength`), so the
+threshold comparison is deterministic without depending on how many events the
+SDK counts.
+
+Serve version check (`RT-037-01`/`02`): a minimal in-process gRPC
+`WorkflowService`, test-only code in `internal/bdd`, listens on `127.0.0.1:0`
+and answers `GetSystemInfo` with the scenario's version — `1.32.2` in
+`Background` and `RT-037-01`, and `1.31.9` and `1.33.0` in `RT-037-02`. The
+runtime dials it through the real client path; no server binary is downloaded.
+
+Against a real server, WP-L5-03 (embedded server) and WP-L5-04 (conformance,
+crash resume, replay) run the same workflows in real time, in the slow lane.
 
 ### Changed outside `runtime/temporal`
 
