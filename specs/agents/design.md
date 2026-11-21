@@ -21,7 +21,7 @@ Every number in a scenario follows these rules.
    turn `n+1`.
 2. **Order of the checks** at the boundary before model turn `n`: cancellation
    (REQ-AGENT-028), the time cap (REQ-AGENT-012), the step cap (REQ-AGENT-008),
-   the memory policy (REQ-AGENT-023–025, REQ-AGENT-027), the token cap
+   the context-window policy (the memory policy of REQ-AGENT-023–025, REQ-AGENT-027), the token cap
    (REQ-AGENT-011), the cost cap and reservation (REQ-AGENT-009,
    REQ-AGENT-010) (see §6).
 3. **Reaching a cap is within it.** Step, token and cost caps are inclusive:
@@ -47,7 +47,7 @@ Every number in a scenario follows these rules.
    plus that turn's input tokens. Across a handoff the target's step count,
    spent cost and used tokens start at `0` and count only its own turns; the
    time cap is the chain's, measured from the run's start (§4).
-7. **Memory policy counts.** A completed model turn is one unit: its assistant
+7. **Context-window policy counts.** A completed model turn is one unit: its assistant
    message (with any tool-call requests) plus the tool-result messages that
    followed it; a turn with `k` tool calls is `1 + k` messages. Before model
    turn `n`, let `T_sys` be the system messages' tokens and `T_i` turn `i`'s
@@ -75,7 +75,7 @@ sandboxes are not specified here.
 
 | Step name | Side effect | Result |
 | --- | --- | --- |
-| `turn-<n>` | one model turn: reserve, `model.Invoke` (blocking form), settle | the model output, the usage, the charge, the count of messages the memory policy dropped (§5) |
+| `turn-<n>` | one model turn: reserve, `model.Invoke` (blocking form), settle | the model output, the usage, the charge, the count of messages the context-window policy dropped (§5) |
 | `tool-<n>-<k>` | tool call `k` of turn `n` | the tool result |
 
 `n` and `k` are 1-based. The step's `IdempotencyKey` is its name, stable for
@@ -98,7 +98,7 @@ change to package `flow`. The node id is the node's key in `flow.IR.Nodes`, and
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `model` | the model id of every turn | — |
-| `system` | the system messages, kept first by the memory policy | none |
+| `system` | the system messages, kept first by the context-window policy | none |
 | `tools` | the tools offered to the model (allowlists and tool access rules are WP-L7-02) | none |
 | `checks` | accepted for compatibility; no effect — cancellation and the time cap are checked before every model turn (REQ-AGENT-012, REQ-AGENT-028) | 1 |
 | `caps.steps` | the step cap, in model turns | none = no cap |
@@ -231,8 +231,8 @@ At each turn boundary before model turn `n`, in this order:
 1. cancellation (REQ-AGENT-028);
 2. the time cap (REQ-AGENT-012);
 3. the step cap (REQ-AGENT-008);
-4. the memory policy and input token limit (REQ-AGENT-023–025, REQ-AGENT-027),
-   which determines turn `n`'s messages and input tokens;
+4. the context-window policy (the memory policy of REQ-AGENT-023–025, REQ-AGENT-027)
+   and input token limit, which determines turn `n`'s messages and input tokens;
 5. the token cap (REQ-AGENT-011);
 6. the cost reservation (REQ-AGENT-009, REQ-AGENT-010).
 
@@ -252,7 +252,7 @@ pull request of its own.
 
 1. **Handoff mechanism (`design.md` §4):** Expressing a model handoff as a reserved `handoff_to` tool call intercepted by the agent loop (rather than a `model.Result` field or structured output convention) is a design choice not fixed by `docs/architecture/flow-engine.md` or `model-layer.md`.
 2. **Caps across a handoff (`REQ-AGENT-016`, `REQ-AGENT-018`, `REQ-AGENT-019`, `REQ-AGENT-029`, `design.md` §4):** Resetting step, cost, and token caps to the target agent's own caps while keeping the chain's `started_at` and one time cap for the whole chain is a design choice for WP-L7-01: the incoming handoff's `time_cap` governs the target even when the target sets its own (REQ-AGENT-019), a target's own `caps.time` applies only when the handoff carries none (REQ-AGENT-029), and each handoff output carries the cap in effect for its run, or `null` when there is none (REQ-AGENT-016).
-3. **Memory policy retention rule (`REQ-AGENT-023`–`025`, `design.md` §5):** Keeping `system` messages + whole model turn 1 (with its tool results) + the most recent whole turns that fit in `input_tokens` is a design choice for WP-L7-01 (`docs/roadmap/L7-agents.md` names "memory policy" without prescribing the algorithm).
-4. **Turn-boundary check order (`design.md` §6):** Checking `cancellation → time cap → step cap → memory policy (input token limit) → token cap → cost reservation` is a design choice that determines which terminal state wins when two caps are reached at the same boundary.
+3. **Context-window (memory) policy retention rule (`REQ-AGENT-023`–`025`, `design.md` §5):** Keeping `system` messages + whole model turn 1 (with its tool results) + the most recent whole turns that fit in `input_tokens` is a design choice for WP-L7-01 (`docs/roadmap/L7-agents.md` names "memory policy" without prescribing the algorithm).
+4. **Turn-boundary check order (`design.md` §6):** Checking `cancellation → time cap → step cap → context-window policy (input token limit) → token cap → cost reservation` is a design choice that determines which terminal state wins when two caps are reached at the same boundary.
 
 ---
