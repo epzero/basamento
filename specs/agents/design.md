@@ -100,7 +100,7 @@ change to package `flow`. The node id is the node's key in `flow.IR.Nodes`, and
 | `model` | the model id of every turn | — |
 | `system` | the system messages, kept first by the memory policy | none |
 | `tools` | the tools offered to the model (allowlists and tool access rules are WP-L7-02) | none |
-| `checks` | model turns between checks of the time cap and cancellation: **1** | 1 |
+| `checks` | accepted for compatibility; no effect — cancellation and the time cap are checked before every model turn (REQ-AGENT-012, REQ-AGENT-028) | 1 |
 | `caps.steps` | the step cap, in model turns | none = no cap |
 | `caps.cost_mpts` | the cost cap, in milli-points | none = no cap |
 | `caps.tokens` | the token cap, counted as input plus output tokens | none = no cap |
@@ -200,11 +200,11 @@ messages), and any new tool results. If total message tokens exceed
 
 When counting tokens, a tool-result message reports no usage of its own: its
 input tokens are estimated from its content at four bytes per token, rounded up,
-plus one token for the message envelope. A turn's weight is its recorded usage
-tokens plus the estimated tokens of its tool results; this content-based estimate
-applies only to tool results, since the system messages' and each turn's tokens
-come from declared or recorded usage. The kept set is measured once its messages
-are assembled.
+plus one token for the message envelope. With `input_tokens > 0`, the same
+content-based estimate also applies to a system message that declares no token
+count and to a turn that reports no usage, so no message is free; otherwise a
+turn's weight is its recorded usage tokens plus the estimated tokens of its tool
+results. The kept set is measured once its messages are assembled.
 
 The count of dropped messages is recorded in the turn's step result (`turn-<n>`),
 not kept elsewhere: the run's messages stay complete for its output. A kept set
