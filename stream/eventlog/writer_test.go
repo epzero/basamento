@@ -178,13 +178,16 @@ func TestCreateRunTwiceIsConflict(t *testing.T) {
 }
 
 func TestRunSubject(t *testing.T) {
-	got, err := RunSubject("r1")
-	if err != nil || got != "run.r1.events" {
+	got, err := RunSubject("acme", "r1")
+	if err != nil || got != "run.61636d65.r1.events" {
 		t.Fatalf("subject %q, err %v", got, err)
 	}
 	for _, bad := range []string{"", "r.1", "r 1", "r*", "r/1"} {
-		if _, err := RunSubject(bad); core.CodeOf(err) != core.CodeInvalidArgument {
+		if _, err := RunSubject("acme", bad); core.CodeOf(err) != core.CodeInvalidArgument {
 			t.Fatalf("run id %q: code %s, want invalid_argument", bad, core.CodeOf(err))
 		}
+	}
+	if _, err := RunSubject("", "r1"); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("empty tenant: code %s, want invalid_argument", core.CodeOf(err))
 	}
 }

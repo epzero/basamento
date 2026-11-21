@@ -2,8 +2,10 @@ package eventlog
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -36,6 +38,9 @@ type Log struct {
 	store *psql.Store
 	clock core.Clock
 	fault Fault
+	// relayMu serialises relay passes over this log, so two loops cannot read
+	// the same pending rows and publish them twice (REQ-STRM-013).
+	relayMu sync.Mutex
 }
 
 // New wraps store. The store must carry the migrations returned by Migrations.
@@ -54,7 +59,8 @@ func New(store *psql.Store, opts Options) (*Log, error) {
 // its sequence number.
 type NewEvent struct {
 	// Type is the event type, such as "node.started"; the bus subject carries
-	// the run only and the type travels in the envelope (REQ-STRM-024).
+	// the tenant and the run, and the type travels in the envelope
+	// (REQ-STRM-024).
 	Type string
 	// V is the event schema version; zero means DefaultSchemaVersion.
 	V int
@@ -138,10 +144,17 @@ func (l *Log) fire(point string) error {
 	return l.fault(point)
 }
 
-// RunSubject returns the one bus subject of a run's durable events.
-func RunSubject(runID string) (string, error) {
+// RunSubject returns the one bus subject of a tenant's run. Run ids are unique
+// only within a tenant, so the tenant is part of the stream identity. It is
+// hex-encoded into one subject token because a tenant id may contain dots,
+// whitespace or non-ASCII (REQ-CORE-005), which the bus subject grammar does
+// not allow.
+func RunSubject(tenant, runID string) (string, error) {
+	if tenant == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "eventlog: tenant required", nil)
+	}
 	if err := checkRunID(runID); err != nil {
 		return "", err
 	}
-	return "run." + runID + ".events", nil
+	return "run." + hex.EncodeToString([]byte(tenant)) + "." + runID + ".events", nil
 }

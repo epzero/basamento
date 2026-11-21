@@ -71,16 +71,27 @@ func readAll(t *testing.T, l *Log, runID string) []Event {
 
 // fakeBus records published envelopes and can refuse publishes.
 type fakeBus struct {
-	mu        sync.Mutex
-	envs      []Envelope
-	accepted  int
-	failAfter int
-	down      bool
+	mu           sync.Mutex
+	envs         []Envelope
+	subjects     []string
+	accepted     int
+	failAfter    int
+	failSubjects map[string]error
+	failOnce     map[string]error
+	down         bool
+	acceptedCh   chan string
 }
 
 func (b *fakeBus) Publish(_ context.Context, subject string, data []byte) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if err := b.failSubjects[subject]; err != nil {
+		return 0, err
+	}
+	if err := b.failOnce[subject]; err != nil {
+		delete(b.failOnce, subject)
+		return 0, err
+	}
 	if b.down || (b.failAfter > 0 && b.accepted >= b.failAfter) {
 		return 0, core.NewError(core.CodeUnavailable, "bus down", nil)
 	}
@@ -90,6 +101,13 @@ func (b *fakeBus) Publish(_ context.Context, subject string, data []byte) (uint6
 	}
 	b.accepted++
 	b.envs = append(b.envs, env)
+	b.subjects = append(b.subjects, subject)
+	if b.acceptedCh != nil {
+		select {
+		case b.acceptedCh <- subject:
+		default:
+		}
+	}
 	return uint64(b.accepted), nil
 }
 
@@ -112,6 +130,19 @@ func (b *fakeBus) sequences(runID string) []uint64 {
 	for _, e := range b.envs {
 		if e.RunID == runID {
 			out = append(out, e.Seq)
+		}
+	}
+	return out
+}
+
+// sequencesOn returns the sequence numbers published on subject.
+func (b *fakeBus) sequencesOn(subject string) []uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []uint64
+	for i, s := range b.subjects {
+		if s == subject {
+			out = append(out, b.envs[i].Seq)
 		}
 	}
 	return out

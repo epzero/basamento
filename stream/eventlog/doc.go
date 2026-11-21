@@ -7,11 +7,11 @@
 // Reads replay durable events after a cursor, scoped to the caller's tenant
 // (REQ-STRM-020 … 022, 025).
 //
-// One subject per run, run.<run_id>.events, carries the published envelopes;
-// the envelope holds the run id, sequence, type, schema version and data
-// (REQ-STRM-024). Consumers order and deduplicate by the envelope's seq, never
-// by the bus sequence (REQ-STRM-016). See ADR-0005 and
-// docs/architecture/streaming.md §2.
+// One subject per tenant and run, run.<hex(tenant)>.<run_id>.events, carries
+// the published envelopes; the envelope holds the run id, sequence, type,
+// schema version and data (REQ-STRM-024). Consumers order and deduplicate by
+// the envelope's seq, never by the bus sequence (REQ-STRM-016). See ADR-0005
+// and docs/architecture/streaming.md §2.
 //
 // The relay is a system component: it scans the outbox of every tenant and
 // publishes each run on its own subject, so it takes no tenant from a caller

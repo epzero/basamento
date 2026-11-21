@@ -443,11 +443,15 @@ func busReceivedSequences(ctx context.Context, tenant, runID, list string) error
 	if len(envs) != len(want) {
 		return fmt.Errorf("bus %s received %d events from %s, want %v", tenant, len(envs), runID, want)
 	}
+	wantSubject, err := eventlog.RunSubject(tenant, runID)
+	if err != nil {
+		return err
+	}
 	for i, e := range envs {
 		if e.Seq != want[i] {
 			return fmt.Errorf("bus %s event %d from %s has sequence %d, want %d", tenant, i, runID, e.Seq, want[i])
 		}
-		if subject := w.bus.subjectsFor(runID)[i]; subject != "run."+runID+".events" {
+		if subject := w.bus.subjectsFor(runID)[i]; subject != wantSubject {
 			return fmt.Errorf("bus %s event %d has subject %q", tenant, i, subject)
 		}
 	}

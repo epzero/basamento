@@ -76,42 +76,53 @@ type pendingRun struct {
 	runID  string
 }
 
-// Run makes one relay pass. It publishes every run's unrelayed entries in
-// sequence order. A bus that cannot be reached ends the pass with no error and
-// leaves the head entry unrelayed, so a later pass resumes exactly there
-// (REQ-STRM-017 … 019). Entries are marked relayed only after the bus accepted
-// them (REQ-STRM-014); a stop between the two publishes the entry again after a
-// restart (REQ-STRM-015).
+// Run makes one relay pass. Passes over the same log are serialised, so two
+// loops cannot publish the same pending rows. It publishes every run's
+// unrelayed entries in sequence order. A bus that cannot be reached ends the
+// pass with no error and leaves the head entry unrelayed, so a later pass
+// resumes exactly there (REQ-STRM-017 … 019). Entries are marked relayed only
+// after the bus accepted them (REQ-STRM-014); a stop between the two publishes
+// the entry again after a restart (REQ-STRM-015). An error in one run is
+// contained: the pass continues with the other runs and returns the first
+// error, so Loop retries it.
 func (r *Relay) Run(ctx context.Context) error {
+	r.log.relayMu.Lock()
+	defer r.log.relayMu.Unlock()
+
 	runs, err := r.pendingRuns(ctx)
 	if err != nil {
 		return err
 	}
+	var firstErr error
 	for _, run := range runs {
-		subject, err := RunSubject(run.runID)
+		if ctx.Err() != nil {
+			break
+		}
+		subject, err := RunSubject(run.tenant, run.runID)
 		if err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if err := r.relayRun(ctx, run, subject); err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // Loop runs a pass, then waits Step on the injected clock and runs again,
-// until ctx is cancelled.
+// until ctx is cancelled. A failed pass does not end the loop: the error is
+// retried after the next Step.
 func (r *Relay) Loop(ctx context.Context) error {
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err := r.Run(ctx); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			return err
-		}
+		_ = r.Run(ctx)
 		select {
 		case <-ctx.Done():
 			return nil
