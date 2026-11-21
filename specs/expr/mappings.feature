@@ -120,7 +120,7 @@ Feature: JSON mappings
     Then compilation fails with code "invalid_argument"
     And the error names the mapping and the position of the error
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-020 @id:EXPR-020-01
+  @REQ-EXPR-020 @id:EXPR-020-01
   Scenario Outline: A mapping whose output exceeds its output limit fails
     Given the mapping "<mapping>" with an output limit of 1024 bytes
     When the mapping is evaluated on null
@@ -138,7 +138,7 @@ Feature: JSON mappings
       | [range(100000)]                                  |
       | [range(100001)] \| .[0]                          |
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-020 @id:EXPR-020-02
+  @REQ-EXPR-020 @id:EXPR-020-02
   Scenario Outline: A mapping whose output is within its output limit succeeds
     Given the mapping "<mapping>" with an output limit of 1024 bytes
     When the mapping is evaluated on null
@@ -151,7 +151,7 @@ Feature: JSON mappings
       | [range(256)]                            | 915    |
       | {a: ("x" * 500), b: ("y" * 500)}        | 1015   |
 
-  @planned @wp:WP-L2-01 @REQ-EXPR-020 @id:EXPR-020-03
+  @REQ-EXPR-020 @id:EXPR-020-03
   Scenario: The default output limit stops a value of 2 GiB
     Given the mapping ""x" * 2147483647"
     When the mapping is evaluated on null
