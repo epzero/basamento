@@ -162,25 +162,27 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 	}
 }
 
-// An empty string is no expression, not an unreadable one.
-func TestCompileAcceptsEmptySpecExpressions(t *testing.T) {
-	for _, test := range []struct{ kind, spec string }{
-		{kind: "gate", spec: `{"accept_if":""}`},
-		{kind: "map", spec: `{"over":"","node":"impl"}`},
-	} {
-		f := typedFlow()
-		node := f.Nodes["check"]
-		node.Kind = test.kind
-		node.Spec = json.RawMessage(test.spec)
-		f.Nodes["check"] = node
-		if test.kind == "map" {
-			f.Nodes["impl"] = flow.Node{Kind: "task"}
-			f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
-		}
-		if _, err := Compile(f); err != nil {
-			t.Fatalf("%s %s: %v", test.kind, test.spec, err)
-		}
+// An empty string is no expression, not an unreadable one, for a gate. A
+// map's "over" is the exception: the machine needs it, so the compiler
+// rejects an empty one before the expression check (EP0-166).
+func TestCompileAcceptsEmptyGateAcceptIfAndRejectsEmptyMapOver(t *testing.T) {
+	f := typedFlow()
+	node := f.Nodes["check"]
+	node.Kind = "gate"
+	node.Spec = json.RawMessage(`{"accept_if":""}`)
+	f.Nodes["check"] = node
+	if _, err := Compile(f); err != nil {
+		t.Fatalf("gate accept_if: %v", err)
 	}
+
+	f = typedFlow()
+	node = f.Nodes["check"]
+	node.Kind = "map"
+	node.Spec = json.RawMessage(`{"over":"","node":"impl"}`)
+	f.Nodes["check"] = node
+	f.Nodes["impl"] = flow.Node{Kind: "task"}
+	f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
+	requireInvalid(t, errOf(t, f), `map node "check"`, `"over"`, "non-empty")
 }
 
 func TestCompileAcceptsGateAcceptIfAndMapOver(t *testing.T) {

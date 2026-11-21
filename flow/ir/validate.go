@@ -273,26 +273,45 @@ func validateMaps(f *flow.IR) error {
 	return nil
 }
 
-// mapChild returns a map node's child name. The child is decided by the
-// spec's "node" field alone, so the child checks run even when "over" is
-// empty or missing: flow/compile leaves empty spec expressions alone, while
-// flow/machine's parseMapSpec requires a non-empty "over" before it runs a
-// map. That accept/reject split is pre-existing; a follow-up ticket will
-// settle whether compile should reject an empty "over" for a map. A spec
-// whose node is absent or not a non-empty string names no child the machine
-// can run, so the compiler rejects it here (EP0-149).
+// mapChild returns a map node's child name after checking the two fields
+// flow/machine's parseMapSpec requires: "over" and "node". A spec whose
+// "over" is missing or a blank string is one the machine cannot run, so the
+// compiler rejects it here, before it reads the child (EP0-166): accepting it
+// would make compile.Compile and machine.New disagree on the same IR. A
+// non-string "over" stays for flow/compile's expression check, which has the
+// wording for it. A "node" that is absent or not a non-empty string names no
+// child the machine can run, so the compiler rejects that too (EP0-149).
 func mapChild(id string, node flow.Node) (string, error) {
 	var spec struct {
+		Over json.RawMessage `json:"over"`
 		Node json.RawMessage `json:"node"`
 	}
+	if json.Unmarshal(node.Spec, &spec) != nil {
+		return "", mapChildFieldError(id, "node")
+	}
+	rawOver := strings.TrimSpace(string(spec.Over))
+	var over string
+	blankOver := rawOver == "" ||
+		(rawOver[0] == '"' && json.Unmarshal([]byte(rawOver), &over) == nil && strings.TrimSpace(over) == "")
+	if blankOver {
+		return "", mapChildFieldError(id, "over")
+	}
 	var child string
-	bad := json.Unmarshal(node.Spec, &spec) != nil ||
-		json.Unmarshal(spec.Node, &child) != nil || child == ""
-	if bad {
-		return "", invalid(fmt.Sprintf("flow: map node %q: spec needs a non-empty \"node\" child name", id),
-			map[string]any{"node": id})
+	if json.Unmarshal(spec.Node, &child) != nil || child == "" {
+		return "", mapChildFieldError(id, "node")
 	}
 	return child, nil
+}
+
+// mapChildFieldError reports a map spec field the machine needs but the
+// definition does not give: "over" is an expression, "node" is a child name.
+func mapChildFieldError(id, field string) error {
+	noun := "expression"
+	if field == "node" {
+		noun = "child name"
+	}
+	return invalid(fmt.Sprintf("flow: map node %q: spec needs a non-empty %q %s", id, field, noun),
+		map[string]any{"node": id})
 }
 
 func validateReachable(f *flow.IR) error {
