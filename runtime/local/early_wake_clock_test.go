@@ -129,10 +129,13 @@ func TestGateTimeoutEarlyWakeTimesOut(t *testing.T) {
 	defer f.close(t)
 
 	atGate := make(chan struct{})
+	waitErr := make(chan error, 1)
 	f.flow("waiting", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 		wait := dc.Await(runtime.GateSpec{Name: "approve", Timeout: time.Hour})
 		close(atGate)
-		return nil, wait.Get(nil)
+		err := wait.Get(nil)
+		waitErr <- err
+		return nil, err
 	})
 	f.start(t, "acme", "r1", "waiting", `{}`)
 	waitOn(t, "gate wait", atGate)
@@ -144,6 +147,10 @@ func TestGateTimeoutEarlyWakeTimesOut(t *testing.T) {
 
 	clock.Set(clock.Now().Add(50 * time.Minute))
 	clock.fire(50 * time.Minute)
+	err := recvWithin(t, waitErr, "gate timeout error")
+	if codeOf(err) != "timeout" {
+		t.Fatalf("gate wait error %v, want timeout", err)
+	}
 	f.waitState(t, "acme", "r1", stateFailed)
 }
 

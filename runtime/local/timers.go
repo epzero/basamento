@@ -103,22 +103,6 @@ func (r *run) fireDue(signaled *runTimer) time.Duration {
 // clock to reach the deadline before the timer completes.
 func (r *run) waitTimer(timer *runTimer, stop <-chan struct{}, onCancel func()) {
 	for {
-		if stop == nil {
-			select {
-			case <-timer.wake:
-				remaining := r.fireDue(timer)
-				if timer.future.Ready() {
-					return
-				}
-				if remaining > 0 {
-					timer.wake = r.rt.after(remaining)
-				}
-			case <-r.ctx.Done():
-				onCancel()
-				return
-			}
-			continue
-		}
 		select {
 		case <-timer.wake:
 			remaining := r.fireDue(timer)

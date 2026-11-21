@@ -316,14 +316,22 @@ func (r *run) wake() <-chan struct{} {
 	return r.changed
 }
 
+const maxCancelReason = 256
+
+// cancelMessage builds the cancellation message from reason. Reason is truncated
+// to maxCancelReason runes so an unbounded caller string cannot allocate a huge
+// intermediate slice.
 func cancelMessage(reason string) string {
 	if reason == "" {
 		return "run cancelled"
 	}
-	const max = 256
-	runes := []rune(reason)
-	if len(runes) > max {
-		reason = string(runes[:max])
+	n := 0
+	for i := range reason {
+		if n == maxCancelReason {
+			reason = reason[:i]
+			break
+		}
+		n++
 	}
 	return "run cancelled: " + reason
 }
