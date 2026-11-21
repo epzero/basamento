@@ -514,12 +514,7 @@ func registerMiddleware(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the provider accepted (\d+) invocation$`, func(ctx context.Context, n int) error {
-		if got := len(callOf(ctx).invocations()); got != n {
-			return fmt.Errorf("the provider accepted %d invocations, want %d", got, n)
-		}
-		return nil
-	})
+	sc.Step(`^the provider accepted (\d+) invocation$`, acceptedInvocations)
 	sc.Step(`^the call's error says no attempt satisfied the output schema$`, func(ctx context.Context) error {
 		cw := callOf(ctx)
 		if cw.current.err == nil || !strings.Contains(cw.current.err.Error(), "no attempt satisfied the output schema") {

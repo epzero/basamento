@@ -511,17 +511,54 @@ func TestSettleRejectsQuoteNotFromStart(t *testing.T) {
 	if err := json.Unmarshal(b, &roundTripped); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	_, err = c.Settle(roundTripped, usage)
-	if got := core.CodeOf(err); got != core.CodeInvalidArgument {
-		t.Fatalf("round-tripped quote: code = %s, want %s (%v)", got, core.CodeInvalidArgument, err)
+	charge, err := c.Settle(roundTripped, usage)
+	if err != nil {
+		t.Fatalf("Settle from a round-tripped quote: %v", err)
+	}
+	if charge.MilliPoints != 5000 {
+		t.Fatalf("round-tripped charge = %d, want 5000", charge.MilliPoints)
 	}
 
-	charge, err := c.Settle(q, usage)
+	charge, err = c.Settle(q, usage)
 	if err != nil {
 		t.Fatalf("Settle from Start: %v", err)
 	}
 	if charge.MilliPoints != 5000 {
 		t.Fatalf("charge = %d, want 5000", charge.MilliPoints)
+	}
+}
+
+func TestSerializedQuoteSettlesByItsPinnedEntryAfterTheDeploymentChanges(t *testing.T) {
+	c, clock := newCatalog(t)
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 1"})
+	q, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1000, OutputLimit: 0})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	raw, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// A fresh process/replay with a changed deployment layer and no trace of
+	// the pinned formula must still settle by the recorded entry.
+	replayed, err := catalog.NewWithSnapshot(clock, nil)
+	if err != nil {
+		t.Fatalf("NewWithSnapshot: %v", err)
+	}
+	mustAdd(t, replayed, chatDescriptor("sim-chat"))
+	mustSetDeployment(t, replayed, "sim-chat", catalog.Price{Formula: "usage.input_tokens * 9"})
+	var restored catalog.Quote
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	charge, err := replayed.Settle(restored, model.Usage{InputTokens: 1000})
+	if err != nil {
+		t.Fatalf("Settle a replayed quote: %v", err)
+	}
+	if charge.MilliPoints != 1000 {
+		t.Fatalf("charge = %d, want the pinned entry's 1000, not the new entry's 9000", charge.MilliPoints)
 	}
 }
 
@@ -920,5 +957,43 @@ func TestFormulaAmountMustBeExactInteger(t *testing.T) {
 				t.Fatalf("estimate=%d want=%d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStartPricesAtTheRunClockWhenGiven(t *testing.T) {
+	t.Parallel()
+	c, _ := newCatalog(t) // its clock reads 12:00 UTC
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: "at.getHours('UTC') >= 17", Rates: catalog.Rates{"input": 140, "output": 550}},
+		{Rates: catalog.Rates{"input": 280, "output": 1100}},
+	}})
+	runAt := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
+	q, err := c.Start(context.Background(), catalog.Request{
+		Model:       "sim-chat",
+		InputTokens: 1_000_000,
+		At:          runAt,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if q.Estimate != 140 || q.Rule != "at.getHours('UTC') >= 17" {
+		t.Fatalf("quote = %+v, want the off-peak estimate at the run clock", q)
+	}
+	charge, err := c.Settle(q, model.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 140 || charge.Rule != "at.getHours('UTC') >= 17" {
+		t.Fatalf("charge = %+v, want the quote's off-peak rule", charge)
+	}
+
+	// Without At the catalog's own clock (12:00) still applies.
+	q2, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if q2.Estimate != 280 || q2.Rule != "" {
+		t.Fatalf("quote = %+v, want the standard estimate from the catalog clock", q2)
 	}
 }

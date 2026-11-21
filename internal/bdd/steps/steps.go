@@ -33,6 +33,7 @@ type World struct {
 	FlowBuilder *builderWorld
 	Catalog     *catalogWorld
 	Model       *modelWorld
+	Node        *nodeWorld
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
@@ -57,6 +58,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
 			Model:       newModelWorld(),
+			Node:        newNodeWorld(),
 			Machine:     newMachineWorld(),
 			Host:        newHostWorld(),
 			Local:       newLocalWorld(),
@@ -69,6 +71,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerPrompt(sc)
 	registerBlob(sc)
 	registerTelemetry(sc)
+	registerNode(sc)
 	registerFlowCompile(sc)
 	registerFlowLimits(sc)
 	registerFlowBuilder(sc)
