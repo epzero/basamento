@@ -18,8 +18,8 @@ When a caller invokes a model without following its events, the model layer shal
 ### REQ-MODEL-003 — Partial output as ordered events
 While an invocation produces partial output, the model layer shall publish it as events in order, and the result shall contain the complete output.
 
-### REQ-MODEL-004 — Stable client ref
-The model node shall start every attempt of one logical invocation with the same client ref.
+### REQ-MODEL-004 — Stable client ref for an unacknowledged start
+When an attempt's start is not acknowledged, the model node shall retry that start with the same client ref, as required by REQ-MODEL-054.
 
 ### REQ-MODEL-005 — Ambiguous starts are never repeated blindly
 If the outcome of a start is unknown, then the model node shall look the invocation up by client ref before starting it again; and when the lookup finds no invocation or the provider cannot answer, the model node shall open a gate instead of starting it again.
@@ -164,7 +164,7 @@ When a worker started with an idle-exit time has held no lease for that time, th
 ## Structured output and middleware
 
 Chat calls go through middleware in one fixed order (call log ∘ recording ∘
-fallback ∘ metering ∘ retry ∘ timeouts) and structured output climbs one
+fallback ∘ metering ∘ structured ∘ retry ∘ timeouts) and structured output climbs one
 ladder, native schema → JSON mode → forced tool call → local JSON repair, on
 one attempt budget (`docs/architecture/model-layer.md` §5, ADR-0006).
 
@@ -232,7 +232,7 @@ The call log middleware shall record one entry per attempt of a call, carrying t
 The call log shall record no credential, no message text and no model output.
 
 ### REQ-MODEL-064 — Middleware order
-The model layer shall apply the middleware to a chat call in one order, outermost first: call log, recording, fallback, metering, retry, timeouts.
+The model layer shall apply the middleware to a chat call in one order, outermost first: call log, recording, fallback, metering, structured, retry, timeouts.
 
 ### REQ-MODEL-065 — Local JSON repair after the last supported rung
 If the attempt on the last rung the model supports does not satisfy the output schema and attempt budget remains, then the model layer shall run local JSON repair on that attempt's output as the next attempt without starting a model invocation. Local JSON repair shall strip the surrounding prose or code fences around a JSON value and repair malformed JSON syntax so that the value parses, and shall not add, remove or change any field.
