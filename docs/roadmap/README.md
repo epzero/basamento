@@ -113,6 +113,8 @@ flowchart LR
     WP_L7_02["WP-L7-02<br/>Tools and MCP"]
     WP_L7_03["WP-L7-03<br/>Conversations"]
     WP_L7_04["WP-L7-04<br/>Conversations on a durable runtime"]
+    WP_L7_05["WP-L7-05<br/>Dropped-turn summary"]
+    WP_L7_06["WP-L7-06<br/>Loop guard"]
   end
   subgraph L8_epic["L8 Auth"]
     WP_L8_01["WP-L8-01<br/>Authentication modes"]
@@ -181,9 +183,11 @@ flowchart LR
   WP_L6_03 --> WP_L7_04
   WP_L6_03 --> WP_L9_01
   WP_L7_01 --> WP_L7_02
-  WP_L7_01 --> WP_L7_03
+  WP_L7_01 --> WP_L7_05
   WP_L7_02 --> WP_L10_01
   WP_L7_03 --> WP_L7_04
+  WP_L7_05 --> WP_L7_06
+  WP_L7_06 --> WP_L7_03
   WP_L8_01 --> WP_L3_07
   WP_L8_01 --> WP_L8_02
   WP_L8_02 --> WP_L6_03
