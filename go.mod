@@ -51,7 +51,7 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/nexus-rpc/nexus-proto-annotations v0.1.0 // indirect
+	github.com/nexus-rpc/nexus-proto-annotations v0.1.1-0.20260629224650-76486e7cc189 // indirect
 	github.com/nexus-rpc/sdk-go v0.7.0 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
