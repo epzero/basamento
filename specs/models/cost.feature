@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-03 @cost @runtime:any @level:component
+@wp:WP-L3-03 @cost @runtime:any @level:component
 Feature: Reservation and settlement of invocation costs
 
   Background:

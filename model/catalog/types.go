@@ -17,13 +17,17 @@ type Request struct {
 	Params      json.RawMessage
 	InputTokens int64
 	OutputLimit int64
+	// At is the run clock's time to price at. It is zero when the caller uses
+	// the catalog's own clock; a run passes dc.Now() so a replay prices a
+	// time-based rule at the same instant (REQ-MODEL-078).
+	At time.Time
 }
 
 // Quote pins the price entry, the model's formula, the start time, the tenant
 // and the parameters that applied when the call started. Retain it and pass it
 // to Settle; later price changes do not reprice the call (REQ-MODEL-078). A
-// quote is in-memory call state only: it is not serializable and must come
-// from Start.
+// quote is serializable: a durable step records it and every replay settles by
+// the pin it held, even when a price layer changed in between.
 type Quote struct {
 	// Model is the id the quote was taken for.
 	Model string
@@ -34,6 +38,56 @@ type Quote struct {
 	Rule string
 
 	pinned pinned
+}
+
+// quoteRecord is the durable form of a Quote. It carries the whole pin: the
+// estimate, the entry with its rules and rates, the descriptor formula, the
+// start time, the tenant and the priced parameters.
+type quoteRecord struct {
+	Model             string          `json:"model"`
+	Estimate          int64           `json:"estimate"`
+	Rule              string          `json:"rule,omitempty"`
+	Entry             Price           `json:"entry"`
+	DescriptorFormula string          `json:"descriptor_formula,omitempty"`
+	At                time.Time       `json:"at"`
+	Tenant            core.TenantID   `json:"tenant,omitempty"`
+	Params            json.RawMessage `json:"params,omitempty"`
+}
+
+// MarshalJSON records the quote's pin so a durable step can store it and a
+// replay can settle by the entry that applied when the call started.
+func (q Quote) MarshalJSON() ([]byte, error) {
+	return json.Marshal(quoteRecord{
+		Model:             q.Model,
+		Estimate:          q.Estimate,
+		Rule:              q.Rule,
+		Entry:             q.pinned.entry,
+		DescriptorFormula: q.pinned.descriptorFormula,
+		At:                q.pinned.at,
+		Tenant:            q.pinned.tenant,
+		Params:            q.pinned.params,
+	})
+}
+
+// UnmarshalJSON restores a quote recorded by MarshalJSON. Settle still rejects
+// a record with no valid pinned entry, so only a quote produced by Start (or
+// restored from one) can settle a call.
+func (q *Quote) UnmarshalJSON(data []byte) error {
+	var r quoteRecord
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	q.Model = r.Model
+	q.Estimate = r.Estimate
+	q.Rule = r.Rule
+	q.pinned = pinned{
+		entry:             r.Entry,
+		descriptorFormula: r.DescriptorFormula,
+		at:                r.At,
+		tenant:            r.Tenant,
+		params:            append(json.RawMessage(nil), r.Params...),
+	}
+	return nil
 }
 
 // Charge is what a settled call costs.

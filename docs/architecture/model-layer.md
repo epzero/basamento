@@ -1,10 +1,10 @@
 # Model layer
 
-Status: contract and adapters implemented in `model` and `model/chat`
-(WP-L3-01); structured output and the call middleware implemented in
-`model/structured` and `model/middleware` (WP-L3-02); the catalog and price
-table in `model/catalog` (WP-L3-06); provider construction and routing
-**Planned** (WP-L3-04).
+Status: the invocation contract and adapters in `model` and `model/chat`
+(WP-L3-01), structured output and the call middleware in `model/structured`
+and `model/middleware` (WP-L3-02), the catalog and price table in
+`model/catalog` (WP-L3-06) and the model node in `model/node` (WP-L3-03) are
+implemented; provider construction and routing **Planned** (WP-L3-04).
 Decision: ADR-0006. Specs: `specs/models`.
 
 ## 1. One invocation contract
@@ -97,23 +97,55 @@ Every provider ships with a **simulator** and contract tests (WP-L3-04).
 The `model` node is a node handler in `model/node` (ADR-0011):
 
 1. **Validate** params against the descriptor schema (REQ-MODEL-010).
-2. **Reserve** the CEL price estimate against the run budget, or fail with
-   `budget_exceeded` (REQ-MODEL-006, REQ-MODEL-007).
+2. **Price and reserve** the CEL estimate against the run budget, or fail with
+   `budget_exceeded` (REQ-MODEL-006, REQ-MODEL-007). Pricing is a durable step
+   whose recorded quote pins the estimate, the price entry with its rates and
+   the start time; a replay reserves, settles and fails closed by that pin,
+   never by a price layer that changed after the call started (REQ-MODEL-078).
+   The estimate counts the node's configured input tokens and output limit and
+   the request's own `max_tokens`; a flow input may raise those counts but
+   never lower them, so a caller cannot understate the reservation.
 3. **Start** step with `ClientRef = hash(run, node path, visit, input)`. It is
    stable across retries of one logical invocation (REQ-MODEL-004) and
    different for the next one: a node visited again on a cycle, or another
    item of a `map`, starts a new invocation even when its input is the same.
    The node path includes the `map` index and the enclosing subflows.
-4. **Follow** events to the bus (`streaming.md`), and wait for the result in a
-   heartbeating step, or through a gate resolved by a webhook.
+4. **Follow** the invocation and wait for its end: the node drains the
+   provider's event stream inside a heartbeating step (the durable record keeps
+   the final result, not the log), or waits through a gate resolved by a
+   webhook. Publishing progress deltas to the bus is the streaming layer's job
+   (`streaming.md`, WP-L6-02); the node only drains.
 5. **Ingest** output files into content-addressed blob storage with provenance
-   (REQ-MODEL-008).
-6. **Settle**: charge the actual cost or release the reservation.
+   (REQ-MODEL-008). Outputs from a successful invocation with no blob store
+   configured fail the node instead of being dropped. A URL output is fetched
+   only over https from a public address (never a redirect); a local provider's
+   path output is read only when it resolves under the composition's configured
+   output root, so a provider result cannot name an arbitrary file on the host.
+6. **Settle**: charge the actual cost or release the reservation. The cost is
+   the provider's, or else the price formula on the actual usage. An invocation
+   that started but reports neither a cost nor a usage is charged the reserved
+   estimate: its actual charge is unknown, so the node fails closed. A
+   cancelled invocation that reports no cost releases it instead
+   (REQ-MODEL-009). A failed settlement is retried with the actual charge when
+   it is known, not with the estimate: first-wins would otherwise lock in an
+   undercharge. A settlement that carries the run past its budget ceiling is
+   recorded and then fails the node with `budget_exceeded`: the provider
+   already ran, so hiding the charge would understate the spend, but the run
+   stops instead of spending further. Every priced invocation reserves against
+   the run's budget; a priced call with no run budget fails before it starts
+   with `internal`, and an unpriced model with a budget fails `unsupported`
+   (REQ-MODEL-073). Only a model with no price and no budget runs unmetered.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.
-**Never start blindly again** (REQ-MODEL-005). Cancelling the run cancels the
-invocation and settles by the provider's final state (REQ-MODEL-009).
+**Never start blindly again** (REQ-MODEL-005). The gate is one per invocation
+(`ambiguous_start.<client_ref>`), so parallel `map` items wait at distinct
+gates instead of colliding on one. The same lookup runs when the run is
+cancelled while an attempt is in flight; if it finds nothing the start is
+ambiguous, so the reservation settles by the estimate instead of releasing a
+start that may have landed. Cancelling the run cancels the invocation and
+settles by the provider's final state (REQ-MODEL-009); a failed cancel still
+reads that final state before falling back to the estimate.
 
 ## 5. Chat specifics
 
@@ -210,5 +242,8 @@ or models.dev) and reviewed like a golden file. Nothing fetches prices at run
 time, so the same commit prices the same call the same way. `model/catalog`
 loads that snapshot from `model/catalog/snapshot.yaml`, applies the deployment
 and tenant layers above it, and keeps the entry and start time of a call in a
-quote until settlement. A model's own formula must return a whole number of
-milli-points in integer arithmetic; rates and priced amounts are never negative.
+quote until settlement. The quote is serializable and the model node records it
+in a durable pricing step, so a replay settles by the entry that was reserved
+even when a layer changed in between (REQ-MODEL-078). A model's own formula must
+return a whole number of milli-points in integer arithmetic; rates and priced
+amounts are never negative.

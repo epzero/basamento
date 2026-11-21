@@ -11,6 +11,7 @@ import (
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
+	"github.com/epzero/basamento/model/catalog"
 	"github.com/epzero/basamento/model/middleware"
 	"github.com/epzero/basamento/model/structured"
 )
@@ -299,7 +300,14 @@ func registerMiddlewareCalls(sc *godog.ScenarioContext) {
 		cw.provider.set(0, cw.provider.everyFrom(0, time.Duration(every)*time.Second, "x"))
 		return nil
 	})
-	sc.Step(`^a model "([^"]*)" priced at "(.*)" milli-points$`, func(ctx context.Context, _, formula string) error {
+	sc.Step(`^a model "([^"]*)" priced at "(.*)" milli-points$`, func(ctx context.Context, id, formula string) error {
+		// The node scenarios (WP-L3-03) price the model in the catalog; the
+		// middleware scenarios price the call itself by usage.
+		if !strings.Contains(formula, "usage.") {
+			n := world(ctx).Node
+			n.update(ctx, func(d *model.Descriptor) { d.ID = id })
+			return n.ensureCatalog(ctx).SetSnapshotPrice(id, catalog.Price{Formula: formula})
+		}
 		if normalizeSpace(formula) != normalizeSpace("(usage.input_tokens * 1 + usage.output_tokens * 8) / 1000") {
 			return fmt.Errorf("unsupported fixture price formula %q", formula)
 		}
