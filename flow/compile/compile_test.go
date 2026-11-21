@@ -137,6 +137,8 @@ func TestCompileRejectsASpecThatIsNotAJSONObject(t *testing.T) {
 }
 
 func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
+	// A map's "over" is checked by ir.Validate's shape rule first (EP0-166,
+	// F1): a null or non-string one is rejected there, not here.
 	tests := []struct {
 		kind, spec, subject string
 	}{
@@ -145,8 +147,6 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 		{kind: "gate", spec: `{"accept_if":null}`, subject: `node "check" gate accept_if`},
 		{kind: "gate", spec: `{"accept_if":{"expr":"state.done"}}`, subject: `node "check" gate accept_if`},
 		{kind: "gate", spec: `{"accept_if":["state.done"]}`, subject: `node "check" gate accept_if`},
-		{kind: "map", spec: `{"over":["state.items"],"node":"impl"}`, subject: `node "check" map over`},
-		{kind: "map", spec: `{"over":null,"node":"impl"}`, subject: `node "check" map over`},
 	}
 	for _, test := range tests {
 		f := typedFlow()
@@ -154,10 +154,6 @@ func TestCompileRejectsASpecExpressionThatIsNotAString(t *testing.T) {
 		node.Kind = test.kind
 		node.Spec = json.RawMessage(test.spec)
 		f.Nodes["check"] = node
-		if test.kind == "map" {
-			f.Nodes["impl"] = flow.Node{Kind: "task"}
-			f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
-		}
 		requireInvalid(t, errOf(t, f), test.subject, "not a string")
 	}
 }
@@ -183,6 +179,24 @@ func TestCompileAcceptsEmptyGateAcceptIfAndRejectsEmptyMapOver(t *testing.T) {
 	f.Nodes["impl"] = flow.Node{Kind: "task"}
 	f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
 	requireInvalid(t, errOf(t, f), `map node "check"`, `"over"`, "non-empty")
+}
+
+// A whitespace-only "over" keeps the shape of an expression, so ir.Validate
+// accepts it and the expression compiler rejects it here; flow/machine reaches
+// the same verdict at New (EP0-166, F2).
+func TestCompileRejectsWhitespaceOnlyMapOverAtTheExpressionStage(t *testing.T) {
+	f := typedFlow()
+	node := f.Nodes["check"]
+	node.Kind = "map"
+	node.Spec = json.RawMessage(`{"over":"   ","node":"impl"}`)
+	f.Nodes["check"] = node
+	f.Nodes["impl"] = flow.Node{Kind: "task"}
+	f.Edges = append(f.Edges, flow.Edge{From: "check", To: "impl"})
+	err := errOf(t, f)
+	requireInvalid(t, err, `node "check" map over`)
+	if strings.Contains(err.Error(), "non-empty") {
+		t.Fatalf("error %q: whitespace-only over was rejected as a shape, want the expression stage", err)
+	}
 }
 
 func TestCompileAcceptsGateAcceptIfAndMapOver(t *testing.T) {

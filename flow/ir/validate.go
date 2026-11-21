@@ -274,13 +274,14 @@ func validateMaps(f *flow.IR) error {
 }
 
 // mapChild returns a map node's child name after checking the two fields
-// flow/machine's parseMapSpec requires: "over" and "node". A spec whose
-// "over" is missing or a blank string is one the machine cannot run, so the
-// compiler rejects it here, before it reads the child (EP0-166): accepting it
-// would make compile.Compile and machine.New disagree on the same IR. A
-// non-string "over" stays for flow/compile's expression check, which has the
-// wording for it. A "node" that is absent or not a non-empty string names no
-// child the machine can run, so the compiler rejects that too (EP0-149).
+// flow/machine's parseMapSpec requires: "over" and "node". An "over" that is
+// missing, null or not a non-empty string is one the machine cannot read, so
+// the compiler rejects it here, before it reads the child (EP0-166): accepting
+// it would make compile.Compile and machine.New disagree on the same IR. A
+// whitespace-only "over" keeps the shape of an expression, so it reaches the
+// expression compiler on both sides instead of being rejected here. A "node"
+// that is absent or not a non-empty string names no child the machine can run,
+// so the compiler rejects that too (EP0-149).
 func mapChild(id string, node flow.Node) (string, error) {
 	var spec struct {
 		Over json.RawMessage `json:"over"`
@@ -289,11 +290,10 @@ func mapChild(id string, node flow.Node) (string, error) {
 	if json.Unmarshal(node.Spec, &spec) != nil {
 		return "", mapChildFieldError(id, "node")
 	}
-	rawOver := strings.TrimSpace(string(spec.Over))
+	// A JSON string only: null unmarshals into a string without an error and
+	// is still not one, and every other non-string type fails here.
 	var over string
-	blankOver := rawOver == "" ||
-		(rawOver[0] == '"' && json.Unmarshal([]byte(rawOver), &over) == nil && strings.TrimSpace(over) == "")
-	if blankOver {
+	if len(spec.Over) == 0 || json.Unmarshal(spec.Over, &over) != nil || over == "" {
 		return "", mapChildFieldError(id, "over")
 	}
 	var child string
