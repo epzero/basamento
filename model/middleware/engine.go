@@ -155,9 +155,8 @@ func (e *engine) call(ctx context.Context) (CallResult, error) {
 
 		if attemptErr != nil {
 			lastErr = attemptErr
-			if timedOut {
-				lastErr = timeoutError("attempt")
-			}
+			// runAttempt returns timedOut only together with a reason-specific
+			// timeoutError, so lastErr already keeps that reason.
 			if core.IsRetryable(lastErr) && events == 0 && attempt < budget {
 				wait := e.retryWait(lastErr, retries)
 				retries++

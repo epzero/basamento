@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -237,6 +238,35 @@ func TestCallTotalTimeoutStopsAnInFlightStream(t *testing.T) {
 	}
 	if first.Events != 1 {
 		t.Fatalf("events = %d, want 1", first.Events)
+	}
+}
+
+func TestCallTotalTimeoutKeepsItsReason(t *testing.T) {
+	rt := newVirtualRuntime(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	p := &scriptedProvider{rt: rt}
+	p.run = func(ctx context.Context, p *scriptedProvider, _ Attempt, emit func(model.Event)) (model.Result, error) {
+		emit(model.Event{Kind: model.EventText, Text: "x"})
+		if err := p.sleep(ctx, 5*time.Second); err != nil {
+			return model.Result{}, err
+		}
+		return succeeded("never", nil), nil
+	}
+	cfg := baseConfig(rt, p)
+	cfg.Attempts = 1
+	cfg.Timeouts.CallTotal = 3 * time.Second
+	res, err := Call(context.Background(), cfg)
+	if got := codeOf(t, err); got != core.CodeTimeout {
+		t.Fatalf("code = %s, want timeout", got)
+	}
+	var ce *core.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("error %T is not a *core.Error", err)
+	}
+	if ce.Message != "call total timeout" {
+		t.Fatalf("message = %q, want %q", ce.Message, "call total timeout")
+	}
+	if res.Attempts[0].Outcome != OutcomeCancelled || res.Attempts[0].Code != core.CodeTimeout {
+		t.Fatalf("attempt 1 = %+v, want a cancelled timeout", res.Attempts[0])
 	}
 }
 
