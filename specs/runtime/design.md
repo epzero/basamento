@@ -403,31 +403,36 @@ skipping straight to that point; there is no wall clock and no sleep.
 
 The runtime's data converter is the payload codec of WP-L1-04 composed with the
 blob claim-check codec of WP-L1-02; the harness wraps that converter in a
-recorder. Every payload the runtime hands to the SDK on its way to the server
-passes through the recorder, so "the run history holds ..." and "every payload
-in the run history ..." (`RT-028-01`, `RT-029-01`, `RT-031-01`, `RT-032-01`,
-`RT-033-01`) are read from what the recorder saw — exactly the payloads the SDK
-hands to the server for history. The tenant, the blob store, the payload codec
-and the simulated key service still come from the gate: the codec and key
-service are WP-L1-04's (`internal/bdd/steps/secrets.go`), the blob store is
-WP-L1-02's, and the two are composed here as the data converter the package
-takes from the composition root. The implementer uses the step library of the
-other work packages this work package needs (`specs/secrets/`, `specs/blob/`),
-not a copy.
+recorder. Every payload the runtime hands to the SDK on encode passes through
+the recorder, so "the run history holds ...", "every payload in the run
+history ..." and "the Temporal test server holds no run history for that start"
+(`RT-028-01`, `RT-029-01`, `RT-031-01`, `RT-031-02`, `RT-032-01`, `RT-033-01`,
+`RT-040-01`, `RT-042-07`) are read from what the recorder saw — the payloads that would be
+written to history. An empty recorder is "no run history". The tenant, the blob
+store, the payload codec and the simulated key service still come from the
+gate: the codec and key service are WP-L1-04's (`internal/bdd/steps/secrets.go`),
+the blob store is WP-L1-02's, and the two are composed here as the data
+converter the package takes from the composition root. The implementer uses the
+step library of the other work packages this work package needs
+(`specs/secrets/`, `specs/blob/`), not a copy.
 
 ContinueAsNew (`RT-034-01` … `RT-038-01`): at a `Checkpoint` past the threshold,
 the workflow returns the SDK's continue-as-new error with the continuation
 input; the harness then starts the next execution under the same run id, as the
-server does, so "continued as new N times" counts those restarts. The harness
-controls the reported history length (`SetCurrentHistoryLength`), so the
-threshold comparison is deterministic without depending on how many events the
-SDK counts.
+server does, so "continued as new N times" counts those restarts. Before each Checkpoint, the harness sets `SetCurrentHistoryLength` to a value
+clearly on the scenario's intended side of the threshold (well above for
+`RT-034-01`/`RT-036-*`/`RT-038-01`, well below for `RT-035-*`), so the
+comparison is deterministic without depending on how many events the SDK would
+count.
 
 Serve version check (`RT-037-01`/`02`): a minimal in-process gRPC
 `WorkflowService`, test-only code in `internal/bdd`, listens on `127.0.0.1:0`
 and answers `GetSystemInfo` with the scenario's version — `1.32.2` in
 `Background` and `RT-037-01`, and `1.31.9` and `1.33.0` in `RT-037-02`. The
-runtime dials it through the real client path; no server binary is downloaded.
+Background step "Given a Temporal test server at version …" and "the Temporal
+test server" in `RT-037-01` name that stub (and the harness world), never
+`StartDevServer` or a downloaded binary. The runtime dials it through the real
+client path; no server binary is downloaded.
 
 Against a real server, WP-L5-03 (embedded server) and WP-L5-04 (conformance,
 crash resume, replay) run the same workflows in real time, in the slow lane.
