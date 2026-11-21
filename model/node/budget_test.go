@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -137,9 +138,9 @@ func TestMemorySettledChargesCountAgainstTheLimit(t *testing.T) {
 	if core.CodeOf(err) != core.CodeBudgetExceeded {
 		t.Fatalf("err = %v, want budget_exceeded", err)
 	}
-	details, ok := err.(*core.Error).Details["remaining"]
-	if !ok || details != int64(100) {
-		t.Fatalf("remaining = %v, want 100", details)
+	var ce *core.Error
+	if !errors.As(err, &ce) || ce.Details["remaining"] != int64(100) {
+		t.Fatalf("remaining = %v, want 100", err)
 	}
 	if got := b.HeldTotal(); got != 500 {
 		t.Fatalf("held = %d after a refused reservation, want 500", got)

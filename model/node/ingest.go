@@ -283,8 +283,9 @@ func publicAddress(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())
+	return !ip.IsLoopback() && !ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() &&
+		!ip.IsUnspecified() && !ip.IsMulticast()
 }
 
 // outputHost is the non-sensitive part of an output's source for error

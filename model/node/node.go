@@ -29,6 +29,12 @@ const visitToken = "model-node"
 
 const stepHeartbeat = 30 * time.Second
 
+// maxRegisteredSteps bounds the step names the handler remembers. Registration
+// tolerates a conflict, so sweeping the memo only means the next use registers
+// again; this keeps a process that serves many runs from growing without
+// bound. It is a cache, not a registry: the runtime owns the registered steps.
+const maxRegisteredSteps = 4096
+
 // Config is a model node's spec: which model it invokes and how its call is
 // sized for the price estimate. The spec is the node's IR `spec` object:
 //
@@ -494,7 +500,9 @@ func (h *Handler) actualCost(result model.Result, quote catalog.Quote, priced bo
 	return charge.MilliPoints, nil
 }
 
-// register installs one of the handler's steps with the runtime, once.
+// register installs one of the handler's steps with the runtime, once per
+// name until the memo is swept. A conflict is success: another run of the same
+// flow registered the same name, and that step's function is the same.
 func (h *Handler) register(name string, fn runtime.StepFunc) error {
 	if h.deps.Steps == nil {
 		return nil
@@ -503,6 +511,9 @@ func (h *Handler) register(name string, fn runtime.StepFunc) error {
 	defer h.mu.Unlock()
 	if h.registered[name] {
 		return nil
+	}
+	if len(h.registered) >= maxRegisteredSteps {
+		h.registered = map[string]bool{}
 	}
 	err := h.deps.Steps.RegisterStep(name, fn, runtime.StepDefaults{Options: runtime.StepOptions{Heartbeat: stepHeartbeat}})
 	if err != nil && core.CodeOf(err) != core.CodeConflict {

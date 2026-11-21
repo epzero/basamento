@@ -294,8 +294,8 @@ func TestIngestErrorDetailsCarryNoPresignedURL(t *testing.T) {
 	if strings.Contains(err.Error(), "secret") {
 		t.Fatalf("err %q leaks the URL", err)
 	}
-	ce, ok := err.(*core.Error)
-	if !ok {
+	var ce *core.Error
+	if !errors.As(err, &ce) {
 		t.Fatalf("err = %T, want *core.Error", err)
 	}
 	if ce.Details["cause"] != "fetch_failed" || ce.Details["host"] != "vendor.test" || ce.Details["media"] != "image" {
