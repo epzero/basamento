@@ -109,6 +109,7 @@ func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMe
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					err = stepPanicErr(step, recovered)
+					r.rt.logPanic(r.tenant, r.id, step, recovered)
 				}
 			}()
 			out, err = fn(r.ctx, in)
@@ -167,12 +168,11 @@ func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 
 	go func() {
 		defer r.rt.wg.Done()
-		select {
-		case <-timer.wake:
-			r.fireDue(timer)
-		case <-r.ctx.Done():
-			f.complete(nil, cancelledErr("timer cancelled"))
-		}
+		r.waitTimer(timer, func() {
+			if !f.Ready() {
+				f.complete(nil, cancelledErr("timer cancelled"))
+			}
+		})
 	}()
 	return f
 }
@@ -207,14 +207,7 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 		go func() {
 			defer r.rt.wg.Done()
 			defer r.gateTimeouts.Add(-1)
-			select {
-			case <-wake:
-				r.fireDue(timer)
-			case <-stop:
-				return
-			case <-r.ctx.Done():
-				g.future.complete(nil, cancelledErr("gate cancelled"))
-			}
+			r.waitGateTimeout(timer, g, stop)
 		}()
 	}
 	r.mu.Unlock()
@@ -306,9 +299,32 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 	if id == "" {
 		id = dc.NewID("child")
 	}
+	r.mu.Lock()
+	for _, link := range r.children {
+		if link.run.id == id && link.run.flow == flow {
+			r.mu.Unlock()
+			return link.future
+		}
+	}
+	if r.state != stateRunning || r.shuttingDown {
+		r.mu.Unlock()
+		f := newFuture(r)
+		f.complete(nil, cancelledErr("local: the parent is closed"))
+		return f
+	}
+	r.mu.Unlock()
+
 	child, err := r.rt.startChild(r.tenant, id, flow, raw, r)
 	if err != nil {
 		return failedFuture(r, err)
+	}
+
+	r.mu.Lock()
+	for _, link := range r.children {
+		if link.run == child {
+			r.mu.Unlock()
+			return link.future
+		}
 	}
 	f := newFuture(r)
 	child.mu.Lock()
@@ -322,7 +338,6 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 		f.complete(out, childErr)
 	}
 
-	r.mu.Lock()
 	if r.state == stateRunning && !r.shuttingDown {
 		r.children = append(r.children, &childLink{run: child, policy: policy, future: f})
 		r.mu.Unlock()

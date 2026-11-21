@@ -88,11 +88,16 @@ behaviour is spec-silent and covered only by unit tests or this document.
 | Behaviour | Spec coverage |
 | --- | --- |
 | Timers due at one clock reading complete as one batch sharing one completion seq; `Select` snapshots run-owned futures under the run lock so a batch is visible all-or-nothing (same as `fireDue`), then breaks ties by lowest index within a batch and otherwise prefers the earliest completion seq | RT-008 / RT-011 (incl. RT-011-04) |
+| Timer wakes before `Now()` reaches the deadline re-arm for the remaining duration; a timer never completes until `Now() >= deadline` | RT-008 (unit tests) |
 | Duplicate `Start` with the same `RunID` in one tenant → `conflict` | RT-046-01 |
 | Non-empty `StartRequest.IdempotencyKey` deduplicates within a tenant; empty key does not; keys do not cross tenants | RT-047 / RT-048 |
-| Panic in the flow host → failed run, process survives | spec-silent (unit tests) |
-| Panic in a registered step → `internal` step error, not retried, process survives | spec-silent (unit tests) |
+| Panic in the flow host → failed run, process survives; panic value logged once per recovery (not in errors returned to callers) | spec-silent (unit tests) |
+| Panic in a registered step → `internal` step error, not retried, process survives; panic value logged once per recovery | spec-silent (unit tests) |
+| `Resolve` accepts any payload; `GateSpec.Schema` and `AcceptIf` validation (FLOW-006-01) arrives with WP-L5-04 | spec-silent here; FLOW-006-01 planned (WP-L5-04) |
 | `Child` re-attach: same parent run and flow (name and hash) returns the existing child; otherwise `conflict` | RT-049 / RT-050 |
+| `Child` re-attach to an already-linked child returns the first call's future; the first close policy wins, later policies are ignored | spec-silent (unit tests) |
+| Parent close on a child applies that child's close policies to its own children (top-down); `abandon` on the middle link leaves descendants running | spec-silent (unit tests) |
+| `Child` on a parent that is not `running` returns `cancelled` and starts no run; an already-linked child still returns its recorded future | spec-silent (unit tests) |
 | `List` cursor paging: opaque version-1 token (`base64.RawURLEncoding` of JSON `{"v":1,"tenant":"<id>","pos":<n>}`), tenant-bound, `pos` is that tenant's start-order ordinal; clients must not parse it (BDD steps craft one token in this form for RT-052-01); invalid, out-of-range or foreign-tenant cursor → `invalid_argument` before any run is read | RT-051…053, RT-026 lists runs |
 | Every started run stays in memory (no retention) | RT-006 / design §Local |
 | `New` requires a timer clock (`After`); failure message names timer scheduling | RT-054-01 |
