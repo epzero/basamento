@@ -3,10 +3,12 @@ package eventlog
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/platform/bus"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -45,7 +47,8 @@ func (l *Log) CreateRun(ctx context.Context, runID, state string) error {
 // run's next sequence number to each event, starting at 1 (REQ-STRM-008), and
 // serialises concurrent appends on the run (REQ-STRM-009). It fails with code
 // not_found when the tenant has no such run, and with invalid_argument without
-// a tenant.
+// a tenant, or when an event's published envelope would exceed the bus payload
+// limit and could therefore never be relayed.
 func (l *Log) AppendChange(ctx context.Context, runID, state string, events []NewEvent) ([]Event, error) {
 	tenant, err := requireTenant(ctx)
 	if err != nil {
@@ -93,6 +96,9 @@ func (l *Log) AppendChange(ctx context.Context, runID, state string, events []Ne
 		for i, e := range normalized {
 			e.Seq = uint64(last) + uint64(i) + 1
 			e.CreatedAt = now
+			if err := checkEnvelopeFits(e); err != nil {
+				return err
+			}
 			if _, err := exec.Exec(ctx,
 				`INSERT INTO eventlog_events (tenant_id, run_id, seq, type, v, data, created_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -120,6 +126,23 @@ func (l *Log) AppendChange(ctx context.Context, runID, state string, events []Ne
 		return nil, err
 	}
 	return out, nil
+}
+
+// checkEnvelopeFits rejects an event whose encoded envelope is larger than the
+// bus accepts. The relay publishes exactly this envelope (REQ-STRM-024), so
+// accepting a larger one would leave the run's outbox head unrelayed and wedge
+// every later sequence of the run behind it.
+func checkEnvelopeFits(e Event) error {
+	payload, err := json.Marshal(Envelope{RunID: e.RunID, Seq: e.Seq, Type: e.Type, V: e.V, Data: e.Data})
+	if err != nil {
+		return core.NewError(core.CodeInternal, "eventlog: encode envelope", nil)
+	}
+	if len(payload) > bus.DefaultMaxMessageSize {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("eventlog: event envelope is %d bytes, over the bus limit of %d bytes", len(payload), bus.DefaultMaxMessageSize),
+			map[string]any{"limit_bytes": bus.DefaultMaxMessageSize})
+	}
+	return nil
 }
 
 func eventWrittenPoint(n int) string {

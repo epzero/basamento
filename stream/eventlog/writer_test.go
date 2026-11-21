@@ -3,10 +3,13 @@ package eventlog
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/epzero/basamento/core"
+	busport "github.com/epzero/basamento/platform/bus"
 )
 
 func TestAppendNumbersEventsFromOne(t *testing.T) {
@@ -166,6 +169,44 @@ func TestAppendRejectsMalformedEvent(t *testing.T) {
 	}
 	if events := readAll(t, l, "r1"); len(events) != 0 {
 		t.Fatalf("log holds %d events, want none", len(events))
+	}
+}
+
+func TestAppendRejectsAnUnrelayableEnvelope(t *testing.T) {
+	l := testLog(t, nil)
+	mustCreateRun(t, l, "r1", "running")
+	appendTypes(t, l, "r1", "running", "run.started")
+
+	// The data alone fits the bus limit; the envelope around it does not, so
+	// the relay could never publish it and the run's outbox head would wedge.
+	filler := strings.Repeat("x", busport.DefaultMaxMessageSize-40)
+	big := NewEvent{Type: "node.delta", Data: json.RawMessage(`"` + filler + `"`)}
+	_, err := l.AppendChange(tenantCtx("acme"), "r1", "completed", []NewEvent{big})
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %s, want invalid_argument: %v", core.CodeOf(err), err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(busport.DefaultMaxMessageSize)) {
+		t.Fatalf("error %q does not name the bus limit", err)
+	}
+	if events := readAll(t, l, "r1"); len(events) != 1 {
+		t.Fatalf("log holds %d events, want only the accepted one", len(events))
+	}
+	if state, err := l.State(tenantCtx("acme"), "r1"); err != nil || state != "running" {
+		t.Fatalf("state %q, err %v, want running", state, err)
+	}
+
+	// The run keeps accepting relayable events, and they reach the bus.
+	if got := appendTypes(t, l, "r1", "completed", "run.completed"); len(got) != 1 || got[0].Seq != 2 {
+		t.Fatalf("appended %+v, want sequence 2", got)
+	}
+	fb := &fakeBus{}
+	relay := newRelay(t, l, fb, nil)
+	if err := relay.Run(context.Background()); err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	wantSeqs(t, fb.sequences("r1"), 1, 2)
+	if events := readAll(t, l, "r1"); len(events) != 2 {
+		t.Fatalf("log holds %d events, want 2", len(events))
 	}
 }
 

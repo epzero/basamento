@@ -22,7 +22,10 @@ The relay takes a lease per run in the store while it publishes it, so
 concurrent passes — over another `Log` or another process — skip a run that is
 already being relayed: a run's entries reach its bus subject in `seq` order
 (REQ-STRM-013). A lease left behind by a crashed pass expires, and the next
-pass republishes the unmarked entry (REQ-STRM-015).
+pass republishes the unmarked entry (REQ-STRM-015). The writer rejects at
+append time, with code `invalid_argument`, an event whose encoded envelope
+would exceed the bus payload limit: such an entry can never be relayed, and
+accepting it would wedge the run's outbox head and every later sequence.
 
 Wire shapes: `contracts/basamento/stream/v1/stream.proto`, Go mirror in
 `stream/stream.go`.
