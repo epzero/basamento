@@ -18,8 +18,8 @@ When a caller invokes a model without following its events, the model layer shal
 ### REQ-MODEL-003 — Partial output as ordered events
 While an invocation produces partial output, the model layer shall publish it as events in order, and the result shall contain the complete output.
 
-### REQ-MODEL-004 — Stable client ref for an unacknowledged start
-When an attempt's start is not acknowledged, the model node shall retry that start with the same client ref, as required by REQ-MODEL-054.
+### REQ-MODEL-004 — Stable client ref for a logical invocation
+The model node shall use the same client ref across retries of one logical invocation, including a retry after a transient rejection or an unacknowledged start.
 
 ### REQ-MODEL-005 — Ambiguous starts are never repeated blindly
 If the outcome of a start is unknown, then the model node shall look the invocation up by client ref before starting it again; and when the lookup finds no invocation or the provider cannot answer, the model node shall open a gate instead of starting it again.
