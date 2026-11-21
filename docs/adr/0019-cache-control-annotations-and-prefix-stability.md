@@ -39,9 +39,9 @@ gaps.
 - **Cache writes have no contract.** The three breakpoints write cache entries,
   and vendors bill those writes at a premium. `model.Usage` has no
   cache-write field and the default formula has no `rates.cache_write`
-  (`specs/models/design.md` C3), so enabling the breakpoints first would let a
+  (`specs/models/design.md` C3), so enabling any breakpoint first would let a
   tenant's bill exceed the reservation and the cost cap. The write contract
-  lands before `System` and `Message` are enabled.
+  lands before any breakpoint is enabled.
 
 The agent turn already journals the whole `model.Request` in its durable step
 input (`agent/handler.go:308-312`). That is the right place to pin a cache
@@ -191,9 +191,12 @@ breakpoint ignores it; no call fails.
   agent's system messages are trusted flow text (`Spec.System`); tool results
   and user input are non-system messages, so the system breakpoint never
   covers them.
-  **Ordering:** `System` and `Message` are enabled only in the same change as
-  the cache-write contract (§7). The `Tools` breakpoint is the only one an
-  adapter may set before then.
+  **Ordering:** no adapter sets any breakpoint — `System`, `Tools` or
+  `Message` — until the cache-write contract (§7) lands in the same change.
+  An Anthropic `Tools` breakpoint is still a cache write billed at the
+  premium, so it under-counts exactly like `System` and `Message`. A
+  provider's automatic prefix caching (OpenAI-compatible, Ollama) needs no
+  hint and is unaffected.
 - **Prompt callers.** `prompt.Assembled.CacheAfter`
   (`prompt/registry.go:370-386`) is the prompt-level form of the system
   breakpoint. A caller that hands an assembled prompt to the model layer sets
@@ -348,8 +351,10 @@ proved by MODEL-089-01/02.
 
 ### 7. Cache writes
 
-This section decides the contract that must land before `System` and
-`Message` are enabled.
+This section decides the contract that must land before any breakpoint is
+enabled. No adapter sets `System`, `Tools` or `Message` until it lands in the
+same change; automatic prefix caching (OpenAI-compatible, Ollama) needs no
+hint and is unaffected.
 
 - `model.Usage` gains `CacheWriteTokens int64` (additive JSON
   `cache_write_tokens,omitempty`). `InputTokens` becomes the total input:
@@ -444,8 +449,8 @@ This section decides the contract that must land before `System` and
   hint in additive `StartRequest.cache`.
 - **Enable all three breakpoints before pricing cache writes.** Cost: the
   write premium is invisible to the reservation and the cost cap; a tenant
-  bill can exceed the cap. Price writes first, and keep `System` and `Message`
-  off until then.
+  bill can exceed the cap. Price writes first, and keep every breakpoint off
+  until then.
 - **Skip the `Message` marker when the last message is a tool result.** Cost:
   the tool result is the largest and most reused part of the next turn, so
   skipping it loses the main hit; the content is in the request regardless,
@@ -468,9 +473,10 @@ This section decides the contract that must land before `System` and
   message prefix is best-effort and is invalidated by a memory-policy drop.
   The stable prefix is unchanged and hits while the provider's cache entry
   lives; a provider TTL expiry costs a new write, not a different prefix.
-- Cache writes are counted and priced in the same change that enables
-  `System` and `Message`; until then `Tools` is the only breakpoint an adapter
-  may set. A vendor that charges no write premium sets `cache_write: 0`.
+- Cache writes are counted and priced in the same change that enables any
+  breakpoint; until then no adapter sets one. A provider's automatic prefix
+  caching (OpenAI-compatible, Ollama) needs no hint and is unaffected. A
+  vendor that charges no write premium sets `cache_write: 0`.
 - `StartRequest.cache` is additive in the invocation contract and the worker
   contract; `buf breaking` passes.
 - `docs/architecture/model-layer.md` gains the hint, the prefix hash, the

@@ -137,9 +137,12 @@ Every model has a `Descriptor`:
 Cache annotations are the provider adapters' (ADR-0019). Anthropic-compatible
 adapters mark the last non-empty system block, the last non-empty tool
 definition and the last non-empty message content block with
-`cache_control: {"type":"ephemeral"}`. Providers with automatic prefix caching
-(OpenAI-compatible, DeepSeek, Qwen, MiniMax, GLM, OpenRouter, Ollama,
-Ark/Doubao, Qianfan) ignore the hint. A generic manifest provider ignores the
+`cache_control: {"type":"ephemeral"}`. No adapter sets any breakpoint —
+`System`, `Tools` or `Message` — until the cache-write contract (ADR-0019 §7)
+lands in the same change; a `Tools` breakpoint is still a cache write billed
+at the premium. Providers with automatic prefix caching (OpenAI-compatible,
+DeepSeek, Qwen, MiniMax, GLM, OpenRouter, Ollama, Ark/Doubao, Qianfan) need no
+hint, ignore it, and are unaffected. A generic manifest provider ignores the
 hint unless its manifest declares an annotation mapping. Every provider not
 listed in ADR-0019 §2 ignores the hint. Gemini explicit cached content is a
 separate ADR (ADR-0019's non-goals); until it lands, the Gemini adapter
