@@ -293,7 +293,7 @@ configuration sets its value in a currency.
 | `when` | CEL over `at` (the start time of the invocation), `params`, `usage` and `tenant`. It expresses off-peak hours, long-context tiers, batch discounts and dated price changes. |
 | Layers | A snapshot shipped with the binary, then deployment overrides, then tenant overrides (negotiated rates, markup). |
 | **Price formula** | The descriptor's CEL over `params`, `usage` and the chosen `rates`. Token models share a default formula. |
-| Reserve | The formula on estimated usage: counted input tokens at `max(input, cache_write)` for a request with a cache hint, and the output limit. |
+| Reserve | The formula on estimated usage: for the default token formula, counted input tokens at `max(input, cache_write)` when the request has a cache hint, and the output limit. |
 | Settle | The cost the vendor reports, or else the formula on actual usage. |
 
 ```yaml
