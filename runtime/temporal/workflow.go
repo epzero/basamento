@@ -42,7 +42,7 @@ func (r *Runtime) hostWorkflow(ctx workflow.Context, in HostInput) (json.RawMess
 	tenant := tenantFromWorkflow(ctx)
 	runID := in.RunID
 	if runID == "" {
-		runID = workflow.GetInfo(ctx).WorkflowExecution.ID
+		runID = runIDFromWorkflowID(tenant, workflow.GetInfo(ctx).WorkflowExecution.ID)
 	}
 	dc := newDurableContext(ctx, r, in, tenant)
 	if err := dc.registerGateUpdateHandler(); err != nil {

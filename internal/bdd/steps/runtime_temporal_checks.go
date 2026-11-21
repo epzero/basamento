@@ -32,9 +32,10 @@ func registerTemporalChecks(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the run's durable events are (.+)$`, func(ctx context.Context, want string) error {
-		got, err := temporalW(ctx).bddOutbox().eventTypesDense()
-		if err != nil {
-			return err
+		events := temporalW(ctx).bddOutbox().eventsInSeqOrder()
+		got := make([]string, len(events))
+		for i, ev := range events {
+			got[i] = ev.Type
 		}
 		types := eventsFromFlowLiteral(want)
 		if len(got) != len(types) {

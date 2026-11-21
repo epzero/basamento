@@ -50,7 +50,7 @@ type durableContext struct {
 func newDurableContext(wfCtx workflow.Context, rt *Runtime, in HostInput, tenant core.TenantID) *durableContext {
 	runID := in.RunID
 	if runID == "" {
-		runID = workflow.GetInfo(wfCtx).WorkflowExecution.ID
+		runID = runIDFromWorkflowID(tenant, workflow.GetInfo(wfCtx).WorkflowExecution.ID)
 	}
 	cont := in.Continuation
 	if cont == nil {

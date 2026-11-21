@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/testsuite"
+
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/runtime"
@@ -125,6 +128,44 @@ func TestEmitSinkSeesTenantAndRunID(t *testing.T) {
 	calls := ob.callsCopy()
 	if len(calls) != 1 || calls[0].runID != "r1" || calls[0].tenant != "acme" || calls[0].seq != 1 || calls[0].typ != "a" {
 		t.Fatalf("%+v", calls[0])
+	}
+}
+
+func TestEmitTenantScopedWorkflowIDWithEmptyRunID(t *testing.T) {
+	ob := newRecordingOutbox()
+	opts := testOptions(t)
+	opts.Outbox = ob
+	rt, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRegisterFlow(t, rt, func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		dcRunID := dc.(*durableContext).runID
+		if err := dc.Emit(runtime.ProgressEvent{Type: "a"}); err != nil {
+			return nil, err
+		}
+		return json.Marshal(dcRunID)
+	})
+	// HostInput.RunID stays empty; the workflow id carries the tenant, so both
+	// the DurableContext run id and the Emit activity must strip it the same way.
+	res := runChain(t, rt, HostInput{Flow: runtime.FlowRef{Name: "e"}}, chainOptions{
+		histLen: 25,
+		tenant:  "acme",
+		maxExec: 1,
+		perExec: []func(int, *testsuite.TestWorkflowEnvironment){func(_ int, env *testsuite.TestWorkflowEnvironment) {
+			env.SetStartWorkflowOptions(client.StartWorkflowOptions{ID: "acme/run"})
+		}},
+	})
+	var dcRunID string
+	if err := json.Unmarshal(res.Output, &dcRunID); err != nil {
+		t.Fatal(err)
+	}
+	if dcRunID != "run" {
+		t.Fatalf("dc.runID %q want %q", dcRunID, "run")
+	}
+	calls := ob.callsCopy()
+	if len(calls) != 1 || calls[0].runID != "run" || calls[0].tenant != "acme" || calls[0].seq != 1 || calls[0].typ != "a" {
+		t.Fatalf("calls %+v want one a for acme/run seq 1", calls)
 	}
 }
 

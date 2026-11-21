@@ -148,8 +148,16 @@ activity), **Child** workflows, **Checkpoint** / ContinueAsNew, and the
 **continuation journal** in `HostInput.Continuation`. After ContinueAsNew the
 host workflow runs the flow function again from its first line; values from
 earlier executions come from `HostInput.Continuation`, not from re-running side
-effects. `HostInput` decodes both the `run_id` field and the `RunID` spelling,
-so a history recorded with either name replays with its original run id.
+effects.
+
+**No Temporal patch markers.** Part (a) ships no way to start a run: its only
+exported surface is `Register`, `HostWorkflowName` and `HostInput`; `Start`,
+`Resolve`, `Cancel`, `Describe`, `List` and `Serve` belong to pull request (c)
+and are not merged. No part-(a) run can be in flight in any deployment, so this
+pull request adds no `workflow.GetVersion` markers. `HostInput` still decodes
+both the `run_id` field and the `RunID` spelling, as cheap insurance for any
+history recorded meanwhile. Revisit this ruling if pull request (c)'s start
+path ships before this branch merges.
 
 ### Continuation journal
 

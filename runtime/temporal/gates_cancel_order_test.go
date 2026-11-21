@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,7 +12,10 @@ import (
 	"github.com/epzero/basamento/runtime"
 )
 
-const gateCancelOrderWorkflow = "gate-cancel-order-probe"
+const (
+	gateCancelOrderWorkflow = "gate-cancel-order-probe"
+	gateCancelOrderTimeout  = 10 * time.Second
+)
 
 type orderSettable struct {
 	workflow.Settable
@@ -35,9 +39,23 @@ func registerGateCancelOrderProbe(env *testsuite.TestWorkflowEnvironment, rt *Ru
 		if err := dc.registerGateUpdateHandler(); err != nil {
 			return nil, err
 		}
-		f1 := dc.Await(runtime.GateSpec{Name: "g1"})
-		f2 := dc.Await(runtime.GateSpec{Name: "g2"})
 		var order []string
+		// The timeouts arm a timer per gate; cancellation cancels them, and the
+		// cancel-call order is the CancelTimer command order this test protects.
+		f1 := dc.Await(runtime.GateSpec{Name: "g1", Timeout: gateCancelOrderTimeout})
+		f2 := dc.Await(runtime.GateSpec{Name: "g2", Timeout: gateCancelOrderTimeout})
+		for _, name := range []string{"g1", "g2"} {
+			name := name
+			g := dc.gates[name]
+			if g.timerCancel == nil {
+				return nil, fmt.Errorf("gate %s has no timeout timer", name)
+			}
+			cancel := g.timerCancel
+			g.timerCancel = func() {
+				order = append(order, "cancel:"+name)
+				cancel()
+			}
+		}
 		dc.gates["g1"].set = orderSettable{Settable: dc.gates["g1"].set, name: "g1", order: &order}
 		dc.gates["g2"].set = orderSettable{Settable: dc.gates["g2"].set, name: "g2", order: &order}
 		_ = f1.Get(nil)
@@ -70,12 +88,20 @@ func runGateCancelOrderProbe(t *testing.T) []string {
 }
 
 // TestGateCancellationSettlesInNameOrderOnReplay runs the same cancellation
-// several times: map iteration would pick a different branch on some runs.
+// several times: map iteration would pick a different branch on some runs. It
+// also checks that the timeout timers are cancelled in the same order, so the
+// CancelTimer commands do not depend on map iteration.
 func TestGateCancellationSettlesInNameOrderOnReplay(t *testing.T) {
+	want := []string{"cancel:g1", "g1", "cancel:g2", "g2"}
 	for i := 0; i < 5; i++ {
 		order := runGateCancelOrderProbe(t)
-		if len(order) != 2 || order[0] != "g1" || order[1] != "g2" {
-			t.Fatalf("run %d settled %v want [g1 g2]", i, order)
+		if len(order) != len(want) {
+			t.Fatalf("run %d order %v want %v", i, order, want)
+		}
+		for j := range want {
+			if order[j] != want[j] {
+				t.Fatalf("run %d order %v want %v", i, order, want)
+			}
 		}
 	}
 }
