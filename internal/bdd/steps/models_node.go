@@ -60,6 +60,7 @@ type nodeProvider struct {
 	dropResponse bool
 	needConfirm  bool
 	lookup       bool
+	forget       bool
 
 	starts   int
 	refs     []string
@@ -112,7 +113,7 @@ func (p *nodeProvider) Start(_ context.Context, req model.Request) (model.Handle
 	p.refs = append(p.refs, req.ClientRef)
 	if p.rejectFirst && p.starts == 1 {
 		p.mu.Unlock()
-		return model.Handle{}, transient()
+		return model.Handle{}, rejected()
 	}
 	if run, ok := p.runs[req.ClientRef]; ok {
 		handle := run.handle
@@ -231,6 +232,12 @@ func (p *nodeProvider) Lookup(_ context.Context, clientRef string) (*model.Handl
 	if !p.lookup {
 		return nil, core.NewError(core.CodeUnsupported, "the provider cannot look an invocation up", nil)
 	}
+	if p.forget {
+		// The invocation's retention window passed: the registry swept it, so
+		// the lookup finds nothing, exactly like a ref it never held.
+		delete(p.runs, clientRef)
+		return nil, nil
+	}
 	run, ok := p.runs[clientRef]
 	if !ok {
 		return nil, nil
@@ -246,6 +253,12 @@ func (p *nodeProvider) Lookup(_ context.Context, clientRef string) (*model.Handl
 
 func transient() error {
 	return &core.Error{Code: core.CodeTimeout, Message: "the start response was lost", Retryable: true}
+}
+
+// rejected is a retryable start error the provider returned before accepting
+// the invocation: the node may retry with the same client ref.
+func rejected() error {
+	return &core.Error{Code: core.CodeUnavailable, Message: "the provider rejected the start", Retryable: true}
 }
 
 // nodeDC records the gate a handler waits at, then delegates to the runtime.
@@ -322,7 +335,10 @@ func (w *nodeWorld) startRun(ctx context.Context, op model.Capability, input str
 	}
 	p := w.ensureProvider(ctx, op)
 	cat := w.ensureCatalog(ctx)
-	rt := local.New(local.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	rt, err := local.New(local.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	if err != nil {
+		return err
+	}
 	h, err := node.New(node.Deps{Invoker: p, Catalog: cat, Steps: rt})
 	if err != nil {
 		return err
@@ -371,10 +387,10 @@ func (w *nodeWorld) startRun(ctx context.Context, op model.Capability, input str
 	return nil
 }
 
-func (w *nodeWorld) handle(dc runtime.DurableContext, n flow.Node, input json.RawMessage) (json.RawMessage, error) {
+func (w *nodeWorld) handle(dc runtime.DurableContext, n flow.Node, input json.RawMessage) (host.NodeResult, error) {
 	cfg, err := node.ConfigFromSpec(n.Name, n.Spec)
 	if err != nil {
-		return nil, err
+		return host.NodeResult{}, err
 	}
 	out, err := w.handler.Handle(nodeDC{DurableContext: dc, w: w}, cfg, input)
 	w.mu.Lock()
@@ -382,9 +398,13 @@ func (w *nodeWorld) handle(dc runtime.DurableContext, n flow.Node, input json.Ra
 	w.runErr = err
 	w.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return host.NodeResult{}, err
 	}
-	return json.Marshal(out)
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return host.NodeResult{}, err
+	}
+	return host.NodeResult{Output: raw, CostMpts: out.CostMpts}, nil
 }
 
 // waitSettled waits until the run ends.
@@ -392,7 +412,7 @@ func (w *nodeWorld) waitSettled() error {
 	select {
 	case <-w.doneCh:
 		return nil
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the run to settle")
 	}
 }
@@ -413,7 +433,7 @@ func (w *nodeWorld) waitStarted() error {
 		w.atGate = gate
 		w.mu.Unlock()
 		return nil
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the run to start")
 	}
 }
@@ -426,7 +446,7 @@ func (w *nodeWorld) waitLookup() error {
 		return nil
 	case <-w.doneCh:
 		return fmt.Errorf("the run ended before the node looked the invocation up")
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the lookup")
 	}
 }
@@ -450,7 +470,7 @@ func (w *nodeWorld) waitGate(gate string) error {
 		return nil
 	case <-w.doneCh:
 		return fmt.Errorf("the run ended before it waited at gate %q", gate)
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for gate %q", gate)
 	}
 }
@@ -469,7 +489,7 @@ func (w *nodeWorld) cancelRun() error {
 		return nil
 	case <-w.doneCh:
 		return fmt.Errorf("the run ended before the provider received a cancel request")
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the cancel request")
 	}
 }
@@ -480,7 +500,7 @@ func (w *nodeWorld) waitAccepted() error {
 		return nil
 	case <-w.doneCh:
 		return fmt.Errorf("the run ended before the provider accepted the invocation")
-	case <-time.After(localWaitLimit):
+	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the provider to accept")
 	}
 }
@@ -497,7 +517,7 @@ func (w *nodeWorld) teardown() {
 		}()
 		select {
 		case <-w.doneCh:
-		case <-time.After(localWaitLimit):
+		case <-time.After(waitBound):
 		}
 	}
 	w.running = false
@@ -531,6 +551,14 @@ func registerNode(sc *godog.ScenarioContext) {
 		world(ctx).Node.ensureProvider(ctx, model.CapVideoGenerate).lookup = true
 		return nil
 	})
+	sc.Step(`^the invocation's retention window passes before the model node looks it up$`, func(ctx context.Context) error {
+		// The adapter's registry keeps an ended invocation for its retention
+		// window (1 hour by default); once the window passes, the ref is swept
+		// and a lookup finds nothing (MODEL-005-03).
+		world(ctx).Node.ensureProvider(ctx, model.CapVideoGenerate).forget = true
+		world(ctx).Core.clock.Advance(time.Hour)
+		return nil
+	})
 	sc.Step(`^the provider does not support lookup$`, func(ctx context.Context) error {
 		world(ctx).Node.ensureProvider(ctx, model.CapVideoGenerate).lookup = false
 		return nil
@@ -546,13 +574,6 @@ func registerNode(sc *godog.ScenarioContext) {
 		})
 		return nil
 	})
-	sc.Step(`^a model "([^"]*)" priced at "([^"]*)" milli-points$`, func(ctx context.Context, id, formula string) error {
-		w := world(ctx).Node
-		w.update(ctx, func(d *model.Descriptor) { d.ID = id })
-		w.ensureCatalog(ctx).SetSnapshotPrice(id, catalog.Price{Formula: formula})
-		return nil
-	})
-
 	sc.Step(`^the run has a budget of (\d+) milli-points$`, func(ctx context.Context, limit int64) error {
 		world(ctx).Node.budget = node.NewMemory(limit)
 		return nil
@@ -606,15 +627,6 @@ func registerNode(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the provider accepted (\d+) invocations?$`, func(ctx context.Context, accepted int) error {
-		p := world(ctx).Node.provider
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.accepted != accepted {
-			return fmt.Errorf("the provider accepted %d invocations, want %d", p.accepted, accepted)
-		}
-		return nil
-	})
 	sc.Step(`^the model node finds the invocation by lookup$`, func(ctx context.Context) error {
 		w := world(ctx).Node
 		if err := w.waitLookup(); err != nil {
@@ -665,7 +677,7 @@ func registerNode(sc *godog.ScenarioContext) {
 		w := world(ctx).Node
 		select {
 		case <-w.doneCh:
-		case <-time.After(localWaitLimit):
+		case <-time.After(waitBound):
 			return fmt.Errorf("timed out waiting for the run to end")
 		}
 		if got := w.budget.Charged(w.clientRef()); got != want {
@@ -680,7 +692,7 @@ func registerNode(sc *godog.ScenarioContext) {
 		w := world(ctx).Node
 		select {
 		case <-w.doneCh:
-		case <-time.After(localWaitLimit):
+		case <-time.After(waitBound):
 			return fmt.Errorf("timed out waiting for the run to end")
 		}
 		if got := w.budget.Charged(w.clientRef()); got != want {
@@ -714,7 +726,7 @@ func registerNode(sc *godog.ScenarioContext) {
 		w := world(ctx).Node
 		select {
 		case <-w.doneCh:
-		case <-time.After(localWaitLimit):
+		case <-time.After(waitBound):
 			return fmt.Errorf("timed out waiting for the run to end")
 		}
 		if w.budget.HeldTotal() != 0 {

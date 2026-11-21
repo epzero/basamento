@@ -160,7 +160,9 @@ func videoCatalog(t *testing.T) *catalog.Catalog {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.SetSnapshotPrice("sim-video", catalog.Price{Formula: "params.duration_s * 100"})
+	if err := c.SetSnapshotPrice("sim-video", catalog.Price{Formula: "params.duration_s * 100"}); err != nil {
+		t.Fatal(err)
+	}
 	return c
 }
 

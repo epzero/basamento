@@ -67,12 +67,18 @@ func retryable() error {
 	return &core.Error{Code: core.CodeTimeout, Message: "no response", Retryable: true}
 }
 
+// rejected is a retryable start error the provider returned before it accepted
+// anything, so a retry cannot charge twice.
+func rejected() error {
+	return &core.Error{Code: core.CodeUnavailable, Message: "the provider refused the start", Retryable: true}
+}
+
 func TestStartRetriesWithTheSameClientRef(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()
 	inv.start = func(attempt int, req model.Request) (model.Handle, error) {
 		if attempt == 1 {
-			return model.Handle{}, retryable()
+			return model.Handle{}, rejected()
 		}
 		h := model.Handle{Provider: "sim", ID: req.ClientRef, ClientRef: req.ClientRef}
 		inv.accepted[req.ClientRef] = h
@@ -144,6 +150,25 @@ func TestStartWithoutLookupIsAmbiguous(t *testing.T) {
 	}
 }
 
+func TestStartWithAForgottenRefIsAmbiguous(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		inv.accepted[req.ClientRef] = model.Handle{Provider: "sim", ID: req.ClientRef, ClientRef: req.ClientRef}
+		return model.Handle{}, retryable()
+	}
+	outcome, err := Starter{Invoker: inv}.Start(t.Context(), model.Request{ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.Ambiguous || outcome.Resolved {
+		t.Fatalf("outcome = %+v, want ambiguous: a forgotten ref cannot prove the start never landed", outcome)
+	}
+	if inv.starts != 1 || inv.lookups != 1 {
+		t.Fatalf("starts = %d, lookups = %d, want 1 and 1", inv.starts, inv.lookups)
+	}
+}
+
 func TestStartStopsOnANonRetryableError(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()
@@ -163,11 +188,11 @@ func TestStartStopsWhenAttemptsAreSpent(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()
 	inv.start = func(int, model.Request) (model.Handle, error) {
-		return model.Handle{}, retryable()
+		return model.Handle{}, rejected()
 	}
 	_, err := Starter{Invoker: inv, MaxAttempts: 2}.Start(t.Context(), model.Request{ClientRef: "ref-1"})
-	if core.CodeOf(err) != core.CodeTimeout {
-		t.Fatalf("err = %v, want timeout", err)
+	if core.CodeOf(err) != core.CodeUnavailable {
+		t.Fatalf("err = %v, want unavailable", err)
 	}
 	if inv.starts != 2 {
 		t.Fatalf("starts = %d, want 2", inv.starts)
