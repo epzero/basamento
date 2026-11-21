@@ -121,14 +121,17 @@ func (f *future) Ready() bool { return true }
 // --- a scripted model ------------------------------------------------------
 
 type scriptTurn struct {
-	Text     string         // answer text, when no tool calls
-	Tools    []string       // tool names requested
-	Handoffs []string       // handoff targets requested
-	Input    int64          // reported input tokens
-	Output   int64          // reported output tokens
-	Cost     int64          // actual charge
-	Estimate agent.Estimate // reservation and expected input tokens
-	Duration time.Duration  // run-clock time the turn takes
+	Text      string         // answer text, when no tool calls
+	Tools     []string       // tool names requested
+	Handoffs  []string       // handoff targets requested
+	Input     int64          // reported input tokens
+	Output    int64          // reported output tokens
+	Cost      int64          // actual charge
+	Estimate  agent.Estimate // reservation and expected input tokens
+	Duration  time.Duration  // run-clock time the turn takes
+	State     model.State    // result state; empty means succeeded
+	Err       error          // result error, with Cost charged
+	NoMessage bool           // result carries no message
 }
 
 type scriptedModel struct {
@@ -188,7 +191,15 @@ func (m *scriptedModel) Result(context.Context, model.Handle) (model.Result, err
 	}
 	raw, _ := json.Marshal(msg)
 	usage := model.Usage{InputTokens: turn.Input, OutputTokens: turn.Output}
-	return model.Result{State: model.StateSucceeded, Message: raw, Usage: &usage, CostMpts: turn.Cost}, nil
+	state := turn.State
+	if state == "" {
+		state = model.StateSucceeded
+	}
+	res := model.Result{State: state, Usage: &usage, CostMpts: turn.Cost}
+	if !turn.NoMessage {
+		res.Message = raw
+	}
+	return res, turn.Err
 }
 func (m *scriptedModel) Cancel(context.Context, model.Handle) error { return nil }
 func (m *scriptedModel) Lookup(context.Context, string) (*model.Handle, error) {
@@ -471,6 +482,55 @@ func TestTimeCapStopsBeforeTheNextTurn(t *testing.T) {
 	}
 }
 
+// AL-01: the time cap is checked before every model turn. With checks > 1 a
+// non-boundary turn must still stop when the cap is reached.
+func TestTimeCapIsCheckedEveryTurn(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{
+		{Tools: []string{"search"}},
+		{Tools: []string{"search"}},
+	}}
+	tr := newTools(dc)
+	tr.durs["search"] = 60 * time.Second
+	h := newHandler(dc, m, tr, nil)
+	out, err := runNode(t, h, dc, "worker", map[string]any{
+		"model": "script", "checks": 2, "caps": map[string]any{"time": "1m"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != agent.StateTimeCap || len(out.Turns) != 1 || m.invoked != 1 {
+		t.Fatalf("output = %+v invocations = %d", out, m.invoked)
+	}
+}
+
+// R1-1: a model turn that was charged but failed still settles its cost, so
+// the host journals node_failed with what the ledger charged.
+func TestFailedTurnSettlesItsCost(t *testing.T) {
+	cases := []struct {
+		name string
+		turn scriptTurn
+	}{
+		{"invoke error", scriptTurn{Cost: 40, Err: core.NewError(core.CodeUnavailable, "model down", nil)}},
+		{"state not succeeded", scriptTurn{Cost: 25, State: model.StateFailed}},
+		{"empty message", scriptTurn{Cost: 15, NoMessage: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+			m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{tc.turn}}
+			h := newHandler(dc, m, newTools(dc), nil)
+			_, res, err := runNodeResult(t, h, dc, "worker", map[string]any{"model": "script"}, nil)
+			if err == nil {
+				t.Fatal("run succeeded, want an error")
+			}
+			if res.CostMpts != tc.turn.Cost {
+				t.Fatalf("settled %d milli-points, want %d", res.CostMpts, tc.turn.Cost)
+			}
+		})
+	}
+}
+
 func TestCancellationBetweenTurnsStartsNoTurn(t *testing.T) {
 	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -699,6 +759,86 @@ func TestMemoryPolicyWithinTheLimitKeepsWholeTurns(t *testing.T) {
 	}
 	if dropped != 0 || len(msgs) != 2 {
 		t.Fatalf("dropped %d messages, kept %d", dropped, len(msgs))
+	}
+}
+
+// AL-02: a system message that declares no tokens is weighed by its content,
+// not treated as free, when the run has an input token limit.
+func TestMemoryPolicyWeighsSystemMessagesWithoutTokens(t *testing.T) {
+	system := []agent.SystemMessage{{Content: strings.Repeat("x", 4000)}}
+	_, _, err := agent.BuildMessagesForTest(system, nil, 1000)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument; the system message was free", err)
+	}
+}
+
+// AL-02: a model turn with no recorded usage is weighed by its content, not
+// treated as free; with no input token limit it is still kept.
+func TestMemoryPolicyWeighsTurnsWithoutUsage(t *testing.T) {
+	raw, _ := json.Marshal(&schema.Message{Role: schema.Assistant, Content: strings.Repeat("x", 4000)})
+	turns := []agent.Turn{{Message: raw}}
+	_, _, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument; the turn was free", err)
+	}
+	if _, _, err := agent.BuildMessagesForTest(nil, turns, 0); err != nil {
+		t.Fatalf("no limit: %v", err)
+	}
+}
+
+// CR2-01: a turn with no recorded usage weighs every string the assistant
+// produced, not only Content. A reasoning-only reply or a multi-content part
+// carries the same bulk as text and must not slip under the input token limit.
+func TestMemoryPolicyWeighsAssistantOutputParts(t *testing.T) {
+	big := strings.Repeat("x", 4000)
+	marshal := func(m *schema.Message) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{"reasoning", marshal(&schema.Message{Role: schema.Assistant, ReasoningContent: big})},
+		{"multi-content text", json.RawMessage(`{"role":"assistant","multi_content":[{"type":"text","text":"` + big + `"}]}`)},
+		{"assistant-generated text", marshal(&schema.Message{Role: schema.Assistant, AssistantGenMultiContent: []schema.MessageOutputPart{
+			{Type: schema.ChatMessagePartTypeText, Text: big},
+		}})},
+		{"assistant-generated reasoning", marshal(&schema.Message{Role: schema.Assistant, AssistantGenMultiContent: []schema.MessageOutputPart{
+			{Type: schema.ChatMessagePartTypeReasoning, Reasoning: &schema.MessageOutputReasoning{Text: big}},
+		}})},
+		{"tool arguments", marshal(&schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+			{ID: "call-1", Type: "function", Function: schema.FunctionCall{Name: "search", Arguments: big}},
+		}})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			turns := []agent.Turn{{Message: tc.raw}}
+			if _, _, err := agent.BuildMessagesForTest(nil, turns, 1000); core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("err = %v, want invalid_argument; the %s was free", err, tc.name)
+			}
+			if _, _, err := agent.BuildMessagesForTest(nil, turns, 0); err != nil {
+				t.Fatalf("no limit: %v", err)
+			}
+		})
+	}
+}
+
+// CR2-01: the estimate charges one envelope token per message, not one per
+// part, so many small parts are weighed by their bytes and do not inflate a
+// turn past the limit on envelopes alone.
+func TestMemoryPolicyCountsOneEnvelopePerTurn(t *testing.T) {
+	parts := make([]string, 200)
+	for i := range parts {
+		parts[i] = `{"type":"text","text":"x"}`
+	}
+	raw := json.RawMessage(`{"role":"assistant","multi_content":[` + strings.Join(parts, ",") + `]}`)
+	if _, _, err := agent.BuildMessagesForTest(nil, []agent.Turn{{Message: raw}}, 100); err != nil {
+		t.Fatalf("err = %v; 200 one-byte parts must weigh their bytes, not one envelope each", err)
 	}
 }
 
