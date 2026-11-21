@@ -218,7 +218,10 @@ are journal-driven: the journal entry is created when the flow first calls
 `Await` (no create-on-miss). After ContinueAsNew, pending gates stay in the
 journal; when replay reaches `Await`, the wait is re-armed from stored
 deadline (absolute time, so remaining time carries over; a past deadline times
-out at once). Run cancellation settles pending gates as
+out at once). A resolve Update that passes validation before the flow calls
+`Await` again still records the payload in the journal so the next `Await`
+returns it at once (no create-on-miss in the handler; the validator requires a
+journal entry). Run cancellation settles pending gates as
 `cancelled` (`temporal: gate cancelled`) and journals that. `GateSpec.Schema`
 and `AcceptIf` are not evaluated (FLOW-006-01, WP-L5-04).
 

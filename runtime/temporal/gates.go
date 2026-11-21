@@ -120,23 +120,31 @@ func (dc *durableContext) onGateTimer(ctx workflow.Context, name string, tf work
 
 func (dc *durableContext) settleGate(name string, payload json.RawMessage, err error) {
 	g := dc.gates[name]
-	if g == nil || g.settle {
+	if g != nil && g.settle {
 		return
 	}
-	g.settle = true
-	g.payload = append(json.RawMessage(nil), payload...)
-	g.err = err
-	if g.timerCancel != nil {
-		g.timerCancel()
-		g.timerCancel = nil
-	}
-	if err != nil {
-		g.set.SetError(err)
-	} else {
-		g.set.Set(payload, nil)
+	if g != nil {
+		g.settle = true
+		g.payload = append(json.RawMessage(nil), payload...)
+		g.err = err
+		if g.timerCancel != nil {
+			g.timerCancel()
+			g.timerCancel = nil
+		}
+		if err != nil {
+			g.set.SetError(err)
+		} else {
+			g.set.Set(payload, nil)
+		}
 	}
 	dc.cont.ensure()
-	j := dc.cont.Gates[name]
+	j, inJournal := dc.cont.Gates[name]
+	if !inJournal {
+		return
+	}
+	if g == nil && (j.Resolved || j.EndedByTimeout || j.EndedByCancel) {
+		return
+	}
 	if j.Name == "" {
 		j.Name = name
 	}
@@ -184,9 +192,11 @@ func (dc *durableContext) validateGateResolve(res GateResolution) error {
 
 func (dc *durableContext) handleGateResolve(res GateResolution) {
 	g := dc.gates[res.Gate]
-	if g == nil || g.settle {
+	if g != nil && g.settle {
 		return
 	}
+	// settleGate also updates the journal when no live wait exists yet (after
+	// ContinueAsNew, before the flow calls Await again).
 	dc.settleGate(res.Gate, res.Payload, nil)
 }
 
