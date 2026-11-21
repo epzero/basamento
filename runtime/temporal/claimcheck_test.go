@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/epzero/basamento/core"
@@ -120,25 +121,154 @@ func TestCodecClaimCheckIsTenantBound(t *testing.T) {
 	}
 }
 
-func TestCodecThresholdIsOnTheEncryptedForm(t *testing.T) {
+func TestCodecClaimCheckBoundaryByEncryptedSize(t *testing.T) {
 	enc := testSecretsCodec(t)
-	c, err := newPayloadCodec(enc, testBlobStore(t), 5*1024)
+	blobs := testBlobStore(t)
+	threshold := 5 * 1024
+	c, err := newPayloadCodec(enc, blobs, threshold)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := testTenantCtx("acme")
-	small, err := c.Encode(ctx, plainPayload(string(make([]byte, 1024))))
+	inlineMax := largestInlinePlaintextSize(t, enc, threshold)
+	secret := []byte("PLAINTEXT_MARKER")
+	plain := plainPayload(string(make([]byte, inlineMax)))
+	hist, err := c.Encode(ctx, plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(small.Data) > 5*1024 {
-		t.Fatal("1 KB payload was claim-checked")
+	markerPlain, _ := enc.Decode(ctx, hist)
+	if string(markerPlain.Metadata["encoding"]) == ClaimCheckEncoding {
+		t.Fatal("unexpected claim-check at inline boundary")
 	}
-	large, err := c.Encode(ctx, plainPayload(string(make([]byte, 20000))))
+	stored, _ := json.Marshal(storedPayload{Metadata: markerPlain.Metadata, Data: markerPlain.Data})
+	key := blob.ContentKeyOf(stored)
+	exists, err := blobs.Exists(ctx, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(large.Data) > 5*1024 {
-		t.Fatal("large payload history was not claim-checked to marker size")
+	if exists {
+		t.Fatal("inline payload should not be stored")
 	}
+	claimPlain := plainPayload(string(append(secret, bytes.Repeat([]byte("b"), inlineMax+500)...)))
+	hist2, err := c.Encode(ctx, claimPlain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist2.Data) > threshold {
+		t.Fatal("claim-checked history should be a small marker")
+	}
+	markerEnc, err := enc.Decode(ctx, hist2)
+	if err != nil || string(markerEnc.Metadata["encoding"]) != ClaimCheckEncoding {
+		t.Fatal("expected claim-check marker")
+	}
+	var marker claimCheckMarker
+	_ = json.Unmarshal(markerEnc.Data, &marker)
+	ok, err := blobs.Exists(ctx, marker.Key)
+	if err != nil || !ok {
+		t.Fatal("claim-checked blob missing")
+	}
+	r, err := blobs.Get(ctx, marker.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	raw, _ := io.ReadAll(r)
+	if bytes.Contains(raw, secret) {
+		t.Fatal("blob holds plaintext")
+	}
+}
+
+func TestCodecClaimCheckDecodeRejectsOversizeBlob(t *testing.T) {
+	enc := testSecretsCodec(t)
+	blobs := testBlobStore(t)
+	c, err := newPayloadCodec(enc, blobs, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testTenantCtx("acme")
+	inner, err := enc.Encode(ctx, plainPayload("payload-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := json.Marshal(storedPayload{Metadata: inner.Metadata, Data: inner.Data})
+	key := blob.ContentKeyOf(stored)
+	_ = blobs.Put(ctx, key, bytes.NewReader(stored), "application/json")
+	marker, _ := json.Marshal(claimCheckMarker{Key: key, Size: len(inner.Data) - 10})
+	encMarker, err := enc.Encode(ctx, secrets.Payload{Metadata: map[string][]byte{"encoding": []byte(ClaimCheckEncoding)}, Data: marker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Decode(ctx, encMarker)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %v", core.CodeOf(err))
+	}
+}
+
+func TestCodecClaimCheckDecodeRejectsUndersizePayload(t *testing.T) {
+	enc := testSecretsCodec(t)
+	blobs := testBlobStore(t)
+	c, err := newPayloadCodec(enc, blobs, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testTenantCtx("acme")
+	inner, err := enc.Encode(ctx, plainPayload("payload-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := json.Marshal(storedPayload{Metadata: inner.Metadata, Data: inner.Data})
+	key := blob.ContentKeyOf(stored)
+	_ = blobs.Put(ctx, key, bytes.NewReader(stored), "application/json")
+	marker, _ := json.Marshal(claimCheckMarker{Key: key, Size: len(inner.Data) + 50})
+	encMarker, err := enc.Encode(ctx, secrets.Payload{Metadata: map[string][]byte{"encoding": []byte(ClaimCheckEncoding)}, Data: marker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Decode(ctx, encMarker)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %v", core.CodeOf(err))
+	}
+}
+
+func TestCodecClaimCheckSizeMismatchRejected(t *testing.T) {
+	enc := testSecretsCodec(t)
+	blobs := testBlobStore(t)
+	c, err := newPayloadCodec(enc, blobs, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testTenantCtx("acme")
+	body := []byte("xy")
+	stored, _ := json.Marshal(storedPayload{Metadata: map[string][]byte{"encoding": []byte(secrets.EncodingEncrypted)}, Data: body})
+	key := blob.ContentKeyOf(stored)
+	_ = blobs.Put(ctx, key, bytes.NewReader(stored), "application/json")
+	marker, _ := json.Marshal(claimCheckMarker{Key: key, Size: 9999})
+	encMarker, err := enc.Encode(ctx, secrets.Payload{Metadata: map[string][]byte{"encoding": []byte(ClaimCheckEncoding)}, Data: marker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Decode(ctx, encMarker)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code %v", core.CodeOf(err))
+	}
+}
+
+func largestInlinePlaintextSize(t *testing.T, enc *secrets.Codec, threshold int) int {
+	t.Helper()
+	lo, hi := 1, 65536
+	ctx := testTenantCtx("acme")
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		p, err := enc.Encode(ctx, plainPayload(string(make([]byte, mid))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Data) <= threshold {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
 }

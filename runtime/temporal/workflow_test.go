@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	stderrors "errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	sdktemporal "go.temporal.io/sdk/temporal"
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/converter"
@@ -100,6 +103,7 @@ func TestRandMatchesLocalGoldenValues(t *testing.T) {
 
 func TestStepPanicFailsOnceWithoutLeakingValue(t *testing.T) {
 	var buf bytes.Buffer
+	var n int
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
 	rt, env := testEnv(t)
 	rt.logger = logger
@@ -108,6 +112,7 @@ func TestStepPanicFailsOnceWithoutLeakingValue(t *testing.T) {
 		return raw, dc.Step("panic", nil, runtime.StepOptions{}).Get(&raw)
 	})
 	_ = rt.RegisterStep("panic", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		n++
 		panic("secret-leak")
 	}, runtime.StepDefaults{})
 	if err := rt.Register(env); err != nil {
@@ -115,31 +120,60 @@ func TestStepPanicFailsOnceWithoutLeakingValue(t *testing.T) {
 	}
 	setTestTenantHeader(env, "acme")
 	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "p"}, RunID: "r1"})
-	if err := env.GetWorkflowError(); err == nil {
+	wfErr := env.GetWorkflowError()
+	if wfErr == nil {
 		t.Fatal("expected workflow failure")
+	}
+	if n != 1 {
+		t.Fatalf("step ran %d times", n)
 	}
 	if got := buf.String(); !bytes.Contains([]byte(got), []byte("secret-leak")) {
 		t.Fatal("panic value not logged")
 	}
+	if strings.Contains(wfErr.Error(), "secret-leak") {
+		t.Fatal("panic value leaked to workflow error")
+	}
 }
 
 func TestStepPlainErrorDoesNotLeakToFutureGet(t *testing.T) {
+	var buf bytes.Buffer
+	var n int
 	rt, env := testEnv(t)
+	rt.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 		var raw json.RawMessage
 		err := dc.Step("bad", nil, runtime.StepOptions{}).Get(&raw)
 		return raw, err
 	})
 	_ = rt.RegisterStep("bad", func(context.Context, json.RawMessage) (json.RawMessage, error) {
-		return nil, errors.New("secret-token")
+		n++
+		return nil, stderrors.New("secret-token")
 	}, runtime.StepDefaults{})
 	if err := rt.Register(env); err != nil {
 		t.Fatal(err)
 	}
 	setTestTenantHeader(env, "acme")
 	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "p"}, RunID: "r1"})
-	if err := env.GetWorkflowError(); err == nil {
+	wfErr := env.GetWorkflowError()
+	if wfErr == nil {
 		t.Fatal("expected failure")
+	}
+	if n != 1 {
+		t.Fatalf("step ran %d times", n)
+	}
+	if !strings.Contains(buf.String(), "secret-token") {
+		t.Fatal("expected secret in log")
+	}
+	errText := wfErr.Error()
+	var app *sdktemporal.ApplicationError
+	if stderrors.As(wfErr, &app) {
+		errText = app.Message()
+	}
+	if strings.Contains(errText, "secret-token") {
+		t.Fatal("secret in workflow error")
+	}
+	if strings.Contains(failureChainText(wfErr), "secret-token") {
+		t.Fatal("secret in failure chain")
 	}
 }
 
@@ -265,13 +299,5 @@ func TestNewRejectsNilDependencies(t *testing.T) {
 	}
 	if _, err := New(Options{Payloads: testSecretsCodec(t)}); err == nil {
 		t.Fatal("expected error without blobs")
-	}
-}
-
-// guard local parity: compute once when changing seededRand.
-func TestLocalRandParitySanity(t *testing.T) {
-	r := seededRand("r1", "k")
-	if r.Uint64() != randR1K0 {
-		t.Fatalf("parity broken: got %d", r.Uint64())
 	}
 }
