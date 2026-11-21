@@ -35,14 +35,16 @@ state:
     required: [messages, files, attempts, plan, tests]
   reducers: { messages: append, files: merge_by(path), attempts: sum }
 nodes:
-  plan:   { kind: agent, spec: { agent: planner }, out: plan }
-  impl:   { kind: map, spec: { over: "state.plan.modules", node: impl_module, max_parallel: 4 } }
+  plan:        { kind: agent, spec: { agent: planner }, out: plan }
+  impl:        { kind: map, spec: { over: "state.plan.modules", node: impl_module, max_parallel: 4 } }
+  impl_module: { kind: task }
   verify: { kind: tool, spec: { tool: run_tests } }
   repair: { kind: agent, spec: { agent: fixer }, guard: { max_visits: 3, cost_mpts: 5000 } }
   review: { kind: gate, spec: { schema: "review.json", accept_if: "input.approved || size(input.notes) > 0", timeout: "72h" } }
 edges:
   - { from: START,  to: plan }
   - { from: plan,   to: impl }
+  - { from: impl,   to: impl_module }
   - { from: impl,   to: verify }
   - { from: verify, to: review, when: "state.tests.failed == 0" }
   - { from: verify, to: repair, when: "state.tests.failed > 0" }

@@ -9,17 +9,19 @@ import (
 	"github.com/epzero/basamento/flow"
 )
 
-// scalarFlow is a flow of one node whose only expression is the edge condition
-// given, so a test can put one expression at a size.
+// scalarFlow is a flow of two nodes whose only expression is the condition on
+// the second edge, so a test can put one expression at a size. The expression
+// is not on the edge from START, which takes none (REQ-FLOW-066).
 func scalarFlow(when string) *flow.IR {
 	return &flow.IR{
 		Name:    "sized",
 		Version: 1,
 		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
-		Nodes:   taskNodes("check"),
+		Nodes:   taskNodes("check", "done"),
 		Edges: []flow.Edge{
-			{From: Start, To: "check", When: when},
-			{From: "check", To: Fail},
+			{From: Start, To: "check"},
+			{From: "check", To: "done", When: when},
+			{From: "done", To: Fail},
 		},
 	}
 }
@@ -51,8 +53,8 @@ func TestValidateRejectsAnExpressionAboveItsMaximum(t *testing.T) {
 	}{
 		{
 			name:   "edge condition",
-			mutate: func(f *flow.IR) { f.Edges[0].When = celExpression(MaxExpressionBytes + 1) },
-			want:   `edge "START" -> "check" when`,
+			mutate: func(f *flow.IR) { f.Edges[1].When = celExpression(MaxExpressionBytes + 1) },
+			want:   `edge "check" -> "done" when`,
 		},
 		{
 			name: "node input mapping",

@@ -384,3 +384,149 @@ func BenchmarkValidateLongChain(b *testing.B) {
 		}
 	}
 }
+
+// mapFlow is the smallest definition with a map node whose child is a declared
+// task reached by an edge, so only a map defect can reject it.
+func mapFlow() *flow.IR {
+	return &flow.IR{
+		Name:    "map",
+		Version: 1,
+		State:   flow.StateSpec{Schema: json.RawMessage(`{"type":"object"}`)},
+		Nodes: map[string]flow.Node{
+			"fanout":      {Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"fanout_item"}`)},
+			"fanout_item": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: Start, To: "fanout"},
+			{From: "fanout", To: "fanout_item"},
+			{From: "fanout_item", To: Fail},
+		},
+	}
+}
+
+func TestValidateAcceptsRunnableMapDefinition(t *testing.T) {
+	if err := Validate(mapFlow()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The child checks depend on "node" alone: an empty over is an expression
+// defect flow/compile judges, not a reason to skip them (EP0-149).
+func TestValidateRejectsUndeclaredChildWithEmptyOver(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"","node":"ghost"}`)}
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout", To: Fail},
+	}
+	requireInvalid(t, Validate(f),
+		`map node "fanout"`, `child node "ghost"`, "does not exist")
+}
+
+// A "node" that names no non-empty string is a map the machine cannot run, so
+// the compiler rejects it and names the map node (EP0-149).
+func TestValidateRejectsUnreadableMapChildName(t *testing.T) {
+	for _, spec := range []string{
+		`{"over":"state.items","node":42}`,
+		`{"over":"state.items"}`,
+		`{"over":"state.items","node":""}`,
+	} {
+		t.Run(spec, func(t *testing.T) {
+			f := mapFlow()
+			f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(spec)}
+			requireInvalid(t, Validate(f), `map node "fanout"`, `"node"`)
+		})
+	}
+}
+
+func TestValidateAcceptsMapWithEmptyOver(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"","node":"fanout_item"}`)}
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// FLOW-062-01: a map child that is not a declared node.
+func TestValidateRejectsMapChildThatIsNotDeclared(t *testing.T) {
+	f := mapFlow()
+	delete(f.Nodes, "fanout_item")
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout", To: Fail},
+	}
+	requireInvalid(t, Validate(f),
+		`map node "fanout"`, `child node "fanout_item"`, "does not exist")
+}
+
+// FLOW-063-01: a map child of a kind the machine runs itself.
+func TestValidateRejectsMapChildTheMachineRuns(t *testing.T) {
+	for _, kind := range []string{"set", "parallel", "map"} {
+		t.Run(kind, func(t *testing.T) {
+			f := mapFlow()
+			child := f.Nodes["fanout_item"]
+			child.Kind = kind
+			f.Nodes["fanout_item"] = child
+			requireInvalid(t, Validate(f),
+				`map node "fanout"`, `child node "fanout_item"`, `kind "`+kind+`"`,
+				"which the machine runs itself")
+		})
+	}
+}
+
+// FLOW-064-01: one child claimed by two map nodes.
+func TestValidateRejectsMapChildClaimedTwice(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["review"] = flow.Node{
+		Kind: "map",
+		Spec: json.RawMessage(`{"over":"state.files","node":"fanout_item"}`),
+	}
+	f.Edges = append(f.Edges,
+		flow.Edge{From: "fanout", To: "review"},
+		flow.Edge{From: "review", To: Fail},
+	)
+	requireInvalid(t, Validate(f),
+		`map nodes "fanout" and "review"`, `child node "fanout_item"`)
+}
+
+// FLOW-065-01: a map child that carries a guard.
+func TestValidateRejectsGuardedMapChild(t *testing.T) {
+	f := mapFlow()
+	child := f.Nodes["fanout_item"]
+	child.Guard = &flow.Guard{MaxVisits: 3}
+	f.Nodes["fanout_item"] = child
+	requireInvalid(t, Validate(f),
+		`map node "fanout"`, `child node "fanout_item"`, "a guard counts visits",
+		"a map child runs once per element")
+}
+
+// The map-child guard is reported before the cycle search, so a guarded map
+// cycle names the child guard rather than looking bounded (design.md §2.6).
+func TestValidateReportsGuardedMapChildBeforeCycle(t *testing.T) {
+	f := mapFlow()
+	child := f.Nodes["fanout_item"]
+	child.Guard = &flow.Guard{MaxVisits: 3}
+	f.Nodes["fanout_item"] = child
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout", To: "fanout_item"},
+		{From: "fanout_item", To: "fanout"},
+	}
+	requireInvalid(t, Validate(f),
+		`map node "fanout"`, `child node "fanout_item"`, "has a guard")
+}
+
+// FLOW-066-01: no condition on the edge from START.
+func TestValidateRejectsConditionOnStartEdge(t *testing.T) {
+	f := simpleFlow()
+	f.Edges[0].When = "true"
+	requireInvalid(t, Validate(f), `edge "START" -> "plan"`, "takes no condition")
+}
+
+func TestValidateAcceptsConditionOnLaterEdge(t *testing.T) {
+	f := simpleFlow()
+	f.Edges[1].When = "true"
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+}
