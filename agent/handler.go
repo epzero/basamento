@@ -23,6 +23,10 @@ import (
 type Node struct {
 	Name string          // the node's key in the flow's IR
 	Spec json.RawMessage // the agent node spec (Spec)
+	// Handoffs are the agent node ids this node may hand off to: the targets
+	// of its outgoing edges in the flow (design §4). The handler offers the
+	// reserved handoff_to tool to the model only when there is at least one.
+	Handoffs []string
 }
 
 // Estimate is what the loop needs to know about a model turn before it starts:
@@ -154,7 +158,7 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 		if h.opts.Observer != nil && dropped > 0 {
 			h.opts.Observer.Dropped(own, dropped)
 		}
-		tools, err := h.toolsJSON(ctx, node.Name, spec)
+		tools, err := h.toolsJSON(ctx, node.Name, spec, node.Handoffs)
 		if err != nil {
 			return nil, err
 		}
@@ -171,6 +175,14 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 			if err != nil {
 				return nil, err
 			}
+		}
+		// The post-build guarantee of REQ-AGENT-027: the estimator measures
+		// the request as assembled, so tool definitions and tool results it
+		// may count beyond the recorded usage still fail before the invoke.
+		if spec.InputTokens > 0 && estimate.InputTokens > spec.InputTokens {
+			return nil, invalid("agent: the assembled request exceeds the input token limit", map[string]any{
+				"input_tokens": spec.InputTokens, "used": estimate.InputTokens,
+			})
 		}
 		// 5. The token cap (REQ-AGENT-011).
 		if spec.Caps.Tokens != nil && used+estimate.InputTokens > *spec.Caps.Tokens {
@@ -379,34 +391,42 @@ func (h *Handler) toolSet(ctx context.Context, agent string) (*tool.Set, error) 
 // toolsJSON renders the tools offered to the model. Each tool's Input JSON
 // Schema becomes its ParamsOneOf: eino reads an absent ParamsOneOf as a tool
 // that takes no arguments, which would hide a required argument from the model.
-func (h *Handler) toolsJSON(ctx context.Context, agent string, spec Spec) (json.RawMessage, error) {
+func (h *Handler) toolsJSON(ctx context.Context, agent string, spec Spec, handoffs []string) (json.RawMessage, error) {
 	set, err := h.toolSet(ctx, agent)
 	if err != nil {
 		return nil, err
 	}
-	if set == nil {
-		return nil, nil
-	}
-	offered := set.Tools
-	if len(spec.Tools) > 0 {
-		offered = nil
-		for _, name := range spec.Tools {
-			if t, ok := set.Get(name); ok {
-				offered = append(offered, t)
+	var infos []*schema.ToolInfo
+	if set != nil {
+		offered := set.Tools
+		if len(spec.Tools) > 0 {
+			offered = nil
+			for _, name := range spec.Tools {
+				if t, ok := set.Get(name); ok {
+					offered = append(offered, t)
+				}
 			}
 		}
-	}
-	infos := make([]*schema.ToolInfo, 0, len(offered))
-	for _, t := range offered {
-		info := &schema.ToolInfo{Name: t.Name, Desc: t.Description}
-		if len(bytes.TrimSpace(t.Input)) > 0 {
-			var input jsonschema.Schema
-			if err := json.Unmarshal(t.Input, &input); err != nil {
-				return nil, invalid(fmt.Sprintf("agent: tool %q has an invalid input schema: %s", t.Name, err), map[string]any{"tool": t.Name})
+		for _, t := range offered {
+			if t.Name == handoffTool {
+				continue // reserved: the loop intercepts it, the tool port never runs it
 			}
-			info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&input)
+			info := &schema.ToolInfo{Name: t.Name, Desc: t.Description}
+			if len(bytes.TrimSpace(t.Input)) > 0 {
+				var input jsonschema.Schema
+				if err := json.Unmarshal(t.Input, &input); err != nil {
+					return nil, invalid(fmt.Sprintf("agent: tool %q has an invalid input schema: %s", t.Name, err), map[string]any{"tool": t.Name})
+				}
+				info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&input)
+			}
+			infos = append(infos, info)
 		}
-		infos = append(infos, info)
+	}
+	// A node with handoff targets offers the reserved handoff_to tool, so a
+	// real model can request a handoff the loop then intercepts (REQ-AGENT-016,
+	// design §4). It is never resolved through the tool port.
+	if len(handoffs) > 0 {
+		infos = append(infos, handoffInfo(handoffs))
 	}
 	if len(infos) == 0 {
 		return nil, nil
@@ -414,12 +434,39 @@ func (h *Handler) toolsJSON(ctx context.Context, agent string, spec Spec) (json.
 	return marshal(infos), nil
 }
 
+// handoffTool is the reserved tool name a model uses to request a handoff.
+const handoffTool = "handoff_to"
+
+// handoffInfo is the schema of the reserved handoff tool: the target is one of
+// the node's handoff targets, the agent node ids its outgoing edges reach.
+func handoffInfo(targets []string) *schema.ToolInfo {
+	enum := make([]any, len(targets))
+	for i, target := range targets {
+		enum[i] = target
+	}
+	input := &jsonschema.Schema{
+		Type:       "object",
+		Properties: jsonschema.NewProperties(),
+		Required:   []string{"target"},
+	}
+	input.Properties.Set("target", &jsonschema.Schema{
+		Type:        "string",
+		Enum:        enum,
+		Description: "the agent node to hand off to",
+	})
+	return &schema.ToolInfo{
+		Name:        handoffTool,
+		Desc:        "End this agent run and hand its turns to another agent node.",
+		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(input),
+	}
+}
+
 // splitCalls separates handoff requests, in order, from tool calls.
 func splitCalls(calls []schema.ToolCall) ([]schema.ToolCall, []schema.ToolCall) {
 	var handoffs []schema.ToolCall
 	var tools []schema.ToolCall
 	for _, call := range calls {
-		if call.Function.Name == "handoff_to" {
+		if call.Function.Name == handoffTool {
 			handoffs = append(handoffs, call)
 			continue
 		}

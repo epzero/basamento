@@ -146,6 +146,13 @@ func (w *agentWorld) run(name string, input json.RawMessage, blockAfter, stopAft
 		blocked: dc.blocked,
 		release: dc.release,
 	}
+	handoffs := make([]string, 0, len(w.defs)-1)
+	for other := range w.defs {
+		if other != name {
+			handoffs = append(handoffs, other)
+		}
+	}
+	sort.Strings(handoffs)
 	h := agent.New(agent.Options{
 		Models:   func(string) (model.Invoker, error) { return d.model, nil },
 		Estimate: d.model.Estimate,
@@ -157,7 +164,7 @@ func (w *agentWorld) run(name string, input json.RawMessage, blockAfter, stopAft
 	})
 	go func() {
 		defer close(r.done)
-		res, err := h.Handle(dc, agent.Node{Name: name, Spec: d.specJSON()}, input)
+		res, err := h.Handle(dc, agent.Node{Name: name, Spec: d.specJSON(), Handoffs: handoffs}, input)
 		r.err = err
 		if len(res.Output) > 0 {
 			_ = json.Unmarshal(res.Output, &r.output)

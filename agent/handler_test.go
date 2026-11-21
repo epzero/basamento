@@ -743,6 +743,129 @@ func TestMemoryPolicyProperty(t *testing.T) {
 	}
 }
 
+// --- reviewer findings (EP0-33, L1-01, L1-02) ------------------------------
+
+// L1-01: a tool result reports no usage of its own, but it is still input to
+// the next turn. A large one must weigh in the policy: here the recorded turn
+// usage alone (300+300) fits 1000, but the first turn's 4000-byte result does
+// not, so the run fails with invalid_argument instead of invoking the model.
+func TestMemoryPolicyCountsToolResults(t *testing.T) {
+	big := strings.Repeat("x", 4000)
+	turns := []agent.Turn{
+		{Message: msg("turn-1"), Tokens: 300, Results: []json.RawMessage{result(big)}},
+		{Message: msg("turn-2"), Tokens: 300},
+	}
+	_, _, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument; the tool result was not counted", err)
+	}
+}
+
+// L1-01: result weight also decides what is dropped. Turn 2's 4000-byte
+// result does not fit the remainder, so that whole turn goes — and its result
+// with it — while turns 1 and 3 stay, as in AGENT-024-01.
+func TestMemoryPolicyDropsATurnWhoseResultsDoNotFit(t *testing.T) {
+	big := strings.Repeat("x", 4000)
+	turns := []agent.Turn{
+		{Message: msg("turn-1"), Tokens: 300, Results: []json.RawMessage{result("ok")}},
+		{Message: msg("turn-2"), Tokens: 300, Results: []json.RawMessage{result(big)}},
+		{Message: msg("turn-3"), Tokens: 300, Results: []json.RawMessage{result("ok")}},
+	}
+	msgs, dropped, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := messageNames(msgs)
+	if contains(names, "turn-2") {
+		t.Fatalf("kept %v; turn 2 and its result exceed the remainder", names)
+	}
+	if !contains(names, "turn-1") || !contains(names, "turn-3") {
+		t.Fatalf("kept %v, want turns 1 and 3", names)
+	}
+	if dropped != 2 {
+		t.Fatalf("dropped %d messages, want 2 (turn 2 and its result)", dropped)
+	}
+}
+
+// L1-01: the post-build guarantee measures the assembled request with the
+// estimator, so a request over input_tokens fails before the invoke even when
+// the recorded usage looked fine.
+func TestAssembledRequestOverTheInputLimitFails(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{
+		{Text: "Done.", Estimate: agent.Estimate{InputTokens: 1500}},
+	}}
+	h := newHandler(dc, m, newTools(dc), nil)
+	_, err := runNode(t, h, dc, "worker", map[string]any{"model": "script", "input_tokens": 1000}, nil)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument", err)
+	}
+	if m.invoked != 0 {
+		t.Fatalf("model invoked %d times, want 0", m.invoked)
+	}
+}
+
+// L1-02: a node with handoff targets offers the reserved handoff_to tool, with
+// the target as a required enum, so a real model can request a handoff.
+func TestHandoffToolIsOfferedToTheModel(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "triage", turns: []scriptTurn{{Text: "Done."}}}
+	h := agent.New(agent.Options{
+		Models:   func(string) (model.Invoker, error) { return m, nil },
+		Estimate: m.Estimate,
+		RunTool:  newTools(dc).run,
+		Tools: func(context.Context, string) (*tool.Set, error) {
+			return &tool.Set{Tools: []tool.Tool{{Name: "search"}}}, nil
+		},
+		Defines:  func(node string) bool { return node == "triage" || node == "fixer" },
+		Register: dc.Register,
+	})
+	node := agent.Node{Name: "triage", Spec: spec(t, map[string]any{"model": "script"}), Handoffs: []string{"fixer"}}
+	if _, err := h.Handle(dc, node, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(m.requests))
+	}
+	var infos []*schema.ToolInfo
+	if err := json.Unmarshal(m.requests[0].Tools, &infos); err != nil {
+		t.Fatalf("tools are not ToolInfo: %v (%s)", err, m.requests[0].Tools)
+	}
+	var handoff *schema.ToolInfo
+	for _, info := range infos {
+		if info.Name == "handoff_to" {
+			handoff = info
+		}
+	}
+	if handoff == nil || handoff.ParamsOneOf == nil {
+		t.Fatalf("tools = %s, want a handoff_to tool with a schema", m.requests[0].Tools)
+	}
+	js, err := handoff.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(js.Required) != 1 || js.Required[0] != "target" {
+		t.Fatalf("required = %v, want [target]", js.Required)
+	}
+	prop, ok := js.Properties.Get("target")
+	if !ok || len(prop.Enum) != 1 || prop.Enum[0] != "fixer" {
+		t.Fatalf("target schema = %+v, want enum [fixer]", prop)
+	}
+}
+
+// L1-02: a node without handoff targets offers no handoff_to tool.
+func TestNoHandoffToolWithoutTargets(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+	h := newHandler(dc, m, newTools(dc), nil)
+	if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if messagesContain(t, m.requests[0].Tools, "handoff_to") {
+		t.Fatalf("tools = %s, want no handoff_to", m.requests[0].Tools)
+	}
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func msg(name string) json.RawMessage {
