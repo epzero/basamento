@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"unicode/utf8"
 
 	"github.com/epzero/basamento/core"
 )
 
+// Panic logs must not copy megabyte panic values or stack dumps from deep recursion.
 const (
 	maxPanicValue = 4096
 	maxPanicStack = 16 << 10
@@ -36,11 +36,15 @@ func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered a
 }
 
 func formatPanicValue(recovered any) string {
-	probe := fmt.Sprintf("%.*v", maxPanicValue+1, recovered)
-	if utf8.RuneCountInString(probe) > maxPanicValue {
-		return fmt.Sprintf("%.*v", maxPanicValue, recovered) + "... (truncated)"
+	s := fmt.Sprintf("%.*v", maxPanicValue+1, recovered)
+	n := 0
+	for i := range s {
+		if n == maxPanicValue {
+			return s[:i] + "... (truncated)"
+		}
+		n++
 	}
-	return probe
+	return s
 }
 
 func formatPanicStack(stack []byte) string {
