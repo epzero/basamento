@@ -200,3 +200,54 @@ func TestLinkChildAfterParentClosed(t *testing.T) {
 		f.waitState(t, "acme", "gc1", stateTerminated)
 	})
 }
+
+func TestLinkChildWhileParentShuttingDown(t *testing.T) {
+	for _, policy := range []string{"abandon", "request_cancel", "terminate"} {
+		t.Run(policy, func(t *testing.T) {
+			f := newFixture(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+			defer f.close(t)
+			childFlow := runtime.FlowRef{Name: "child"}
+			parentAtGate := make(chan struct{})
+			childAtGate := make(chan struct{})
+			childWaitErr := make(chan error, 1)
+			f.flow("child", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+				close(childAtGate)
+				err := dc.Await(runtime.GateSpec{Name: "child-hold"}).Get(nil)
+				childWaitErr <- err
+				return nil, err
+			})
+			f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+				wait := dc.Await(runtime.GateSpec{Name: "parent-hold"})
+				close(parentAtGate)
+				return nil, wait.Get(nil)
+			})
+			f.start(t, "acme", "p1", "parent", `{}`)
+			waitOn(t, "parent at gate", parentAtGate)
+			parent := f.rt.lookup(core.TenantID("acme"), "p1")
+			if parent == nil {
+				t.Fatal("parent run not found")
+			}
+			child, err := f.rt.startChild(parent.tenant, "c1", childFlow, json.RawMessage(`{}`), parent)
+			if err != nil {
+				t.Fatalf("startChild: %v", err)
+			}
+			waitOn(t, "child at gate", childAtGate)
+			child.mu.Lock()
+			waitersBefore := len(child.waiters)
+			child.mu.Unlock()
+			parent.shutdown()
+			parent.mu.Lock()
+			gotState, shutting := parent.state, parent.shuttingDown
+			parent.mu.Unlock()
+			if gotState != stateRunning || !shutting {
+				t.Fatalf("parent state=%q shuttingDown=%v, want running with shuttingDown", gotState, shutting)
+			}
+			assertLinkChildClosedParent(t, f, parent, child, policy, waitersBefore)
+			f.waitState(t, "acme", "c1", stateTerminated)
+			waitErr := recvWithin(t, childWaitErr, "child gate wait")
+			if codeOf(waitErr) != "cancelled" {
+				t.Fatalf("child wait error %v, want cancelled", waitErr)
+			}
+		})
+	}
+}
