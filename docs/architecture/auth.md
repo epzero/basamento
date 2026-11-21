@@ -11,19 +11,23 @@ authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
 | --- | --- | --- |
 | `none` | Single user on their own machine | Listens on loopback only; refuses any other address (REQ-AUTH-001). |
 | `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. |
-| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. We only validate JWTs (issuer keys via JWKS, audience, expiry) and map organization roles from claims (REQ-AUTH-003). Logto runs as a separate service; it is never part of the embedded binary. |
+| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. JWT validation covers issuer keys (JWKS or configured set), audience and expiry (REQ-AUTH-003). Organization role mapping belongs to authorization (WP-L8-02). Logto runs as a separate service; it is never part of the embedded binary. |
 
-`auth/authn` implements the modes and the `auth.mode` setting selects one.
-`kit serve` refuses a non-loopback `listen.addr` in `none` mode before it opens
-a port or binds the listener; only an IP loopback address or `localhost` is
-accepted (REQ-AUTH-001).
+`auth/authn` implements the modes. `kit serve` reads `auth.mode` for the
+loopback refusal in `none` mode (REQ-AUTH-001). Verifying bearer tokens on
+requests for `local` and `oidc` is planned in the API work (WP-L6-03);
+authorization in WP-L8-02.
 
 OIDC verification requires the issuer, the audience, a non-expired `exp` and a
-signature by one of the issuer's keys. A `JWKS` key set is cached and refreshed
-when a token names an unknown key id, so issuer key rotation needs no restart.
-Clock skew is an explicit, small leeway, zero by default. The token's `tenant`
-claim (name configurable) must satisfy the tenant grammar when present; a token
-without it is tenantless and cannot read tenant data.
+signature by one of the issuer's keys. A `JWKS` key set is cached; fetches use
+https (http only to loopback), the default HTTP client does not follow redirects,
+and at most one refresh attempt per `MinRefresh` interval (30 s by default), so a
+token signed with a brand-new key may be rejected until the next attempt. A fetch
+response with no usable signing key leaves the previous keys in place. Clock skew
+is an explicit leeway capped at five minutes, zero by default. The token's
+`tenant` claim (name configurable) must satisfy the tenant grammar when present.
+When absent, `Principal.Tenant` is empty; request wiring must refuse such a
+principal wherever a tenant is required.
 
 Local-mode bearer tokens are opaque 256-bit secrets. Only their SHA-256 hash is
 stored; verification compares hashes in constant time and enforces a fixed

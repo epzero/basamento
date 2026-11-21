@@ -38,6 +38,19 @@ func rsaPrivateKey(t *testing.T) *rsa.PrivateKey {
 	return key
 }
 
+func otherRSAPrivateKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	data, err := os.ReadFile("testdata/unknown-rsa.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
 func testOIDC(t *testing.T, clock core.Clock) *OIDC {
 	t.Helper()
 	key := rsaPrivateKey(t)
@@ -129,8 +142,11 @@ func TestOIDCAuthenticateRejectsBadTokens(t *testing.T) {
 
 	valid := func() jwt.MapClaims { return testClaims(now) }
 	cases := map[string]func() string{
-		"signed by an unknown key": func() string {
+		"corrupted signature": func() string {
 			return tamperSignature(t, signToken(t, jwt.SigningMethodRS256, key, testKeyID, valid()))
+		},
+		"signed by another key": func() string {
+			return signToken(t, jwt.SigningMethodRS256, otherRSAPrivateKey(t), testKeyID, valid())
 		},
 		"unknown key id": func() string {
 			return signToken(t, jwt.SigningMethodRS256, key, "other", valid())
@@ -282,7 +298,6 @@ func TestOIDCTenantClaimIsConfigurable(t *testing.T) {
 	}
 }
 
-
 func TestNewOIDCAcceptsMaxLeeway(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	key := rsaPrivateKey(t)
@@ -299,11 +314,11 @@ func TestNewOIDCRejectsIncompleteOptions(t *testing.T) {
 	key := rsaPrivateKey(t)
 	keys := StaticKeys{testKeyID: &key.PublicKey}
 	cases := map[string]OIDCOptions{
-		"no issuer":   {Audience: testAudience, Keys: keys, Clock: clock},
-		"bad issuer":  {Issuer: "not a url", Audience: testAudience, Keys: keys, Clock: clock},
-		"no audience": {Issuer: testIssuer, Keys: keys, Clock: clock},
-		"no keys":     {Issuer: testIssuer, Audience: testAudience, Clock: clock},
-		"no clock":    {Issuer: testIssuer, Audience: testAudience, Keys: keys},
+		"no issuer":        {Audience: testAudience, Keys: keys, Clock: clock},
+		"bad issuer":       {Issuer: "not a url", Audience: testAudience, Keys: keys, Clock: clock},
+		"no audience":      {Issuer: testIssuer, Keys: keys, Clock: clock},
+		"no keys":          {Issuer: testIssuer, Audience: testAudience, Clock: clock},
+		"no clock":         {Issuer: testIssuer, Audience: testAudience, Keys: keys},
 		"bad leeway":       {Issuer: testIssuer, Audience: testAudience, Keys: keys, Clock: clock, Leeway: -time.Second},
 		"leeway too large": {Issuer: testIssuer, Audience: testAudience, Keys: keys, Clock: clock, Leeway: MaxLeeway + time.Nanosecond},
 	}

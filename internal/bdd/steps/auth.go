@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/epzero/basamento/auth/authn"
-	"github.com/epzero/basamento/core"
 )
 
 // oidcTestKeyPEM is a fixed 2048-bit RSA key: the component scenarios must not
@@ -22,13 +20,17 @@ import (
 //go:embed testdata/oidc-rsa.pem
 var oidcTestKeyPEM []byte
 
+// oidcUnknownKeyPEM is a second RSA key that is not in the verifier key set.
+//
+//go:embed testdata/oidc-unknown-rsa.pem
+var oidcUnknownKeyPEM []byte
+
 type authWorld struct {
 	mode     authn.Mode
 	issuer   string
 	audience string
 	key      *rsa.PrivateKey
 	verifier *authn.OIDC
-	lastErr  error
 }
 
 func newAuthWorld() *authWorld { return &authWorld{} }
@@ -54,24 +56,9 @@ func (w *authWorld) authenticate(ctx context.Context, raw string) error {
 	if w.verifier == nil {
 		return fmt.Errorf("no oidc verifier: the auth mode is not oidc")
 	}
-	_, w.lastErr = w.verifier.Authenticate(ctx, raw)
+	_, err := w.verifier.Authenticate(ctx, raw)
+	world(ctx).Core.lastErr = err
 	return nil
-}
-
-// tamperSignature changes one signature byte, leaving the header, claims and
-// key id in place: the token claims to be signed by the issuer's key but is not.
-func tamperSignature(raw string) (string, error) {
-	parts := strings.Split(raw, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("token has %d parts, want 3", len(parts))
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return "", err
-	}
-	signature[0] ^= 0xff
-	parts[2] = base64.RawURLEncoding.EncodeToString(signature)
-	return strings.Join(parts, "."), nil
 }
 
 func registerAuth(sc *godog.ScenarioContext) {
@@ -107,11 +94,22 @@ func registerAuth(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^a request carries a token that is signed by an unknown key$`, func(ctx context.Context) error {
 		w := world(ctx).Auth
-		raw, err := w.sign(world(ctx).Core.clock.Now(), w.audience, world(ctx).Core.clock.Now().Add(time.Hour))
+		unknown, err := jwt.ParseRSAPrivateKeyFromPEM(oidcUnknownKeyPEM)
 		if err != nil {
-			return err
+			return fmt.Errorf("test unknown signing key: %w", err)
 		}
-		raw, err = tamperSignature(raw)
+		now := world(ctx).Core.clock.Now()
+		claims := jwt.MapClaims{
+			"iss":    w.issuer,
+			"aud":    w.audience,
+			"sub":    "ana",
+			"iat":    jwt.NewNumericDate(now),
+			"exp":    jwt.NewNumericDate(now.Add(time.Hour)),
+			"tenant": "acme",
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["kid"] = "issuer-1"
+		raw, err := token.SignedString(unknown)
 		if err != nil {
 			return err
 		}
@@ -158,17 +156,4 @@ func registerAuth(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-}
-
-// assertAuthFailsWithCode reports the outcome of the last authentication the
-// auth steps performed.
-func assertAuthFailsWithCode(ctx context.Context, code string) error {
-	err := world(ctx).Auth.lastErr
-	if err == nil {
-		return fmt.Errorf("request succeeded, want code %s", code)
-	}
-	if got := core.CodeOf(err); string(got) != code {
-		return fmt.Errorf("got code %s, want %s", got, code)
-	}
-	return nil
 }
