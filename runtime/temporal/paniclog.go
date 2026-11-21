@@ -33,12 +33,13 @@ func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered a
 
 func formatPanicValue(recovered any) string {
 	if s, ok := recovered.(string); ok {
-		return truncatePanicValueRunes(s)
+		return truncateLogTextRunes(s)
 	}
-	return truncatePanicValueRunes(fmt.Sprintf("%v", recovered))
+	return truncateLogTextRunes(fmt.Sprintf("%v", recovered))
 }
 
-func truncatePanicValueRunes(s string) string {
+// truncateLogTextRunes bounds text written to logs (panics and non-core errors).
+func truncateLogTextRunes(s string) string {
 	n := 0
 	for i := range s {
 		if n == maxPanicValue {

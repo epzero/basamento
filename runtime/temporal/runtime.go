@@ -11,7 +11,6 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/epzero/basamento/core"
-	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/runtime"
 )
 
@@ -27,7 +26,6 @@ type Runtime struct {
 	host      runtime.FlowHost
 	steps     map[string]registeredStep
 	converter converter.DataConverter
-	blobs     platform.Blob
 	taskQueue string
 	logger    *slog.Logger
 }
@@ -59,10 +57,16 @@ func New(opts Options) (*Runtime, error) {
 	return &Runtime{
 		steps:     map[string]registeredStep{},
 		converter: dc,
-		blobs:     opts.Blobs,
 		taskQueue: queue,
 		logger:    opts.Logger,
 	}, nil
+}
+
+func (r *Runtime) stepFor(name string) (registeredStep, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reg, ok := r.steps[name]
+	return reg, ok
 }
 
 // RegisterFlowHost installs the single flow entrypoint (ADR-0011).

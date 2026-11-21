@@ -104,9 +104,14 @@ as an activity. This change delivers:
   `polyglot_queues` until pull requests (b) and (c) add gates and ContinueAsNew.
 
 **Plain text in history:** Temporal stores failure messages and the tenant
-header unencrypted; payload bytes go through the codec only. Step authors must
-not put secrets in `core.Error` messages; non-`core.Error` failures become
-`internal` with fixed messages and details go to the logger only.
+header unencrypted; payload bytes go through the codec only. History carries only
+a core error’s code and message (no Details, no chained cause text). Step authors
+must not put secrets in `core.Error` messages; other failures become `internal`
+with a fixed message and the original text goes to the logger only (bounded).
+
+**Claim-check blobs** are content-addressed. A replayed workflow task or retried
+activity may store new ciphertext under new keys; unreferenced blobs are not
+reclaimed in this phase.
 
 The BDD harness **decorates** `DataConverter` (records payloads, models the
 client tenant context, injects RT-032/033 faults on activity results). Production

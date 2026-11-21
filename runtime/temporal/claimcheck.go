@@ -96,20 +96,35 @@ func (c *payloadCodec) Decode(ctx context.Context, p secrets.Payload) (secrets.P
 	if err := json.Unmarshal(plain.Data, &marker); err != nil || marker.Key == "" {
 		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-check marker", nil)
 	}
+	if marker.Size <= 0 {
+		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-check marker", nil)
+	}
 	r, err := c.blobs.Get(ctx, marker.Key)
 	if err != nil {
 		return secrets.Payload{}, err
 	}
 	defer func() { _ = r.Close() }()
-	raw, err := io.ReadAll(r)
+	// marker.Size is the encrypted inner Data length; the blob is JSON (base64) around it.
+	const maxBlobRead = 1 << 20
+	readCap := int64(marker.Size)*2 + 8192
+	if readCap > maxBlobRead {
+		readCap = maxBlobRead
+	}
+	raw, err := io.ReadAll(io.LimitReader(r, readCap+1))
 	if err != nil {
 		return secrets.Payload{}, core.NewError(core.CodeUnavailable, "temporal: read claim-checked payload", map[string]any{"cause": err.Error()})
+	}
+	if int64(len(raw)) > readCap {
+		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: claim-checked payload size mismatch", nil)
 	}
 	var stored storedPayload
 	if err := json.Unmarshal(raw, &stored); err != nil {
 		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-checked payload", nil)
 	}
 	enc := secrets.Payload{Metadata: stored.Metadata, Data: stored.Data}
+	if len(enc.Data) != marker.Size {
+		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: claim-checked payload size mismatch", nil)
+	}
 	if string(enc.Metadata["encoding"]) != secrets.EncodingEncrypted {
 		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: claim-checked blob is not encrypted", nil)
 	}

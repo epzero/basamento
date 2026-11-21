@@ -7,7 +7,7 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
-func (r *Runtime) logStepFailure(tenant core.TenantID, runID, step string, err error) {
+func (r *Runtime) logStepFailure(tenant core.TenantID, workflowID, step string, err error) {
 	logger := r.logger
 	if logger == nil {
 		logger = slog.Default()
@@ -19,12 +19,14 @@ func (r *Runtime) logStepFailure(tenant core.TenantID, runID, step string, err e
 	if errors.As(err, &pe) {
 		return
 	}
-	logger.Error("temporal: step failed",
+	attrs := []any{
 		slog.String("tenant", string(tenant)),
-		slog.String("run", runID),
+		slog.String("workflow", workflowID),
 		slog.String("step", step),
 		slog.String("code", string(core.CodeInternal)),
-	)
+		slog.String("error", truncateLogTextRunes(err.Error())),
+	}
+	logger.Error("temporal: step failed", attrs...)
 }
 
 func (r *Runtime) logFlowFailure(tenant core.TenantID, runID string, err error) {
@@ -43,5 +45,6 @@ func (r *Runtime) logFlowFailure(tenant core.TenantID, runID string, err error) 
 		slog.String("tenant", string(tenant)),
 		slog.String("run", runID),
 		slog.String("code", string(core.CodeInternal)),
+		slog.String("error", truncateLogTextRunes(err.Error())),
 	)
 }

@@ -47,10 +47,6 @@ func rawInput(in any) (json.RawMessage, error) {
 	}
 }
 
-func invalidErr(message string, details map[string]any) error {
-	return core.NewError(core.CodeInvalidArgument, message, details)
-}
-
 func fnv64(s string) uint64 {
 	const offset, prime = 14695981039346656037, 1099511628211
 	h := uint64(offset)

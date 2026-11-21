@@ -47,8 +47,11 @@ func (r *Runtime) wrapWorkflowError(tenant core.TenantID, runID string, err erro
 	}
 	var pe *core.Error
 	if errors.As(err, &pe) {
+		if !core.IsRetryable(pe) {
+			return temporal.NewNonRetryableApplicationError(pe.Message, string(pe.Code), nil)
+		}
 		return temporal.NewApplicationError(pe.Message, string(pe.Code), pe.Retryable)
 	}
 	r.logFlowFailure(tenant, runID, err)
-	return temporal.NewApplicationError("temporal: flow failed", string(core.CodeInternal), false)
+	return temporal.NewNonRetryableApplicationError("temporal: flow failed", string(core.CodeInternal), nil)
 }

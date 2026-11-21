@@ -6,6 +6,14 @@
 // and the step activity with exponential backoff retries. Child, Await, Emit and
 // Checkpoint return code unsupported until the next changes of WP-L5-02.
 //
+// Failure messages in Temporal history are plaintext: only core error codes and
+// messages cross the boundary (Details maps are dropped). Non-core errors become
+// internal with a fixed message; the original text is logged only, bounded like
+// panic values. The tenant header is plaintext by necessity.
+//
+// Claim-checked blobs are content-addressed and immutable; replay or activity retry
+// may write additional ciphertext blobs with no garbage collection in this phase.
+//
 // The composition root uses Options and New; (*Runtime).Register wires workers;
 // (*Runtime).DataConverter shares the codec with clients. Tests and BDD wrap
 // DataConverter to model tenant-aware clients and record history (not in prod).

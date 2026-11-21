@@ -57,5 +57,4 @@ type immediateFuture struct {
 func (f *immediateFuture) Get(any) error { return f.err }
 func (f *immediateFuture) Ready() bool   { return true }
 
-func newDone(err error) runtime.Future   { return &immediateFuture{err: err} }
-func newFailed(err error) runtime.Future { return &immediateFuture{err: err} }
+func newImmediate(err error) runtime.Future { return &immediateFuture{err: err} }

@@ -77,15 +77,13 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 	}
 	raw, err := rawInput(in)
 	if err != nil {
-		f := newFailed(err)
+		f := newImmediate(err)
 		dc.stepFutures[name] = f
 		return f
 	}
-	dc.rt.mu.Lock()
-	reg, ok := dc.rt.steps[name]
-	dc.rt.mu.Unlock()
+	reg, ok := dc.rt.stepFor(name)
 	if !ok {
-		f := newFailed(core.NewError(core.CodeUnsupported,
+		f := newImmediate(core.NewError(core.CodeUnsupported,
 			fmt.Sprintf("temporal: step %q is not registered", name), map[string]any{"step": name}))
 		dc.stepFutures[name] = f
 		return f
@@ -121,7 +119,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 
 func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 	if d <= 0 {
-		return newDone(nil)
+		return newImmediate(nil)
 	}
 	fut := workflow.NewTimer(dc.wfCtx, d)
 	return &timerFuture{ctx: dc.wfCtx, f: fut}
@@ -165,12 +163,12 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 
 // Child is unimplemented until WP-L5-02 pull request (b) (EP0-31).
 func (dc *durableContext) Child(runtime.FlowRef, any, runtime.ChildOptions) runtime.Future {
-	return newFailed(unsupportedOp("Child"))
+	return newImmediate(unsupportedOp("Child"))
 }
 
 // Await is unimplemented until WP-L5-02 pull request (b) (EP0-31).
 func (dc *durableContext) Await(runtime.GateSpec) runtime.Future {
-	return newFailed(unsupportedOp("Await"))
+	return newImmediate(unsupportedOp("Await"))
 }
 
 // Emit is unimplemented until WP-L5-02 pull request (b) (EP0-31).
