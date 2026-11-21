@@ -410,9 +410,11 @@ func TestValidateAcceptsRunnableMapDefinition(t *testing.T) {
 	}
 }
 
-// The child checks depend on "node" alone: an empty over is an expression
-// defect flow/compile judges, not a reason to skip them (EP0-149).
-func TestValidateRejectsUndeclaredChildWithEmptyOver(t *testing.T) {
+// An empty "over" is now the first rejection (EP0-166): the machine rejects
+// the spec before it uses the child, so an undeclared child cannot hide it.
+// This keeps the no-bypass intent of EP0-149: neither field lets the other
+// through.
+func TestValidateRejectsEmptyMapOverBeforeTheChildCheck(t *testing.T) {
 	f := mapFlow()
 	f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"","node":"ghost"}`)}
 	f.Edges = []flow.Edge{
@@ -420,7 +422,7 @@ func TestValidateRejectsUndeclaredChildWithEmptyOver(t *testing.T) {
 		{From: "fanout", To: Fail},
 	}
 	requireInvalid(t, Validate(f),
-		`map node "fanout"`, `child node "ghost"`, "does not exist")
+		`map node "fanout"`, `"over"`, "non-empty")
 }
 
 // A "node" that names no non-empty string is a map the machine cannot run, so
@@ -439,11 +441,20 @@ func TestValidateRejectsUnreadableMapChildName(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsMapWithEmptyOver(t *testing.T) {
-	f := mapFlow()
-	f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(`{"over":"","node":"fanout_item"}`)}
-	if err := Validate(f); err != nil {
-		t.Fatal(err)
+// A missing or blank "over" is a map the machine cannot run, so the compiler
+// rejects it and names the map node and the field (EP0-166).
+func TestValidateRejectsMapWithEmptyOver(t *testing.T) {
+	for _, spec := range []string{
+		`{"over":"","node":"fanout_item"}`,
+		`{"over":"   ","node":"fanout_item"}`,
+		`{"node":"fanout_item"}`,
+	} {
+		t.Run(spec, func(t *testing.T) {
+			f := mapFlow()
+			f.Nodes["fanout"] = flow.Node{Kind: "map", Spec: json.RawMessage(spec)}
+			requireInvalid(t, Validate(f),
+				`map node "fanout"`, `"over"`, "non-empty")
+		})
 	}
 }
 
