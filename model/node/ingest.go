@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -187,17 +188,29 @@ func defaultFetcher(ctx context.Context, out model.Output) ([]byte, string, erro
 	return outputFetcher{lookupIP: net.DefaultResolver.LookupIPAddr}.fetch(ctx, out)
 }
 
-// outputFetcher is the production fetcher. Its resolver and transport are
-// fields so tests can exercise the address checks without a network.
+// outputFetcher is the production fetcher. Its resolver, dialer and TLS
+// configuration are fields so tests can exercise the address checks without a
+// network.
 type outputFetcher struct {
-	lookupIP  func(context.Context, string) ([]net.IPAddr, error)
-	transport http.RoundTripper
+	lookupIP func(context.Context, string) ([]net.IPAddr, error)
+	// dial opens the TCP connection. Nil uses a net.Dialer. The fetcher always
+	// dials the address it resolved and checked, never a host name.
+	dial func(context.Context, string, string) (net.Conn, error)
+	// tlsConfig is the client TLS configuration; nil uses the system roots.
+	// ServerName is left empty so the transport fills it from the URL host,
+	// which keeps SNI and the Host header on the vendor's name.
+	tlsConfig *tls.Config
 }
 
 // errRedirect is returned when an output URL redirects. Following one would
 // let a vendor's URL reach an address the initial check approved only for the
 // original host.
 var errRedirect = errors.New("output fetch does not follow redirects")
+
+// errNonPublicAddress is returned when the address pinned for a fetch is not
+// public. It is checked again at dial time so the transport cannot reach a
+// peer the URL check refused.
+var errNonPublicAddress = errors.New("output fetch address is not public")
 
 func (f outputFetcher) fetch(ctx context.Context, out model.Output) ([]byte, string, error) {
 	switch {
@@ -235,9 +248,28 @@ func (f outputFetcher) fetchURL(ctx context.Context, raw string) ([]byte, string
 			return nil, "", fmt.Errorf("output host %q resolves to a non-public address", host)
 		}
 	}
+	// Resolve once and pin the first checked address. The transport dials that
+	// address, so a second DNS answer cannot rebind the connection to a
+	// private or link-local peer; TLS SNI and the Host header still come from
+	// the URL. No proxy is consulted: a proxy would dial on our behalf and
+	// bypass the pin.
+	pinned := ips[0].IP
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if !publicAddress(pinned) {
+				return nil, errNonPublicAddress
+			}
+			_, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			return f.dialContext(ctx, network, net.JoinHostPort(pinned.String(), port))
+		},
+		TLSClientConfig: f.tlsConfig,
+	}
 	client := &http.Client{
 		Timeout:   ingestTimeout,
-		Transport: f.transport,
+		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errRedirect
 		},
@@ -264,6 +296,16 @@ func (f outputFetcher) fetchURL(ctx context.Context, raw string) ([]byte, string
 		return nil, "", errors.New("reading the output failed")
 	}
 	return data, resp.Header.Get("Content-Type"), nil
+}
+
+// dialContext opens the pinned connection, through the injected dialer when a
+// test provides one.
+func (f outputFetcher) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if f.dial != nil {
+		return f.dial(ctx, network, addr)
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, network, addr)
 }
 
 // readBounded reads at most limit+1 bytes, so the caller can tell an oversized

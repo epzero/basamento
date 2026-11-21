@@ -237,6 +237,16 @@ func TestDefaultFetcherRejectsNonPublicAddresses(t *testing.T) {
 	}
 }
 
+// testDialer returns a dialer that connects to server's listener whatever
+// address the fetcher pinned, so a test can serve the request without a
+// network.
+func testDialer(server *httptest.Server) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, server.Listener.Addr().String())
+	}
+}
+
 func TestOutputFetcherRefusesRedirects(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -247,11 +257,51 @@ func TestOutputFetcherRefusesRedirects(t *testing.T) {
 		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
 			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
 		},
-		transport: server.Client().Transport,
+		dial:      testDialer(server),
+		tlsConfig: server.Client().Transport.(*http.Transport).TLSClientConfig,
 	}
-	_, _, err := f.fetch(t.Context(), model.Output{URL: server.URL + "/a.png"})
+	_, _, err := f.fetch(t.Context(), model.Output{URL: "https://example.com/a.png"})
 	if !errors.Is(err, errRedirect) {
 		t.Fatalf("err = %v, want a refused redirect", err)
+	}
+}
+
+func TestOutputFetcherPinsTheResolvedAddress(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+	var lookups int
+	var dialed string
+	f := outputFetcher{
+		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
+			lookups++
+			if lookups == 1 {
+				return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+			}
+			// A DNS-rebinding answer: the second resolution is private.
+			return []net.IPAddr{{IP: net.ParseIP("10.0.0.7")}}, nil
+		},
+		dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialed = addr
+			var d net.Dialer
+			return d.DialContext(ctx, network, server.Listener.Addr().String())
+		},
+		tlsConfig: server.Client().Transport.(*http.Transport).TLSClientConfig,
+	}
+	data, _, err := f.fetch(t.Context(), model.Output{URL: "https://example.com/a.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "ok" {
+		t.Fatalf("body = %q, want ok", data)
+	}
+	if lookups != 1 {
+		t.Fatalf("resolved %d times, want one: a second answer could rebind the dial", lookups)
+	}
+	if dialed != "93.184.216.34:443" {
+		t.Fatalf("dialed %q, want the pinned public address", dialed)
 	}
 }
 
