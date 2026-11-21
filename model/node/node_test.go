@@ -330,6 +330,67 @@ func TestHandleChargesTheFormulaWhenTheProviderReportsUsage(t *testing.T) {
 	}
 }
 
+func TestHandleChargesTheEstimateWhenAResultHasNoUsage(t *testing.T) {
+	t.Parallel()
+	for _, state := range []model.State{model.StateSucceeded, model.StateFailed} {
+		t.Run(string(state), func(t *testing.T) {
+			t.Parallel()
+			inv := newScriptInvoker()
+			inv.start = func(_ int, req model.Request) (model.Handle, error) {
+				return model.Handle{ClientRef: req.ClientRef}, nil
+			}
+			// Poll and video results often report neither a cost nor a usage.
+			inv.result = model.Result{State: state}
+			reg := newFakeRegistrar()
+			h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+			budget := NewMemory(5000)
+
+			out, _ := runNode(t, h, reg, t.Context(), budget, `{"params":{"duration_s":5}}`)
+			ref := inv.refs[0]
+			if got := budget.Charged(ref); got != 500 {
+				t.Fatalf("charged = %d, want the reserved estimate 500", got)
+			}
+			if out.CostMpts != 500 {
+				t.Fatalf("cost = %d, want the reserved estimate 500", out.CostMpts)
+			}
+			if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+				t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+			}
+		})
+	}
+}
+
+func TestHandleReleasesACancelledInvocationThatReportsNoCost(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateCancelled}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dc := &fakeDC{
+		ctx:   WithBudget(ctx, budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 0 {
+		t.Fatalf("charged = %d, want 0", got)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want released", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
+
 func TestHandleDoesNotReemitProviderDeltas(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()
