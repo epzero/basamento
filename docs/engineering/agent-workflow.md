@@ -430,15 +430,34 @@ its author approved.
   ticket to *Done*, or hands it on when more work follows, and cleans up:
   `git fetch --prune` and `gate agent release` for its sessions. Every other
   lead releases its own sessions on that branch at its next tick.
-- **What GitHub enforces** (`.github/rulesets/main.json`, `.github/CODEOWNERS`):
-  a pull request; one approval from someone who did not open it, dismissed
-  by new commits; on high-risk paths the approval of the reviewer or the
-  architect; resolved threads; a green `gate` in the merge queue; squash
-  only; no force-push to `main`. `CODEOWNERS` is generated from the high
-  tier of `review.yaml` (`go tool gate docs -write`), so it covers the
-  high-tier paths of `review.yaml`. `go.mod` stays owned there even when a
-  patch-only `go` bump rates medium in the review plan; the reviewer's
-  approval alone satisfies what `CODEOWNERS` requires (`ADR-0014`).
+- **What GitHub enforces** (repository ruleset `main`, id 27388790;
+  `.github/CODEOWNERS`): a pull request; one approval from someone who did not
+  open it; on high-risk paths the approval of the reviewer or the architect;
+  resolved review threads; a green `gate` in the merge queue; squash only; no
+  force-push to `main`. `CODEOWNERS` is generated from the high tier of
+  `review.yaml` (`go tool gate docs -write`), so it covers the high-tier paths
+  of `review.yaml`. `go.mod` stays owned there even when a patch-only `go` bump
+  rates medium in the review plan; the reviewer's approval alone satisfies what
+  `CODEOWNERS` requires (`ADR-0014`). A new commit does not dismiss an approval
+  (`dismiss_stale_reviews_on_push: false`, `require_last_push_approval: false`).
+  One case does need a fresh approval: a branch rebased onto a newer `main`.
+  Conflict resolution is unreviewed code, so the reviewer decides with one
+  command:
+
+   ```sh
+   git range-diff origin/main...<approved-head> origin/main...<rebased-head>
+   ```
+
+   `=` on every patch means the rebase changed context only — approve without
+   re-reading. `!` marks a patch whose content changed (the conflict
+   resolution): review those hunks. A `-`/`>` pair means a patch was dropped or
+   added — review those too. For example, PR #143
+   (`git range-diff origin/main...1d1631b origin/main...b5d559e`) showed twelve
+   `=` lines and one `>`; the EP0-163 branch showed one `!` in
+   `flow/ir/validate.go` and `validate_test.go`. This is a reviewer rule, not
+   automation: the command narrows what to read, it does not remove the read.
+   The merge queue builds its own commit on the latest `main`, so that rebuild
+   is not an author push and does not invalidate an approval.
 - **A merge that breaks `main`** is reverted with a pull request of its own
   and marked `escaped` (`code-review.md` §7).
 
