@@ -37,6 +37,7 @@ type World struct {
 	Machine     *machineWorld
 	Host        *hostWorld
 	Local       *localWorld
+	Temporal    *temporalWorld
 	Eventlog    *eventlogWorld
 }
 
@@ -93,7 +94,9 @@ func Initialize(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	registerModel(sc)
+	registerTemporalLocalRunSteps(sc)
 	registerLocal(sc)
+	registerTemporal(sc)
 	registerModelRetention(sc)
 	registerMiddleware(sc)
 	registerMiddlewareCalls(sc)
