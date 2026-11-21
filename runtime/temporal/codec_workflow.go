@@ -32,7 +32,10 @@ func codecTransient(pe *core.Error) bool {
 	case core.CodeUnavailable, core.CodeTimeout, core.CodeRateLimited:
 		return true
 	case core.CodeCancelled:
-		// Workflow-bound codec I/O uses a timeout-only context; nothing else cancels it.
+		// Workflow-bound I/O uses our context (tenant plus the 30 s bound); flow code
+		// cannot cancel it, so cancelled here is not a caller decision: bound expiry
+		// (the blob layer may map a deadline to cancelled) or the store reported
+		// cancellation. Both are retried like unavailable.
 		return true
 	default:
 		return core.IsRetryable(pe)
