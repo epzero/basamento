@@ -119,15 +119,16 @@ If a flow has no edge from `START`, or more than one, then the flow compiler sha
 
 ## Definition errors the machine cannot repair (WP-L4-01)
 
-Five defects make a definition unrunnable in a way the machine cannot report
+Six defects make a definition unrunnable in a way the machine cannot report
 well once a run is in flight: a fan-out to a node that is not declared, a child
 the machine should run itself, two fan-outs that share one child, a guard on a
-child that a fan-out runs, and a condition on the first edge. `flow/machine`'s
-`New` rejects all five as defence for an IR built in Go without the compiler
-(ADR-0003), and the compiler rejects them at definition time as well, so the
-author sees them when the flow is registered rather than when a run starts.
-Every rejection below fails with code `invalid_argument`, naming the node or
-edge at fault (REQ-FLOW-062 to REQ-FLOW-066). Scenarios: `compile.feature`.
+child that a fan-out runs, a condition on the first edge, and a `map` with no
+`over` expression. `flow/machine`'s `New` rejects them as defence for an IR
+built in Go without the compiler (ADR-0003), and the compiler rejects them at
+definition time as well, so the author sees them when the flow is registered
+rather than when a run starts. Every rejection below fails with code
+`invalid_argument`, naming the node or edge at fault (REQ-FLOW-062 to
+REQ-FLOW-067). Scenarios: `compile.feature`.
 
 ### REQ-FLOW-062 — A map child that is not a declared node
 If a `map` node's spec names as its child a node the flow does not declare, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the missing child node.
@@ -165,6 +166,15 @@ If the one edge from `START` carries a `when` condition, then the flow compiler 
 `START` is where a run enters the definition, before any node has completed
 and routed, so the first superstep has nothing to route on and the machine
 does not evaluate the condition: accepting one would silently ignore it.
+
+### REQ-FLOW-067 — A map with no over expression
+If a `map` node's spec has no `over` field or an empty `over` string, then the flow compiler shall reject the flow with code `invalid_argument`, naming the `map` node and the `over` field.
+
+The machine's `parseMapSpec` needs a non-empty `over` to start a fan-out, and
+design §2.6 makes the compiler the one validator, so the compiler rejects the
+definition when it is registered rather than when a run starts. A declared
+child does not rescue it: a missing or empty `over` is rejected before the
+child is read.
 
 ## Flow host (WP-L4-04)
 
