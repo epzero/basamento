@@ -82,9 +82,6 @@ type HTTP struct {
 	// startMu serializes starts so two calls with the same client ref cannot
 	// both reach the vendor. Starts are short; the vendor work is asynchronous.
 	startMu sync.Mutex
-	// mu guards ids, the vendor id of each client ref.
-	mu  sync.Mutex
-	ids map[string]string
 }
 
 var _ model.Invoker = (*HTTP)(nil)
@@ -133,7 +130,6 @@ func NewHTTP(m *Manifest, opts HTTPOptions) (*HTTP, error) {
 		poll:        opts.PollInterval,
 		start:       start,
 		runs:        runs,
-		ids:         map[string]string{},
 	}
 	if h.client == nil {
 		h.client = &http.Client{}
@@ -170,10 +166,18 @@ func (h *HTTP) Start(ctx context.Context, r model.Request) (model.Handle, error)
 	if r.ClientRef == "" {
 		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "request has no client ref", nil)
 	}
+	// The registry keys the run by the tenant of ctx and fails without one. A
+	// start it cannot record must never reach the vendor: that paid call would
+	// be orphaned, since the node treats the error as final. Begin itself runs
+	// after the vendor accepts, because the registry cannot reopen an ended
+	// ref, so a run begun first would strand every retry of the same start.
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return model.Handle{}, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
 	h.startMu.Lock()
 	defer h.startMu.Unlock()
 
-	if hd, ok := h.local(r.ClientRef); ok {
+	if hd, ok := h.local(ctx, r.ClientRef); ok {
 		return hd, nil
 	}
 	input, err := h.inputFor(ctx, r)
@@ -192,7 +196,7 @@ func (h *HTTP) Start(ctx context.Context, r model.Request) (model.Handle, error)
 	if err != nil {
 		return model.Handle{}, err
 	}
-	h.remember(r.ClientRef, id)
+	run.SetID(id)
 	h.deliver(run, id, doc, h.manifest.Protocol == model.ProtocolSingle)
 
 	switch h.manifest.Protocol {
@@ -221,12 +225,18 @@ func (h *HTTP) Cancel(ctx context.Context, hd model.Handle) error {
 	if hd.ClientRef == "" {
 		return core.NewError(core.CodeInvalidArgument, "handle has no client ref", nil)
 	}
-	if h.cancel != nil {
-		input, err := inputFor(model.Request{ClientRef: hd.ClientRef}, h.vendorID(hd), "")
+	id, err := h.vendorID(ctx, hd)
+	if err != nil {
+		return err
+	}
+	// No run of this tenant holds the ref: the invocation was never ours or is
+	// already forgotten, so nothing is sent to the vendor.
+	if h.cancel != nil && id != "" {
+		input, err := inputFor(model.Request{ClientRef: hd.ClientRef}, id, "")
 		if err != nil {
 			return err
 		}
-		if _, err := h.do(ctx, h.cancel, input, h.vendorID(hd)); err != nil && core.CodeOf(err) != core.CodeNotFound {
+		if _, err := h.do(ctx, h.cancel, input, id); err != nil && core.CodeOf(err) != core.CodeNotFound {
 			return err
 		}
 	}
@@ -238,7 +248,7 @@ func (h *HTTP) Cancel(ctx context.Context, hd model.Handle) error {
 // returns core.CodeUnsupported, which tells the model node to open the
 // ambiguous-start gate instead of starting again (REQ-MODEL-005).
 func (h *HTTP) Lookup(ctx context.Context, clientRef string) (*model.Handle, error) {
-	if hd, ok := h.local(clientRef); ok {
+	if hd, ok := h.local(ctx, clientRef); ok {
 		return &hd, nil
 	}
 	if h.lookup == nil {
@@ -270,7 +280,7 @@ func (h *HTTP) Lookup(ctx context.Context, clientRef string) (*model.Handle, err
 	if err != nil {
 		return nil, err
 	}
-	h.remember(clientRef, foundID.id)
+	run.SetID(foundID.id)
 	if h.manifest.Protocol == model.ProtocolPoll {
 		go h.follow(run, foundID.id, clientRef)
 	}
@@ -354,6 +364,11 @@ func (h *HTTP) inputFor(ctx context.Context, r model.Request) (map[string]any, e
 	return in, nil
 }
 
+// statusRetryLimit bounds the consecutive retryable status errors one poll
+// loop tolerates. A transient 429, 408, 504 or 5xx must not fail a paid run
+// while the vendor job continues; a persistent one still ends it.
+const statusRetryLimit = 5
+
 // follow polls the status endpoint until the invocation ends.
 func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 	if h.status == nil {
@@ -362,6 +377,7 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 	}
 	ctx := run.Context()
 	lastProgress := -1.0
+	retries := 0
 	for {
 		input, err := inputFor(model.Request{ClientRef: clientRef}, id, "")
 		if err != nil {
@@ -370,9 +386,17 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 		}
 		doc, err := h.do(ctx, h.status, input, id)
 		if err != nil {
-			run.Fail(err)
-			return
+			if !core.IsRetryable(err) || retries >= statusRetryLimit {
+				run.Fail(err)
+				return
+			}
+			retries++
+			if !h.pause(ctx) {
+				return
+			}
+			continue
 		}
+		retries = 0
 		mapped, err := h.status.response.read(doc)
 		if err != nil {
 			run.Fail(err)
@@ -386,21 +410,31 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 			h.finish(run, mapped)
 			return
 		}
-		if h.poll > 0 {
-			timer := time.NewTimer(h.poll)
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			}
-		} else {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+		if !h.pause(ctx) {
+			return
 		}
+	}
+}
+
+// pause waits one poll interval, or returns at once when polling back to back
+// (a negative interval, which tests use so no clock is involved). It reports
+// false when the invocation's context ended.
+func (h *HTTP) pause(ctx context.Context) bool {
+	if h.poll > 0 {
+		timer := time.NewTimer(h.poll)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		}
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+		return true
 	}
 }
 
@@ -439,39 +473,39 @@ func (h *HTTP) finish(run *model.Run, m *mapped) {
 }
 
 func (h *HTTP) startID(doc any) (string, error) {
-	m, err := h.start.response.read(doc)
-	if err != nil {
-		return "", err
-	}
-	return m.id, nil
+	return h.start.response.idOf(doc)
 }
 
-func (h *HTTP) local(clientRef string) (model.Handle, bool) {
-	hd, err := h.runs.Lookup(context.Background(), clientRef)
+// local answers a start or lookup from this process's registry, within the
+// tenant of ctx. The run carries the vendor id the start recorded, so the
+// handle it yields addresses the vendor directly.
+func (h *HTTP) local(ctx context.Context, clientRef string) (model.Handle, bool) {
+	hd, err := h.runs.Lookup(ctx, clientRef)
 	if err != nil || hd == nil {
 		return model.Handle{}, false
 	}
-	return h.handle(clientRef, h.vendorID(*hd)), true
+	return h.handle(hd.ClientRef, hd.ID), true
 }
 
 func (h *HTTP) handle(clientRef, id string) model.Handle {
 	return model.Handle{Provider: h.manifest.Name, ID: id, ClientRef: clientRef}
 }
 
-func (h *HTTP) remember(clientRef, id string) {
-	h.mu.Lock()
-	h.ids[clientRef] = id
-	h.mu.Unlock()
-}
-
-func (h *HTTP) vendorID(hd model.Handle) string {
-	h.mu.Lock()
-	id := h.ids[hd.ClientRef]
-	h.mu.Unlock()
-	if id != "" {
-		return id
+// vendorID is the vendor id of a handle within the tenant of ctx: the id the
+// run recorded when the vendor accepted the start, else the handle's own. An
+// empty answer means no run of this tenant holds the client ref.
+func (h *HTTP) vendorID(ctx context.Context, hd model.Handle) (string, error) {
+	found, err := h.runs.Lookup(ctx, hd.ClientRef)
+	if err != nil {
+		return "", err
 	}
-	return hd.ID
+	if found == nil {
+		return "", nil
+	}
+	if found.ID != "" {
+		return found.ID, nil
+	}
+	return hd.ID, nil
 }
 
 // do executes one manifest call and returns its decoded JSON document.
@@ -686,24 +720,22 @@ type mapped struct {
 
 func (c *compiledResponse) read(doc any) (*mapped, error) {
 	m := &mapped{}
-	if c.id != nil {
-		id, err := evalString(c.id, doc)
-		if err != nil {
-			return nil, err
-		}
-		m.id = id
-	} else if obj, ok := doc.(map[string]any); ok {
-		if v, ok := obj["id"]; ok {
-			m.id = toString(v)
-		}
+	id, err := c.idOf(doc)
+	if err != nil {
+		return nil, err
 	}
+	m.id = id
 	if c.state != nil {
 		raw, err := evalString(c.state, doc)
 		if err != nil {
 			return nil, err
 		}
 		m.hasState = true
-		m.state = c.stateOf(raw)
+		state, err := c.stateOf(raw)
+		if err != nil {
+			return nil, err
+		}
+		m.state = state
 	}
 	if c.progress != nil {
 		v, err := evalMapping(c.progress, doc)
@@ -779,18 +811,38 @@ func (c *compiledResponse) read(doc any) (*mapped, error) {
 	return m, nil
 }
 
-func (c *compiledResponse) stateOf(raw string) model.State {
+// idOf reads only the vendor id, so a start response is recorded even when
+// its state mapping is incomplete: failing the start would orphan the call.
+func (c *compiledResponse) idOf(doc any) (string, error) {
+	if c.id != nil {
+		return evalString(c.id, doc)
+	}
+	if obj, ok := doc.(map[string]any); ok {
+		if v, ok := obj["id"]; ok {
+			return toString(v), nil
+		}
+	}
+	return "", nil
+}
+
+// stateOf maps a vendor state string. A state the manifest does not map is
+// vendor_error, never running: a state_map gap must not leave a paid
+// invocation running forever.
+func (c *compiledResponse) stateOf(raw string) (model.State, error) {
 	if c.StateMap != nil {
 		if s, ok := c.StateMap[raw]; ok {
-			return s
+			return s, nil
 		}
-		return model.StateRunning
+		return model.StateRunning, core.NewError(core.CodeVendor,
+			"provider reported a state the manifest does not map",
+			map[string]any{"state": raw})
 	}
 	switch model.State(raw) {
-	case model.StateSucceeded, model.StateFailed, model.StateCancelled:
-		return model.State(raw)
+	case model.StateRunning, model.StateSucceeded, model.StateFailed, model.StateCancelled:
+		return model.State(raw), nil
 	default:
-		return model.StateRunning
+		return model.StateRunning, core.NewError(core.CodeVendor,
+			"provider reported an unknown state", map[string]any{"state": raw})
 	}
 }
 

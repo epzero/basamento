@@ -107,8 +107,9 @@ type Response struct {
 	ID string `yaml:"id,omitempty"`
 	// State is the vendor's state string.
 	State string `yaml:"state,omitempty"`
-	// StateMap maps a vendor state string to a model.State. Unlisted states
-	// read as running.
+	// StateMap maps a vendor state string to a model.State. A state it does
+	// not list fails the invocation with vendor_error, so a gap is visible
+	// instead of leaving the invocation running forever.
 	StateMap map[string]model.State `yaml:"state_map,omitempty"`
 	// Progress is a 0..1 progress number.
 	Progress string `yaml:"progress,omitempty"`
@@ -136,7 +137,8 @@ type CLIDriver struct {
 	// Args is a gojq expression producing the array of arguments appended to
 	// Command. It sees the invocation input plus workdir.
 	Args string `yaml:"args,omitempty"`
-	// Dir is the working directory. Output globs are relative to it.
+	// Dir is the base working directory. Each invocation runs in its own
+	// subdirectory of it, and output globs are relative to that subdirectory.
 	Dir string `yaml:"dir,omitempty"`
 	// Env adds environment variables to the process. Values are literal.
 	Env map[string]string `yaml:"env,omitempty"`

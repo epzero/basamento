@@ -3,6 +3,8 @@ package providers
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -188,7 +190,10 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 	if hd, err := c.runs.Lookup(ctx, r.ClientRef); err == nil && hd != nil {
 		return *hd, nil
 	}
-	input, err := inputFor(r, "", c.dir)
+	// Each invocation runs in its own subdirectory of the provider's
+	// directory, so its output globs never pick up another invocation's files.
+	dir := c.runDir(r.ClientRef)
+	input, err := inputFor(r, "", dir)
 	if err != nil {
 		return model.Handle{}, err
 	}
@@ -200,10 +205,15 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 	if err != nil {
 		return model.Handle{}, err
 	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		run.Fail(core.NewError(core.CodeVendor,
+			"command-line provider could not create the invocation directory", map[string]any{"cause": err.Error()}))
+		return run.Handle(), nil
+	}
 	cmd := Command{
 		Path: c.manifest.CLI.Command[0],
 		Args: append(append([]string(nil), c.manifest.CLI.Command[1:]...), args...),
-		Dir:  c.dir,
+		Dir:  dir,
 		Env:  c.env(),
 	}
 	proc, err := c.runner.Start(run.Context(), cmd)
@@ -212,8 +222,28 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 			"command-line provider could not start the command", map[string]any{"cause": err.Error()}))
 		return run.Handle(), nil
 	}
-	go c.execute(run, proc)
+	go c.execute(run, proc, dir)
 	return run.Handle(), nil
+}
+
+// runDir is one invocation's working directory: a subdirectory of the
+// provider's directory named after the client ref, with a short digest of the
+// ref so two refs that sanitize alike stay apart.
+func (c *CLI) runDir(clientRef string) string {
+	sum := sha256.Sum256([]byte(clientRef))
+	var name strings.Builder
+	for _, r := range clientRef {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			name.WriteRune(r)
+		default:
+			name.WriteByte('_')
+		}
+		if name.Len() >= 48 {
+			break
+		}
+	}
+	return filepath.Join(c.dir, "runs", fmt.Sprintf("%s-%x", name.String(), sum[:4]))
 }
 
 // Events follows the command's progress events with Seq > after.
@@ -237,15 +267,12 @@ func (c *CLI) Lookup(ctx context.Context, clientRef string) (*model.Handle, erro
 	return c.runs.Lookup(ctx, clientRef)
 }
 
-func (c *CLI) execute(run *model.Run, proc Process) {
+func (c *CLI) execute(run *model.Run, proc Process, dir string) {
 	ctx := run.Context()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		c.readProgress(run, proc.Stdout())
-	}()
+	// Drain stdout before Wait: a subprocess's Wait closes the pipe, so a
+	// reader racing it would lose the progress lines still in the buffer.
+	c.readProgress(run, proc.Stdout())
 	err := proc.Wait()
-	<-done
 	if ctx.Err() != nil {
 		// Cancel ended the run and the process was killed.
 		return
@@ -255,7 +282,7 @@ func (c *CLI) execute(run *model.Run, proc Process) {
 			"command-line provider command failed", map[string]any{"cause": err.Error()}))
 		return
 	}
-	outputs, err := c.outputs()
+	outputs, err := c.outputs(dir)
 	if err != nil {
 		run.Fail(err)
 		return
@@ -310,15 +337,16 @@ func (c *CLI) arguments(input map[string]any) ([]string, error) {
 	return args, nil
 }
 
-// outputs expands the manifest's globs into output files. Matches are sorted,
-// so the same command yields the same result order.
-func (c *CLI) outputs() ([]model.Output, error) {
+// outputs expands the manifest's globs into output files under the
+// invocation's directory. Matches are sorted, so the same command yields the
+// same result order.
+func (c *CLI) outputs(dir string) ([]model.Output, error) {
 	var out []model.Output
 	seen := map[string]bool{}
 	for _, pattern := range c.manifest.CLI.Outputs {
 		glob := pattern
 		if !filepath.IsAbs(glob) {
-			glob = filepath.Join(c.dir, pattern)
+			glob = filepath.Join(dir, pattern)
 		}
 		matches, err := filepath.Glob(glob)
 		if err != nil {

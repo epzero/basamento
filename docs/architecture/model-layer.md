@@ -92,8 +92,8 @@ machine-local model (REQ-MODEL-011, WP-L3-04).
 | Provider | Notes |
 | --- | --- |
 | Chat and embeddings (OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Ark/Doubao, Qianfan, Ollama, OpenRouter) | `eino-ext` adapters and official SDKs behind `Invoker`. MiniMax and GLM use OpenAI-compatible mode. |
-| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling or webhook. Covers most cloud media vendors and local generation servers; a WebSocket vendor gets an adapter until the driver carries it. |
-| **Generic CLI provider** | Configured by a manifest: command template, argument mapping, working directory, output file globs, progress parsing from stdout; `machine_local`. |
+| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling or webhook, with a vendor state the manifest does not map failing the run (`vendor_error`) rather than running forever. Covers most cloud media vendors and local generation servers; a WebSocket vendor gets an adapter until the driver carries it. |
+| **Generic CLI provider** | Configured by a manifest: command template, argument mapping, a working directory with one subdirectory per invocation (so output globs never see another run's files), output file globs, progress parsing from stdout; `machine_local`. |
 | Workers | Models and tools that the workers of a pool declared (§6). |
 | Remote invokers | Any service implementing `basamento.invoke.v1.InvocationService` over connect (for example the browser runner, ADR-0009). |
 | Vendor-specific adapters | Only where a manifest cannot express the protocol. |

@@ -8,7 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -346,7 +351,9 @@ models:
 	if res.State != model.StateSucceeded || len(res.Outputs) != 2 {
 		t.Fatalf("result = %+v", res)
 	}
-	if res.Outputs[0].Path != dir+"/out/a.png" || res.Outputs[0].Mime != "image/png" {
+	// The command runs in its own subdirectory of the provider's directory.
+	if !strings.Contains(res.Outputs[0].Path, "/runs/ref-cli-") ||
+		!strings.HasSuffix(res.Outputs[0].Path, "/out/a.png") || res.Outputs[0].Mime != "image/png" {
 		t.Fatalf("output = %+v", res.Outputs[0])
 	}
 }
@@ -584,4 +591,377 @@ func drain(t *testing.T, ch <-chan model.Event) []model.Event {
 		out = append(out, e)
 	}
 	return out
+}
+
+// countingStarts wraps a handler and counts POST /start calls, so a test can
+// prove a repeated start never reaches the vendor.
+func countingStarts(h http.Handler) (http.Handler, func() int) {
+	var mu sync.Mutex
+	n := 0
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/start" {
+				mu.Lock()
+				n++
+				mu.Unlock()
+			}
+			h.ServeHTTP(w, r)
+		}), func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return n
+		}
+}
+
+// F1: a second Start with the same client ref must answer from the registry,
+// not send another paid /start. The registry's local lookup needs the tenant.
+func TestHTTPSecondStartWithTheSameRefReachesTheVendorOnce(t *testing.T) {
+	t.Parallel()
+	handler, starts := countingStarts(sim.NewHTTP(sim.HTTPConfig{}).Handler())
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+
+	req := model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"}
+	h1, err := p.Start(testCtx(t), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := p.Start(testCtx(t), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h2 != h1 {
+		t.Fatalf("second start = %+v, want %+v", h2, h1)
+	}
+	if got := starts(); got != 1 {
+		t.Fatalf("vendor saw %d /start calls, want 1", got)
+	}
+	found, err := p.Lookup(testCtx(t), "ref-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.ID != h1.ID {
+		t.Fatalf("lookup = %+v, want the vendor id %q", found, h1.ID)
+	}
+}
+
+// F2: two tenants that use the same client ref must keep their own vendor job;
+// the vendor id lives on the run, so tenant A's cancel cannot address B's job.
+func TestHTTPTenantsSharingAClientRefKeepTheirOwnVendorJob(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	next := 0
+	var cancels []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			next++
+			_, _ = fmt.Fprintf(w, `{"id":"job-%d"}`, next)
+		case strings.HasPrefix(r.URL.Path, "/cancel/"):
+			cancels = append(cancels, strings.TrimPrefix(r.URL.Path, "/cancel/"))
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			_, _ = fmt.Fprint(w, `{"state":"running"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+
+	acme := core.WithTenant(t.Context(), "acme")
+	beta := core.WithTenant(t.Context(), "beta")
+	req := model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "shared"}
+	a, err := p.Start(acme, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := p.Start(beta, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != "job-1" || b.ID != "job-2" {
+		t.Fatalf("handles = %q and %q, want job-1 and job-2", a.ID, b.ID)
+	}
+	if err := p.Cancel(acme, a); err != nil {
+		t.Fatal(err)
+	}
+	found, err := p.Lookup(beta, "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || found.ID != "job-2" {
+		t.Fatalf("beta lookup = %+v, want job-2", found)
+	}
+	if err := p.Cancel(beta, *found); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), cancels...)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != "job-1" || got[1] != "job-2" {
+		t.Fatalf("cancels = %v, want [job-1 job-2]", got)
+	}
+}
+
+// F3: a start that the registry cannot record must not reach the vendor.
+func TestHTTPStartWithoutATenantNeverReachesTheVendor(t *testing.T) {
+	t.Parallel()
+	handler, starts := countingStarts(sim.NewHTTP(sim.HTTPConfig{}).Handler())
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+
+	req := model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"}
+	if _, err := p.Start(context.Background(), req); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument", core.CodeOf(err))
+	}
+	if got := starts(); got != 0 {
+		t.Fatalf("vendor saw %d /start calls, want 0", got)
+	}
+}
+
+// F4: a transient status error must not fail a paid run while the vendor job
+// continues.
+func TestHTTPFollowRetriesATransientStatusError(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	statuses := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses++
+			if statuses <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"state":"succeeded","outputs":[]}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+
+	ctx, cancel := context.WithTimeout(testCtx(t), 10*time.Second)
+	defer cancel()
+	h, err := p.Start(ctx, model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.Result(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != model.StateSucceeded {
+		t.Fatalf("state = %q, want succeeded", res.State)
+	}
+	mu.Lock()
+	got := statuses
+	mu.Unlock()
+	if got != 3 {
+		t.Fatalf("status calls = %d, want 3", got)
+	}
+}
+
+// F7: a vendor state the manifest does not map fails the run instead of
+// leaving it running forever.
+func TestHTTPUnmappedVendorStateFailsTheRun(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	statuses := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses++
+			_, _ = fmt.Fprint(w, `{"state":"mystery"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+
+	ctx, cancel := context.WithTimeout(testCtx(t), 10*time.Second)
+	defer cancel()
+	h, err := p.Start(ctx, model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.Result(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != model.StateFailed {
+		t.Fatalf("state = %q, want failed", res.State)
+	}
+	var failure model.Failure
+	if err := json.Unmarshal(res.Error, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != core.CodeVendor {
+		t.Fatalf("failure code = %q, want vendor_error", failure.Code)
+	}
+	mu.Lock()
+	got := statuses
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("status calls = %d, want 1", got)
+	}
+}
+
+// fileRunner writes one output file per invocation, named after the call, and
+// reports success.
+type fileRunner struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (r *fileRunner) Start(_ context.Context, cmd providers.Command) (providers.Process, error) {
+	r.mu.Lock()
+	r.n++
+	n := r.n
+	r.mu.Unlock()
+	path := filepath.Join(cmd.Dir, "out", fmt.Sprintf("file-%d.png", n))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, []byte("png"), 0o600); err != nil {
+		return nil, err
+	}
+	return &quietProcess{}, nil
+}
+
+type quietProcess struct{}
+
+func (*quietProcess) Stdout() io.Reader { return strings.NewReader("") }
+func (*quietProcess) Wait() error       { return nil }
+
+// F6: each invocation collects only the files it wrote, even when two runs
+// share the provider's directory.
+func TestCLIInvocationsKeepTheirOwnOutputs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := readManifest(t, `name: local-render
+locality: machine_local
+protocol: command
+cli:
+  command: [render]
+  dir: `+dir+`
+  outputs: ["out/*.png"]
+models:
+  - id: local-render
+    caps: [image.generate]
+`)
+	p, err := providers.NewCLI(m, providers.CLIOptions{Clock: core.SystemClock{}, Runner: &fileRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"file-1.png", "file-2.png"} {
+		ref := fmt.Sprintf("ref-%d", i+1)
+		h, err := p.Start(testCtx(t), model.Request{Model: "local-render", Op: model.CapImageGenerate, ClientRef: ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := p.Result(testCtx(t), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Outputs) != 1 || filepath.Base(res.Outputs[0].Path) != want {
+			t.Fatalf("%s outputs = %+v, want only %s", ref, res.Outputs, want)
+		}
+	}
+}
+
+// pipeProcess mimics a subprocess whose Wait closes the stdout pipe.
+type pipeProcess struct {
+	eof             atomic.Bool
+	waitedBeforeEOF atomic.Bool
+}
+
+func (p *pipeProcess) Stdout() io.Reader {
+	return &pipeReader{p: p, lines: []string{"frame: 50\n", "frame: 100\n"}}
+}
+
+func (p *pipeProcess) Wait() error {
+	if !p.eof.Load() {
+		p.waitedBeforeEOF.Store(true)
+	}
+	return nil
+}
+
+type pipeReader struct {
+	p     *pipeProcess
+	lines []string
+}
+
+func (r *pipeReader) Read(b []byte) (int, error) {
+	if len(r.lines) == 0 {
+		r.p.eof.Store(true)
+		return 0, io.EOF
+	}
+	// Yield so a Wait racing the reader gets its chance to observe the stream
+	// mid-way, which is how a subprocess pipe loses its buffered output.
+	runtime.Gosched()
+	n := copy(b, r.lines[0])
+	r.lines = r.lines[1:]
+	return n, nil
+}
+
+type runnerFunc func(context.Context, providers.Command) (providers.Process, error)
+
+func (f runnerFunc) Start(ctx context.Context, cmd providers.Command) (providers.Process, error) {
+	return f(ctx, cmd)
+}
+
+// N1: stdout is drained before Wait, so no progress line is lost.
+func TestCLIDrainsStdoutBeforeWaiting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := readManifest(t, `name: local-render
+locality: machine_local
+protocol: command
+cli:
+  command: [render]
+  dir: `+dir+`
+  outputs: ["out/*.png"]
+  progress: 'frame: ([0-9]+)'
+models:
+  - id: local-render
+    caps: [image.generate]
+`)
+	proc := &pipeProcess{}
+	p, err := providers.NewCLI(m, providers.CLIOptions{Clock: core.SystemClock{}, Runner: runnerFunc(
+		func(context.Context, providers.Command) (providers.Process, error) { return proc, nil },
+	)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := p.Start(testCtx(t), model.Request{Model: "local-render", Op: model.CapImageGenerate, ClientRef: "ref-drain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, mustEvents(t, p, h, 0))
+	if len(events) != 2 || events[0].Progress != 0.5 || events[1].Progress != 1 {
+		t.Fatalf("events = %+v, want both progress lines", events)
+	}
+	if _, err := p.Result(testCtx(t), h); err != nil {
+		t.Fatal(err)
+	}
+	if proc.waitedBeforeEOF.Load() {
+		t.Fatal("Wait ran before stdout was drained")
+	}
 }

@@ -4,7 +4,8 @@
 // Two generic drivers cover most vendors without code: an HTTP API provider
 // (start, status, cancel and lookup endpoints, credentials by reference and
 // gojq mappings to and from our request) and a command-line provider (argv
-// mapping, working directory, progress parsed from stdout and output globs).
+// mapping, a working directory with one subdirectory per invocation, progress
+// parsed from stdout and output globs).
 // A vendor whose protocol a manifest cannot express gets a purpose-built
 // adapter in its own package; every provider ships a simulator and the same
 // contract tests (docs/architecture/model-layer.md §3, ADR-0006).
