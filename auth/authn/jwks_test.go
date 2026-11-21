@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,13 +67,13 @@ func edJWK(kid string, pub ed25519.PublicKey) map[string]any {
 	}
 }
 
-func jwksServer(t *testing.T, keys func() []map[string]any) (*httptest.Server, *int) {
+func jwksServer(t *testing.T, keys func() []map[string]any) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var mu sync.Mutex
-	requests := 0
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
 		mu.Lock()
-		requests++
 		current := keys()
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -82,6 +83,54 @@ func jwksServer(t *testing.T, keys func() []map[string]any) (*httptest.Server, *
 	}))
 	t.Cleanup(server.Close)
 	return server, &requests
+}
+
+// jwksWait bounds every wait for a JWKS fetch to make progress. A test uses it
+// only as a hang guard: a stall fails in seconds and names the wait instead of
+// running into the package timeout.
+const jwksWait = 5 * time.Second
+
+// recvWithin receives from ch, failing the test after jwksWait and naming what
+// it was waiting for.
+func recvWithin[T any](t *testing.T, what string, ch <-chan T) T {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), jwksWait)
+	defer cancel()
+	select {
+	case v := <-ch:
+		return v
+	case <-ctx.Done():
+		t.Fatalf("timed out after %s waiting for %s", jwksWait, what)
+	}
+	var zero T
+	return zero
+}
+
+// waitIdle waits until the refresh started by the last lookup has fully
+// settled: its flight is cleared, not merely its done channel closed.
+// VerificationKey returns once done closes, a few instructions before the
+// fetch goroutine clears j.flight; a lookup inside that window joins the
+// finished flight, so it neither consults the fake clock nor fetches, and a
+// clock advance or key rotation that follows is silently lost. Tests that
+// advance the clock or rotate the key set between lookups wait here first. The
+// flight clears only after the fetch goroutine read the test server's
+// response, so reaching here also proves the previous fetch arrived.
+func waitIdle(t *testing.T, set *JWKS) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), jwksWait)
+	defer cancel()
+	for {
+		set.flightMu.Lock()
+		busy := set.flight != nil
+		set.flightMu.Unlock()
+		if !busy {
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("timed out after %s waiting for the JWKS refresh flight to clear", jwksWait)
+		}
+		runtime.Gosched()
+	}
 }
 
 func TestJWKSResolvesRSAKey(t *testing.T) {
@@ -106,8 +155,8 @@ func TestJWKSResolvesRSAKey(t *testing.T) {
 	if _, ok := got2.(*rsa.PublicKey); !ok {
 		t.Fatal("cached lookup failed")
 	}
-	if *requests != 1 {
-		t.Fatalf("requests = %d, want 1", *requests)
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
 	}
 }
 
@@ -183,6 +232,7 @@ func TestJWKSRotationWithOIDC(t *testing.T) {
 		t.Fatalf("first key: %v", err)
 	}
 
+	waitIdle(t, set)
 	mu.Lock()
 	kid = "k2"
 	mu.Unlock()
@@ -191,6 +241,7 @@ func TestJWKSRotationWithOIDC(t *testing.T) {
 	if _, err := verifier.Authenticate(context.Background(), second); err != nil {
 		t.Fatalf("rotated key: %v", err)
 	}
+	waitIdle(t, set)
 	clock.Advance(defaultMinRefresh)
 	if _, err := verifier.Authenticate(context.Background(), first); err == nil {
 		t.Fatal("token signed with dropped key must fail")
@@ -317,6 +368,7 @@ func TestJWKSBadResponseKeepsOldKeys(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			waitIdle(t, set)
 			body = tc.body
 			status = tc.status
 			clock.Advance(defaultMinRefresh)
