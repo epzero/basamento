@@ -1,4 +1,4 @@
-@planned @wp:WP-L5-02 @runtime:temporal @level:component
+@runtime:temporal @level:component
 Feature: The Temporal runtime
 
   The temporal runtime runs the flow host as a Temporal workflow and each step
@@ -11,7 +11,7 @@ Feature: The Temporal runtime
     Given a Temporal test server at version "1.32.2"
     And a blob store and a payload codec served by a simulated key service
 
-  @REQ-RT-039 @id:RT-039-01
+  @planned @wp:WP-L5-02 @REQ-RT-039 @id:RT-039-01
   Scenario: The temporal runtime reports its capabilities
     Given the runtime is "temporal"
     Then the runtime reports capability "durable" as true
@@ -67,7 +67,7 @@ Feature: The Temporal runtime
     And the run history holds neither "sk-live-4f9a2c" nor "json/plain"
     And the run returns {"api_key": "sk-live-4f9a2c"}
 
-  @security @REQ-RT-040 @REQ-RT-031 @id:RT-031-02
+  @planned @wp:WP-L5-02 @security @REQ-RT-040 @REQ-RT-031 @id:RT-031-02
   Scenario: A run without a tenant fails before any payload reaches the history unencrypted
     Given a flow calls step "fetch" that returns {"ok": true}
     When a run of "fetch" without a tenant is started on the temporal runtime
@@ -91,7 +91,7 @@ Feature: The Temporal runtime
     Then step "fetch" fails with code "not_found"
     And the run is "failed"
 
-  @REQ-RT-034 @id:RT-034-01
+  @planned @wp:WP-L5-02 @REQ-RT-034 @id:RT-034-01
   Scenario: A checkpoint continues the run as new once the history reaches the threshold
     Given the checkpoint event threshold is 20
     And a flow calls 40 steps "s1" to "s40" and checkpoints after each, then returns "done"
@@ -99,7 +99,7 @@ Feature: The Temporal runtime
     Then the run was continued as new at least once
     And the run is "completed"
 
-  @REQ-RT-035 @id:RT-035-01
+  @planned @wp:WP-L5-02 @REQ-RT-035 @id:RT-035-01
   Scenario: A checkpoint below the threshold keeps the run in its history
     Given the checkpoint event threshold is 1000
     And a flow calls 3 steps "s1" to "s3", checkpoints, then waits at gate "approve"
@@ -108,7 +108,7 @@ Feature: The Temporal runtime
     Then the run was continued as new 0 times
     And the run returns {"approved": true}
 
-  @REQ-RT-035 @id:RT-035-02
+  @planned @wp:WP-L5-02 @REQ-RT-035 @id:RT-035-02
   Scenario: A checkpoint far below the threshold keeps the run in its history
     Given the checkpoint event threshold is 1000
     And a flow calls 6 steps "s1" to "s6", checkpoints, then returns "done"
@@ -116,7 +116,7 @@ Feature: The Temporal runtime
     Then the run was continued as new 0 times
     And the run returns "done"
 
-  @REQ-RT-036 @id:RT-036-01
+  @planned @wp:WP-L5-02 @REQ-RT-036 @id:RT-036-01
   Scenario: A run continued as new keeps its id, results and awaited gate
     Given the checkpoint event threshold is 20
     And a flow calls 40 steps "s1" to "s40", checkpoints, then waits at gate "approve" and returns {"done": true}
@@ -126,7 +126,7 @@ Feature: The Temporal runtime
     And run "r1" is "completed"
     And the run returns {"done": true}
 
-  @REQ-RT-036 @id:RT-036-02
+  @planned @wp:WP-L5-02 @REQ-RT-036 @id:RT-036-02
   Scenario: Emitted events before a continue-as-new reach the run's outbox once, in order
     Given the checkpoint event threshold is 20
     And a flow emits "a", "b", "c", "d", "e" and "f", calls 40 steps "s1" to "s40", checkpoints, calls 5 steps "t1" to "t5", then returns "done"
@@ -135,12 +135,12 @@ Feature: The Temporal runtime
     And the run's durable events are "a", "b", "c", "d", "e", "f"
     And the run returns "done"
 
-  @REQ-RT-037 @id:RT-037-01
+  @planned @wp:WP-L5-02 @REQ-RT-037 @id:RT-037-01
   Scenario: The temporal runtime starts against a server at the pinned version
     When the temporal runtime starts against the Temporal test server
     Then the runtime is serving
 
-  @REQ-RT-037 @id:RT-037-02
+  @planned @wp:WP-L5-02 @REQ-RT-037 @id:RT-037-02
   Scenario Outline: The temporal runtime refuses a server outside the pinned range with unsupported
     Given a simulated Temporal server version "<server>"
     When the temporal runtime starts against that server
@@ -151,7 +151,7 @@ Feature: The Temporal runtime
       | 1.31.9 |
       | 1.33.0 |
 
-  @REQ-RT-038 @id:RT-038-01
+  @planned @wp:WP-L5-02 @REQ-RT-038 @id:RT-038-01
   Scenario: A checkpoint waits for an in-flight step before continuing as new
     Given the checkpoint event threshold is 20
     And a flow calls 5 steps "s1" to "s5", starts steps "a" and "b" in parallel, calls checkpoint while "b" is in flight, then returns "done"

@@ -88,26 +88,7 @@ func registerLocalRuns(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the run returns (\{.*\})$`, func(ctx context.Context, want string) error {
-		w := localStepWorld(ctx)
-		if w.current.RunID == "" {
-			return fmt.Errorf("no run has started")
-		}
-		if err := w.waitRunState(ctx, w.current, "completed"); err != nil {
-			return err
-		}
-		got := w.output(w.current)
-		if len(got) == 0 && w.currentExec != nil {
-			w.recordOutput(w.current, w.currentExec)
-			got = w.output(w.current)
-		}
-		if !jsonEquivalent(got, json.RawMessage(want)) {
-			return fmt.Errorf("the run returns %s, want %s", got, want)
-		}
-		return nil
-	})
 	sc.Step(`^the run is still "([^"]*)"$`, localRunState)
-	sc.Step(`^the run is "([^"]*)"$`, localRunState)
 	sc.Step(`^the run is described as "([^"]*)"$`, localRunState)
 	sc.Step(`^run "([^"]*)" is "([^"]*)"$`, func(ctx context.Context, runID, want string) error {
 		w := localStepWorld(ctx)

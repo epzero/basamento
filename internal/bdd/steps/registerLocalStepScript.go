@@ -45,10 +45,6 @@ func registerLocalStepScript(sc *godog.ScenarioContext) {
 			}
 			return nil
 		})
-	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" marked retryable (true|false)$`,
-		func(ctx context.Context, name, code, retryable string) error {
-			return localStepError(ctx, name, code, retryable, 0)
-		})
 	sc.Step(`^step "([^"]*)" fails with code "([^"]*)" on execution (\d+) and with code "([^"]*)" on execution (\d+), each marked retryable (true|false)$`,
 		func(ctx context.Context, name, first string, firstN int, second string, secondN int, retryable string) error {
 			w := localStepWorld(ctx)
@@ -80,15 +76,6 @@ func registerLocalStepScript(sc *godog.ScenarioContext) {
 		w.mu.Unlock()
 		return nil
 	})
-	sc.Step(`^the step allows (\d+) attempts$`, func(ctx context.Context, attempts int) error {
-		w := localStepWorld(ctx)
-		w.mu.Lock()
-		options := w.stepOptions["charge"]
-		options.MaxAttempts = attempts
-		w.stepOptions["charge"] = options
-		w.mu.Unlock()
-		return nil
-	})
 	sc.Step(`^the step leaves its attempt limit at 0$`, func(ctx context.Context) error {
 		w := localStepWorld(ctx)
 		w.mu.Lock()
@@ -98,14 +85,12 @@ func registerLocalStepScript(sc *godog.ScenarioContext) {
 		w.mu.Unlock()
 		return nil
 	})
-	sc.Step(`^step "([^"]*)" was executed (\d+) times?$`, func(ctx context.Context, name string, want int) error {
-		w := localStepWorld(ctx)
-		if got := w.executionsOf(name); got != want {
-			return fmt.Errorf("step %q was executed %d times, want %d", name, got, want)
+	sc.Step(`^the step fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if w := world(ctx).Temporal; w != nil && w.rt != nil {
+			return temporalStepFailure(w, code)
 		}
-		return nil
+		return localStepFailed(ctx, code)
 	})
-	sc.Step(`^the step fails with code "([^"]*)"$`, localStepFailed)
 	sc.Step(`^the step fails with the error of its last attempt with code "([^"]*)"$`, localStepFailed)
 	sc.Step(`^no retry waited for the clock to advance$`, func(ctx context.Context) error {
 		w := localStepWorld(ctx)
