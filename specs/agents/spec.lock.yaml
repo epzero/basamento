@@ -460,3 +460,39 @@ scenarios:
         note: New WP-L7-01 agent loop, cap, handoff, cancellation, and memory-policy behavior.
         human:
             status: pending
+    AGENT-031-01:
+        hash: sha256:dcb338259ea97bf4db187b5c38ac8af261504e0298dd663121e267608daa2b53
+        reqs:
+            - REQ-AGENT-031
+        tier: P2
+        author: caster:spec-author:d823bf
+        reviewer: cursor:spec-reviewer:99c8d6
+        approved_at: "2026-11-21"
+        note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
+        ref: https://github.com/epzero/basamento/pull/159
+        human:
+            status: pending
+    AGENT-031-02:
+        hash: sha256:14bb5d72cf08dd38365371df8a4127a51fe73f39bb4eec5f335d1691bb6afb8f
+        reqs:
+            - REQ-AGENT-031
+        tier: P2
+        author: caster:spec-author:d823bf
+        reviewer: cursor:spec-reviewer:99c8d6
+        approved_at: "2026-11-21"
+        note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
+        ref: https://github.com/epzero/basamento/pull/159
+        human:
+            status: pending
+    AGENT-032-01:
+        hash: sha256:ab07b8bc88f720109fa55be858fff60e5039637b0207f528252aeda020a0213a
+        reqs:
+            - REQ-AGENT-032
+        tier: P2
+        author: caster:spec-author:d823bf
+        reviewer: cursor:spec-reviewer:99c8d6
+        approved_at: "2026-11-21"
+        note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
+        ref: https://github.com/epzero/basamento/pull/159
+        human:
+            status: pending
