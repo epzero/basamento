@@ -61,8 +61,8 @@ here in full; no code from that repository is copied.
    `Output`; the `tool-<n>-<k>` step input gains `blocked` and `count`. Its
    state is rebuilt from every journaled turn and tool result at each boundary,
    observing each call once and in order; the `turnResult` JSON
-   (`agent/handler.go:317-323`, asserted at `agent/handler_test.go:700-721`)
-   is unchanged.
+   (`agent/handler.go:317-323`) is unchanged. WP-L7-06 adds a test asserting
+   its exact JSON.
 7. WP-L7-01's implemented scenarios stay untouched: the summary is opt-in, and
    the guard's thresholds are not reached by an existing scenario in a way
    that changes its assertions.
@@ -115,26 +115,32 @@ At a boundary:
    `active.To+1..frontier`: the largest whole-turn prefix whose request fits in
    `input_tokens` after the summariser instructions and the previous summary.
    The step name is the chunk's range, `summary-<from>-<to>`; a turn is never
-   split. The new active summary covers `2..to` of the last successful chunk.
+   split. Chunk selection stops at the failed-chunk barrier: no chunk starts
+   at or after the first failed chunk's `from`, and the summary's `To` never
+   passes the last successful chunk's `to`. The new active summary covers
+   `2..to` of the last successful chunk.
    Repeat until the summary reaches the frontier, a chunk fails, the extension
    budget is exhausted or a cap stops it.
 3. Recompute the tail with the new summary's measured weight. If the frontier
    advances, extend again. If the frontier retreats below the summary's `To`
    (the recomputed tail now keeps a turn the summary covers), discard the
-   summary and, if turns are still dropped, restart from turn 2. A restart is
-   a new summary step, not a reuse of the discarded one.
+   summary and, if turns are still dropped, restart from turn 2. A restart
+   re-derives the summary from the chunks: a chunk whose range and input were
+   already journaled replays that step, and a new range is a new step.
 4. Stop at a fixed point: the summary's `To` equals the frontier, or no further
    summary can be made.
 
-A failed chunk is recorded as `summary.failed` and is not retried. The loop
-does not extend past it, even after a restart: the summary stops at the end of
-the last successful chunk, and the remaining dropped turns stay unsummarised
-for the run. This is why a later boundary cannot re-include a range that
-already failed.
+A failed chunk is recorded as `summary.failed` and is not retried. It is a
+barrier for the run, expressed on turns: no chunk starts at or after the first
+failed chunk's `from`, and the summary's `To` is frozen at the last successful
+chunk's `to`. Step 2's chunk selection never crosses or begins at the barrier,
+so a later boundary with a larger frontier makes no new summary call and the
+remaining dropped turns stay unsummarised for the run.
 
 The loop is bounded: at most 8 summary steps per turn boundary and at most 2
-restarts per boundary, both fixed constants; at most 16 summary steps per run,
-counted from the journaled `summary-*` steps. Each summary call is checked
+restarts per boundary, both fixed constants; at most 16 summarising model
+calls per run, counted from the journaled summary steps that record a model
+call. Each summary call is checked
 against the time, token and cost caps before it runs (§1.5). The fixed point
 terminates because each successful chunk strictly increases the summary's `To`
 and the frontier is bounded by the number of turns; a failed chunk stops the
@@ -236,9 +242,12 @@ summary is too large. The post-build measurement (`agent/memory.go:91-107`)
 includes the summary message.
 
 A handoff target whose model differs from the model that produced the carried
-summary re-measures the summary with its own model's tokenizer, using the same
-`Estimate` path it uses for a message that declares no usage. It then drops
-tail turns or, when none can be dropped, skips the summary; it never fails the
+summary re-measures the summary with the host `Estimator` over a
+`model.Request` that contains the summary message — the same estimator the
+loop already uses to assemble requests. The carried `output_tokens` is a lower
+bound; before invoking, the loop re-checks the assembled request against
+`input_tokens` and drops tail turns, never the run, if it does not fit. It
+skips the summary only when no tail turn can be dropped; it never fails the
 run for the summary's weight. This matters for dense text: a CJK summary's
 recorded `output_tokens` can be several times its byte count divided by four,
 so a byte-based estimate would keep too much tail and then fail REQ-AGENT-027.
@@ -271,7 +280,8 @@ The summary call does **not** increment `own`, does not appear in
 `Output.Turns`, and does not count against `caps.steps`, which is defined as
 model turns. Summary calls have their own bounded budget (§1.2): at most 8 per
 turn boundary, at most 2 restarts per boundary and at most 16 per run, counted
-from the journaled `summary-*` steps. This is a separate model-call budget, not
+from the journaled summary steps that record a model call. This is a separate
+model-call budget, not
 `caps.steps`. The time cap is checked before the
 summary and again before the turn; a summary that runs past the time cap is
 paid for, but the turn does not start and the run ends with `time_cap_reached`.
@@ -288,9 +298,11 @@ failure is recorded in the `summary.failed` step result with a fixed reason
 code (§1.3), so replay is stable and the reason is visible without storing
 vendor text. The model middleware's own retry policy may retry the invocation
 inside the step; the durable step records the final outcome. A failed chunk is
-not retried and stops the extension for the run: a later chunk would leave a
-hole in the summary, and a later frontier with a new step name would otherwise
-re-include the failed range at every boundary.
+not retried and is a barrier for the run: no chunk starts at or after its
+`from`, and the summary's `To` stays at the last successful chunk's `to`. A
+later chunk would leave a hole in the summary and a later frontier would
+otherwise re-include the failed range at every boundary; the barrier prevents
+both.
 
 ### 1.7 Handoff
 
@@ -327,7 +339,9 @@ carried summary. The carried turns are complete either way, so ignoring the
 summary loses no raw history. The target's summary steps use its own
 `node/runID` prefix, and its summary cost is charged to the target's caps, not
 the first agent's. When the target's model differs, it re-measures the carried
-summary's weight with its own tokenizer (§1.4).
+summary's weight with the host `Estimator` over the assembled `model.Request`
+(§1.4), treats the carried `output_tokens` as a lower bound and drops tail
+turns if the request does not fit.
 
 ### 1.8 What the summary contains
 
@@ -471,9 +485,11 @@ and result, so it is observed. Each call is observed exactly once, in order.
 
 On a handoff, the target seeds the guard from the carried turns
 (`agent/output.go:63`). On a resume, the loop rebuilds from the turn and tool
-steps it has replayed, including a resumed current turn's journaled prefix. No
-counter is stored in `turnResult`, `Turn`, `Output` or a new step, and the turn
-JSON asserted at `agent/handler_test.go:700-721` is unchanged.
+steps it has replayed: it rebuilds first from the current turn's journaled
+`tool-<n>-<k>` prefix, then observes only the calls whose steps are not yet
+journaled before processing them. No counter is stored in `turnResult`,
+`Turn`, `Output` or a new step, and the `turnResult` JSON is unchanged;
+WP-L7-06 adds a test asserting its exact JSON.
 
 ### 2.5 Scope
 
@@ -506,7 +522,7 @@ turn 3 grows from 400 to roughly 440 tokens against a 1000-token limit with a
 | Summarise by default | Every memory scenario would need a scripted summariser and its token accounting would change; WP-L7-01's scenarios would not stay untouched. | Rejected; `input_summary` is opt-in. |
 | Insert the summary as a plain user message | A summary made from untrusted tool output can close the wrapper and inject instructions that survive compaction and the handoff (REQ-PROMPT-014/015). | Rejected; `<untrusted source="conversation-summary">` with neutralisation. |
 | Unbounded extension loop | An attacker-forced drop can make O(turns) summary calls per boundary and burn the caps; failed ranges are re-included at every later frontier. | Rejected; bounded extensions and restarts, a per-run budget, and a failed chunk stops the extension. |
-| Estimate the summary at four bytes per token | Dense text such as CJK undercounts, the tail keeps too much, and the real estimator then fails the run with `invalid_argument`. | Rejected; use the step's recorded `usage.output_tokens`, re-measure for a different tokenizer, and drop tail turns or skip. |
+| Estimate the summary at four bytes per token | Dense text such as CJK undercounts, the tail keeps too much, and the real estimator then fails the run with `invalid_argument`. | Rejected; use the step's recorded `usage.output_tokens`, re-measure with the host `Estimator` over the assembled request for a different model, and drop tail turns or skip. |
 | Store raw vendor error text in `summary.failed` | Vendor text becomes durable state and can carry a phantom charge for a call that never ran. | Rejected; fixed reason codes and zero usage/cost for a pre-call rejection. |
 
 ### 3.2 Loop guard
@@ -517,7 +533,7 @@ turn 3 grows from 400 to roughly 440 tokens against a 1000-token limit with a
 | Fail the run on a repeat | The model cannot recover; a transient repeat becomes fatal. | Rejected. |
 | Block at the first repeat | False positives on legitimate retries and paginated reads. | Rejected. |
 | Deduplicate calls within one turn | Even read-only tools may depend on side effects of another call in the same batch; the reference implementation explicitly does not deduplicate a batch. | Rejected. |
-| Store counters in `turnResult` | Changes the durable JSON and makes replay depend on a field the turn did not record; `agent/handler_test.go:700-721` asserts that JSON. | Rejected. |
+| Store counters in `turnResult` | Changes the durable JSON and makes replay depend on a field the turn did not record; the durable JSON must stay unchanged, and WP-L7-06 adds a test asserting it exactly. | Rejected. |
 | Hash raw argument bytes only | Key order and whitespace differences evade the guard. | Rejected. |
 | Collapse whitespace inside string values | Two different SQL statements, prompts or commands merge, and a legitimate call is hard-blocked at 6. | Rejected; structural whitespace only, string values byte-exact. |
 | Resolve duplicate object keys by last value | `{"a":1,"a":2}` and `{"a":2}` merge; the guard cannot tell a malformed call from a different one. | Rejected; duplicate keys fall back to raw bytes. |
@@ -569,15 +585,15 @@ claim on the sequence. The designer adds them with `@planned` scenarios.
 
 | Requirement | Text |
 | --- | --- |
-| REQ-AGENT-032 | When the context-window policy drops one or more model turns from the messages of a model turn and the agent's `input_summary` is true, the agent loop shall include one summary message of those dropped turns in the messages, after the kept first model turn and before the kept recent model turns, wrapped in `<untrusted source="conversation-summary">` and `</untrusted>` with any delimiter-looking text in the summary neutralised. |
-| REQ-AGENT-033 | The agent loop shall record each summary of dropped turns in a durable step named `summary-<from>-<to>` whose range is the chunk it covers, and shall use the recorded summary when it replays the run, so the replayed messages are the messages of the first execution. |
-| REQ-AGENT-034 | When the agent loop makes a summarising model call, the agent loop shall reserve its estimated cost before the call, add its input and output tokens to the run's used tokens and its charge to the run's spent cost, and not count the call as a model turn for the step cap; a summary request rejected before the call shall add nothing. |
-| REQ-AGENT-035 | If a summarising model call fails, its request would exceed the agent's input token limit, or its summary cannot be afforded, then the agent loop shall continue the run without a summary message for the affected dropped turns and, when a step is recorded, record a fixed reason code with zero usage and zero cost for a call that did not run. |
-| REQ-AGENT-036 | When a handoff carries a summary of dropped turns and the target agent drops turns that the summary covers, the target agent shall use the carried summary for those turns instead of summarising them again; when the target agent keeps a turn the summary covers, it shall discard the carried summary. |
+| REQ-AGENT-032 | When the context-window policy drops one or more model turns from the messages of a model turn, the agent's `input_summary` is true, and the loop has a summary message covering one or more of the dropped turns, the agent loop shall include that one summary message in the messages, after the kept first model turn and before the kept recent model turns, wrapped in `<untrusted source="conversation-summary">` and `</untrusted>` with any delimiter-looking text in the summary neutralised. |
+| REQ-AGENT-033 | The agent loop shall record each summary of dropped turns in a durable step named `summary-<from>-<to>` whose range is the chunk it covers, use the recorded summary when it replays the run so the replayed messages are the messages of the first execution, and bound the extension at a turn boundary: at most 8 summary steps per boundary, at most 2 restarts per boundary and at most 16 summarising model calls per run, counted from the journaled steps that record a model call; a restart re-derives the summary from the chunks, a chunk whose range and input were already journaled replays that step, a new range is a new step, and after a tail recomputation leaves a summary whose `To` is above the recomputed frontier the agent loop shall discard it and, if turns are still dropped, restart from turn 2. |
+| REQ-AGENT-034 | When the agent loop makes a summarising model call, the agent loop shall reserve its estimated cost before the call, add its input and output tokens to the run's used tokens and its charge to the run's spent cost, and not count the call as a model turn for the step cap; a summary request rejected before the call shall add nothing. The summary message's weight shall be the step's recorded `usage.output_tokens` plus a content-based estimate of its envelope; a target whose model differs from the producing model shall re-measure the summary with the host `Estimator` over the assembled `model.Request`, treat the recorded tokens as a lower bound, and drop tail turns, never failing the run, when the assembled request does not fit `input_tokens`. |
+| REQ-AGENT-035 | If a summarising model call fails, its request would exceed the agent's input token limit, or its summary cannot be afforded, then the agent loop shall continue the run without a summary message for the affected dropped turns and, when a step is recorded, record a fixed reason code with zero usage and zero cost for a call that did not run; a failed chunk shall not be retried and shall be a barrier for the run: no chunk starts at or after its `from`, and the summary's `To` is frozen at the last successful chunk's `to`. |
+| REQ-AGENT-036 | When a handoff carries a summary of dropped turns, the target agent's `input_summary` is true, and the target agent drops turns that the summary covers, the target agent shall use the carried summary for those turns instead of summarising them again; when the target agent drops no turn the summary covers, it shall discard the carried summary. |
 | REQ-AGENT-037 | When a model turn requests a non-handoff tool call and that call is the 3rd, 4th or 5th call with the same canonical name and arguments that the agent loop has processed in the run, counting the current call, the agent loop shall run the call and append a loop-guard warning to its tool result. |
 | REQ-AGENT-038 | When a model turn requests a non-handoff tool call and that call is the 6th or later call with the same canonical name and arguments that the agent loop has processed in the run, counting the current call, the agent loop shall not run the call and shall give the model a synthetic tool result that says the call was blocked. |
-| REQ-AGENT-039 | When the loop guard compares two tool calls, the agent loop shall treat them as the same call when their tool names are equal and their arguments are equal after JSON canonicalisation: object keys sorted recursively, only structural whitespace removed, string values byte-exact, array order preserved, and numbers compared as their JSON literals; arguments that are not valid JSON or contain a duplicate object key are compared as their raw bytes. |
-| REQ-AGENT-040 | The agent loop shall rebuild the loop guard's counts from the model turns and tool-call results recorded in the run at every turn boundary, observing each non-handoff call once and in order when its tool-call step is journaled, observing a current turn's call only while its tool-call step is not yet journaled, and not observing a handoff turn's other calls, without reading a separate durable counter. |
+| REQ-AGENT-039 | When the loop guard compares two tool calls, the agent loop shall treat them as the same call when their tool names are equal and their arguments are equal after JSON canonicalisation: object keys sorted recursively, only structural whitespace removed, string values byte-exact, array order preserved, and numbers compared as their JSON literals; arguments that are not valid JSON, contain a duplicate object key or carry trailing data are compared as their raw bytes, and empty arguments, `null` and `{}` all canonicalise to `{}`. |
+| REQ-AGENT-040 | The agent loop shall rebuild the loop guard's counts from the model turns and tool-call results recorded in the run at every turn boundary, observing each non-handoff call once and in order when its tool-call step is journaled, on a resume rebuilding first from the current turn's journaled `tool-<n>-<k>` prefix before processing its remaining calls and then observing only calls whose steps are not yet journaled, and not observing a handoff turn's other calls, without reading a separate durable counter. |
 
 ### 4.3 Scenarios the designer adds
 
@@ -595,22 +611,22 @@ under WP-L7-05 and WP-L7-06. No `@planned` scenario is added by this ADR.
 - **Replay uses the recorded summary:** a resumed run reads the
   `summary-<from>-<to>` step and assembles the same messages with no second
   model call.
-- **Large first drop:** the first dropped turn alone exceeds `input_tokens`
-  with the summariser instructions; the run records `summary.failed` with
-  `reason: "input_too_large"`, zero usage and zero cost, no summary message,
-  and continues.
+- **Large first drop (REQ-AGENT-035):** the first dropped turn alone exceeds
+  `input_tokens` with the summariser instructions; the run records
+  `summary.failed` with `reason: "input_too_large"`, zero usage and zero cost,
+  no summary message, and continues.
 - **Chunked extension:** a dropped range larger than one request is split into
   the largest fitting whole-turn chunks; the step keys are the chunk ranges and
   the summary reaches the frontier.
 - **Metered summary:** the summary call's input and output tokens add to used
   tokens, its charge to spent cost and `Result.CostMpts`, and it does not
   increment the step count.
-- **Unaffordable summary:** a summary that would exceed `caps.tokens` or
-  `caps.cost_mpts` is skipped with no step and no model call; the turn's own
-  checks follow.
-- **Size-skipped summary moves nothing:** a size-skipped summary changes
-  neither `used` nor `spent` nor `Result.CostMpts`, and its reason is a fixed
-  code, not vendor text.
+- **Unaffordable summary (REQ-AGENT-035):** a summary that would exceed
+  `caps.tokens` or `caps.cost_mpts` is skipped with no step and no model call;
+  the turn's own checks follow.
+- **Size-skipped summary moves nothing (REQ-AGENT-035):** a size-skipped
+  summary changes neither `used` nor `spent` nor `Result.CostMpts`, and its
+  reason is a fixed code, not vendor text.
 - **Handoff carry:** the target reuses the carried summary when its dropped
   range is the same or larger, and discards it when the carried summary covers
   a turn the target keeps.
@@ -627,6 +643,10 @@ under WP-L7-05 and WP-L7-06. No `@planned` scenario is added by this ADR.
 - **Resume with a journaled tool result:** a resumed run rebuilds the guard
   from the journaled turns and tool results, observes each call once, and the
   next identical call gets the correct count.
+- **Resume mid-turn:** the current turn requests six identical calls and two
+  are journaled before the run is resumed; the loop rebuilds from the
+  journaled `tool-<n>-<k>` prefix first, so the 3rd call gets the soft marker
+  and the 6th is blocked.
 - **Handoff turn's other calls:** a handoff turn requests a non-handoff call
   and `handoff_to`; the target does not count the non-handoff call because it
   has no tool step.
@@ -634,6 +654,18 @@ under WP-L7-05 and WP-L7-06. No `@planned` scenario is added by this ADR.
   `usage.output_tokens` much larger than four bytes per token; the policy uses
   the recorded tokens, drops tail turns or skips the summary, and the run does
   not fail with `invalid_argument`.
+- **Cross-model CJK summary:** an agent hands off a dense-CJK summary to a
+  target whose model has a different tokenizer; the target re-measures the
+  summary with the host `Estimator` over the assembled `model.Request`, treats
+  the carried `output_tokens` as a lower bound, and drops tail turns rather
+  than failing the run.
+- **Frontier retreat:** after a tail recomputation the frontier falls below the
+  active summary's `To`; the loop discards the summary and restarts from turn
+  2, so no summary covering a kept turn is used.
+- **Failed chunk is a barrier:** a chunk fails; at a later boundary the
+  frontier is larger, but no chunk starts at or after the failed chunk's
+  `from`, the summary's `To` stays at the last successful chunk's `to`, and no
+  new summary call is made.
 - **Bounded summary loop:** a run with many dropped turns makes at most the
   fixed number of summary calls per boundary and per run; caps are checked
   before each; the run continues after the budget is exhausted.
@@ -647,8 +679,8 @@ under WP-L7-05 and WP-L7-06. No `@planned` scenario is added by this ADR.
 - `REQ-AGENT-027` still holds: a kept set over `input_tokens` fails the run.
   The summary is dropped from the kept set or skipped when it would not fit,
   so it does not create a new failure.
-- The durable `turnResult` JSON asserted in `agent/handler_test.go:700-721` is
-  unchanged.
+- The durable `turnResult` JSON is unchanged; WP-L7-06 adds a test asserting
+  its exact JSON.
 
 ## 5. Revert
 

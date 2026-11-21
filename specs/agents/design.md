@@ -244,8 +244,9 @@ invoking the model (REQ-AGENT-027).
 
 ### 5.1 Dropped-turn summary (ADR-0020)
 
-With `input_summary: true`, the policy also keeps one summary of the dropped
-turns. The summary is a synthetic user message
+With `input_summary: true`, the policy also keeps the active summary of the
+dropped turns when the loop has one covering one or more of them (a failure
+still continues without it, §5.1 below). The summary is a synthetic user message
 `<untrusted source="conversation-summary">…</untrusted>` placed after the kept
 first turn and before the kept recent tail; it has no `Name` and is not a
 `Turn`. The summary text is untrusted: any substring that reads as an
@@ -257,7 +258,8 @@ The summary is produced by durable steps named
 `<node>/<runID>/summary-<from>-<to>`, one per chunk of the dropped range. A
 chunk is the largest whole-turn prefix of `previous.To+1..frontier` whose
 request fits in `input_tokens` after the summariser instructions and the
-previous summary; a turn is never split. The step input carries the model, the
+previous summary; a turn is never split, and no chunk starts at or after the
+first failed chunk's `from`. The step input carries the model, the
 summarising request, the chunk's `from` and `to`, and the previous summary
 (wrapped and neutralised like the summary message). The step result holds the
 updated summary (`from: 2`, `to: <chunk to>`), its usage and its charge. Replay
@@ -269,8 +271,12 @@ As the frontier advances, the loop extends the summary from
 dropped raw turns; it does not re-summarise the whole prefix. It recomputes the
 tail with the summary's measured weight: the step's recorded
 `usage.output_tokens` plus the envelope's content-based estimate. A handoff
-target with a different model re-measures the carried summary with its own
-tokenizer. If `T_sys + T_1 + T_summary` exceeds `input_tokens`, the loop drops
+target whose model differs from the producing model re-measures the carried
+summary with the host `Estimator` over a `model.Request` that contains the
+summary message (the estimator and request assembly the loop already uses for a
+turn); the carried `output_tokens` is a lower bound, and before invoking it
+re-checks the assembled request and drops tail turns, never the run, if it
+does not fit. If `T_sys + T_1 + T_summary` exceeds `input_tokens`, the loop drops
 tail turns; if no tail turn can be dropped, it skips the summary and falls back
 to the pre-change tail. The run never fails because the summary is too large;
 if `T_sys + T_1` alone exceeds the limit, REQ-AGENT-027 still fails the run.
@@ -278,12 +284,16 @@ if `T_sys + T_1` alone exceeds the limit, REQ-AGENT-027 still fails the run.
 After every tail recomputation, not only after a handoff, a summary whose `To`
 is above the recomputed frontier is discarded and, if turns are still dropped,
 the loop restarts from turn 2. The loop is bounded: at most 8 summary steps per
-boundary, at most 2 restarts per boundary, and at most 16 summary steps per
-run, counted from the journaled `summary-*` steps. A failed chunk is recorded
-as `summary.failed` with a fixed reason code and is not retried; it stops the
-extension even after a restart, so a later boundary cannot re-include the
-failed range. The fixed
-point terminates because each successful chunk increases `To`, the frontier is
+boundary, at most 2 restarts per boundary, and at most 16 summarising model
+calls per run, counted from the journaled summary steps that record a model
+call. A restart re-derives the summary from the chunks: a chunk whose range and
+input were already journaled replays that step, and a new range is a new step.
+A failed chunk is recorded as `summary.failed` with a fixed reason code and is
+not retried; it is a barrier for the run — no chunk starts at or after its
+`from`, and the summary's `To` freezes at the last successful chunk's `to` — so
+a later boundary with a larger frontier makes no new summary call for the
+failed range or beyond. The fixed point terminates because each successful
+chunk increases `To`, the frontier is
 bounded by the number of turns, a failure stops the extension, and a restart
 strictly shrinks the covered range.
 
@@ -300,10 +310,14 @@ records `summary.failed` with a fixed reason code, and the run continues
 without a summary for the affected turns.
 
 A handoff carries the active summary in the output's `summary` field. The
-target uses it when its own dropped range is the same or larger; it discards it
-after a tail recomputation that keeps a turn the summary covers, and restarts
-from turn 2 if turns are still dropped. The target's summary steps use its own
-`node/runID` prefix and its own caps.
+target uses it only when the target agent's `input_summary` is true and its own
+dropped range is the same or larger; when `input_summary` is false it ignores
+the carried summary and applies its ordinary policy to the complete carried
+turns. With `input_summary` true it discards the carried summary after a tail
+recomputation that keeps a turn the summary covers, and restarts from turn 2 if
+turns are still dropped. The target's summary steps use its own `node/runID`
+prefix and its own caps; a different model re-measures the carried summary as
+above.
 
 ## 6. Order of checks at a turn boundary
 
@@ -316,7 +330,7 @@ At each turn boundary before model turn `n`, in this order:
    this step may make one or more summary calls (§5.1), each reserved and
    checked against the time, token and cost caps before it runs; the summary
    loop is bounded (at most 8 steps per boundary, 2 restarts per boundary and
-   16 steps per run);
+   16 summarising model calls per run);
 5. the token cap (REQ-AGENT-011);
 6. the cost reservation (REQ-AGENT-009, REQ-AGENT-010).
 
@@ -367,13 +381,17 @@ non-handoff call whose `tool-<n>-<k>` step is journaled is observed once, in
 order, matched to its result in `Turn.Results` by tool-call ID (positional
 fallback for a result without an ID). When the loop processes the current
 turn's calls, it observes a call only while its tool-call step is not yet
-journaled, and then journals the step. Tool steps of a turn are made in order,
+journaled, and then journals the step. On a resume, the loop first rebuilds
+from the current turn's journaled `tool-<n>-<k>` prefix before processing its
+remaining calls, then observes only calls whose steps are not yet journaled.
+Tool steps of a turn are made in order,
 so the journaled calls are a prefix and the observations stay in order. A
 handoff turn's other calls have no tool step and are not observed; a blocked
 call has its step and synthetic result and is observed. On a handoff the target
 seeds the guard from the carried turns. No counter is stored in `turnResult`,
 `Turn`, `Output` or a new step; the `tool-<n>-<k>` step input gains `blocked`
-and `count`, and the `turnResult` JSON is unchanged.
+and `count`, and the `turnResult` JSON is unchanged; WP-L7-06 adds a test
+asserting its exact JSON.
 
 Assistant-text repetition is not part of this guard; it has no tool side effect
 and is a candidate for a later ADR. The guard is always on and has no agent

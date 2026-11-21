@@ -23,9 +23,9 @@ Proves at `@level:system` that a conversation on the `temporal` runtime, served 
 ### WP-L7-05 — Dropped-turn summary
 Depends: WP-L7-01.
 Owns: `agent`, `specs/agents`, `internal/bdd/steps/agent.go`.
-Opt-in summary of the model turns the context-window policy drops: chunked durable `summary-<from>-<to>` steps, replay-stable messages, cap accounting and handoff carry (ADR-0020).
+Opt-in summary of the model turns the context-window policy drops: bounded chunked durable `summary-<from>-<to>` steps, replay-stable messages, cap accounting, the failed-chunk barrier and handoff carry (ADR-0020).
 
 ### WP-L7-06 — Loop guard
 Depends: WP-L7-01, WP-L7-05.
 Owns: `agent`, `specs/agents`, `internal/bdd/steps/agent.go`.
-Soft marker on the 3rd–5th call and hard block on the 6th and later for repeated non-handoff tool calls, with exact-bytes canonical arguments and a 100-entry LRU rebuilt from the recorded turns (ADR-0020).
+Soft marker on the 3rd–5th call and hard block on the 6th and later for repeated non-handoff tool calls, with exact-bytes canonical arguments and a 100-entry LRU rebuilt from the recorded turns; adds a test asserting the unchanged `turnResult` JSON (ADR-0020).
