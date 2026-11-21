@@ -15,6 +15,10 @@ import (
 )
 
 func registerConfig(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Config = newConfigWorld()
+		return ctx, nil
+	})
 	sc.Step(`^a configuration file sets "([^"]*)" to "([^"]*)"(?: and "([^"]*)" to "([^"]*)")?$`, func(ctx context.Context, key, value, key2, value2 string) error {
 		w := world(ctx).Config
 		w.file[key] = value

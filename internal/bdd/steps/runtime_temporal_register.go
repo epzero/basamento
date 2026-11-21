@@ -16,6 +16,12 @@ import (
 )
 
 func registerTemporal(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
+		if scenarioUsesTemporal(scn) {
+			world(ctx).Temporal = newTemporalWorld()
+		}
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Temporal; w != nil {
 			w.close()
@@ -266,4 +272,16 @@ func (w *temporalWorld) ensureNamedFlow(name string) error {
 		})
 	}
 	return nil
+}
+
+// scenarioUsesTemporal reports whether the scenario targets the Temporal
+// runtime. The Temporal world stays nil for local scenarios because the shared
+// runtime steps use it to tell the two runtimes apart.
+func scenarioUsesTemporal(scn *godog.Scenario) bool {
+	for _, t := range scn.Tags {
+		if t.Name == "@runtime:temporal" {
+			return true
+		}
+	}
+	return false
 }

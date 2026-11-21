@@ -124,6 +124,10 @@ func findingTable(t *godog.Table) ([]prompt.Finding, error) {
 }
 
 func registerPrompt(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Prompt = newPromptWorld()
+		return ctx, nil
+	})
 	sc.Step(`^the prompt registry holds template "([^"]*)" with static segment "([^"]*)"$`, func(ctx context.Context, ref, text string) error {
 		return registerSimpleStatic(world(ctx).Prompt, ref, text)
 	})

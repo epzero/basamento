@@ -482,6 +482,10 @@ func credentialSQLCount(w *credentialsWorld, tenant string) (int, error) {
 }
 
 func registerCredentials(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Credentials = newCredentialsWorld()
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Credentials; w != nil {
 			w.teardown()

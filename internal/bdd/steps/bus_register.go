@@ -2,23 +2,22 @@ package steps
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cucumber/godog"
+
+	"github.com/epzero/basamento/core"
 )
 
 func registerBus(sc *godog.ScenarioContext) {
+	registerFailureSource(callFailurePhrase, "bus", busCallFailure)
 	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
 		if !scenarioUsesBus(scn) {
 			return ctx, nil
 		}
 		w := world(ctx)
-		if w.Bus == nil {
-			w.Bus = newBusWorld()
-		} else {
-			w.Bus.teardown()
-			w.Bus = newBusWorld()
-		}
+		w.Bus = newBusWorld()
 		if err := skipBusByProfile(scn, w.Bus.backend); err != nil {
 			return ctx, err
 		}
@@ -41,4 +40,15 @@ func registerBus(sc *godog.ScenarioContext) {
 	registerBusLimits(sc)
 	registerBusOpen(sc)
 	registerBusAssets(sc)
+}
+
+func busCallFailure(ctx context.Context, code string) (bool, error) {
+	w := world(ctx).Bus
+	if w == nil || w.lastErr == nil {
+		return false, nil
+	}
+	if string(core.CodeOf(w.lastErr)) != code {
+		return true, fmt.Errorf("got code %s, want %s", core.CodeOf(w.lastErr), code)
+	}
+	return true, nil
 }

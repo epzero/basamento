@@ -155,6 +155,10 @@ func playOrder(def *flow.IR, order []string) (flow.Snapshot, error) {
 }
 
 func registerFlowMachine(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Machine = newMachineWorld()
+		return ctx, nil
+	})
 	sc.Step(`^flow "([^"]*)" routes node "([^"]*)" to "([^"]*)" when "([^"]*)", to "([^"]*)" when "([^"]*)", otherwise to "([^"]*)"$`,
 		func(ctx context.Context, name, from, first, firstWhen, second, secondWhen, fallback string) error {
 			w := world(ctx).Machine
