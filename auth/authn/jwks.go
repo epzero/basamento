@@ -40,8 +40,8 @@ type JWKSOptions struct {
 	// is loopback, and must not carry credentials (userinfo).
 	URL string
 	// Client performs fetches. When nil, the default client applies a 10 s
-	// timeout and does not follow redirects; a supplied client keeps its own
-	// timeout and redirect policy.
+	// timeout and does not follow redirects. A supplied client keeps its
+	// transport and timeout but redirects are never followed.
 	Client *http.Client
 	// Clock records fetch-attempt times for rate limiting.
 	Clock core.Clock
@@ -101,9 +101,15 @@ func NewJWKS(opts JWKSOptions) (*JWKS, error) {
 	default:
 		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must be an http or https URL", map[string]any{"key": "auth.oidc.jwks"})
 	}
-	client := opts.Client
-	if client == nil {
+	var client *http.Client
+	if opts.Client == nil {
 		client = defaultJWKSHTTPClient()
+	} else {
+		c := *opts.Client
+		c.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		client = &c
 	}
 	return &JWKS{
 		url:          opts.URL,
