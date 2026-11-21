@@ -159,7 +159,8 @@ func TestWorkflowCodecPolicyNonCoreErrorLogsBoundedText(t *testing.T) {
 func TestWorkflowCodecPolicyPermanentCoreErrorReturnsItself(t *testing.T) {
 	pe := core.NewError(core.CodePermissionDenied, "denied", nil)
 	got := workflowCodecPolicy(true, nil, context.Background(), pe)
-	if got != pe {
+	var gotErr *core.Error
+	if !errors.As(got, &gotErr) || gotErr != pe {
 		t.Fatalf("got %v want the same core error", got)
 	}
 }
