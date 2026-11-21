@@ -386,9 +386,7 @@ pinned release ships server v1.32.2, API v1.63.5 and SDK v1.47.0
 and minor version — 1.32 — and "outside the pinned range" means a different
 major or minor (`1.31.9` and `1.33.0` in `RT-037-02`). On `Serve`, the
 runtime asks the server for its version and refuses to serve, with code
-`unsupported`, when it is outside the range (`REQ-RT-037`). The Background step "Given a Temporal test server at version …" and "the
-Temporal test server" in `RT-037-01` name that stub (and the harness world),
-never `StartDevServer` or a downloaded binary. This check uses no
+`unsupported`, when it is outside the range (`REQ-RT-037`). This check uses no
 new method on `runtime.Runtime` or `runtime.Caps`.
 
 The gate downloads no server binary. The harness runs `runtime/temporal`
@@ -431,7 +429,10 @@ Serve version check (`RT-037-01`/`02`): a minimal in-process gRPC
 `WorkflowService`, test-only code in `internal/bdd`, listens on `127.0.0.1:0`
 and answers `GetSystemInfo` with the scenario's version — `1.32.2` in
 `Background` and `RT-037-01`, and `1.31.9` and `1.33.0` in `RT-037-02`. The
-runtime dials it through the real client path; no server binary is downloaded.
+Background step "Given a Temporal test server at version …" and "the Temporal
+test server" in `RT-037-01` name that stub (and the harness world), never
+`StartDevServer` or a downloaded binary. The runtime dials it through the real
+client path; no server binary is downloaded.
 
 Against a real server, WP-L5-03 (embedded server) and WP-L5-04 (conformance,
 crash resume, replay) run the same workflows in real time, in the slow lane.
