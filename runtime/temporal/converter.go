@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"log/slog"
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/converter"
@@ -14,19 +15,21 @@ import (
 // dataConverter wraps payloadCodec as a Temporal DataConverter shared by
 // workflow and activity workers (REQ-RT-028 … REQ-RT-033).
 type dataConverter struct {
-	codec *payloadCodec
-	inner converter.DataConverter
-	ctx   context.Context
-	wfCtx workflow.Context
+	codec  *payloadCodec
+	inner  converter.DataConverter
+	logger *slog.Logger
+	ctx    context.Context
+	wfCtx  workflow.Context
 }
 
-func newDataConverter(codec *payloadCodec) (converter.DataConverter, error) {
+func newDataConverter(codec *payloadCodec, logger *slog.Logger) (converter.DataConverter, error) {
 	if codec == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: data converter needs a codec", nil)
 	}
 	return &dataConverter{
-		codec: codec,
-		inner: converter.GetDefaultDataConverter(),
+		codec:  codec,
+		inner:  converter.GetDefaultDataConverter(),
+		logger: logger,
 	}, nil
 }
 
@@ -34,6 +37,7 @@ func newDataConverter(codec *payloadCodec) (converter.DataConverter, error) {
 func (d *dataConverter) WithContext(ctx context.Context) converter.DataConverter {
 	clone := *d
 	clone.ctx = ctx
+	clone.wfCtx = nil
 	return &clone
 }
 
@@ -44,45 +48,81 @@ func (d *dataConverter) WithWorkflowContext(ctx workflow.Context) converter.Data
 	return &clone
 }
 
-func (d *dataConverter) tenantCtx() (context.Context, error) {
+func (d *dataConverter) workflowBound() bool {
+	return d.wfCtx != nil
+}
+
+func (d *dataConverter) tenantBase() (core.TenantID, context.Context, error) {
 	if d.ctx != nil {
-		if _, ok := core.TenantFrom(d.ctx); ok {
-			return d.ctx, nil
+		if tid, ok := core.TenantFrom(d.ctx); ok {
+			return tid, d.ctx, nil
 		}
 	}
 	if d.wfCtx != nil {
 		if v := d.wfCtx.Value(tenantWorkflowKey{}); v != nil {
 			if id, ok := v.(core.TenantID); ok && id != "" {
-				return core.WithTenant(context.Background(), id), nil
+				return id, core.WithTenant(context.Background(), id), nil
 			}
 		}
 	}
-	return nil, core.NewError(core.CodeInvalidArgument, "temporal: no tenant in context", nil)
+	return "", nil, core.NewError(core.CodeInvalidArgument, "temporal: no tenant in context", nil)
 }
 
-func (d *dataConverter) ToPayload(value interface{}) (*commonpb.Payload, error) {
-	ctx, err := d.tenantCtx()
+func (d *dataConverter) codecCtx() (context.Context, func(), error) {
+	_, base, err := d.tenantBase()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !d.workflowBound() {
+		return base, func() {}, nil
+	}
+	ctx, cancel := context.WithTimeout(base, workflowCodecTimeout)
+	return ctx, cancel, nil
+}
+
+func (d *dataConverter) logWorkflowCodec(pe *core.Error) {
+	logger := d.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	tid, _, _ := d.tenantBase()
+	wfID := ""
+	if d.wfCtx != nil {
+		wfID = workflow.GetInfo(d.wfCtx).WorkflowExecution.ID
+	}
+	logger.Error("temporal: payload codec failed in workflow",
+		slog.String("tenant", string(tid)),
+		slog.String("workflow", wfID),
+		slog.String("code", string(pe.Code)),
+		slog.String("error", truncateLogTextRunes(pe.Message)),
+	)
+}
+
+func (d *dataConverter) ToPayload(value interface{}) (p *commonpb.Payload, err error) {
+	ctx, cancel, err := d.codecCtx()
 	if err != nil {
 		return nil, err
 	}
+	defer cancel()
 	plain, err := d.inner.ToPayload(value)
 	if err != nil {
 		return nil, err
 	}
 	enc, err := d.codec.Encode(ctx, payloadFromProto(plain))
-	if err != nil {
+	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, err); err != nil {
 		return nil, err
 	}
 	return payloadToProto(enc), nil
 }
 
 func (d *dataConverter) FromPayload(payload *commonpb.Payload, valuePtr interface{}) error {
-	ctx, err := d.tenantCtx()
+	ctx, cancel, err := d.codecCtx()
 	if err != nil {
 		return err
 	}
+	defer cancel()
 	plain, err := d.codec.Decode(ctx, payloadFromProto(payload))
-	if err != nil {
+	if err = workflowCodecPolicy(d.workflowBound(), d.logWorkflowCodec, err); err != nil {
 		return err
 	}
 	return d.inner.FromPayload(payloadToProto(plain), valuePtr)

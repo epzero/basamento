@@ -49,7 +49,7 @@ func New(opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	dc, err := newDataConverter(codec)
+	dc, err := newDataConverter(codec, opts.Logger)
 	if err != nil {
 		return nil, err
 	}

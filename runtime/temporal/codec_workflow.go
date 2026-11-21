@@ -3,10 +3,14 @@ package temporal
 import (
 	"errors"
 	"fmt"
-	"log/slog"
+	"time"
 
 	"github.com/epzero/basamento/core"
 )
+
+// workflowCodecTimeout bounds blob and key I/O in workflow-bound converter calls
+// while the SDK deadlock detector is paused around the data converter (G1).
+const workflowCodecTimeout = 30 * time.Second
 
 // taskFailure is a sanitized panic value for transient payload codec errors in
 // workflow code. The SDK fails the workflow task so the server can retry; the
@@ -38,52 +42,23 @@ func errorFromPanic(v any) error {
 	return fmt.Errorf("%v", v)
 }
 
-func (r *Runtime) logCodecFailure(tenant core.TenantID, workflowID, step string, err error) {
-	logger := r.logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	var pe *core.Error
-	if !errors.As(err, &pe) {
-		return
-	}
-	attrs := []any{
-		slog.String("tenant", string(tenant)),
-		slog.String("workflow", workflowID),
-		slog.String("code", string(pe.Code)),
-		slog.String("error", truncateLogTextRunes(pe.Message)),
-	}
-	if step != "" {
-		attrs = append(attrs, slog.String("step", step))
-	}
-	logger.Error("temporal: payload codec failed in workflow", attrs...)
-}
-
-// handleCodecPanic classifies a recovered encode/decode panic. Transient errors
-// re-panic as taskFailure; permanent errors return for a failed Step future.
-func (r *Runtime) handleCodecPanic(tenant core.TenantID, workflowID, step string, recovered any) (permanent *core.Error) {
-	var pe *core.Error
-	if !errors.As(errorFromPanic(recovered), &pe) {
-		panic(recovered)
-	}
-	r.logCodecFailure(tenant, workflowID, step, pe)
-	if codecTransient(pe) {
-		panic(taskFailure{code: pe.Code})
-	}
-	return pe
-}
-
-func (r *Runtime) handleCodecError(tenant core.TenantID, workflowID, step string, err error) error {
+// workflowCodecPolicy applies transient-vs-permanent rules for workflow-bound converter calls.
+func workflowCodecPolicy(wfBound bool, log func(*core.Error), err error) error {
 	if err == nil {
 		return nil
+	}
+	if !wfBound {
+		return err
 	}
 	var pe *core.Error
 	if !errors.As(err, &pe) {
 		return err
 	}
-	r.logCodecFailure(tenant, workflowID, step, pe)
+	if log != nil {
+		log(pe)
+	}
 	if codecTransient(pe) {
 		panic(taskFailure{code: pe.Code})
 	}
-	return pe
+	return err
 }

@@ -31,9 +31,6 @@ func (r *Runtime) hostWorkflow(ctx workflow.Context, in HostInput) (json.RawMess
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				if _, ok := recovered.(taskFailure); ok {
-					panic(recovered)
-				}
 				err = flowPanicErr()
 				r.logPanic(tenant, runID, "", recovered)
 			}

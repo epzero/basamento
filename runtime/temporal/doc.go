@@ -9,7 +9,9 @@
 // Failure messages in Temporal history are plaintext: only core error codes and
 // messages cross the boundary (Details maps are dropped). Non-core errors become
 // internal with a fixed message; the original text is logged only, bounded like
-// panic values. The tenant header is plaintext by necessity.
+// panic values. The tenant header is plaintext by necessity. The workflow-bound
+// converter fails transient codec errors as workflow tasks (sanitized panic);
+// permanent errors are returned. Workflow-bound I/O is capped at 30 s per call.
 //
 // Claim-checked blobs are content-addressed and immutable; replay or activity retry
 // may write additional ciphertext blobs with no garbage collection in this phase.

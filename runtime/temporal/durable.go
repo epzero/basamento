@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -108,17 +109,24 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 		HeartbeatTimeout:    opts.Heartbeat,
 		RetryPolicy:         activityRetryPolicy(opts),
 	})
-	wfID := workflow.GetInfo(dc.wfCtx).WorkflowExecution.ID
 	var fut workflow.Future
 	var early runtime.Future
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				// Encode panics before any activity command is created; safe to memoize permanent failures.
-				if pe := dc.rt.handleCodecPanic(dc.tenant, wfID, name, recovered); pe != nil {
+				if _, ok := recovered.(taskFailure); ok {
+					panic(recovered)
+				}
+				// Permanent encode failures: SDK panics the converter's *core.Error before any
+				// activity command exists (spec: fail the step, not the run). Transient errors
+				// become taskFailure in the workflow-bound converter and never reach here.
+				var pe *core.Error
+				if errors.As(errorFromPanic(recovered), &pe) {
 					early = newImmediate(pe)
 					dc.stepFutures[name] = early
+					return
 				}
+				panic(recovered)
 			}
 		}()
 		fut = workflow.ExecuteActivity(actCtx, stepActivityName, stepActivityInput{
@@ -129,10 +137,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 	if early != nil {
 		return early
 	}
-	wrapped := &stepFuture{
-		ctx: actCtx, f: fut,
-		rt: dc.rt, tenant: dc.tenant, wfID: wfID, step: name,
-	}
+	wrapped := &stepFuture{ctx: actCtx, f: fut}
 	dc.stepFutures[name] = wrapped
 	return wrapped
 }

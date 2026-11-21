@@ -94,13 +94,21 @@ as an activity. This change delivers:
   so the SDK worker deadlock detector does not count that I/O (a slow store delays
   the workflow task subject to server task timeout; pull request (c) will document
   worker `DeadlockDetectionTimeout`).
-- **Payload codec errors in workflow code:** `unavailable`, `timeout`,
-  `rate_limited`, and retryable `core.Error` values fail the **workflow task**
-  (server retries the run). Other codec errors become a failed `Step` future with
-  the real code; the flow host must not turn transient outages into a permanently
-  failed run. User panics in the flow host still fail the run once with
-  `temporal: the flow host panicked`; SDK non-determinism and illegal-state panics
-  are out of scope here.
+- **Payload codec errors:** only the **workflow-bound** data converter (the clone
+  from `WithWorkflowContext`) applies the transient policy: `unavailable`,
+  `timeout`, `rate_limited`, or retryable `core.Error` values are logged (bounded
+  message, code, tenant, workflow id) and panic as a sanitized `taskFailure`, so
+  the **workflow task** fails and the server retries (the run is not failed).
+  Permanent errors are returned. That covers step argument and result encode/decode,
+  workflow input decode, workflow result encode, and later workflow-side uses in
+  (b)/(c). Client and activity converters (`WithContext`) return errors without
+  panicking. Permanent step-argument encode failures are still surfaced to the
+  flow as a failed `Step` future (`Step` recovers the SDK panic). Workflow I/O is
+  bounded at 30 s per converter call. Workers must keep the SDK default
+  `WorkflowPanicPolicy` (`BlockWorkflow`); `FailWorkflow` would turn task failures
+  into permanent run failures (pull request (c) pins worker options). User panics
+  in the flow host still fail the run once with `temporal: the flow host panicked`;
+  SDK non-determinism and illegal-state panics are out of scope here.
 - A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
   `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
   `Emit` and `Checkpoint` return `unsupported` until the next changes of

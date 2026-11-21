@@ -23,21 +23,35 @@ import (
 )
 
 type faultBlob struct {
-	inner  platform.Blob
-	mu     sync.Mutex
-	putErr *core.Error
-	getErr *core.Error
-	getArm bool
+	inner    platform.Blob
+	mu       sync.Mutex
+	putErr   *core.Error
+	getErr   *core.Error
+	getArm   bool
+	putCount int
 }
 
 func (b *faultBlob) Put(ctx context.Context, key string, r io.Reader, contentType string) error {
 	b.mu.Lock()
+	b.putCount++
 	err := b.putErr
 	b.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	return b.inner.Put(ctx, key, r, contentType)
+}
+
+func (b *faultBlob) setPutErr(err *core.Error) {
+	b.mu.Lock()
+	b.putErr = err
+	b.mu.Unlock()
+}
+
+func (b *faultBlob) putCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.putCount
 }
 
 func (b *faultBlob) Get(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -95,9 +109,9 @@ func testLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func testEnvWithBlobs(t *testing.T, blobs platform.Blob) (*Runtime, *testsuite.TestWorkflowEnvironment) {
+func testEnvWithBlobs(t *testing.T, blobs platform.Blob, logger *slog.Logger) (*Runtime, *testsuite.TestWorkflowEnvironment) {
 	t.Helper()
-	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: blobs})
+	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: blobs, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +139,7 @@ func TestCodecTransientPutFailsWorkflowTask(t *testing.T) {
 			var runs int
 			var buf bytes.Buffer
 			fb := &faultBlob{inner: testBlobStore(t), putErr: tc.err}
-			rt, env := testEnvWithBlobs(t, fb)
-			rt.logger = testLogger(&buf)
+			rt, env := testEnvWithBlobs(t, fb, testLogger(&buf))
 			in := largeStepInput(t)
 			_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 				var out json.RawMessage
@@ -167,7 +180,7 @@ func TestCodecPermanentPutFailsStepFuture(t *testing.T) {
 		inner:  testBlobStore(t),
 		putErr: core.NewError(core.CodePermissionDenied, "SECRET-DENIED", nil),
 	}
-	rt, env := testEnvWithBlobs(t, fb)
+	rt, env := testEnvWithBlobs(t, fb, nil)
 	in := largeStepInput(t)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 		var a, b json.RawMessage
@@ -195,12 +208,15 @@ func TestCodecPermanentPutFailsStepFuture(t *testing.T) {
 	if codes[0] != string(core.CodePermissionDenied) || codes[1] != string(core.CodePermissionDenied) {
 		t.Fatalf("codes %v", codes)
 	}
+	if fb.putCalls() != 1 {
+		t.Fatalf("put calls %d want 1", fb.putCalls())
+	}
 }
 
 func TestCodecTransientGetFailsWorkflowTask(t *testing.T) {
 	var runs int
 	fb := &faultBlob{inner: testBlobStore(t)}
-	rt, env := testEnvWithBlobs(t, fb)
+	rt, env := testEnvWithBlobs(t, fb, nil)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 		var out json.RawMessage
 		return out, dc.Step("echo", nil, runtime.StepOptions{}).Get(&out)
@@ -228,7 +244,7 @@ func TestCodecTransientGetFailsWorkflowTask(t *testing.T) {
 
 func TestCodecPermanentGetFailsStep(t *testing.T) {
 	fb := &faultBlob{inner: testBlobStore(t)}
-	rt, env := testEnvWithBlobs(t, fb)
+	rt, env := testEnvWithBlobs(t, fb, nil)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 		var out json.RawMessage
 		return out, dc.Step("echo", nil, runtime.StepOptions{}).Get(&out)

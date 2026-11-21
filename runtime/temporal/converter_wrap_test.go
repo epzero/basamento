@@ -1,10 +1,8 @@
 package temporal
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -54,19 +52,5 @@ func TestDataConverterWrappedWithoutDeadlock(t *testing.T) {
 	// WithWorkflowContext must be nil-safe on the client side (SDK contract).
 	if aware.WithWorkflowContext(nil) == nil {
 		t.Fatal("nil workflow context converter")
-	}
-}
-
-func TestCodecFailureLogRecord(t *testing.T) {
-	var buf bytes.Buffer
-	rt := &Runtime{logger: slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))}
-	rt.logCodecFailure("acme", "wf-1", "big", core.NewError(
-		core.CodeUnavailable, "INJECTED-SECRET-CAUSE", map[string]any{"k": "v"}))
-	got := buf.String()
-	if !strings.Contains(got, "unavailable") || !strings.Contains(got, "INJECTED-SECRET-CAUSE") {
-		t.Fatalf("log %q", got)
-	}
-	if !strings.Contains(got, "workflow=wf-1") {
-		t.Fatalf("log %q", got)
 	}
 }
