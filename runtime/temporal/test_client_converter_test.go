@@ -12,8 +12,9 @@ import (
 
 // clientConverter models a Temporal client that always encodes with the tenant in ctx.
 type clientConverter struct {
-	inner  converter.DataConverter
-	tenant core.TenantID
+	inner      converter.DataConverter
+	tenant     core.TenantID
+	inWorkflow bool
 }
 
 func (c *clientConverter) aware() interface {
@@ -37,6 +38,7 @@ func (c *clientConverter) WithContext(ctx context.Context) converter.DataConvert
 
 func (c *clientConverter) WithWorkflowContext(ctx workflow.Context) converter.DataConverter {
 	out := *c
+	out.inWorkflow = true
 	if a := c.aware(); a != nil {
 		out.inner = a.WithWorkflowContext(ctx)
 	}
@@ -44,7 +46,7 @@ func (c *clientConverter) WithWorkflowContext(ctx workflow.Context) converter.Da
 }
 
 func (c *clientConverter) delegate() converter.DataConverter {
-	if a := c.aware(); a != nil && c.tenant != "" {
+	if a := c.aware(); a != nil && c.tenant != "" && !c.inWorkflow {
 		return a.WithContext(core.WithTenant(context.Background(), c.tenant))
 	}
 	return c.inner

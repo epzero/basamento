@@ -76,6 +76,77 @@ func TestWrapWorkflowErrorOmitsPlainCause(t *testing.T) {
 	}
 }
 
+func TestWrapWorkflowErrorCoreCases(t *testing.T) {
+	var r Runtime
+	peNr := &core.Error{Code: "invalid_argument", Message: "bad", Retryable: false}
+	errNr := r.wrapWorkflowError("acme", "r1", peNr)
+	if app := extractAppFailure(errNr); app == nil || app.GetType() != "invalid_argument" || !app.GetNonRetryable() {
+		t.Fatal(errNr)
+	}
+	if fcFailure(errNr).GetCause() != nil {
+		t.Fatal("cause on non-retryable")
+	}
+	peR := &core.Error{Code: "vendor_error", Message: "retry", Retryable: true}
+	errR := r.wrapWorkflowError("acme", "r1", peR)
+	if app := extractAppFailure(errR); app == nil || app.GetType() != "vendor_error" || app.GetNonRetryable() {
+		t.Fatal(errR)
+	}
+}
+
+func TestActivityToCoreRoundTrip(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		code      core.Code
+		message   string
+		retryable bool
+	}{
+		{
+			name:      "core_retryable",
+			err:       activityApplicationError(&core.Error{Code: "vendor_error", Message: "retry me", Retryable: true}),
+			code:      "vendor_error",
+			message:   "retry me",
+			retryable: true,
+		},
+		{
+			name:      "core_non_retryable",
+			err:       activityApplicationError(&core.Error{Code: "invalid_argument", Message: "nope", Retryable: false}),
+			code:      core.CodeInvalidArgument,
+			message:   "nope",
+			retryable: false,
+		},
+		{
+			name:      "plain",
+			err:       activityApplicationError(errors.New("plain-secret")),
+			code:      core.CodeInternal,
+			message:   "temporal: step failed",
+			retryable: false,
+		},
+		{
+			name:      "unsupported",
+			err:       activityApplicationError(core.NewError(core.CodeUnsupported, "no step", nil)),
+			code:      core.CodeUnsupported,
+			message:   "no step",
+			retryable: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := activityToCore(tc.err)
+			var pe *core.Error
+			if !errors.As(got, &pe) {
+				t.Fatalf("got %T", got)
+			}
+			if pe.Code != tc.code || pe.Message != tc.message {
+				t.Fatalf("got code=%q msg=%q", pe.Code, pe.Message)
+			}
+			if core.IsRetryable(pe) != tc.retryable {
+				t.Fatalf("retryable=%v want %v", core.IsRetryable(pe), tc.retryable)
+			}
+		})
+	}
+}
+
 func fcFailure(err error) *commonpb.Failure {
 	return temporal.GetDefaultFailureConverter().ErrorToFailure(err)
 }

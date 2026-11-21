@@ -130,6 +130,9 @@ func TestStepPanicFailsOnceWithoutLeakingValue(t *testing.T) {
 	if got := buf.String(); !bytes.Contains([]byte(got), []byte("secret-leak")) {
 		t.Fatal("panic value not logged")
 	}
+	if !strings.Contains(buf.String(), "workflow=default-test-workflow-id") {
+		t.Fatalf("log %q", buf.String())
+	}
 	if strings.Contains(wfErr.Error(), "secret-leak") {
 		t.Fatal("panic value leaked to workflow error")
 	}
