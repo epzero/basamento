@@ -111,21 +111,32 @@ The `model` node is a node handler in `model/node` (ADR-0011):
    heartbeating step, or through a gate resolved by a webhook.
 5. **Ingest** output files into content-addressed blob storage with provenance
    (REQ-MODEL-008). Outputs from a successful invocation with no blob store
-   configured fail the node instead of being dropped.
+   configured fail the node instead of being dropped. A URL output is fetched
+   only over https from a public address (never a redirect); a local provider's
+   path output is read only when it resolves under the composition's configured
+   output root, so a provider result cannot name an arbitrary file on the host.
 6. **Settle**: charge the actual cost or release the reservation. The cost is
    the provider's, or else the price formula on the actual usage. An invocation
    that started but reports neither a cost nor a usage is charged the reserved
    estimate: its actual charge is unknown, so the node fails closed. A
    cancelled invocation that reports no cost releases it instead
-   (REQ-MODEL-009). Every priced invocation reserves against the run's budget;
+   (REQ-MODEL-009). A failed settlement is retried with the actual charge when
+   it is known, not with the estimate: first-wins would otherwise lock in an
+   undercharge. Every priced invocation reserves against the run's budget;
    a priced call with no run budget fails before it starts with `internal`, and
    an unpriced model with a budget fails `unsupported` (REQ-MODEL-073). Only a
    model with no price and no budget runs unmetered.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.
-**Never start blindly again** (REQ-MODEL-005). Cancelling the run cancels the
-invocation and settles by the provider's final state (REQ-MODEL-009).
+**Never start blindly again** (REQ-MODEL-005). The gate is one per invocation
+(`ambiguous_start.<client_ref>`), so parallel `map` items wait at distinct
+gates instead of colliding on one. The same lookup runs when the run is
+cancelled while an attempt is in flight; if it finds nothing the start is
+ambiguous, so the reservation settles by the estimate instead of releasing a
+start that may have landed. Cancelling the run cancels the invocation and
+settles by the provider's final state (REQ-MODEL-009); a failed cancel still
+reads that final state before falling back to the estimate.
 
 ## 5. Chat specifics
 

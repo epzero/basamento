@@ -171,7 +171,8 @@ func TestIngestReadsACommandOutputFromItsPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	blobs := newMemBlob()
-	h := testHandler(t, Deps{Blobs: blobs})
+	// A command-line provider's path is only read under the configured root.
+	h := testHandler(t, Deps{Blobs: blobs, OutputRoot: dir})
 	raw, err := json.Marshal(ingestIn{
 		Model:  "local-video",
 		Op:     "video.generate",
@@ -212,7 +213,7 @@ func TestParamHashIsStableAndCanonical(t *testing.T) {
 
 func TestDefaultFetcherRequiresHTTPS(t *testing.T) {
 	t.Parallel()
-	_, _, err := defaultFetcher(t.Context(), model.Output{URL: "http://vendor.test/a.png"})
+	_, _, err := defaultFetcher("")(t.Context(), model.Output{URL: "http://vendor.test/a.png"})
 	if err == nil || !strings.Contains(err.Error(), "not https") {
 		t.Fatalf("err = %v, want an https requirement", err)
 	}
@@ -229,8 +230,12 @@ func TestDefaultFetcherRejectsNonPublicAddresses(t *testing.T) {
 		"https://0.0.0.0/a.png",
 		"https://[::1]/a.png",
 		"https://[fd00::1]/a.png",
+		"https://100.64.0.1/a.png",
+		"https://198.18.0.1/a.png",
+		"https://192.0.2.1/a.png",
+		"https://[2001:db8::1]/a.png",
 	} {
-		_, _, err := defaultFetcher(t.Context(), model.Output{URL: raw})
+		_, _, err := defaultFetcher("")(t.Context(), model.Output{URL: raw})
 		if err == nil || !strings.Contains(err.Error(), "non-public") {
 			t.Fatalf("%s: err = %v, want a non-public address refusal", raw, err)
 		}
@@ -302,6 +307,69 @@ func TestOutputFetcherPinsTheResolvedAddress(t *testing.T) {
 	}
 	if dialed != "93.184.216.34:443" {
 		t.Fatalf("dialed %q, want the pinned public address", dialed)
+	}
+}
+
+func TestPublicAddressDeniesNonGlobalUnicast(t *testing.T) {
+	t.Parallel()
+	for raw, wantPublic := range map[string]bool{
+		"93.184.216.34":   true,
+		"100.128.0.1":     true, // just past carrier-grade NAT
+		"198.20.0.1":      true, // just past benchmarking
+		"2606:4700::1111": true,
+		"100.64.0.1":      false,
+		"100.127.255.254": false,
+		"198.18.0.1":      false,
+		"198.19.255.254":  false,
+		"192.0.0.9":       false,
+		"192.88.99.1":     false,
+		"198.51.100.1":    false,
+		"203.0.113.1":     false,
+		"240.0.0.1":       false,
+		"2001:db8::1":     false,
+		"::1":             false,
+		"fe80::1":         false,
+	} {
+		if got := publicAddress(net.ParseIP(raw)); got != wantPublic {
+			t.Errorf("publicAddress(%s) = %v, want %v", raw, got, wantPublic)
+		}
+	}
+}
+
+func TestOutputPathMustStayUnderTheRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	inside := filepath.Join(root, "frame.png")
+	if err := os.WriteFile(inside, []byte("frame"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	data, _, err := defaultFetcher(root)(t.Context(), model.Output{Path: inside})
+	if err != nil || string(data) != "frame" {
+		t.Fatalf("inside root: data = %q, err = %v, want the file", data, err)
+	}
+	for name, output := range map[string]model.Output{
+		"no root":         {Path: inside},
+		"outside root":    {Path: outside},
+		"symlink escape":  {Path: link},
+		"relative escape": {Path: filepath.Join(root, "..", "secret.txt")},
+	} {
+		fetch := defaultFetcher(root)
+		if name == "no root" {
+			fetch = defaultFetcher("")
+		}
+		if _, _, err := fetch(t.Context(), output); err == nil {
+			t.Fatalf("%s: path %q was read, want a refusal", name, output.Path)
+		}
 	}
 }
 
