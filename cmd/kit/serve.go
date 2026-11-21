@@ -57,9 +57,9 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
-	// Refuse an unsafe listener before opening ports or binding: in none mode
-	// there is no caller identity, so a non-loopback address would expose every
-	// tenant (REQ-AUTH-001).
+	// Refuse an unsafe listener before opening ports or binding: request
+	// authentication is not wired yet, so every mode is loopback-only
+	// (REQ-AUTH-001 for none).
 	mode, err := authn.ParseMode(result.Config.Auth.Mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

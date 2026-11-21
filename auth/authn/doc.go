@@ -1,6 +1,7 @@
 // Package authn implements the authentication modes of ADR-0008.
 //
-// The none mode only listens on loopback (REQ-AUTH-001). The oidc mode accepts
+// Every mode only listens on loopback until request authentication is wired
+// into kit serve (REQ-AUTH-001 for none). The oidc mode accepts
 // JWTs signed by the issuer's published keys, for the configured audience and
 // not expired (REQ-AUTH-003); OIDC and JWKS values implement the KeySet
 // interface, and a JWKS is refreshed when a token names an unknown key id, so

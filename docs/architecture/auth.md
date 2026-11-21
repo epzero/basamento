@@ -10,17 +10,20 @@ authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
 | Mode | For | How |
 | --- | --- | --- |
 | `none` | Single user on their own machine | Listens on loopback only; refuses any other address (REQ-AUTH-001). |
-| `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. |
-| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. JWT validation covers issuer keys (JWKS or configured set), audience and expiry (REQ-AUTH-003). Organization role mapping belongs to authorization (WP-L8-02). Logto runs as a separate service; it is never part of the embedded binary. |
+| `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. Listens on loopback only until request authentication is wired into `kit serve`. |
+| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. JWT validation covers issuer keys (JWKS or configured set), audience and expiry (REQ-AUTH-003). Organization role mapping belongs to authorization (WP-L8-02). Logto runs as a separate service; it is never part of the embedded binary. Listens on loopback only until request authentication is wired into `kit serve`. |
 
-`auth/authn` implements the modes. `kit serve` reads `auth.mode` for the
-loopback refusal in `none` mode (REQ-AUTH-001). Verifying bearer tokens on
-requests for `local` and `oidc` is planned in the API work (WP-L6-03);
+`auth/authn` implements the modes. `kit serve` validates `listen.addr` against
+`auth.mode`: every mode accepts loopback only until request authentication is
+wired (REQ-AUTH-001 for `none`; the same loopback rule for `local` and `oidc`
+while bearer verification on requests is planned in WP-L6-03). Verifying bearer
+tokens on requests for `local` and `oidc` is planned in the API work (WP-L6-03);
 authorization in WP-L8-02.
 
 OIDC verification requires the issuer, the audience, a non-expired `exp` and a
 signature by one of the issuer's keys. A `JWKS` key set is cached; fetches use
-https (http only to loopback), the default HTTP client does not follow redirects,
+https (http only to loopback), and neither the default nor a supplied HTTP
+client follows redirects,
 and at most one refresh attempt per `MinRefresh` interval (30 s by default), so a
 token signed with a brand-new key may be rejected until the next attempt. The JWKS
 URL must not carry credentials. While the cache is empty, a recent fetch failure is

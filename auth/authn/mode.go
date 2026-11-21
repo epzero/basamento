@@ -13,7 +13,8 @@ import (
 type Mode string
 
 const (
-	// ModeNone trusts every caller on the local machine and listens on loopback
+	// ModeNone trusts every caller on the local machine. Until request
+	// authentication is wired into kit serve, every mode listens on loopback
 	// only (REQ-AUTH-001).
 	ModeNone Mode = "none"
 	// ModeLocal authenticates in-app accounts and scoped API tokens.
@@ -33,16 +34,14 @@ func ParseMode(s string) (Mode, error) {
 		`auth.mode must be one of "none", "local" or "oidc"`, map[string]any{"key": "auth.mode"})
 }
 
-// ValidateListen reports invalid_argument when mode is none and addr is not a
-// loopback listener. The none mode has no way to tell callers apart, so a
-// non-loopback address would expose every tenant to the network (REQ-AUTH-001).
+// ValidateListen reports invalid_argument when addr is not a loopback listener.
+// Request authentication is not wired into kit serve yet, so every mode
+// accepts loopback addresses only; non-loopback none keeps the REQ-AUTH-001
+// message, while local and oidc report that request auth is not wired.
 //
 // A host name other than "localhost" is not loopback: it may resolve anywhere,
 // and the process cannot prove otherwise.
 func ValidateListen(mode Mode, addr string) error {
-	if mode != ModeNone {
-		return nil
-	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return core.NewError(core.CodeInvalidArgument,
@@ -51,8 +50,13 @@ func ValidateListen(mode Mode, addr string) error {
 	if isLoopbackHost(host) {
 		return nil
 	}
+	if mode == ModeNone {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("auth.mode %q refuses listen.addr %q: auth is required for non-loopback addresses", mode, addr),
+			map[string]any{"key": "listen.addr"})
+	}
 	return core.NewError(core.CodeInvalidArgument,
-		fmt.Sprintf("auth.mode %q refuses listen.addr %q: auth is required for non-loopback addresses", mode, addr),
+		fmt.Sprintf("listen.addr %q is refused: request authentication is not wired into kit serve yet, so only loopback addresses are accepted", addr),
 		map[string]any{"key": "listen.addr"})
 }
 

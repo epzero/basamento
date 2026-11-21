@@ -24,7 +24,7 @@ func TestParseMode(t *testing.T) {
 	}
 }
 
-func TestValidateListenNoneRefusesNonLoopback(t *testing.T) {
+func TestValidateListenRefusesNonLoopback(t *testing.T) {
 	loopback := []string{
 		"127.0.0.1:8080",
 		"127.0.0.1:0",
@@ -32,12 +32,6 @@ func TestValidateListenNoneRefusesNonLoopback(t *testing.T) {
 		"localhost:8080",
 		"LOCALHOST:8080",
 	}
-	for _, addr := range loopback {
-		if err := ValidateListen(ModeNone, addr); err != nil {
-			t.Errorf("ValidateListen(none, %q) = %v, want nil", addr, err)
-		}
-	}
-
 	nonLoopback := []string{
 		"0.0.0.0:8080",
 		"[::]:8080",
@@ -45,23 +39,27 @@ func TestValidateListenNoneRefusesNonLoopback(t *testing.T) {
 		"example.test:8080",
 		":8080",
 	}
-	for _, addr := range nonLoopback {
-		err := ValidateListen(ModeNone, addr)
-		if core.CodeOf(err) != core.CodeInvalidArgument {
-			t.Errorf("ValidateListen(none, %q) code = %s, want invalid_argument", addr, core.CodeOf(err))
-			continue
-		}
-		if !strings.Contains(err.Error(), "auth is required for non-loopback addresses") {
-			t.Errorf("ValidateListen(none, %q) = %q, want the loopback explanation", addr, err)
-		}
-	}
-}
-
-func TestValidateListenOtherModesAllowNonLoopback(t *testing.T) {
-	for _, mode := range []Mode{ModeLocal, ModeOIDC} {
-		for _, addr := range []string{"0.0.0.0:8080", "[::]:8080"} {
+	for _, mode := range []Mode{ModeNone, ModeLocal, ModeOIDC} {
+		for _, addr := range loopback {
 			if err := ValidateListen(mode, addr); err != nil {
 				t.Errorf("ValidateListen(%q, %q) = %v, want nil", mode, addr, err)
+			}
+		}
+		for _, addr := range nonLoopback {
+			err := ValidateListen(mode, addr)
+			if core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Errorf("ValidateListen(%q, %q) code = %s, want invalid_argument", mode, addr, core.CodeOf(err))
+				continue
+			}
+			switch mode {
+			case ModeNone:
+				if !strings.Contains(err.Error(), "auth is required for non-loopback addresses") {
+					t.Errorf("ValidateListen(none, %q) = %q, want the loopback explanation", addr, err)
+				}
+			default:
+				if !strings.Contains(err.Error(), "request authentication is not wired") {
+					t.Errorf("ValidateListen(%q, %q) = %q, want request-auth explanation", mode, addr, err)
+				}
 			}
 		}
 	}
