@@ -199,9 +199,7 @@ fails the step with code `internal`, marked non-retryable, so no retry follows
 (`REQ-RT-016`); if the flow does not handle it, the run fails as for any other
 unhandled step error. The failure is recorded in the journal so `Describe` and
 `Future.Get` report it. These are runtime boundary rules, not a contract
-change. The recovered value is logged once per recovery through `Options.Logger`
-(default `slog.Default()`), bounded, and is not part of any error a caller
-receives.
+change.
 
 ### Retention is the process's life
 
