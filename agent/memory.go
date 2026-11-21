@@ -11,16 +11,15 @@ import (
 // (specs/agents/design.md §5). When the history exceeds limit, it keeps the
 // system messages and the first model turn whole, then the most recent whole
 // turns that fit in the remainder, latest first, dropping whole turns
-// (REQ-AGENT-023, REQ-AGENT-024, REQ-AGENT-025). A turn's weight is its
-// recorded usage plus its tool-result messages, which report no usage of their
-// own and are counted by toolResultTokens; the kept set is measured once the
-// messages are assembled, and one that exceeds limit fails the run
-// (REQ-AGENT-027). The second result is the number of messages dropped;
-// limit <= 0 means no limit.
+// (REQ-AGENT-023, REQ-AGENT-024, REQ-AGENT-025). A weight that was not
+// declared or reported is estimated from its content, so an unweighed message
+// is never free; the kept set is measured once the messages are assembled, and
+// one that exceeds limit fails the run (REQ-AGENT-027). The second result is
+// the number of messages dropped; limit <= 0 means no limit.
 func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema.Message, int, error) {
 	sysTokens := int64(0)
 	for _, m := range system {
-		sysTokens += m.Tokens
+		sysTokens += systemTokens(m)
 	}
 	total := sysTokens
 	for _, t := range turns {
@@ -109,14 +108,49 @@ func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema
 	return msgs, dropped, nil
 }
 
+// systemTokens is a system message's weight: its declared count, or an
+// estimate from its content when it declares none. Keeping a system message
+// with no count out of the limit would let a large prompt stay free.
+func systemTokens(m SystemMessage) int64 {
+	if m.Tokens > 0 {
+		return m.Tokens
+	}
+	return contentTokens(m.Content)
+}
+
 // turnTokens is a turn's weight for the memory policy: the usage the model
-// reported for it plus the tool-result messages it produced.
+// reported for it plus the tool-result messages it produced. A turn with no
+// reported usage is estimated from its reply instead of weighing nothing.
 func turnTokens(t Turn) int64 {
 	total := t.Tokens
+	if total == 0 {
+		total = assistantTokens(t.Message)
+	}
 	for _, raw := range t.Results {
 		total += toolResultTokens(raw)
 	}
 	return total
+}
+
+// assistantTokens estimates a recorded model turn's weight when its step
+// reported no usage: its content and tool-call arguments at four bytes per
+// token, plus the message envelope.
+func assistantTokens(raw json.RawMessage) int64 {
+	var m schema.Message
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return (int64(len(raw)) + 3) / 4
+	}
+	total := contentTokens(m.Content)
+	for _, call := range m.ToolCalls {
+		total += contentTokens(call.Function.Arguments)
+	}
+	return total
+}
+
+// contentTokens estimates a message's input tokens at four bytes per token,
+// rounded up, plus one token for the message envelope.
+func contentTokens(text string) int64 {
+	return 1 + (int64(len(text))+3)/4
 }
 
 // toolResultTokens estimates a tool-result message's input tokens. A tool
@@ -128,5 +162,5 @@ func toolResultTokens(raw json.RawMessage) int64 {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return (int64(len(raw)) + 3) / 4
 	}
-	return 1 + (int64(len(m.Content))+3)/4
+	return contentTokens(m.Content)
 }

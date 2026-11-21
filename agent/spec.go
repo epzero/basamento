@@ -42,7 +42,9 @@ type Caps struct {
 }
 
 // Spec is the `agent` node's spec (specs/agents/design.md §3). The node id is
-// the agent's name.
+// the agent's name. Checks is accepted for compatibility with flow specs and
+// has no effect: cancellation and the time cap are checked before every model
+// turn (REQ-AGENT-012, REQ-AGENT-028).
 type Spec struct {
 	Agent       string          `json:"agent,omitempty"`
 	Model       string          `json:"model"`

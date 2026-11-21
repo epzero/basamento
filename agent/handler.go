@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/cloudwego/eino/schema"
@@ -142,8 +143,9 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 		if err := ctx.Err(); err != nil {
 			return nil, core.NewError(core.CodeCancelled, "agent: run cancelled", map[string]any{"node": node.Name})
 		}
-		// 2. The time cap (REQ-AGENT-012), checked every Checks turns.
-		if boundary(own, spec.Checks) && timeCap != nil && dc.Now().Sub(startedAt) >= timeCap.Duration() {
+		// 2. The time cap (REQ-AGENT-012), checked before every model turn: a
+		// cap that has elapsed is never deferred to a later boundary.
+		if timeCap != nil && dc.Now().Sub(startedAt) >= timeCap.Duration() {
 			return finish(StateTimeCap, turns, "")
 		}
 		// 3. The step cap (REQ-AGENT-008).
@@ -206,8 +208,16 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 		stepName := fmt.Sprintf("%s/%s/turn-%d", node.Name, runID, own)
 		raw, err := h.runStep(dc, stepName, turnInput{Model: spec.Model, Request: req, Dropped: dropped}, h.runTurn)
 		if err != nil {
+			// A turn that failed still settles what its invocation charged, so
+			// the host journals node_failed with that cost (REQ-FLOW-049).
+			charged := int64(0)
+			var failed *turnError
+			if errors.As(err, &failed) {
+				charged = failed.cost
+				*settled += charged
+			}
 			if h.opts.Observer != nil {
-				h.opts.Observer.Settled(own, 0)
+				h.opts.Observer.Settled(own, charged)
 			}
 			return nil, err
 		}
@@ -282,14 +292,6 @@ func finish(state string, turns []Turn, answer string) (json.RawMessage, error) 
 	return json.Marshal(Output{State: state, Answer: answer, Turns: turns})
 }
 
-// boundary reports whether turn n runs the time-cap and cancellation checks.
-func boundary(n, checks int) bool {
-	if checks <= 1 {
-		return true
-	}
-	return (n-1)%checks == 0
-}
-
 func (h *Handler) runStep(dc runtime.DurableContext, name string, in any, fn runtime.StepFunc) (json.RawMessage, error) {
 	if h.opts.Register != nil {
 		if err := h.opts.Register(name, fn); err != nil && core.CodeOf(err) != core.CodeConflict {
@@ -334,13 +336,13 @@ func (h *Handler) runTurn(ctx context.Context, raw json.RawMessage) (json.RawMes
 	}
 	res, err := model.Invoke(ctx, invoker, in.Request)
 	if err != nil {
-		return nil, err
+		return nil, turnFailed(res, err)
 	}
 	if res.State != model.StateSucceeded {
-		return nil, core.NewError(core.CodeInternal, "agent: the model invocation did not succeed", map[string]any{"state": string(res.State)})
+		return nil, turnFailed(res, core.NewError(core.CodeInternal, "agent: the model invocation did not succeed", map[string]any{"state": string(res.State)}))
 	}
 	if len(res.Message) == 0 {
-		return nil, core.NewError(core.CodeInternal, "agent: the model returned no message", nil)
+		return nil, turnFailed(res, core.NewError(core.CodeInternal, "agent: the model returned no message", nil))
 	}
 	usage := model.Usage{}
 	if res.Usage != nil {
@@ -354,6 +356,24 @@ func (h *Handler) runTurn(ctx context.Context, raw json.RawMessage) (json.RawMes
 		Dropped:  in.Dropped,
 	})
 }
+
+// turnFailed attaches the cost a failed model invocation was charged to its
+// error, so the loop can settle it before returning the failure.
+func turnFailed(res model.Result, err error) error {
+	if res.CostMpts == 0 {
+		return err
+	}
+	return &turnError{cost: res.CostMpts, err: err}
+}
+
+// turnError is a failed model turn whose invocation still cost milli-points.
+type turnError struct {
+	cost int64
+	err  error
+}
+
+func (e *turnError) Error() string { return e.err.Error() }
+func (e *turnError) Unwrap() error { return e.err }
 
 type toolStepInput struct {
 	Agent string    `json:"agent"`
