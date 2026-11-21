@@ -7,13 +7,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
+	"sync/atomic"
 
-	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
-	"go.temporal.io/sdk/worker"
-	"go.temporal.io/sdk/workflow"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform/blob"
@@ -33,13 +29,15 @@ type temporalWorld struct {
 	enc    *secrets.Codec
 	sim    *simKeyRegistry
 
-	version   string // WP-L5-02 (c) compares this to the pinned server release.
-	threshold int
-	attempts  int
+	version             string
+	threshold           int
+	checkpointThreshold int
+	attempts            int
 
-	flows      map[string]func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error)
-	behaviors  map[string]*temporalStepBehavior
-	registered map[string]bool
+	flows       map[string]func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error)
+	flowHarness map[string]flowHarnessMeta
+	behaviors   map[string]*temporalStepBehavior
+	registered  map[string]bool
 
 	faultMode     string
 	faultKey      string
@@ -52,6 +50,17 @@ type temporalWorld struct {
 	lastErr     error
 	lastStepErr error
 	lastOutput  json.RawMessage
+
+	outbox *memOutbox
+
+	continuations    int
+	execActivityDone atomic.Uint64
+	currentExecIndex int
+	orderProofStep   string
+	stepBDoneExec    int
+	continueFromExec int
+
+	pendingGate pendingGateRun
 }
 
 type temporalStepBehavior struct {
@@ -78,10 +87,13 @@ func copyMeta(in map[string][]byte) map[string][]byte {
 
 func newTemporalWorld() *temporalWorld {
 	return &temporalWorld{
-		version:    "1.32.2",
-		flows:      map[string]func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error){},
-		behaviors:  map[string]*temporalStepBehavior{},
-		registered: map[string]bool{},
+		version:          "1.32.2",
+		flows:            map[string]func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error){},
+		flowHarness:      map[string]flowHarnessMeta{},
+		behaviors:        map[string]*temporalStepBehavior{},
+		registered:       map[string]bool{},
+		stepBDoneExec:    -1,
+		continueFromExec: -1,
 	}
 }
 
@@ -132,16 +144,19 @@ func (w *temporalWorld) prepare() error {
 func (w *temporalWorld) ensureRuntime() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.env != nil {
+	if w.rt != nil {
 		return nil
 	}
 	if w.blobs == nil {
 		return fmt.Errorf("blob store is not prepared")
 	}
+	ob := w.bddOutbox()
 	rt, err := temporal.New(temporal.Options{
-		Payloads:        w.enc,
-		Blobs:           w.blobs,
-		ClaimCheckBytes: w.threshold,
+		Payloads:                 w.enc,
+		Blobs:                    w.blobs,
+		ClaimCheckBytes:          w.threshold,
+		Outbox:                   ob,
+		CheckpointEventThreshold: w.ckptThreshold(),
 	})
 	if err != nil {
 		return err
@@ -150,42 +165,14 @@ func (w *temporalWorld) ensureRuntime() error {
 		return err
 	}
 	w.rt = rt
-	w.env = w.suite.NewTestWorkflowEnvironment()
-	w.env.SetTestTimeout(time.Hour)
-	w.env.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: time.Hour})
-	w.env.SetContextPropagators([]workflow.ContextPropagator{temporal.TenantPropagator{}})
-	w.dataConv = &recordingConverter{
-		inner:    rt.DataConverter(),
-		enc:      w.enc,
-		tenant:   w.activeTenant,
-		recorded: &w.history,
-		faultMode: func() string {
-			w.mu.Lock()
-			defer w.mu.Unlock()
-			return w.faultMode
-		},
-		faultKey: func() string {
-			w.mu.Lock()
-			defer w.mu.Unlock()
-			return w.faultKey
-		},
-		faultInjected: &w.faultInjected,
-	}
-	w.env.SetDataConverter(w.dataConv)
-	if err := rt.Register(w.env); err != nil {
-		return err
-	}
-	for name := range w.behaviors {
-		if err := w.registerStepLocked(name); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-func (w *temporalWorld) setTenantHeader(tenant core.TenantID) {
-	p, _ := converter.GetDefaultDataConverter().ToPayload(string(tenant))
-	w.env.SetHeader(&commonpb.Header{Fields: map[string]*commonpb.Payload{"basamento-tenant": p}})
+func (w *temporalWorld) ckptThreshold() int {
+	if w.checkpointThreshold > 0 {
+		return w.checkpointThreshold
+	}
+	return temporal.DefaultCheckpointEventThreshold
 }
 
 func (w *temporalWorld) runFlow(dc runtime.DurableContext, ref runtime.FlowRef, in json.RawMessage) (json.RawMessage, error) {
@@ -220,6 +207,15 @@ func (w *temporalWorld) ensureStep(name string) error {
 	return w.registerStepLocked(name)
 }
 
+func (w *temporalWorld) ensureSteps(names ...string) error {
+	for _, name := range names {
+		if err := w.ensureStep(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (w *temporalWorld) callStep(ctx context.Context, name string, _ json.RawMessage) (json.RawMessage, error) {
 	w.mu.Lock()
 	b := w.behaviors[name]
@@ -231,7 +227,15 @@ func (w *temporalWorld) callStep(ctx context.Context, name string, _ json.RawMes
 	shouldFail := b.failFirst < 0 || b.calls <= b.failFirst
 	output := b.output
 	code, retryable := b.code, b.retryable
+	proof := w.orderProofStep
+	exec := w.currentExecIndex
 	w.mu.Unlock()
+	if name == proof {
+		w.mu.Lock()
+		w.stepBDoneExec = exec
+		w.mu.Unlock()
+	}
+	w.execActivityDone.Add(1)
 	if err := ctx.Err(); err != nil {
 		return nil, core.NewError(core.CodeCancelled, "temporal bdd: step cancelled", nil)
 	}
@@ -242,44 +246,31 @@ func (w *temporalWorld) callStep(ctx context.Context, name string, _ json.RawMes
 }
 
 func (w *temporalWorld) start(tenant, flowName, runID string) error {
-	if err := w.ensureRuntime(); err != nil {
-		return err
-	}
-	if err := w.ensureNamedFlow(flowName); err != nil {
-		return err
-	}
-	id := core.TenantID(tenant)
-	w.mu.Lock()
-	w.activeTenant = id
-	w.faultInjected = false
-	w.mu.Unlock()
-	if w.dataConv != nil {
-		w.dataConv.tenant = id
-	}
-	w.setTenantHeader(id)
-	w.env.ExecuteWorkflow(temporal.HostWorkflowName, temporal.HostInput{
-		Flow:  runtime.FlowRef{Name: flowName},
-		RunID: runID,
+	return w.runChain(chainRunConfig{
+		tenant: core.TenantID(tenant),
+		flow:   flowName,
+		runID:  runID,
 	})
-	w.mu.Lock()
-	w.lastErr = w.env.GetWorkflowError()
-	if w.lastErr == nil {
-		_ = w.env.GetWorkflowResult(&w.lastOutput)
-	}
-	w.mu.Unlock()
-	return nil
 }
 
 func (w *temporalWorld) waitDone() {
+	if w.env == nil {
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.lastErr = w.env.GetWorkflowError()
-	if w.lastErr == nil {
-		_ = w.env.GetWorkflowResult(&w.lastOutput)
+	if w.lastErr == nil && w.env.IsWorkflowCompleted() {
+		if err := w.env.GetWorkflowResult(&w.lastOutput); err != nil {
+			w.lastErr = err
+		}
 	}
 }
 
 func (w *temporalWorld) runState() string {
+	if w.env == nil {
+		return "running"
+	}
 	if err := w.env.GetWorkflowError(); err != nil {
 		return "failed"
 	}
