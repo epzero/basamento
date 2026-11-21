@@ -265,8 +265,10 @@ func newHandler(dc *fakeDC, m *scriptedModel, tr *toolRunner, obs agent.Observer
 		Estimate: func(ctx context.Context, req model.Request) (agent.Estimate, error) {
 			return m.Estimate(ctx, req)
 		},
-		RunTool:  tr.run,
-		Tools:    func(string) *tool.Set { return &tool.Set{Tools: []tool.Tool{{Name: "search"}, {Name: "fetch"}}} },
+		RunTool: tr.run,
+		Tools: func(context.Context, string) (*tool.Set, error) {
+			return &tool.Set{Tools: []tool.Tool{{Name: "search"}, {Name: "fetch"}}}, nil
+		},
 		Defines:  func(node string) bool { return node != "ghost" && node != "reviewer" },
 		Register: dc.Register,
 		Observer: obs,
@@ -284,15 +286,21 @@ func spec(t *testing.T, v map[string]any) json.RawMessage {
 
 func runNode(t *testing.T, h *agent.Handler, dc *fakeDC, name string, nodeSpec map[string]any, input json.RawMessage) (agent.Output, error) {
 	t.Helper()
-	raw, err := h.Handle(dc, agent.Node{Name: name, Spec: spec(t, nodeSpec)}, input)
-	if raw == nil {
-		return agent.Output{}, err
+	out, _, err := runNodeResult(t, h, dc, name, nodeSpec, input)
+	return out, err
+}
+
+func runNodeResult(t *testing.T, h *agent.Handler, dc *fakeDC, name string, nodeSpec map[string]any, input json.RawMessage) (agent.Output, agent.Result, error) {
+	t.Helper()
+	res, err := h.Handle(dc, agent.Node{Name: name, Spec: spec(t, nodeSpec)}, input)
+	if len(res.Output) == 0 {
+		return agent.Output{}, res, err
 	}
 	var out agent.Output
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("output is not JSON: %v (%s)", err, raw)
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		t.Fatalf("output is not JSON: %v (%s)", err, res.Output)
 	}
-	return out, err
+	return out, res, err
 }
 
 // --- tests -----------------------------------------------------------------
@@ -311,7 +319,7 @@ func TestEachModelTurnIsOneStep(t *testing.T) {
 	if len(out.Turns) != 1 {
 		t.Fatalf("turns = %d, want 1", len(out.Turns))
 	}
-	if got := dc.stepCalls(); len(got) != 1 || got[0] != "worker/turn-1" {
+	if got := dc.stepCalls(); len(got) != 1 || got[0] != "worker/agent_1/turn-1" {
 		t.Fatalf("steps = %v", got)
 	}
 }
@@ -475,7 +483,7 @@ func TestCancellationBetweenTurnsStartsNoTurn(t *testing.T) {
 		Models:   func(string) (model.Invoker, error) { return m, nil },
 		Estimate: m.Estimate,
 		RunTool:  wrapped.run,
-		Tools:    func(string) *tool.Set { return nil },
+		Tools:    func(context.Context, string) (*tool.Set, error) { return nil, nil },
 		Defines:  func(string) bool { return true },
 		Register: dc.Register,
 	})
@@ -636,8 +644,8 @@ func TestReplayFeedsRecordedTurnsAndDoesNotPayAgain(t *testing.T) {
 		}}},
 		"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
 	}
-	dc.journal["worker/turn-1"] = spec(t, turn)
-	dc.journal["worker/tool-1-1"] = spec(t, map[string]any{"result": map[string]any{"content": "42"}})
+	dc.journal["worker/agent_1/turn-1"] = spec(t, turn)
+	dc.journal["worker/agent_1/tool-1-1"] = spec(t, map[string]any{"result": map[string]any{"content": "42"}})
 
 	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
 	tr := newTools(dc)
@@ -763,4 +771,154 @@ func contains(xs []string, want string) bool {
 func messagesContain(t *testing.T, raw json.RawMessage, want string) bool {
 	t.Helper()
 	return strings.Contains(string(raw), want)
+}
+
+// --- self-review fixes (EP0-33, A33-1 … A33-5) -----------------------------
+
+// A33-1: a flow can visit the same agent node twice in one run (a cycle, or a
+// handoff back). Each visit must journal its own turn steps and invoke the
+// model, instead of replaying the first visit's recorded turn.
+func TestEachVisitToAnAgentNodeInvokesTheModel(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "first"}, {Text: "second"}}}
+	h := newHandler(dc, m, newTools(dc), nil)
+
+	out, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != "first" {
+		t.Fatalf("first visit answer = %q", out.Answer)
+	}
+	out, err = runNode(t, h, dc, "worker", map[string]any{"model": "script"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != "second" || m.invoked != 2 {
+		t.Fatalf("second visit answer = %q, invocations = %d; want the model invoked twice", out.Answer, m.invoked)
+	}
+	got := dc.stepCalls()
+	if len(got) != 2 || got[0] == got[1] {
+		t.Fatalf("step names = %v, want one distinct turn step per visit", got)
+	}
+}
+
+// A33-2: the handler returns the settled cost, and that cost is what makes a
+// cost guard trip: the flow host adds Result.CostMpts to the run's spend and
+// the machine refuses the next loop visit once the guard's budget is passed.
+func TestSettledCostReachesACostGuard(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{
+		{Text: "one", Cost: 40},
+		{Text: "two", Cost: 40},
+		{Text: "three", Cost: 40},
+	}}
+	h := newHandler(dc, m, newTools(dc), nil)
+
+	const guard = int64(50)
+	var spent int64
+	visits := 0
+	for range 10 {
+		if spent > guard {
+			break
+		}
+		_, res, err := runNodeResult(t, h, dc, "worker", map[string]any{"model": "script"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.CostMpts == 0 {
+			t.Fatal("Handle reported no settled cost, so a cost guard can never trip")
+		}
+		spent += res.CostMpts
+		visits++
+	}
+	if visits != 2 || spent != 80 || m.invoked != 2 {
+		t.Fatalf("visits = %d spent = %d invocations = %d; want 2, 80, 2", visits, spent, m.invoked)
+	}
+}
+
+// A33-3: a tool's Input JSON Schema reaches the model as ParamsOneOf. Without
+// it eino tells the model the tool takes no arguments.
+func TestToolInputSchemaReachesTheModel(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+	h := agent.New(agent.Options{
+		Models:   func(string) (model.Invoker, error) { return m, nil },
+		Estimate: m.Estimate,
+		RunTool:  newTools(dc).run,
+		Tools: func(context.Context, string) (*tool.Set, error) {
+			return &tool.Set{Tools: []tool.Tool{{
+				Name:        "search",
+				Description: "find things",
+				Input:       json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}`),
+			}}}, nil
+		},
+		Register: dc.Register,
+	})
+	if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.requests) != 1 {
+		t.Fatalf("model requests = %d, want 1", len(m.requests))
+	}
+	var infos []*schema.ToolInfo
+	if err := json.Unmarshal(m.requests[0].Tools, &infos); err != nil {
+		t.Fatalf("tools are not ToolInfo: %v (%s)", err, m.requests[0].Tools)
+	}
+	if len(infos) != 1 || infos[0].ParamsOneOf == nil {
+		t.Fatalf("tool info = %+v, want a parameter schema", infos)
+	}
+	js, err := infos[0].ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(js.Required) != 1 || js.Required[0] != "q" {
+		t.Fatalf("required = %v, want [q]", js.Required)
+	}
+}
+
+// A33-5: the tool resolver receives the run's context, so two tenants sharing
+// one handler are offered their own tool sets.
+func TestToolSetResolutionSeesTheTenant(t *testing.T) {
+	toolsFor := func(ctx context.Context, _ string) (*tool.Set, error) {
+		id, ok := core.TenantFrom(ctx)
+		if !ok {
+			return nil, nil
+		}
+		name := "search"
+		if id == "tenant-b" {
+			name = "fetch"
+		}
+		return &tool.Set{Tools: []tool.Tool{{Name: name}}}, nil
+	}
+	run := func(tenant core.TenantID) []string {
+		dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+		dc.ctx = core.WithTenant(context.Background(), tenant)
+		m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+		h := agent.New(agent.Options{
+			Models:   func(string) (model.Invoker, error) { return m, nil },
+			Estimate: m.Estimate,
+			RunTool:  newTools(dc).run,
+			Tools:    toolsFor,
+			Register: dc.Register,
+		})
+		if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		var infos []*schema.ToolInfo
+		if err := json.Unmarshal(m.requests[0].Tools, &infos); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, 0, len(infos))
+		for _, info := range infos {
+			names = append(names, info.Name)
+		}
+		return names
+	}
+	if got := run("tenant-a"); len(got) != 1 || got[0] != "search" {
+		t.Fatalf("tenant-a tools = %v, want [search]", got)
+	}
+	if got := run("tenant-b"); len(got) != 1 || got[0] != "fetch" {
+		t.Fatalf("tenant-b tools = %v, want [fetch]", got)
+	}
 }

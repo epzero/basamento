@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/eino-contrib/jsonschema"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/model"
@@ -53,8 +55,10 @@ type Options struct {
 	// RunTool is the tool port (specs/tools/design.md §2). It is required when
 	// a model turn requests a tool.
 	RunTool tool.Runner
-	// Tools returns an agent's allowlist. nil means no tools.
-	Tools func(agent string) *tool.Set
+	// Tools resolves an agent's allowlist. The context carries the run's
+	// tenant, so one shared handler gives each tenant its own set (REQ-CORE-005).
+	// nil means no tools.
+	Tools func(ctx context.Context, agent string) (*tool.Set, error)
 	// Defines reports whether the flow defines the agent node node. A handoff
 	// to a node it rejects fails with not_found (REQ-AGENT-020).
 	Defines func(node string) bool
@@ -77,10 +81,27 @@ type Handler struct {
 // New returns a handler over opts.
 func New(opts Options) *Handler { return &Handler{opts: opts} }
 
-// Handle runs one agent node. input is the node's input; when it carries a
-// handoff, it is the previous agent's output and supplies the message history,
-// the run's start and the chain's time cap.
-func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMessage) (json.RawMessage, error) {
+// Result is what an agent node returns to the flow host: the run's output and
+// the cost this node's own turns settled, in milli-points (REQ-FLOW-049). The
+// composition root passes CostMpts on as host.NodeResult.CostMpts, so a
+// flow.Guard cost bound over an agent node sees the agent's spend.
+type Result struct {
+	Output   json.RawMessage `json:"output,omitempty"`
+	CostMpts int64           `json:"cost_mpts,omitempty"`
+}
+
+// Handle runs one agent node and reports what this node settled. input is the
+// node's input; when it carries a handoff, it is the previous agent's output
+// and supplies the message history, the run's start and the chain's time cap.
+func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMessage) (Result, error) {
+	settled := int64(0)
+	out, err := h.handle(dc, node, input, &settled)
+	return Result{Output: out, CostMpts: settled}, err
+}
+
+// handle is Handle's loop. settled receives the run's spend after every
+// completed turn, so a run that fails late still reports what it paid for.
+func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMessage, settled *int64) (json.RawMessage, error) {
 	if dc == nil {
 		return nil, invalid("agent: nil durable context", nil)
 	}
@@ -133,11 +154,15 @@ func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMes
 		if h.opts.Observer != nil && dropped > 0 {
 			h.opts.Observer.Dropped(own, dropped)
 		}
+		tools, err := h.toolsJSON(ctx, node.Name, spec)
+		if err != nil {
+			return nil, err
+		}
 		req := model.Request{
 			Model:     spec.Model,
 			Op:        model.CapChat,
 			Messages:  marshal(messages),
-			Tools:     h.toolsJSON(node.Name, spec),
+			Tools:     tools,
 			ClientRef: clientRef(runID, node.Name, own),
 		}
 		var estimate Estimate
@@ -159,11 +184,14 @@ func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMes
 			h.opts.Observer.Reserved(own, estimate.CostMpts)
 		}
 
-		// Step names carry the node id as well as the turn: a handoff target
-		// runs in the same flow run as the agent that handed off, so "turn-1"
-		// alone would collide in the runtime's journal. The idempotency key is
-		// the step name, stable for the run (design §2).
-		stepName := fmt.Sprintf("%s/turn-%d", node.Name, own)
+		// Step names carry the node id and this visit's run id as well as the
+		// turn: a handoff target runs in the same flow run as the agent that
+		// handed off, and a flow may visit the same agent node twice (a cycle
+		// or a handoff back). Without the run id, "node/turn-1" would replay
+		// the first visit's recorded turn instead of invoking the model again.
+		// runID comes from dc.NewID, so it is deterministic per run and
+		// survives a resume (design §2, REQ-AGENT-002).
+		stepName := fmt.Sprintf("%s/%s/turn-%d", node.Name, runID, own)
 		raw, err := h.runStep(dc, stepName, turnInput{Model: spec.Model, Request: req, Dropped: dropped}, h.runTurn)
 		if err != nil {
 			if h.opts.Observer != nil {
@@ -177,6 +205,7 @@ func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMes
 		}
 		used += result.Usage.InputTokens + result.Usage.OutputTokens
 		spent += result.CostMpts
+		*settled = spent
 		if h.opts.Observer != nil {
 			h.opts.Observer.Settled(own, result.CostMpts)
 		}
@@ -215,7 +244,7 @@ func (h *Handler) Handle(dc runtime.DurableContext, node Node, input json.RawMes
 		}
 
 		for k, call := range calls {
-			name := fmt.Sprintf("%s/tool-%d-%d", node.Name, own, k+1)
+			name := fmt.Sprintf("%s/%s/tool-%d-%d", node.Name, runID, own, k+1)
 			in := toolStepInput{Agent: node.Name, ID: call.ID, Call: tool.Call{Name: call.Function.Name, Args: json.RawMessage(call.Function.Arguments)}}
 			raw, err := h.runStep(dc, name, in, h.runTool)
 			if err != nil {
@@ -328,9 +357,9 @@ func (h *Handler) runTool(ctx context.Context, raw json.RawMessage) (json.RawMes
 	if h.opts.RunTool == nil {
 		return nil, core.NewError(core.CodeUnsupported, "agent: no tool runner", map[string]any{"tool": in.Call.Name})
 	}
-	var set *tool.Set
-	if h.opts.Tools != nil {
-		set = h.opts.Tools(in.Agent)
+	set, err := h.toolSet(ctx, in.Agent)
+	if err != nil {
+		return nil, err
 	}
 	outcome, err := h.opts.RunTool(ctx, set, in.Call)
 	if err != nil {
@@ -339,13 +368,24 @@ func (h *Handler) runTool(ctx context.Context, raw json.RawMessage) (json.RawMes
 	return json.Marshal(outcome)
 }
 
-func (h *Handler) toolsJSON(agent string, spec Spec) json.RawMessage {
-	var set *tool.Set
-	if h.opts.Tools != nil {
-		set = h.opts.Tools(agent)
+// toolSet resolves the set of tools the run's tenant may use.
+func (h *Handler) toolSet(ctx context.Context, agent string) (*tool.Set, error) {
+	if h.opts.Tools == nil {
+		return nil, nil
+	}
+	return h.opts.Tools(ctx, agent)
+}
+
+// toolsJSON renders the tools offered to the model. Each tool's Input JSON
+// Schema becomes its ParamsOneOf: eino reads an absent ParamsOneOf as a tool
+// that takes no arguments, which would hide a required argument from the model.
+func (h *Handler) toolsJSON(ctx context.Context, agent string, spec Spec) (json.RawMessage, error) {
+	set, err := h.toolSet(ctx, agent)
+	if err != nil {
+		return nil, err
 	}
 	if set == nil {
-		return nil
+		return nil, nil
 	}
 	offered := set.Tools
 	if len(spec.Tools) > 0 {
@@ -358,12 +398,20 @@ func (h *Handler) toolsJSON(agent string, spec Spec) json.RawMessage {
 	}
 	infos := make([]*schema.ToolInfo, 0, len(offered))
 	for _, t := range offered {
-		infos = append(infos, &schema.ToolInfo{Name: t.Name, Desc: t.Description})
+		info := &schema.ToolInfo{Name: t.Name, Desc: t.Description}
+		if len(bytes.TrimSpace(t.Input)) > 0 {
+			var input jsonschema.Schema
+			if err := json.Unmarshal(t.Input, &input); err != nil {
+				return nil, invalid(fmt.Sprintf("agent: tool %q has an invalid input schema: %s", t.Name, err), map[string]any{"tool": t.Name})
+			}
+			info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&input)
+		}
+		infos = append(infos, info)
 	}
 	if len(infos) == 0 {
-		return nil
+		return nil, nil
 	}
-	return marshal(infos)
+	return marshal(infos), nil
 }
 
 // splitCalls separates handoff requests, in order, from tool calls.
@@ -422,7 +470,9 @@ func timeCapCopy(d *Duration) *Duration {
 }
 
 // clientRef is the turn's stable idempotency key across retries
-// (REQ-MODEL-004): a hash of the run, the node and the turn.
+// (REQ-MODEL-004): a hash of the visit's run id, the node and the turn. runID
+// is unique per visit, so a second visit to the same node never reuses the
+// first visit's key.
 func clientRef(runID, node string, turn int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00turn-%d", runID, node, turn)))
 	return hex.EncodeToString(sum[:])

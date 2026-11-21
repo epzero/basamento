@@ -150,17 +150,17 @@ func (w *agentWorld) run(name string, input json.RawMessage, blockAfter, stopAft
 		Models:   func(string) (model.Invoker, error) { return d.model, nil },
 		Estimate: d.model.Estimate,
 		RunTool:  w.toolRunner(d),
-		Tools:    func(string) *tool.Set { return w.toolSet() },
+		Tools:    func(context.Context, string) (*tool.Set, error) { return w.toolSet(), nil },
 		Defines:  func(node string) bool { _, ok := w.defs[node]; return ok },
 		Register: dc.Register,
 		Observer: r.obs,
 	})
 	go func() {
 		defer close(r.done)
-		raw, err := h.Handle(dc, agent.Node{Name: name, Spec: d.specJSON()}, input)
+		res, err := h.Handle(dc, agent.Node{Name: name, Spec: d.specJSON()}, input)
 		r.err = err
-		if raw != nil {
-			_ = json.Unmarshal(raw, &r.output)
+		if len(res.Output) > 0 {
+			_ = json.Unmarshal(res.Output, &r.output)
 		}
 	}()
 	return r
@@ -344,9 +344,43 @@ func (d *agentDC) Register(name string, fn runtime.StepFunc) error {
 	return nil
 }
 
+// stepMatches reports whether a journal step name is the one a scenario
+// names. A step name is "<node>/<visit>/<step>" while a scenario states
+// "<node>/<step>": the visit's run id is not in the scenario, so it is
+// dropped from the recorded name before comparing.
+func stepMatches(name, want string) bool {
+	if name == want {
+		return true
+	}
+	node, rest, ok := strings.Cut(name, "/")
+	if !ok {
+		return false
+	}
+	_, step, ok := strings.Cut(rest, "/")
+	if !ok {
+		return false
+	}
+	return node+"/"+step == want
+}
+
+// journalStep finds a recorded step the way a scenario names it. The last
+// recorded match wins, so a later visit to the same node is the one reported.
+func (d *agentDC) journalStep(want string) (json.RawMessage, bool) {
+	for i := len(d.steps) - 1; i >= 0; i-- {
+		name := d.steps[i]
+		if !stepMatches(name, want) {
+			continue
+		}
+		if raw, ok := d.journal[name]; ok {
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
 func (d *agentDC) Step(name string, in any, _ runtime.StepOptions) runtime.Future {
 	d.steps = append(d.steps, name)
-	if name == d.stopAfter {
+	if d.stopAfter != "" && stepMatches(name, d.stopAfter) {
 		return agentFuture{err: core.NewError(core.CodeUnavailable, "interrupted", map[string]any{"step": name})}
 	}
 	if raw, ok := d.journal[name]; ok {
@@ -365,7 +399,7 @@ func (d *agentDC) Step(name string, in any, _ runtime.StepOptions) runtime.Futur
 		return agentFuture{err: err}
 	}
 	d.journal[name] = append(json.RawMessage(nil), raw...)
-	if name == d.blockAfter {
+	if d.blockAfter != "" && stepMatches(name, d.blockAfter) {
 		close(d.blocked)
 		<-d.release
 	}
@@ -766,7 +800,7 @@ func registerAgent(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the result of the model turn (\d+) step is the model output "([^"]*)"$`, func(ctx context.Context, turn int, text string) error {
 		r := world(ctx).Agent.current
-		raw, ok := r.dc.journal[fmt.Sprintf("%s/turn-%d", r.agent, turn)]
+		raw, ok := r.dc.journalStep(fmt.Sprintf("%s/turn-%d", r.agent, turn))
 		if !ok {
 			return fmt.Errorf("no result recorded for model turn %d", turn)
 		}
