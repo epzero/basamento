@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math/rand/v2"
 	"sync"
 	"sync/atomic"
@@ -75,15 +74,6 @@ type childLink struct {
 	future *future
 }
 
-// runTimer is one pending clock wait (a Sleep or a gate timeout). Helpers wake
-// on wake and call fireDue; they never complete the future themselves.
-type runTimer struct {
-	deadline time.Time
-	future   *future
-	wake     <-chan time.Time
-	gate     *gate // set for gate timeouts so fireDue can emit CodeTimeout
-}
-
 func newRun(rt *Runtime, tenant core.TenantID, id string, flow runtime.FlowRef, input json.RawMessage, parent context.Context) *run {
 	base := context.WithoutCancel(parent)
 	base = core.WithTenant(base, tenant)
@@ -119,6 +109,7 @@ func (r *run) execute() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				err = flowPanicErr(recovered)
+				r.rt.logPanic(r.tenant, r.id, "", recovered)
 			}
 		}()
 		out, err = r.rt.host(&durableContext{run: r}, r.flow, r.input)
@@ -188,6 +179,7 @@ func (r *run) applyParentClose(policy string) {
 	err := cancelledErr("child closed by its parent")
 	r.completeWaitsLocked(err)
 	r.completeWaitersLocked(nil, err)
+	r.closeChildrenLocked()
 	r.mu.Unlock()
 	r.notify()
 }
@@ -249,77 +241,6 @@ func (r *run) completeWaitsLocked(err error) {
 	r.timers = nil
 	for _, link := range r.children {
 		link.future.complete(nil, err)
-	}
-}
-
-func (r *run) removeTimer(target *runTimer) {
-	kept := r.timers[:0]
-	for _, timer := range r.timers {
-		if timer != target {
-			kept = append(kept, timer)
-		}
-	}
-	r.timers = kept
-}
-
-func (r *run) timerOutcome(timer *runTimer) (json.RawMessage, error) {
-	if timer.gate == nil {
-		return nil, nil
-	}
-	g := timer.gate
-	if g.resolved {
-		return nil, nil
-	}
-	return nil, core.NewError(core.CodeTimeout,
-		fmt.Sprintf("local: gate %q timed out", g.spec.Name),
-		map[string]any{"gate": g.spec.Name})
-}
-
-// fireDue completes the signaled timer and every other pending timer whose
-// deadline the clock has reached, all with one completion seq (REQ-RT-008,
-// REQ-RT-011). It is idempotent when the signaled timer already completed.
-// The signaled timer is always completed even when Now() is still before its
-// deadline, so a wake from After cannot be lost against Now().
-func (r *run) fireDue(signaled *runTimer) {
-	r.mu.Lock()
-	if signaled.future.Ready() {
-		r.mu.Unlock()
-		return
-	}
-	now := r.rt.clock.Now()
-	seq := r.seqs.Add(1)
-	var completed bool
-	complete := func(timer *runTimer, force bool) {
-		if timer.future.Ready() {
-			return
-		}
-		if !force && timer.deadline.After(now) {
-			return
-		}
-		out, err := r.timerOutcome(timer)
-		if timer.future.completeWithSeq(seq, out, err, false) {
-			completed = true
-		}
-	}
-	complete(signaled, true)
-	kept := r.timers[:0]
-	for _, timer := range r.timers {
-		if timer == signaled {
-			continue
-		}
-		if timer.future.Ready() {
-			continue
-		}
-		if timer.deadline.After(now) {
-			kept = append(kept, timer)
-			continue
-		}
-		complete(timer, false)
-	}
-	r.timers = kept
-	r.mu.Unlock()
-	if completed {
-		r.notify()
 	}
 }
 
@@ -398,6 +319,11 @@ func (r *run) wake() <-chan struct{} {
 func cancelMessage(reason string) string {
 	if reason == "" {
 		return "run cancelled"
+	}
+	const max = 256
+	runes := []rune(reason)
+	if len(runes) > max {
+		reason = string(runes[:max])
 	}
 	return "run cancelled: " + reason
 }
