@@ -34,6 +34,8 @@ type modelWorld struct {
 
 	events []model.Event
 	result model.Result
+
+	call *callWorld
 }
 
 func newModelWorld() *modelWorld { return &modelWorld{retention: newRetentionWorld()} }
@@ -55,7 +57,16 @@ func registerModel(sc *godog.ScenarioContext) {
 		return w.provider(ctx, capability, "streamed reply")
 	})
 	sc.Step(`^a caller starts an invocation and follows its events$`, func(ctx context.Context) error {
+		if cw := world(ctx).Model.call; cw != nil {
+			return cw.follow(ctx, false, "call-1")
+		}
 		return world(ctx).Model.follow(ctx)
+	})
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		if cw := world(ctx).Model.call; cw != nil {
+			cw.close()
+		}
+		return ctx, nil
 	})
 	sc.Step(`^a caller starts an invocation and cancels it after its first event$`, func(ctx context.Context) error {
 		w := world(ctx).Model
