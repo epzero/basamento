@@ -1,7 +1,8 @@
 # Runtimes
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
-**Implemented** (`flow/host`, WP-L4-04); runtimes **Planned** (WP-L5-*).
+**Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
+(`runtime/local`, WP-L5-01); `temporal` **Planned** (WP-L5-02).
 Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
@@ -30,7 +31,7 @@ into `DurableContext` calls and feeds results back as events.
 
 | Runtime | Use | Notes |
 | --- | --- | --- |
-| `local` | tests, CLI, short interactive runs | Goroutines and an in-memory journal. Not durable by design. |
+| `local` | tests, CLI, short interactive runs | Goroutines and an in-memory journal. Not durable by design; finished runs and idempotency keys are never evicted—the process is expected to be short-lived. |
 | `temporal` | default for both profiles | `Step` = activity, `Await` = Update (validated synchronously), `Checkpoint` = ContinueAsNew, polyglot task queues. The embedded server follows `temporalio/cli` `internal/devserver`: `temporal.NewServer`, SQLite via `modernc.org/sqlite`, one history shard. It lives in its own Go module so library users do not inherit the server's dependencies. |
 
 `Caps` (durable, sync gate updates, ContinueAsNew, polyglot queues) lets callers
@@ -77,3 +78,28 @@ Settings for the embedded profile:
 
 ~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
 work that needs lower latency runs on the `local` runtime.
+
+## 6. Local runtime: behaviours the specs leave open
+
+These are implementation choices for `runtime/local` (WP-L5-01). Where a row
+names a requirement or scenario id, the gate exercises it; otherwise the
+behaviour is spec-silent and covered only by unit tests or this document.
+
+| Behaviour | Spec coverage |
+| --- | --- |
+| Timers due at one clock reading complete as one batch sharing one completion seq; `Select` snapshots run-owned futures under the run lock so a batch is visible all-or-nothing (same as `fireDue`), then breaks ties by lowest index within a batch and otherwise prefers the earliest completion seq | RT-008 / RT-011 (incl. RT-011-04) |
+| Timer wakes before `Now()` reaches the deadline re-arm for the remaining duration; a timer never completes until `Now() >= deadline` | RT-008 (unit tests) |
+| Duplicate `Start` with the same `RunID` in one tenant → `conflict` | RT-046-01 |
+| Non-empty `StartRequest.IdempotencyKey` deduplicates within a tenant; empty key does not; keys do not cross tenants | RT-047 / RT-048 |
+| Panic in the flow host → failed run, process survives; panic value logged once per recovery, bounded in size (not in errors returned to callers) | spec-silent (unit tests) |
+| Panic in a registered step → `internal` step error, not retried, process survives; panic value and stack logged once per recovery, bounded | spec-silent (unit tests) |
+| `Cancel` truncates the caller's reason to 256 runes in the cancellation message | spec-silent (unit tests) |
+| `Resolve` accepts any payload; `GateSpec.Schema` and `AcceptIf` validation (FLOW-006-01) arrives with WP-L5-04 | spec-silent here; FLOW-006-01 planned (WP-L5-04) |
+| `Child` re-attach: same parent run and flow (name and hash) returns the existing child; otherwise `conflict` | RT-049 / RT-050 |
+| `Child` re-attach to an already-linked child returns the first call's future; the first close policy wins, later policies are ignored | spec-silent (unit tests) |
+| Parent close on a child applies that child's close policies to its own children (top-down); `abandon` on the middle link leaves descendants running | spec-silent (unit tests) |
+| `Child` on a parent that is not `running` returns `cancelled` and starts no run; an already-linked child still returns its recorded future | spec-silent (unit tests) |
+| `List` cursor paging: opaque version-1 token (`base64.RawURLEncoding` of JSON `{"v":1,"tenant":"<id>","pos":<n>}`), tenant-bound, `pos` is that tenant's start-order ordinal; clients must not parse it (BDD steps craft one token in this form for RT-052-01); invalid, out-of-range or foreign-tenant cursor → `invalid_argument` before any run is read | RT-051…053, RT-026 lists runs |
+| Every started run stays in memory (no retention) | RT-006 / design §Local |
+| `New` requires a timer clock (`After`); failure message names timer scheduling | RT-054-01 |
+| `Resolve` on a gate whose wait already ended (run cancelled, gate timeout, runtime shut down) → `conflict`, payload not delivered | spec-silent (unit tests) |

@@ -35,6 +35,7 @@ type World struct {
 	Model       *modelWorld
 	Machine     *machineWorld
 	Host        *hostWorld
+	Local       *localWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -58,6 +59,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Model:       newModelWorld(),
 			Machine:     newMachineWorld(),
 			Host:        newHostWorld(),
+			Local:       newLocalWorld(),
 		}), nil
 	})
 	registerCore(sc)
@@ -86,17 +88,26 @@ func Initialize(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	registerModel(sc)
+	registerLocal(sc)
 	registerModelRetention(sc)
 	registerMiddleware(sc)
 	registerMiddlewareCalls(sc)
 }
 
+// durationPassStepPattern is the shared "N … pass" step. It is anchored on a
+// duration phrase parseElapsed accepts so godog's single step namespace is not
+// stolen from capabilities that own sentences ending in "pass" (for example a
+// runtime run start or a worker grace period). Models middleware scenarios say
+// "1 more second passes"; advanceClockByDurationPhrase strips the word "more".
+const durationPassStepPattern = `^(-?\d+ (?:more )?[a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
+
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)
-	sc.Step(`^(.+?) pass(?:es)?$`, advanceClockByDurationPhrase)
+	sc.Step(durationPassStepPattern, advanceClockByDurationPhrase)
 	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
 	registerSharedRunStartStep(sc)
 	registerSharedRunOutcomeSteps(sc)
+	registerSharedResolutionFailStep(sc)
 }
 
 // matchPutOutcomeShared owns the put phrase for every capability, because godog
@@ -130,6 +141,11 @@ func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
 		cw.rt.Advance(d)
 	} else {
 		w.Core.clock.Advance(d)
+	}
+	if local := w.Local; local != nil {
+		if err := local.timePassed(ctx, d); err != nil {
+			return err
+		}
 	}
 	// A component server times its shutdown drain from the same frozen clock;
 	// advancing its timer here is what "the seconds pass" means.
