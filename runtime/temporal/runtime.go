@@ -22,12 +22,14 @@ type registeredStep struct {
 // Runtime registers the Temporal flow-host workflow and step activities. It
 // does not yet implement runtime.Runtime (WP-L5-02 pull request (c)).
 type Runtime struct {
-	mu        sync.Mutex
-	host      runtime.FlowHost
-	steps     map[string]registeredStep
-	converter converter.DataConverter
-	taskQueue string
-	logger    *slog.Logger
+	mu                  sync.Mutex
+	host                runtime.FlowHost
+	steps               map[string]registeredStep
+	converter           converter.DataConverter
+	taskQueue           string
+	logger              *slog.Logger
+	outbox              Outbox
+	checkpointThreshold int
 }
 
 // New returns a Temporal runtime shell. The shared data converter performs blob
@@ -40,6 +42,9 @@ func New(opts Options) (*Runtime, error) {
 	}
 	if opts.Payloads == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: payload codec is required", nil)
+	}
+	if opts.Outbox == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "temporal: outbox is required", nil)
 	}
 	threshold := opts.ClaimCheckBytes
 	if threshold <= 0 {
@@ -59,11 +64,17 @@ func New(opts Options) (*Runtime, error) {
 	if queue == "" {
 		queue = DefaultTaskQueue
 	}
+	ckptThreshold := opts.CheckpointEventThreshold
+	if ckptThreshold == 0 {
+		ckptThreshold = DefaultCheckpointEventThreshold
+	}
 	return &Runtime{
-		steps:     map[string]registeredStep{},
-		converter: dc,
-		taskQueue: queue,
-		logger:    opts.Logger,
+		steps:               map[string]registeredStep{},
+		converter:           dc,
+		taskQueue:           queue,
+		logger:              opts.Logger,
+		outbox:              opts.Outbox,
+		checkpointThreshold: ckptThreshold,
 	}, nil
 }
 
@@ -116,6 +127,7 @@ func (r *Runtime) Register(reg worker.Registry) error {
 	}
 	reg.RegisterWorkflowWithOptions(r.hostWorkflow, workflow.RegisterOptions{Name: HostWorkflowName})
 	reg.RegisterActivityWithOptions(r.runStepActivity, activity.RegisterOptions{Name: stepActivityName})
+	reg.RegisterActivityWithOptions(r.runEmitActivity, activity.RegisterOptions{Name: emitActivityName})
 	return nil
 }
 

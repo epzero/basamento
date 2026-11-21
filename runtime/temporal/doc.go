@@ -1,10 +1,15 @@
 // Package temporal is the Temporal-backed durable runtime (WP-L5-02).
 //
-// This change delivers the data path: a context-aware payload data converter
-// (tenant encryption and blob claim-check), the flow-host workflow with
-// DurableContext (Context, Now, NewID, Rand, Step, Sleep, Select, Capabilities),
-// and the step activity with exponential backoff retries. Child, Await, Emit and
-// Checkpoint return code unsupported until the next changes of WP-L5-02.
+// Pull request (a) delivers the data path: tenant payload codec, claim-check,
+// flow-host workflow with Step/Sleep/Select, and step activity retries.
+//
+// Pull request (b) delivers gates as Temporal Updates (journal-driven Await),
+// synchronous basamento-emit outbox activity, Child host workflows,
+// Checkpoint/ContinueAsNew with continuation state in HostInput.Continuation,
+// and Capabilities (durable, sync_gate_updates, continue_as_new, polyglot_queues).
+// Flow code must replay durable calls in the same order; step results journal by
+// name. DefaultCheckpointEventThreshold is 2000 events. ContinueAsNew carries the
+// journal, not NewID/Rand counters.
 //
 // Failure messages in Temporal history are plaintext: only core error codes and
 // messages cross the boundary (Details maps are dropped). Non-core errors become
@@ -19,15 +24,11 @@
 // expires the workflow task fails (sanitized panic) and the server retries, and the
 // run outcome is unchanged once I/O succeeds. Client and activity converters treat
 // caller-cancelled contexts as permanent errors.
+// Workers must keep SDK default WorkflowPanicPolicy (BlockWorkflow).
 //
-// Claim-checked blobs are content-addressed and immutable; replay or activity retry
-// may write additional ciphertext blobs with no garbage collection in this phase.
+// New requires Outbox at the composition root; production code includes no
+// in-memory outbox.
 //
-// The composition root uses Options and New; New wraps the payload codec in
-// workflow.DataConverterWithoutDeadlockDetection for workflow-safe blob I/O.
-// (*Runtime).Register wires workers; (*Runtime).DataConverter shares the
-// wrapped converter with clients and workers. Tests and BDD wrap
-// DataConverter to model tenant-aware clients and record history (not in prod).
-//
-// Status: in progress (WP-L5-02, EP0-31); embedded server packaging is WP-L5-03.
+// Status: part (b) delivers workflow features; control plane is pull request (c);
+// embedded server packaging is WP-L5-03.
 package temporal

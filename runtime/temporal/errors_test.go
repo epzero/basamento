@@ -53,7 +53,7 @@ func TestActivityApplicationErrorCoreNonRetryable(t *testing.T) {
 	if app == nil || app.GetType() != "invalid_argument" || !app.GetNonRetryable() {
 		t.Fatal(app)
 	}
-	if f := fcFailure(err); f.GetCause() != nil {
+	if f := temporalFailureFromErr(err); f.GetCause() != nil {
 		t.Fatal("nested cause present")
 	}
 }
@@ -83,7 +83,7 @@ func TestWrapWorkflowErrorCoreCases(t *testing.T) {
 	if app := extractAppFailure(errNr); app == nil || app.GetType() != "invalid_argument" || !app.GetNonRetryable() {
 		t.Fatal(errNr)
 	}
-	if fcFailure(errNr).GetCause() != nil {
+	if temporalFailureFromErr(errNr).GetCause() != nil {
 		t.Fatal("cause on non-retryable")
 	}
 	peR := &core.Error{Code: "vendor_error", Message: "retry", Retryable: true}
@@ -147,12 +147,12 @@ func TestActivityToCoreRoundTrip(t *testing.T) {
 	}
 }
 
-func fcFailure(err error) *commonpb.Failure {
+func temporalFailureFromErr(err error) *commonpb.Failure {
 	return temporal.GetDefaultFailureConverter().ErrorToFailure(err)
 }
 
 func extractAppFailure(err error) *commonpb.ApplicationFailureInfo {
-	f := fcFailure(err)
+	f := temporalFailureFromErr(err)
 	if f == nil {
 		return nil
 	}

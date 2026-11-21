@@ -11,10 +11,22 @@ import (
 )
 
 // clientConverter models a Temporal client that always encodes with the tenant in ctx.
+// base holds the unbound converter from construction; WithContext/WithWorkflowContext
+// always rebind from base, never from a workflow-bound inner, so the SDK test
+// environment does not pass a workflow deadlock detector into activity encodes
+// (real workers use an unbound converter on the activity side).
 type clientConverter struct {
+	base       converter.DataConverter
 	inner      converter.DataConverter
 	tenant     core.TenantID
 	inWorkflow bool
+}
+
+func (c *clientConverter) baseConverter() converter.DataConverter {
+	if c.base != nil {
+		return c.base
+	}
+	return c.inner
 }
 
 func (c *clientConverter) aware() interface {
@@ -28,9 +40,22 @@ func (c *clientConverter) aware() interface {
 	return a
 }
 
+func (c *clientConverter) awareOf(dc converter.DataConverter) interface {
+	WithContext(context.Context) converter.DataConverter
+	WithWorkflowContext(workflow.Context) converter.DataConverter
+} {
+	a, _ := dc.(interface {
+		WithContext(context.Context) converter.DataConverter
+		WithWorkflowContext(workflow.Context) converter.DataConverter
+	})
+	return a
+}
+
 func (c *clientConverter) WithContext(ctx context.Context) converter.DataConverter {
 	out := *c
-	if a := c.aware(); a != nil {
+	base := c.baseConverter()
+	out.base = base
+	if a := c.awareOf(base); a != nil {
 		out.inner = a.WithContext(ctx)
 	}
 	return &out
@@ -39,7 +64,9 @@ func (c *clientConverter) WithContext(ctx context.Context) converter.DataConvert
 func (c *clientConverter) WithWorkflowContext(ctx workflow.Context) converter.DataConverter {
 	out := *c
 	out.inWorkflow = true
-	if a := c.aware(); a != nil {
+	base := c.baseConverter()
+	out.base = base
+	if a := c.awareOf(base); a != nil {
 		out.inner = a.WithWorkflowContext(ctx)
 	}
 	return &out

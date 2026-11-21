@@ -31,4 +31,9 @@ type Options struct {
 	TaskQueue string
 	// Logger records panics and non-core step or flow failures.
 	Logger *slog.Logger
+	// Outbox persists durable progress events (required).
+	Outbox Outbox
+	// CheckpointEventThreshold selects when Checkpoint continues as new; 0 means
+	// DefaultCheckpointEventThreshold (2000); negative disables continue-as-new.
+	CheckpointEventThreshold int
 }

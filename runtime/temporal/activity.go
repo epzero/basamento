@@ -10,8 +10,8 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
-// stepActivityInput is the activity argument for one step invocation.
-type stepActivityInput struct {
+// StepActivityInput is the activity argument for one step invocation.
+type StepActivityInput struct {
 	Name string          `json:"name"`
 	In   json.RawMessage `json:"in"`
 }
@@ -25,7 +25,7 @@ func workflowIDFromActivity(ctx context.Context) string {
 
 // runStepActivity executes one registered step with tenant context and panic
 // recovery (REQ-RT-017).
-func (r *Runtime) runStepActivity(ctx context.Context, in stepActivityInput) (json.RawMessage, error) {
+func (r *Runtime) runStepActivity(ctx context.Context, in StepActivityInput) (json.RawMessage, error) {
 	reg, ok := r.stepFor(in.Name)
 	if !ok {
 		return nil, activityApplicationError(core.NewError(core.CodeUnsupported,
