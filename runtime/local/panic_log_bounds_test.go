@@ -45,6 +45,8 @@ func deepRecurse(step string, n int) {
 	deepRecurse(step, n-1)
 }
 
+// Go elides middle frames in debug.Stack itself for deep recursion, so the
+// 16 KiB cap is covered by TestFormatPanicStackTruncates, not this scenario.
 func TestStepPanicLogBoundsDeepStack(t *testing.T) {
 	log := &captureHandler{}
 	f := newLoggedFixture(t, log)
@@ -62,14 +64,12 @@ func TestStepPanicLogBoundsDeepStack(t *testing.T) {
 	})
 	f.start(t, "acme", "r1", "parent", `{}`)
 	f.waitState(t, "acme", "r1", stateCompleted)
+	const stackLogCap = 16 << 10
 	stack := attrString(log.last(), "stack")
-	if len(stack) > maxPanicStack+len("... (stack truncated)")+1 {
+	if len(stack) > stackLogCap+len("... (stack truncated)")+1 {
 		t.Fatalf("stack len %d, want bounded", len(stack))
 	}
 	if !strings.Contains(stack, "deepRecurse") {
 		t.Fatal("stack should contain panicking function near the top")
-	}
-	if !strings.HasSuffix(stack, "... (stack truncated)") {
-		t.Fatalf("stack missing truncation marker")
 	}
 }
