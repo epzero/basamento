@@ -35,9 +35,9 @@ type authWorld struct {
 
 func newAuthWorld() *authWorld { return &authWorld{} }
 
-func (w *authWorld) sign(now time.Time, audience string, expires time.Time) (string, error) {
-	if w.key == nil {
-		return "", fmt.Errorf("no issuer key: the auth mode is not oidc")
+func (w *authWorld) signWith(key *rsa.PrivateKey, now time.Time, audience string, expires time.Time) (string, error) {
+	if key == nil {
+		return "", fmt.Errorf("no signing key")
 	}
 	claims := jwt.MapClaims{
 		"iss":    w.issuer,
@@ -49,7 +49,11 @@ func (w *authWorld) sign(now time.Time, audience string, expires time.Time) (str
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = "issuer-1"
-	return token.SignedString(w.key)
+	return token.SignedString(key)
+}
+
+func (w *authWorld) sign(now time.Time, audience string, expires time.Time) (string, error) {
+	return w.signWith(w.key, now, audience, expires)
 }
 
 func (w *authWorld) authenticate(ctx context.Context, raw string) error {
@@ -99,17 +103,7 @@ func registerAuth(sc *godog.ScenarioContext) {
 			return fmt.Errorf("test unknown signing key: %w", err)
 		}
 		now := world(ctx).Core.clock.Now()
-		claims := jwt.MapClaims{
-			"iss":    w.issuer,
-			"aud":    w.audience,
-			"sub":    "ana",
-			"iat":    jwt.NewNumericDate(now),
-			"exp":    jwt.NewNumericDate(now.Add(time.Hour)),
-			"tenant": "acme",
-		}
-		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-		token.Header["kid"] = "issuer-1"
-		raw, err := token.SignedString(unknown)
+		raw, err := w.signWith(unknown, now, w.audience, now.Add(time.Hour))
 		if err != nil {
 			return err
 		}

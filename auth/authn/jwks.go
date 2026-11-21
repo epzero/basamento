@@ -54,10 +54,11 @@ type JWKSOptions struct {
 // URL. The set is cached; a token naming an unknown key id may trigger one
 // refresh subject to single-flight and rate limits.
 type JWKS struct {
-	url        string
-	client     *http.Client
-	clock      core.Clock
-	minRefresh time.Duration
+	url          string
+	client       *http.Client
+	clock        core.Clock
+	minRefresh   time.Duration
+	fetchTimeout time.Duration
 
 	mu          sync.RWMutex
 	keys        map[string]any
@@ -101,10 +102,11 @@ func NewJWKS(opts JWKSOptions) (*JWKS, error) {
 		client = defaultJWKSHTTPClient()
 	}
 	return &JWKS{
-		url:        opts.URL,
-		client:     client,
-		clock:      opts.Clock,
-		minRefresh: minRefresh,
+		url:          opts.URL,
+		client:       client,
+		clock:        opts.Clock,
+		minRefresh:   minRefresh,
+		fetchTimeout: jwksFetchTimeout,
 	}, nil
 }
 
@@ -133,6 +135,12 @@ func (j *JWKS) VerificationKey(ctx context.Context, kid string) (any, error) {
 func (j *JWKS) lookupAfterRefresh(ctx context.Context, kid string) (any, error) {
 	waiter, cooldown := j.beginRefresh(ctx)
 	if cooldown {
+		j.mu.RLock()
+		key, ok := j.matchLocked(kid)
+		j.mu.RUnlock()
+		if ok {
+			return key, nil
+		}
 		return nil, ErrUnknownKey
 	}
 	select {
@@ -175,15 +183,13 @@ func (j *JWKS) beginRefresh(ctx context.Context) (*jwksFlight, bool) {
 	j.flightMu.Unlock()
 
 	go func() {
-		defer close(w.done)
-		defer func() {
-			j.flightMu.Lock()
-			j.flight = nil
-			j.flightMu.Unlock()
-		}()
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jwksFetchTimeout)
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), j.fetchTimeout)
 		defer cancel()
 		w.err = j.fetch(fetchCtx)
+		close(w.done)
+		j.flightMu.Lock()
+		j.flight = nil
+		j.flightMu.Unlock()
 	}()
 
 	return w, false
@@ -228,9 +234,6 @@ func (j *JWKS) fetch(ctx context.Context) error {
 	}
 	keys := make(map[string]any, len(set.Keys))
 	for _, key := range set.Keys {
-		if key.Use == "enc" {
-			continue
-		}
 		if key.Use != "" && key.Use != "sig" {
 			continue
 		}
