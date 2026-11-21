@@ -37,7 +37,10 @@ func (r *run) recordedOrClosedChildFuture(id string, flow runtime.FlowRef) (*fut
 }
 
 // linkChild attaches child to the parent journal or returns an existing link.
-// The caller must not hold r.mu.
+// When the parent is no longer running, the child is not linked: it is always
+// stopped with terminate regardless of the named close policy, and the returned
+// future completes cancelled. Close policy still applies to children that
+// linked while the parent was open. The caller must not hold r.mu.
 func (r *run) linkChild(child *run, policy string) *future {
 	r.mu.Lock()
 	for _, link := range r.children {
@@ -64,7 +67,7 @@ func (r *run) linkChild(child *run, policy string) *future {
 		return f
 	}
 	r.mu.Unlock()
-	child.applyParentClose(policy)
 	f.complete(nil, cancelledErr("local: the parent closed before the child was linked"))
+	child.applyParentClose("terminate")
 	return f
 }
