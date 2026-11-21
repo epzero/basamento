@@ -169,15 +169,17 @@ func (w *blobWorld) openAt(ctx context.Context, clock core.Clock, raw string) er
 
 func registerBlob(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
-		w := world(ctx).Blob
-		w.scenarioName = scn.Name
+		w := world(ctx)
+		w.Blob = newBlobWorld()
+		w.Blob.scenarioName = scn.Name
 		var err error
-		w.matrixID, err = matrixIDFromGodogScenario(scn, w.backend)
+		w.Blob.matrixID, err = matrixIDFromGodogScenario(scn, w.Blob.backend)
 		if err != nil {
 			return ctx, err
 		}
 		return ctx, nil
 	})
+	registerFailureSource(callFailurePhrase, "blob", blobCallFailure)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		w := world(ctx).Blob
 		if w.s3 != nil {
@@ -555,6 +557,14 @@ func givenPut(ctx context.Context, tenant, key string, r io.Reader, ctype string
 
 func tenantPut(ctx context.Context, tenant, key string, r io.Reader, ctype string) error {
 	return whenPut(ctx, tenant, key, r, ctype)
+}
+
+func blobCallFailure(ctx context.Context, code string) (bool, error) {
+	w := world(ctx).Blob
+	if w == nil || (w.lastErr == nil && w.openErr == nil) {
+		return false, nil
+	}
+	return true, assertBlobCallCode(ctx, code)
 }
 
 func assertBlobCallCode(ctx context.Context, code string) error {

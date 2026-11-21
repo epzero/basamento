@@ -160,6 +160,10 @@ func assertMapChildFailure(w *flowWorld, code, mapNode, child string) error {
 }
 
 func registerFlowCompile(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Flow = newFlowWorld()
+		return ctx, nil
+	})
 	sc.Step(`^a flow where node "([^"]*)" routes back to node "([^"]*)" and neither has a guard$`,
 		func(ctx context.Context, back, to string) error {
 			w := world(ctx).Flow

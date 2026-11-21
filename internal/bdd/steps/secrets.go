@@ -250,6 +250,11 @@ func tenantCtx(ctx context.Context, tenant string) context.Context {
 }
 
 func registerSecrets(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Secrets = newSecretsWorld()
+		return ctx, nil
+	})
+	registerFailureSource(openingFailurePhrase, "secrets", secretsOpeningFailure)
 	sc.Step(`^the simulated key service holds master key "([^"]*)"$`, func(ctx context.Context, name string) error {
 		w := world(ctx)
 		if w.Secrets == nil {
@@ -1313,4 +1318,15 @@ func crossCodecDecode(ctx context.Context, tenant string) error {
 		return fmt.Errorf("cross decode got %q and %q", out1.Data, out2.Data)
 	}
 	return nil
+}
+
+func secretsOpeningFailure(ctx context.Context, code string) (bool, error) {
+	w := world(ctx).Secrets
+	if w == nil || w.lastErr == nil {
+		return false, nil
+	}
+	if string(core.CodeOf(w.lastErr)) != code {
+		return true, fmt.Errorf("code %s want %s", core.CodeOf(w.lastErr), code)
+	}
+	return true, nil
 }

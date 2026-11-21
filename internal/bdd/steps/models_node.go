@@ -537,6 +537,10 @@ func (w *nodeWorld) clientRef() string {
 }
 
 func registerNode(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Node = newNodeWorld()
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Node; w != nil {
 			w.teardown()

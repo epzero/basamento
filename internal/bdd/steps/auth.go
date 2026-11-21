@@ -66,6 +66,10 @@ func (w *authWorld) authenticate(ctx context.Context, raw string) error {
 }
 
 func registerAuth(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Auth = newAuthWorld()
+		return ctx, nil
+	})
 	sc.Step(`^auth mode "([^"]*)"$`, func(ctx context.Context, mode string) error {
 		m, err := authn.ParseMode(mode)
 		if err != nil {

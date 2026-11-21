@@ -41,6 +41,10 @@ func (w *coreWorld) generator() core.Ids {
 var idBody = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 
 func registerCore(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Core = newCoreWorld()
+		return ctx, nil
+	})
 	sc.Step(`^the clock is frozen at "([^"]*)"$`, func(ctx context.Context, at string) error {
 		t, err := time.Parse(time.RFC3339, at)
 		if err != nil {

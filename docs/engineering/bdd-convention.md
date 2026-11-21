@@ -117,6 +117,11 @@ driver hides the level:
 The same scenario runs at either level by tag. godog prints a skeleton for
 each undefined step; implementers fill it in.
 
+**Shared step texts live in `internal/bdd/steps/shared.go`.** A capability that
+needs a new generic text adds it there, plus a source for its world, and never
+registers a shared text itself; `World` fields and the `register*` calls in
+`Initialize` stay sorted alphabetically.
+
 **No AI in the gate.** AI takes part only in labelled lanes:
 
 | Lane | Where AI acts | Determinism in the PR gate |

@@ -14,6 +14,10 @@ import (
 )
 
 func registerExpr(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Expr = &exprWorld{bindings: map[string]any{}}
+		return ctx, nil
+	})
 	sc.Step(`^an expression environment declaring no variables$`, func(ctx context.Context) error {
 		return exprNewEnv(ctx, nil, nil)
 	})

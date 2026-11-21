@@ -1,5 +1,6 @@
 // Step texts that more than one capability's scenarios use are registered once
-// in this file; EP0-100 will grow a registry to replace ad hoc routing.
+// in this file. A capability that needs a new generic text adds it here and
+// registers a source for its world; it never registers the shared text itself.
 package steps
 
 import (
@@ -11,6 +12,66 @@ import (
 
 	"github.com/cucumber/godog"
 )
+
+// Shared failure phrases. A capability registers one source per phrase from
+// its own register* with registerFailureSource.
+const (
+	callFailurePhrase    = "the call fails with code"
+	openingFailurePhrase = "opening fails with code"
+)
+
+// failureCheck reports whether a capability's world holds a recorded error for
+// the phrase (held), and how the assertion went (err).
+type failureCheck func(ctx context.Context, code string) (held bool, err error)
+
+type failureSource struct {
+	name  string
+	check failureCheck
+}
+
+// failureRegistry keeps the sources of each shared failure phrase. Sources are
+// asked in registration order; the first that holds decides.
+type failureRegistry struct {
+	sources map[string][]failureSource
+}
+
+func newFailureRegistry() *failureRegistry {
+	return &failureRegistry{sources: map[string][]failureSource{}}
+}
+
+func (r *failureRegistry) register(phrase, name string, check failureCheck) {
+	r.sources[phrase] = append(r.sources[phrase], failureSource{name: name, check: check})
+}
+
+func (r *failureRegistry) assert(ctx context.Context, phrase, code string) error {
+	for _, src := range r.sources[phrase] {
+		held, err := src.check(ctx, code)
+		if held {
+			return err
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", src.name, err)
+		}
+	}
+	switch phrase {
+	case callFailurePhrase:
+		return fmt.Errorf("call succeeded, want %s", code)
+	case openingFailurePhrase:
+		return fmt.Errorf("opening succeeded, want %s", code)
+	default:
+		return fmt.Errorf("no failure source for %q", phrase)
+	}
+}
+
+// sharedFailures is reset by Initialize so every godog suite starts clean.
+var sharedFailures = newFailureRegistry()
+
+// registerFailureSource adds a capability's check for a shared failure phrase.
+// held says the world has a recorded error for the phrase; err is the
+// assertion result.
+func registerFailureSource(phrase, name string, check failureCheck) {
+	sharedFailures.register(phrase, name, check)
+}
 
 // timeSink lets shared "N pass" steps advance scenario time on a domain fake.
 type timeSink interface {
@@ -153,4 +214,75 @@ func registerSharedResolutionFailStep(sc *godog.ScenarioContext) {
 		}
 		return fmt.Errorf("no resolution error to assert")
 	})
+}
+
+// durationPassStepPattern is the shared "N … pass" step. It is anchored on a
+// duration phrase parseElapsed accepts so godog's single step namespace is not
+// stolen from capabilities that own sentences ending in "pass" (for example a
+// runtime run start or a worker grace period). Models middleware scenarios say
+// "1 more second passes"; advanceClockByDurationPhrase strips the word "more".
+const durationPassStepPattern = `^(-?\d+ (?:more )?[a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
+
+// registerSharedSteps registers every step text more than one capability
+// writes, including the two failure phrases routed through sharedFailures.
+func registerSharedSteps(sc *godog.ScenarioContext) {
+	sc.Step(`^the call fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		return sharedFailures.assert(ctx, callFailurePhrase, code)
+	})
+	sc.Step(`^opening fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		return sharedFailures.assert(ctx, openingFailurePhrase, code)
+	})
+	sc.Step(durationPassStepPattern, advanceClockByDurationPhrase)
+	sc.Step(`^the put (succeeds|fails with code "[^"]+")$`, matchPutOutcomeShared)
+	registerSharedRunStartStep(sc)
+	registerSharedRunOutcomeSteps(sc)
+	registerSharedResolutionFailStep(sc)
+}
+
+// matchPutOutcomeShared owns the put phrase for every capability, because godog
+// has one step namespace and both the bus and the credentials scenarios say
+// "the put fails with code ...". The KV world is created only for bus scenarios
+// (registerBus) and the credentials world only for credentials ones, so the
+// worlds tell the two apart without reading the text.
+func matchPutOutcomeShared(ctx context.Context, tail string) error {
+	if world(ctx).Bus != nil {
+		return matchPutOutcome(ctx, tail)
+	}
+	if strings.HasPrefix(tail, `fails with code "`) {
+		code := strings.TrimSuffix(strings.TrimPrefix(tail, `fails with code "`), `"`)
+		return credentialsCode(credentialsW(ctx).putErr, code)
+	}
+	return fmt.Errorf("unknown put outcome %q", tail)
+}
+
+func advanceClockByDurationPhrase(ctx context.Context, elapsed string) error {
+	// The middleware scenarios say "1 more second passes" to step the call's
+	// virtual runtime; the word carries no duration of its own.
+	elapsed = strings.Replace(elapsed, " more ", " ", 1)
+	d, err := parseElapsed(elapsed)
+	if err != nil {
+		return err
+	}
+	w := world(ctx)
+	if cw := w.Model.call; cw != nil {
+		// The call runs on its own virtual runtime over the scenario clock, so
+		// advancing it also fires the call's timers and wakes its goroutine.
+		cw.rt.Advance(d)
+	} else {
+		w.Core.clock.Advance(d)
+	}
+	if local := w.Local; local != nil {
+		if err := local.timePassed(ctx, d); err != nil {
+			return err
+		}
+	}
+	// A component server times its shutdown drain from the same frozen clock;
+	// advancing its timer here is what "the seconds pass" means.
+	if w.Config != nil && w.Config.shutdown != nil {
+		w.Config.shutdown.advance(d)
+	}
+	if sink, ok := any(w.Host).(timeSink); ok {
+		return sink.timePassed(ctx, d)
+	}
+	return nil
 }

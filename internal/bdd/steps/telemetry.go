@@ -182,6 +182,10 @@ func (w *telemetryWorld) clockNow() time.Time {
 }
 
 func registerTelemetry(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Telemetry = newTelemetryWorld()
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Telemetry; w != nil {
 			w.teardown()
