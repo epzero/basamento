@@ -9,4 +9,6 @@ High risk: a mistake here leaks data across tenants or grants access.
 - Token validation checks issuer keys, audience and expiry; clock skew
   allowances are explicit and small.
 - Secrets and password hashes never appear in logs, errors or responses.
-- The `none` mode refuses non-loopback addresses.
+- Every auth mode refuses non-loopback listen addresses until request
+  authentication is wired into kit serve; lifting that rule needs the
+  authenticator in the serve path first.

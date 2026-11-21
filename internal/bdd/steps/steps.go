@@ -28,6 +28,7 @@ type World struct {
 	Bus         *busWorld
 	Secrets     *secretsWorld
 	Config      *configWorld
+	Auth        *authWorld
 	Credentials *credentialsWorld
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
@@ -37,6 +38,7 @@ type World struct {
 	Host        *hostWorld
 	Local       *localWorld
 	Temporal    *temporalWorld
+	Eventlog    *eventlogWorld
 }
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
@@ -54,6 +56,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Blob:        newBlobWorld(),
 			Secrets:     newSecretsWorld(),
 			Config:      newConfigWorld(),
+			Auth:        newAuthWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
@@ -76,11 +79,13 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerFlowMachine(sc)
 	registerFlowHost(sc)
 	registerBus(sc)
+	registerEventlog(sc)
 	registerSharedSteps(sc)
 	registerBlobUploads(sc)
 	registerSecrets(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
+	registerAuth(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerCatalog(sc)

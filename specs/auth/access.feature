@@ -1,7 +1,7 @@
 @security
 Feature: Authentication and tenancy
 
-  @planned @REQ-AUTH-001 @wp:WP-L8-01 @level:system @id:AUTH-001-01
+  @REQ-AUTH-001 @wp:WP-L8-01 @level:system @id:AUTH-001-01
   Scenario: The server refuses a public address without auth
     Given auth mode "none"
     When "kit serve" is asked to listen on "0.0.0.0:8080"
@@ -14,7 +14,7 @@ Feature: Authentication and tenancy
     Then the list contains only "acme" runs
     And the fetch fails with code "not_found"
 
-  @planned @REQ-AUTH-003 @wp:WP-L8-01 @level:component @id:AUTH-003-01
+  @REQ-AUTH-003 @wp:WP-L8-01 @level:component @id:AUTH-003-01
   Scenario Outline: Only valid issuer tokens are accepted
     Given auth mode "oidc" with issuer "https://id.example.test" and audience "kit"
     When a request carries a token that is <token>
