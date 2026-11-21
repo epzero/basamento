@@ -56,13 +56,17 @@ func (d *dataConverter) workflowBound() bool {
 func (d *dataConverter) tenantBase() (core.TenantID, context.Context, error) {
 	if d.ctx != nil {
 		if tid, ok := core.TenantFrom(d.ctx); ok {
-			return tid, d.ctx, nil
+			if id := checkedTenant(tid); id != "" {
+				return id, d.ctx, nil
+			}
 		}
 	}
 	if d.wfCtx != nil {
 		if v := d.wfCtx.Value(tenantWorkflowKey{}); v != nil {
-			if id, ok := v.(core.TenantID); ok && id != "" {
-				return id, core.WithTenant(context.Background(), id), nil
+			if id, ok := v.(core.TenantID); ok {
+				if id = checkedTenant(id); id != "" {
+					return id, core.WithTenant(context.Background(), id), nil
+				}
 			}
 		}
 	}

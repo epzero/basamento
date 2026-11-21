@@ -182,7 +182,7 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 					panic(recovered)
 				}
 				var pe *core.Error
-				if errors.As(errorFromPanic(recovered), &pe) {
+				if errors.As(errorFromPanic(recovered, dc.rt.logger), &pe) {
 					early = newImmediate(pe)
 					dc.stepFutures[name] = early
 					return
@@ -291,7 +291,7 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 					panic(recovered)
 				}
 				var pe *core.Error
-				if errors.As(errorFromPanic(recovered), &pe) {
+				if errors.As(errorFromPanic(recovered, dc.rt.logger), &pe) {
 					early = newImmediate(pe)
 					return
 				}

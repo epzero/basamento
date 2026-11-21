@@ -78,7 +78,7 @@ func (dc *durableContext) Emit(ev runtime.ProgressEvent) error {
 					panic(recovered)
 				}
 				var pe *core.Error
-				if errors.As(errorFromPanic(recovered), &pe) {
+				if errors.As(errorFromPanic(recovered, dc.rt.logger), &pe) {
 					early = pe
 				} else {
 					panic(recovered)
@@ -113,7 +113,11 @@ func (dc *durableContext) Emit(ev runtime.ProgressEvent) error {
 }
 
 func (r *Runtime) runEmitActivity(ctx context.Context, in emitActivityInput) error {
-	tenant, _ := core.TenantFrom(ctx)
+	tenant, ok := core.TenantFrom(ctx)
+	if !ok || checkedTenant(tenant) == "" {
+		return activityApplicationError(core.NewError(core.CodeInvalidArgument,
+			"temporal: emit activity has no valid tenant", nil))
+	}
 	runID := runIDFromWorkflowID(tenant, workflowIDFromActivity(ctx))
 	if runID == "" || in.RunID != runID {
 		return activityApplicationError(core.NewError(core.CodeInvalidArgument,

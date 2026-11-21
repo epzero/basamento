@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -42,11 +43,16 @@ func codecTransient(pe *core.Error) bool {
 	}
 }
 
-func errorFromPanic(v any) error {
+func errorFromPanic(v any, logger *slog.Logger) error {
 	if err, ok := v.(error); ok {
 		return err
 	}
-	return fmt.Errorf("%v", v)
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("temporal: non-error panic value in workflow code",
+		slog.String("panic", formatPanicValue(v)))
+	return core.NewError(core.CodeInternal, "temporal: unexpected panic value", nil)
 }
 
 // workflowCodecPolicy applies transient-vs-permanent rules for workflow-bound converter calls.
@@ -66,7 +72,12 @@ func workflowCodecPolicy(wfBound bool, log func(*core.Error), ioCtx context.Cont
 	}
 	var pe *core.Error
 	if !errors.As(err, &pe) {
-		return err
+		// The codec returned text we do not control (store, vendor or blob
+		// detail). Log it bounded; history gets a fixed internal error.
+		if log != nil {
+			log(&core.Error{Code: core.CodeInternal, Message: err.Error()})
+		}
+		return core.NewError(core.CodeInternal, "temporal: payload codec failed", nil)
 	}
 	if log != nil {
 		log(pe)
