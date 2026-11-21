@@ -31,10 +31,9 @@ type temporalWorld struct {
 	blobs  *blob.Store
 	blobAt string
 	enc    *secrets.Codec
-	codec  *temporal.Codec
 	sim    *simKeyRegistry
 
-	version   string
+	version   string // WP-L5-02 (c) compares this to the pinned server release.
 	threshold int
 	attempts  int
 
@@ -42,12 +41,12 @@ type temporalWorld struct {
 	behaviors  map[string]*temporalStepBehavior
 	registered map[string]bool
 
-	faultMode  string
-	faultKey   string
-	faultAfter int
+	faultMode     string
+	faultKey      string
+	faultInjected bool
 
-	recorder     *historyRecorder
-	dataConv     *temporal.DataConverter
+	history      []recordedPayload
+	dataConv     *recordingConverter
 	activeTenant core.TenantID
 
 	lastErr     error
@@ -67,55 +66,6 @@ type recordedPayload struct {
 	metadata   map[string][]byte
 	data       []byte
 	claimCheck bool
-}
-
-type historyRecorder struct {
-	world *temporalWorld
-	enc   *secrets.Codec
-	mu    sync.Mutex
-	seen  []recordedPayload
-	count int
-}
-
-func (h *historyRecorder) maybeFault(enc temporal.Encoded, current *commonpb.Payload) *commonpb.Payload {
-	h.mu.Lock()
-	h.count++
-	n := h.count
-	h.mu.Unlock()
-	h.world.mu.Lock()
-	mode, key, after := h.world.faultMode, h.world.faultKey, h.world.faultAfter
-	h.world.mu.Unlock()
-	if mode == "" || n <= after {
-		return nil
-	}
-	switch mode {
-	case "plain":
-		return &commonpb.Payload{Metadata: map[string][]byte{"encoding": []byte("json/plain")}, Data: []byte(`{"ok":true}`)}
-	case "foreign":
-		marker, _ := json.Marshal(struct {
-			Key  string `json:"key"`
-			Size int    `json:"size"`
-		}{Key: key, Size: 8192})
-		encMarker, err := h.enc.Encode(core.WithTenant(context.Background(), "acme"), secrets.Payload{
-			Metadata: map[string][]byte{"encoding": []byte(temporal.ClaimCheckEncoding)},
-			Data:     marker,
-		})
-		if err != nil {
-			return nil
-		}
-		return &commonpb.Payload{Metadata: encMarker.Metadata, Data: encMarker.Data}
-	}
-	return nil
-}
-
-func (h *historyRecorder) observe(encoded temporal.Encoded) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.seen = append(h.seen, recordedPayload{
-		metadata:   copyMeta(encoded.Payload.Metadata),
-		data:       append([]byte(nil), encoded.Payload.Data...),
-		claimCheck: encoded.ClaimCheck,
-	})
 }
 
 func copyMeta(in map[string][]byte) map[string][]byte {
@@ -144,9 +94,6 @@ func temporalW(ctx context.Context) *temporalWorld {
 }
 
 func (w *temporalWorld) close() {
-	if w.env != nil {
-		w.env.AssertExpectations(nil)
-	}
 	if w.blobs != nil {
 		_ = w.blobs.Close()
 	}
@@ -191,13 +138,11 @@ func (w *temporalWorld) ensureRuntime() error {
 	if w.blobs == nil {
 		return fmt.Errorf("blob store is not prepared")
 	}
-	codec, err := temporal.NewCodec(w.enc, w.blobs, w.threshold)
-	if err != nil {
-		return err
-	}
-	w.codec = codec
-	w.recorder = &historyRecorder{world: w, enc: w.enc}
-	rt, err := temporal.New(temporal.Options{Codec: codec, Blobs: w.blobs, Threshold: w.threshold})
+	rt, err := temporal.New(temporal.Options{
+		Payloads:        w.enc,
+		Blobs:           w.blobs,
+		ClaimCheckBytes: w.threshold,
+	})
 	if err != nil {
 		return err
 	}
@@ -209,14 +154,25 @@ func (w *temporalWorld) ensureRuntime() error {
 	w.env.SetTestTimeout(time.Hour)
 	w.env.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: time.Hour})
 	w.env.SetContextPropagators([]workflow.ContextPropagator{temporal.TenantPropagator{}})
-	rawDC, err := rt.BuildDataConverter(w.recorder.observe)
-	if err != nil {
-		return err
+	w.dataConv = &recordingConverter{
+		inner:    rt.DataConverter(),
+		enc:      w.enc,
+		tenant:   w.activeTenant,
+		recorded: &w.history,
+		faultMode: func() string {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return w.faultMode
+		},
+		faultKey: func() string {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return w.faultKey
+		},
+		faultInjected: &w.faultInjected,
 	}
-	w.dataConv = rawDC.(*temporal.DataConverter)
-	w.dataConv.FaultReplace = w.recorder.maybeFault
 	w.env.SetDataConverter(w.dataConv)
-	if err := rt.RegisterWorkflowsActivities(w.env); err != nil {
+	if err := rt.Register(w.env); err != nil {
 		return err
 	}
 	for name := range w.behaviors {
@@ -225,13 +181,6 @@ func (w *temporalWorld) ensureRuntime() error {
 		}
 	}
 	return nil
-}
-
-func (w *temporalWorld) setDataConverterTenant(tenant core.TenantID) {
-	if w.dataConv == nil {
-		return
-	}
-	w.env.SetDataConverter(w.dataConv.WithFallbackTenant(tenant))
 }
 
 func (w *temporalWorld) setTenantHeader(tenant core.TenantID) {
@@ -300,13 +249,17 @@ func (w *temporalWorld) start(tenant, flowName, runID string) error {
 		return err
 	}
 	id := core.TenantID(tenant)
+	w.mu.Lock()
 	w.activeTenant = id
-	w.setDataConverterTenant(id)
+	w.faultInjected = false
+	w.mu.Unlock()
+	if w.dataConv != nil {
+		w.dataConv.tenant = id
+	}
 	w.setTenantHeader(id)
 	w.env.ExecuteWorkflow(temporal.HostWorkflowName, temporal.HostInput{
-		Flow:   runtime.FlowRef{Name: flowName},
-		RunID:  runID,
-		Tenant: id,
+		Flow:  runtime.FlowRef{Name: flowName},
+		RunID: runID,
 	})
 	w.mu.Lock()
 	w.lastErr = w.env.GetWorkflowError()
@@ -330,14 +283,17 @@ func (w *temporalWorld) runState() string {
 	if err := w.env.GetWorkflowError(); err != nil {
 		return "failed"
 	}
-	return "completed"
+	if w.env.IsWorkflowCompleted() {
+		return "completed"
+	}
+	return "running"
 }
 
 func (w *temporalWorld) recorded() []recordedPayload {
-	w.recorder.mu.Lock()
-	defer w.recorder.mu.Unlock()
-	out := make([]recordedPayload, len(w.recorder.seen))
-	copy(out, w.recorder.seen)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]recordedPayload, len(w.history))
+	copy(out, w.history)
 	return out
 }
 

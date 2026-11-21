@@ -94,17 +94,24 @@ as an activity. This change delivers:
   `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
   `Emit` and `Checkpoint` return `unsupported` until the next changes of
   WP-L5-02.
-- **Step activity** retry mapping aligned with the local runtime (`MaxAttempts`
-  0 → 3, `NonRetryable` codes, core error codes across the boundary).
-- **Registration** (`Runtime.RegisterFlowHost`, `RegisterStep`,
-  `RegisterWorkflowsActivities`) without the control-plane `runtime.Runtime`
-  methods (those arrive in pull request (c)).
+- **Step activity** retries: `MaxAttempts` 0 → 3, listed `NonRetryable` codes and
+  non-retryable `core.Error` values stop after one attempt; Temporal backoff is
+  1 s initial, ×2, cap 100 s (the local runtime retries immediately). Codes and
+  the `Retryable` flag cross the activity boundary on `Future.Get`.
+- **Registration** (`RegisterFlowHost`, `RegisterStep`, `Register`,
+  `DataConverter`) without control-plane `runtime.Runtime` (pull request (c)).
+- **`Capabilities()`** on `DurableContext` reports only `durable` and
+  `polyglot_queues` until pull requests (b) and (c) add gates and ContinueAsNew.
 
-The in-process BDD harness wraps the converter in a recorder and drives
-`testsuite.TestWorkflowEnvironment` with the simulated key service and tenant
-blob store. It proves claim-check, encryption, retry limits, and decode rejects
-for bad history (RT-028…033, RT-041). Real-server version pinning and the
-control plane are WP-L5-02 (c) and WP-L5-03.
+**Plain text in history:** Temporal stores failure messages and the tenant
+header unencrypted; payload bytes go through the codec only. Step authors must
+not put secrets in `core.Error` messages; non-`core.Error` failures become
+`internal` with fixed messages and details go to the logger only.
+
+The BDD harness **decorates** `DataConverter` (records payloads, models the
+client tenant context, injects RT-032/033 faults on activity results). Production
+code has no test hooks. Real-server version pinning is pull request (c) and
+WP-L5-03.
 
 ## 7. Local runtime: behaviours the specs leave open
 

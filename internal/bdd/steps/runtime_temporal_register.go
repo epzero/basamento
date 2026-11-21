@@ -4,24 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/cucumber/godog"
+	sdktemporal "go.temporal.io/sdk/temporal"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform/blob"
 	"github.com/epzero/basamento/runtime"
-	"github.com/epzero/basamento/runtime/temporal"
 )
 
 func registerTemporal(sc *godog.ScenarioContext) {
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
-		if w := temporalW(ctx); w != nil {
+		if w := world(ctx).Temporal; w != nil {
 			w.close()
 		}
 		return ctx, nil
 	})
 
+	// Stored for WP-L5-02 (c) server version pinning; unused in data-path scenarios.
 	sc.Step(`^a Temporal test server at version "([^"]*)"$`, func(ctx context.Context, version string) error {
 		temporalW(ctx).version = version
 		return nil
@@ -61,10 +63,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^a flow calls step "([^"]*)" whose result is (\{.*\}) and returns it$`, func(ctx context.Context, step, result string) error {
 		return temporalW(ctx).addStepFlow("fetch", step, json.RawMessage(result), true, nil)
 	})
-	sc.Step(`^a flow calls step "([^"]*)" that returns (\{.*\})$`, func(ctx context.Context, step, result string) error {
-		return temporalW(ctx).addStepFlow("fetch", step, json.RawMessage(result), true, nil)
-	})
-
 	sc.Step(`^the payload codec claim-check threshold is (\d+) KB$`, func(ctx context.Context, kb int) error {
 		temporalW(ctx).threshold = kb * 1024
 		return nil
@@ -117,7 +115,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	sc.Step(`^step "([^"]*)" recorded an unencrypted payload in the run history of a run on the temporal runtime$`, func(ctx context.Context, step string) error {
 		w := temporalW(ctx)
 		w.faultMode = "plain"
-		w.faultAfter = 2
 		if err := w.addStepFlow("fetch", step, json.RawMessage(`{"ok":true}`), true, nil); err != nil {
 			return err
 		}
@@ -136,7 +133,6 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		}
 		w.faultMode = "foreign"
 		w.faultKey = key
-		w.faultAfter = 2
 		return w.ensureStep("fetch")
 	})
 	sc.Step(`^a run on the temporal runtime for tenant "([^"]*)" has a step "([^"]*)" result in its run history naming that blob's content key$`, func(ctx context.Context, tenant, step string) error {
@@ -163,15 +159,35 @@ func temporalStepFailure(w *temporalWorld, code string) error {
 		return nil
 	}
 	if err == nil && w.env != nil {
-		err = temporal.FromWorkflowError(w.env.GetWorkflowError())
+		err = w.env.GetWorkflowError()
 	}
 	if err == nil {
 		return fmt.Errorf("step succeeded, want %s", code)
 	}
-	if got := string(core.CodeOf(err)); got != code {
+	got := temporalWorkflowErrCode(err)
+	if got != code {
 		return fmt.Errorf("step code %q, want %q", got, code)
 	}
 	return nil
+}
+
+func temporalWorkflowErrCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var pe *core.Error
+	if errors.As(err, &pe) {
+		return string(pe.Code)
+	}
+	var app *sdktemporal.ApplicationError
+	if errors.As(err, &app) {
+		return app.Type()
+	}
+	var wf *sdktemporal.WorkflowExecutionError
+	if errors.As(err, &wf) {
+		return temporalWorkflowErrCode(wf.Unwrap())
+	}
+	return string(core.CodeOf(err))
 }
 
 func (w *temporalWorld) addFlow(name string, fn func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error)) error {

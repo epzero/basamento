@@ -37,6 +37,10 @@ func registerTemporalLocalRunSteps(sc *godog.ScenarioContext) {
 			return err
 		}
 		got := w.output(w.current)
+		if len(got) == 0 && w.currentExec != nil {
+			w.recordOutput(w.current, w.currentExec)
+			got = w.output(w.current)
+		}
 		wantRaw := temporalValue(want)
 		if !jsonEquivalent(got, wantRaw) {
 			return fmt.Errorf("the run returns %s, want %s", got, want)
@@ -77,11 +81,10 @@ func registerTemporalLocalRunSteps(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^step "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, name, code string) error {
-		w := temporalW(ctx)
-		if w.rt == nil {
-			return fmt.Errorf("step %q failure is only on the temporal runtime", name)
+		if tw := world(ctx).Temporal; tw != nil && tw.rt != nil {
+			return temporalStepFailure(tw, code)
 		}
-		return temporalStepFailure(w, code)
+		return fmt.Errorf("step %q failure is only on the temporal runtime", name)
 	})
 }
 
