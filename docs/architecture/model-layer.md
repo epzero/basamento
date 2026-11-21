@@ -311,14 +311,18 @@ a replay prices it the same way. A vendor whose pricing no rule can express
 gets a formula of its own in its descriptor.
 
 Cache writes are part of the contract (ADR-0019 §7). `Usage.InputTokens` is
-the total input: input plus cache reads plus cache creations. `CachedTokens`
-is the cache-read part and `CacheWriteTokens` the cache-creation part, both
-inside `InputTokens`. A rule may set `cache_write`; when it omits it, cache
-writes cost the input rate, and `cache_write: 0` is a rate. The default
-formula prices `I − C − W` at the input rate, `C` at the cached rate, `W` at
-the cache-write rate and `O` at the output rate. A reservation for a request
-with a cache hint counts its counted input tokens as cache-write tokens, so a
-full write is reserved; the settled `CostMpts` includes the write premium.
+the provider's total prompt tokens: the uncached input plus cache reads plus
+cache creations, with each part added only when the provider's count excludes
+it. `CachedTokens` is the cache-read part and `CacheWriteTokens` the
+cache-creation part, both inside `InputTokens`. A rule may set `cache_write`;
+when it omits it, cache writes cost the input rate, and `cache_write: 0` is a
+rate. The default formula prices `I − C − W` at the input rate, `C` at the
+cached rate, `W` at the cache-write rate and `O` at the output rate, and it
+needs the input rate when `I − C − W > 0` and, without `cache_write`, when
+`W > 0`; a negative count and `C + W > I` fail with `invalid_argument`. A
+reservation for a request with a cache hint counts its counted input tokens as
+cache-write tokens, so a full write is reserved; the settled `CostMpts`
+includes the write premium.
 
 The shipped snapshot is generated from a public dataset (LiteLLM's cost map
 or models.dev) and reviewed like a golden file. Nothing fetches prices at run

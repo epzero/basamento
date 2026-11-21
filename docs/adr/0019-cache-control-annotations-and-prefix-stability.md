@@ -293,14 +293,16 @@ free numbers (REQ-MODEL-089 onward):
 
 > **REQ-MODEL-091 — Cache writes are counted and priced**
 > When a provider reports cache reads and cache creations, the adapter shall
-> set `Usage.InputTokens` to the sum of input, cache-read and cache-creation
-> tokens, `Usage.CachedTokens` to the cache-read tokens and
-> `Usage.CacheWriteTokens` to the cache-creation tokens; the default token
-> formula shall price the non-cached, non-write input at the input rate,
-> cached tokens at `rates.cached` when the rule defines it and the input rate
-> otherwise, cache-write tokens at `rates.cache_write` when the rule defines it
-> and the input rate otherwise, and output tokens at the output rate; the
-> invocation's `CostMpts` shall include the cache-write premium.
+> set `Usage.InputTokens` to the provider's total prompt tokens, adding a part
+> only when the provider's count excludes it, `Usage.CachedTokens` to the
+> cache-read tokens and `Usage.CacheWriteTokens` to the cache-creation tokens;
+> the default token formula shall price the non-cached, non-write input at the
+> input rate, cached tokens at `rates.cached` when the rule defines it and the
+> input rate otherwise, cache-write tokens at `rates.cache_write` when the rule
+> defines it and the input rate otherwise, and output tokens at the output
+> rate, failing with `invalid_argument` when a positive cache-write count has
+> neither rate; the invocation's `CostMpts` shall include the cache-write
+> premium.
 
 > **REQ-MODEL-092 — The reservation covers cache writes**
 > When the price table estimates the cost of a call whose request carries a
@@ -332,11 +334,22 @@ Proposed scenarios for caster:
   order, or the same system messages in a different order, have different
   hashes; two requests with the same tools and system messages and different
   dynamic messages have the same hash.
+- `@REQ-MODEL-085 @id:MODEL-085-02`, "A negative cache-write count fails
+  pricing before any formula runs". A call reports a cache-write count of -1;
+  pricing fails with code `invalid_argument` naming model `sim-chat` and field
+  `cache_write_tokens`.
 - `@REQ-MODEL-091 @id:MODEL-091-01`, "Cache writes are counted and priced". A
-  provider reports 7000 input tokens, 4000 cache reads and 2000 cache
-  creations; the usage carries 7000 input, 4000 cached and 2000 cache-write
-  tokens; with rates input 1000, cached 500, cache_write 1250 and output 2000
-  per million and 500 output tokens, the call costs 7 milli-points.
+  provider reports 7000 prompt tokens, of which 4000 are cache reads and 2000
+  cache creations; the usage carries 7000 input (the total), 4000 cached and
+  2000 cache-write tokens; with rates input 1000, cached 500, cache_write 1250
+  and output 2000 per million and 500 output tokens, the call costs
+  `(7000 − 4000 − 2000) × 1000 + 4000 × 500 + 2000 × 1250 + 500 × 2000 =
+  6,500,000` → 7 milli-points.
+- `@REQ-MODEL-091 @id:MODEL-091-02`, "A rule without cache_write prices writes
+  at the input rate". Usage with 1000 input and 500 cache-write tokens on a
+  rule with input 1000 and no `cache_write` costs `500 × 1000 + 500 × 1000 =
+  1,000,000` → 1 milli-point; a rule with neither `cache_write` nor `input`
+  fails with `invalid_argument`.
 - `@REQ-MODEL-092 @id:MODEL-092-01`, "The reservation covers the cache-write
   premium". A request with a cache hint and 7000 counted input tokens reserves
   the write rate for those tokens, so a call that writes the whole prefix does
@@ -357,17 +370,26 @@ same change; automatic prefix caching (OpenAI-compatible, Ollama) needs no
 hint and is unaffected.
 
 - `model.Usage` gains `CacheWriteTokens int64` (additive JSON
-  `cache_write_tokens,omitempty`). `InputTokens` becomes the total input:
-  input + cache reads + cache creations. `CachedTokens` stays the cache-read
-  part and `CacheWriteTokens` the cache-creation part, both inside
-  `InputTokens`.
+  `cache_write_tokens,omitempty`). `InputTokens` is the provider's **total
+  prompt tokens**: the uncached input, the cache reads and the cache
+  creations. `CachedTokens` is the cache-read part and `CacheWriteTokens` the
+  cache-creation part, both inside `InputTokens`; an adapter never adds a part
+  to a count that already includes it. eino's `PromptTokens` is already that
+  total and `PromptTokenDetails` is its `CachedTokens`/`CacheWriteTokens`
+  breakdown, so `model/chat`'s `usageOf` maps `InputTokens = PromptTokens`,
+  `CachedTokens = PromptTokenDetails.CachedTokens` and `CacheWriteTokens =
+  PromptTokenDetails.CacheWriteTokens`. Only a vendor whose reported prompt
+  count excludes cache reads or creations gets them added by its adapter.
 - A rate rule gains `cache_write` beside `input`, `output` and `cached`. A rule
   that omits it prices cache-write tokens at the input rate, as it does for
-  cached tokens; `cache_write: 0` is a rate.
+  cached tokens; `cache_write: 0` is a rate. The default formula therefore
+  needs the `input` rate when `I − C − W > 0` and, when `cache_write` is
+  absent, whenever `W > 0`.
 - The default formula is
   `(I − C − W) × input + C × cached + W × cache_write + O × output`, where
   `I`, `C`, `W` and `O` are input, cached, cache-write and output tokens. The
-  `C > I` check becomes `C + W > I`.
+  `C > I` check becomes `C + W > I`, and `validateUsage` rejects a negative
+  `W` like the other counts.
 - The reservation estimate includes the write premium: for a request with a
   cache hint, the estimate counts the call's counted input tokens as
   cache-write tokens, so a full write is reserved. The actual usage settles
@@ -377,8 +399,9 @@ hint and is unaffected.
 - This supersedes the "Cache writes are not priced" note in
   `specs/models/design.md` C3; the spec change that adds REQ-MODEL-091/092
   updates that note. REQ-MODEL-075 and REQ-MODEL-082 remain true for `W = 0`;
-  the spec change adds the `W` term to the default formula and the combined
-  `C + W > I` check.
+  the spec change adds the `W` term to the default formula, the combined
+  `C + W > I` check and `cache_write_tokens` to REQ-MODEL-085's field list
+  (re-locks, P1).
 
 ## Non-goals
 
@@ -502,16 +525,17 @@ mapping note from `specs/prompt/design.md`, and the split cache-hint rows from
 | `specs/prompt/design.md` | Intro and §4: the `cache_after` mapping; the vendor mapping is ADR-0019's. | this change |
 | `specs/glossary.md` | Split the prompt and model cache hints and the two prefix hashes. | this change |
 | `model/model.go` | `CacheHint`, `Request.Cache`, `PrefixHash`, `Usage.CacheWriteTokens`. | WP-L3-01 (done); changed by WP-L3-04 |
-| `model/chat/chat.go` | `CacheAnnotator`; ignore an annotator error. | WP-L3-01 (done); changed by WP-L3-04 |
+| `model/chat/chat.go` | `CacheAnnotator`; ignore an annotator error; `usageOf` maps `InputTokens`, `CachedTokens` and `CacheWriteTokens` from `PromptTokens` and `PromptTokenDetails`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `model/providers/` | Provider composition root and per-vendor annotators. | WP-L3-04 |
-| `model/catalog/price.go` | `rates.cache_write`, the default formula and the reservation estimate. | WP-L3-06 (done); changed by WP-L3-04 |
+| `model/catalog/price.go` | `rates.cache_write`, the default formula, `validateUsage` (negative `W`, `C + W > I`), the missing-rate checks and the reservation estimate. | WP-L3-06 (done); changed by WP-L3-04 |
 | `contracts/basamento/invoke/v1/invoke.proto` | Additive `StartRequest.cache`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `contracts/basamento/worker` | Additive cache hint in the worker start request. | WP-L3-07 |
 | `agent/handler.go` | Set and journal the hint; include cache writes in the reservation. | WP-L7-01 |
-| `specs/models/requirements.md` | REQ-MODEL-089 to REQ-MODEL-092. | caster, after this ADR |
+| `specs/models/requirements.md` | REQ-MODEL-089 to REQ-MODEL-092; `cache_write_tokens` in REQ-MODEL-085 and the `W` term in REQ-MODEL-082 (re-locks, P1). | caster, after this ADR |
 | `specs/models/contract.feature` | MODEL-089-01..04 and MODEL-090-01. | caster |
-| `specs/models/cost.feature` | MODEL-091-01 and MODEL-092-01..02. | caster |
-| `specs/models/design.md` | Replace the "Cache writes are not priced" note with §7's contract. | caster |
+| `specs/models/catalog.feature` | MODEL-085-02. | caster |
+| `specs/models/cost.feature` | MODEL-091-01..02 and MODEL-092-01..02. | caster |
+| `specs/models/design.md` | C3: `Usage` has five fields, the `W` term, `C + W > I` and the negative-`W` check; C4: the cache-aware estimate; remove the "Cache writes are not priced" note. | caster |
 | `specs/agents/requirements.md` | REQ-AGENT-031. | caster |
 | `specs/agents/cache.feature` | AGENT-031-01 and AGENT-031-02. | caster |
 
