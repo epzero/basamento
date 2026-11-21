@@ -21,12 +21,13 @@ func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered a
 	}
 	attrs := []any{
 		"tenant", string(tenant),
-		"run", runID,
 		"panic", formatPanicValue(recovered),
 		"stack", formatPanicStack(debug.Stack()),
 	}
 	if step != "" {
-		attrs = append(attrs, "step", step)
+		attrs = append(attrs, "workflow", runID, "step", step)
+	} else {
+		attrs = append(attrs, "run", runID)
 	}
 	logger.Error("temporal runtime recovered a panic", attrs...)
 }

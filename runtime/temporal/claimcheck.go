@@ -3,8 +3,10 @@ package temporal
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
+	"math"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/platform"
@@ -104,11 +106,9 @@ func (c *payloadCodec) Decode(ctx context.Context, p secrets.Payload) (secrets.P
 		return secrets.Payload{}, err
 	}
 	defer func() { _ = r.Close() }()
-	// marker.Size is the encrypted inner Data length; the blob is JSON (base64) around it.
-	const maxBlobRead = 1 << 20
-	readCap := int64(marker.Size)*2 + 8192
-	if readCap > maxBlobRead {
-		readCap = maxBlobRead
+	readCap, err := claimCheckBlobReadLimit(marker.Size)
+	if err != nil {
+		return secrets.Payload{}, err
 	}
 	raw, err := io.ReadAll(io.LimitReader(r, readCap+1))
 	if err != nil {
@@ -129,4 +129,21 @@ func (c *payloadCodec) Decode(ctx context.Context, p secrets.Payload) (secrets.P
 		return secrets.Payload{}, core.NewError(core.CodeInvalidArgument, "temporal: claim-checked blob is not encrypted", nil)
 	}
 	return c.enc.Decode(ctx, enc)
+}
+
+// claimCheckBlobReadLimit is the maximum JSON blob size for a marker inner ciphertext
+// of size bytes (tenant-authenticated marker.Size). Base64 expansion plus JSON wrapper.
+func claimCheckBlobReadLimit(size int) (int64, error) {
+	if size <= 0 {
+		return 0, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-check marker", nil)
+	}
+	if size > (math.MaxInt32-2)/4*3 {
+		return 0, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-check marker", nil)
+	}
+	encLen := int64(base64.StdEncoding.EncodedLen(size))
+	const jsonWrapper = 8192
+	if encLen > math.MaxInt64-jsonWrapper {
+		return 0, core.NewError(core.CodeInvalidArgument, "temporal: malformed claim-check marker", nil)
+	}
+	return encLen + jsonWrapper, nil
 }
