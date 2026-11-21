@@ -307,6 +307,16 @@ func validateReachable(f *flow.IR) error {
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
+		// A map starts its child from the node's spec, with no edge into it,
+		// so reaching the map reaches the child too. validateMaps has already
+		// proven the child exists; continuation then follows the child's
+		// outgoing edges, which is where the machine routes after the fan-out.
+		if node, ok := f.Nodes[current]; ok && node.Kind == "map" {
+			if child, err := mapChild(current, node); err == nil && !reached[child] {
+				reached[child] = true
+				queue = append(queue, child)
+			}
+		}
 		for _, next := range out[current] {
 			if next == Fail || reached[next] {
 				continue

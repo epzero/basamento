@@ -410,6 +410,46 @@ func TestValidateAcceptsRunnableMapDefinition(t *testing.T) {
 	}
 }
 
+// A map starts its child from spec.node, with no edge into the child, so the
+// child is reachable through the map alone.
+func TestValidateAcceptsMapChildWithoutIncomingEdge(t *testing.T) {
+	f := mapFlow()
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout_item", To: Fail},
+	}
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Continuation after a map comes from the child's outgoing edges: verify is
+// reachable only through fanout_item, not through an edge from the map.
+func TestValidateMapChildEdgeCarriesReachabilityOnward(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["verify"] = flow.Node{Kind: "task"}
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout_item", To: "verify"},
+		{From: "verify", To: Fail},
+	}
+	if err := Validate(f); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The map-child rule widens reachability; it does not excuse a node that no
+// path reaches.
+func TestValidateStillRejectsUnreachableNodeBesideMap(t *testing.T) {
+	f := mapFlow()
+	f.Nodes["orphan"] = flow.Node{Kind: "task"}
+	f.Edges = []flow.Edge{
+		{From: Start, To: "fanout"},
+		{From: "fanout_item", To: Fail},
+	}
+	requireInvalid(t, Validate(f), `node "orphan"`, "unreachable")
+}
+
 // The child checks depend on "node" alone: an empty over is an expression
 // defect flow/compile judges, not a reason to skip them (EP0-149).
 func TestValidateRejectsUndeclaredChildWithEmptyOver(t *testing.T) {

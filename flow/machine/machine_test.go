@@ -476,6 +476,47 @@ func TestMapFansOutOverTheState(t *testing.T) {
 	assertState(t, snapshot, `{"items":[1,2,3],"out":[1,2,3]}`)
 }
 
+// Continuation after a map comes from the child's outgoing edges, not from an
+// edge out of the map node: the barrier routes every step it ran, and a map
+// emits steps for its child.
+func TestMapContinuationRoutesFromTheChild(t *testing.T) {
+	def := &flow.IR{
+		Name:    "map-continuation",
+		Version: 1,
+		State: flow.StateSpec{
+			Schema:   json.RawMessage(`{"type":"object","properties":{"items":{"type":"array"},"out":{"type":"array"}}}`),
+			Reducers: map[string]string{"out": "append"},
+		},
+		Nodes: map[string]flow.Node{
+			"fan":   {Kind: "map", Spec: json.RawMessage(`{"over":"state.items","node":"work"}`)},
+			"work":  {Kind: "task", Out: "out"},
+			"after": {Kind: "task"},
+		},
+		Edges: []flow.Edge{
+			{From: ir.Start, To: "fan"},
+			{From: "work", To: "after"},
+		},
+	}
+	m := requireMachine(t, def)
+	snapshot, commands, err := m.Start(json.RawMessage(`{"items":[1,2]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("commands %+v, want two", commands)
+	}
+	for i := range commands {
+		payload, _ := json.Marshal(i + 1)
+		snapshot, commands, err = m.Apply(snapshot, flow.Event{Type: "node_completed", Node: "work", Attempt: i + 1, Payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(commands) != 1 || commands[0].Type != "run_node" || commands[0].Node != "after" {
+		t.Fatalf("commands %+v, want run_node for after", commands)
+	}
+}
+
 func TestRejectsUncompilableExpression(t *testing.T) {
 	def := triageFlow()
 	def.Edges[1].When = "state.missing == 0"

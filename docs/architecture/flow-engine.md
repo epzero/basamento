@@ -42,14 +42,13 @@ nodes:
   repair: { kind: agent, spec: { agent: fixer }, guard: { max_visits: 3, cost_mpts: 5000 } }
   review: { kind: gate, spec: { schema: "review.json", accept_if: "input.approved || size(input.notes) > 0", timeout: "72h" } }
 edges:
-  - { from: START,  to: plan }
-  - { from: plan,   to: impl }
-  - { from: impl,   to: impl_module }
-  - { from: impl,   to: verify }
-  - { from: verify, to: review, when: "state.tests.failed == 0" }
-  - { from: verify, to: repair, when: "state.tests.failed > 0" }
-  - { from: verify, to: FAIL }
-  - { from: repair, to: verify }
+  - { from: START,       to: plan }
+  - { from: plan,        to: impl }
+  - { from: impl_module, to: verify }
+  - { from: verify,      to: review, when: "state.tests.failed == 0" }
+  - { from: verify,      to: repair, when: "state.tests.failed > 0" }
+  - { from: verify,      to: FAIL }
+  - { from: repair,      to: verify }
 ```
 
 Node kinds: `set` (pure CEL assignment inside flow code), `task`, `model` (any
@@ -108,7 +107,9 @@ validates the IR and compiles its expressions, then `Start` and `Apply` run it.
   `START` must not carry a condition (`New` rejects it).
 - **Map children**: at `New`, every `map` node's `spec.node` must name an
   existing node whose kind is one the host runs (not `set`, `map` or `parallel`),
-  must not carry a guard, and must not be shared by two map nodes.
+  must not carry a guard, and must not be shared by two map nodes. A map's
+  child needs no incoming edge — the map starts it once per element — and
+  continuation after the map comes from the child's outgoing edges.
 - **Node kinds**: `set` nodes and routing are evaluated in the machine with no
   command (REQ-FLOW-036). A node with no `in` mapping receives the run's input
   as its command input. A `parallel` node starts every node named by its
