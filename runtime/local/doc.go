@@ -8,6 +8,7 @@
 // goroutines, and every timer waits on the core.Clock the composition root
 // supplies; the package never reads the wall clock or sleeps. Recovered panics
 // are written once to Options.Logger (default slog.Default()) with tenant, run,
-// step and stack; error values returned to callers omit the panic text. See
+// step and a bounded stack; error values returned to callers omit the panic text.
+// See
 // specs/runtime/design.md §Local runtime and ADR-0002.
 package local

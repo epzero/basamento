@@ -286,7 +286,8 @@ func (dc *durableContext) Capabilities() runtime.Caps { return dc.run.rt.Capabil
 // ends (REQ-RT-015). Re-attach with the same parent run, flow and id returns the
 // first call's future and keeps its policy; a closed or shutting-down parent
 // returns cancelled without starting a new run unless the child is already
-// recorded on the journal.
+// recorded on the journal. Concurrent Child calls for the same id from several
+// goroutines have no defined call order; the call that links first sets policy.
 func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOptions) runtime.Future {
 	r := dc.run
 	policy, err := childPolicy(o.ParentClose)

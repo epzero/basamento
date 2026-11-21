@@ -91,8 +91,9 @@ behaviour is spec-silent and covered only by unit tests or this document.
 | Timer wakes before `Now()` reaches the deadline re-arm for the remaining duration; a timer never completes until `Now() >= deadline` | RT-008 (unit tests) |
 | Duplicate `Start` with the same `RunID` in one tenant → `conflict` | RT-046-01 |
 | Non-empty `StartRequest.IdempotencyKey` deduplicates within a tenant; empty key does not; keys do not cross tenants | RT-047 / RT-048 |
-| Panic in the flow host → failed run, process survives; panic value logged once per recovery (not in errors returned to callers) | spec-silent (unit tests) |
-| Panic in a registered step → `internal` step error, not retried, process survives; panic value logged once per recovery | spec-silent (unit tests) |
+| Panic in the flow host → failed run, process survives; panic value logged once per recovery, bounded in size (not in errors returned to callers) | spec-silent (unit tests) |
+| Panic in a registered step → `internal` step error, not retried, process survives; panic value and stack logged once per recovery, bounded | spec-silent (unit tests) |
+| `Cancel` truncates the caller's reason to 256 runes in the cancellation message | spec-silent (unit tests) |
 | `Resolve` accepts any payload; `GateSpec.Schema` and `AcceptIf` validation (FLOW-006-01) arrives with WP-L5-04 | spec-silent here; FLOW-006-01 planned (WP-L5-04) |
 | `Child` re-attach: same parent run and flow (name and hash) returns the existing child; otherwise `conflict` | RT-049 / RT-050 |
 | `Child` re-attach to an already-linked child returns the first call's future; the first close policy wins, later policies are ignored | spec-silent (unit tests) |

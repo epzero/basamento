@@ -24,8 +24,8 @@ type Options struct {
 	// IDs issues run ids when StartRequest.RunID is empty. nil means ULIDs
 	// over Clock.
 	IDs core.Ids
-	// Logger receives one Error record per recovered flow-host or step panic. nil
-	// means slog.Default().
+	// Logger receives one Error record per recovered flow-host or step panic, with
+	// panic value and stack capped (see logPanic). nil means slog.Default().
 	Logger *slog.Logger
 }
 
