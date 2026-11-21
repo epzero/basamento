@@ -59,10 +59,11 @@ scenarios:
         reqs:
             - REQ-MODEL-004
         tier: P0
-        author: claude-code:spec-author:34bca5
-        reviewer: antigravity:spec-reviewer:cc9645
-        approved_at: "2026-11-01"
-        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:1c21de
+        approved_at: "2026-11-21"
+        note: 'Money safety: model-node client ref stays stable across retries of one logical invocation, including after a transient rejection or an unacknowledged start (REQ-MODEL-004 restored; MODEL-004-01).'
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
@@ -1096,10 +1097,11 @@ scenarios:
         reqs:
             - REQ-MODEL-064
         tier: P0
-        author: claude-code:spec-author:c5ea10
-        reviewer: antigravity:spec-reviewer:039bb8
-        approved_at: "2026-11-17"
-        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:56a69a
+        approved_at: "2026-11-21"
+        note: REQ-MODEL-064 adds structured between metering and retry (seven-stage chain). Aligns with design.md §1b, model/middleware/doc.go and docs/architecture/model-layer.md §5. Scenario text unchanged; re-approval for agreed requirement-behavior change (EP0-164).
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
@@ -1110,10 +1112,11 @@ scenarios:
         reqs:
             - REQ-MODEL-064
         tier: P0
-        author: claude-code:spec-author:c5ea10
-        reviewer: antigravity:spec-reviewer:039bb8
-        approved_at: "2026-11-17"
-        note: 'Cost safety: the shared attempt budget, retries, waits, timeouts, client refs and per-attempt metering bound what a call can spend and prevent double charges; MODEL-063-01 is security: the call log keeps no secret or content.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:56a69a
+        approved_at: "2026-11-21"
+        note: REQ-MODEL-064 adds structured between metering and retry (seven-stage chain). Aligns with design.md §1b, model/middleware/doc.go and docs/architecture/model-layer.md §5. Scenario text unchanged; re-approval for agreed requirement-behavior change (EP0-164).
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
