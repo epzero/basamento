@@ -184,6 +184,20 @@ the chain continues and the next agent receives the target's turns too.
 
 ## 5. Memory policy
 
+Despite the section title, `buildMessages` and the rules below are the agent
+node's context-window policy: they keep or drop the turns of one model turn's
+working memory so it fits `input_tokens`, and estimate the weight of messages
+that declare none, storing nothing and persisting nothing between runs. The
+name "memory policy" is kept for compatibility with REQ-AGENT-023–027, but it
+is not cross-run memory. Memory that outlives a run — facts about the codebase,
+what earlier runs did, how to do a thing — and permission gating and lifecycle
+policy (run the formatter after every edit, log every tool call) belong to the
+host: the composition root and the flow placed around the agent node, which
+takes System messages and an `input_tokens` limit and does the rest by replay.
+An in-loop policy engine for these concerns would add a non-deterministic
+second policy engine, which the constitution (article 3, determinism/replay)
+rejects.
+
 Before each model turn the agent loop builds the turn's messages: the system
 messages, the completed model turns (each turn's assistant message paired with
 the tool-result messages that followed it; a turn with `k` tool calls is `1 + k`
