@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"math/rand/v2"
 	"testing"
@@ -605,5 +606,142 @@ func TestClientRefsAreScopedToTheRun(t *testing.T) {
 	other, _ := newRun(2)
 	if other == first {
 		t.Fatalf("two runs share the client ref %q", first)
+	}
+}
+
+func TestHandleRejectsAGateHandleFromAnotherInvocation(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, _ model.Request) (model.Handle, error) {
+		return model.Handle{}, retryable()
+	}
+	inv.lookup = func(string) (*model.Handle, error) {
+		return nil, core.NewError(core.CodeUnsupported, "no lookup", nil)
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	dc := &fakeDC{
+		ctx:   WithBudget(t.Context(), NewMemory(5000)),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+		// One gate serves the whole run; this handle belongs to another node.
+		gatePayload: json.RawMessage(`{"handle":{"id":"v-other","client_ref":"mn_other"}}`),
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeAmbiguousStart {
+		t.Fatalf("err = %v, want ambiguous_start", err)
+	}
+	var ce *core.Error
+	if !errors.As(err, &ce) || ce.Details["cause"] != "handle_ref_mismatch" {
+		t.Fatalf("err = %v, want a handle_ref_mismatch detail", err)
+	}
+	// The starter's own lookup (1) was the ambiguous resolution attempt; the
+	// mismatched gate handle must not trigger another one or a follow.
+	if inv.lookups != 1 {
+		t.Fatalf("lookups = %d, want only the starter's 1", inv.lookups)
+	}
+}
+
+func TestHandleFailsSuccessfulOutputsWithoutABlobStore(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateSucceeded, Outputs: []model.Output{{URL: "https://vendor.test/a.png"}}}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+
+	_, err := runNode(t, h, reg, t.Context(), NewMemory(5000), `{"params":{"duration_s":5}}`)
+	if core.CodeOf(err) != core.CodeInternal {
+		t.Fatalf("err = %v, want internal: outputs need a blob store", err)
+	}
+}
+
+func TestHandleNeverLetsIngestMaskCancellation(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// Outputs with no blob store would fail ingestion; cancellation must win.
+	inv.result = model.Result{State: model.StateSucceeded, Outputs: []model.Output{{URL: "https://vendor.test/a.png"}}}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dc := &fakeDC{
+		ctx:   WithBudget(ctx, NewMemory(5000)),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+}
+
+func TestHandleDoesNotIngestAFailedInvocation(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{
+		State:   model.StateFailed,
+		Error:   json.RawMessage(`{"code":"vendor_error","message":"nope"}`),
+		Outputs: []model.Output{{URL: "https://vendor.test/a.png"}},
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+
+	_, err := runNode(t, h, reg, t.Context(), NewMemory(5000), `{"params":{"duration_s":5}}`)
+	if core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("err = %v, want the provider's failure, not an ingest error", err)
+	}
+}
+
+func TestRegisterBoundsTheStepMemo(t *testing.T) {
+	t.Parallel()
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: newScriptInvoker(), Catalog: videoCatalog(t), Steps: reg})
+	fn := func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }
+	for i := 0; i <= maxRegisteredSteps+1; i++ {
+		if err := h.register(fmt.Sprintf("model.step-%d", i), fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.mu.Lock()
+	size := len(h.registered)
+	h.mu.Unlock()
+	if size > maxRegisteredSteps {
+		t.Fatalf("registered memo holds %d names, want at most %d", size, maxRegisteredSteps)
+	}
+}
+
+// conflictRegistrar reports every registration as a conflict, like a runtime
+// whose step names were registered from the flow definition first.
+type conflictRegistrar struct{ calls int }
+
+func (r *conflictRegistrar) RegisterStep(string, runtime.StepFunc, runtime.StepDefaults) error {
+	r.calls++
+	return core.NewError(core.CodeConflict, "already registered", nil)
+}
+
+func TestRegisterTreatsAConflictAsSuccess(t *testing.T) {
+	t.Parallel()
+	reg := &conflictRegistrar{}
+	h, err := New(Deps{Invoker: newScriptInvoker(), Catalog: videoCatalog(t), Steps: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := func(context.Context, json.RawMessage) (json.RawMessage, error) { return nil, nil }
+	if err := h.register("model.generate.start.ref", fn); err != nil {
+		t.Fatalf("register = %v, want conflict tolerated", err)
+	}
+	if reg.calls != 1 {
+		t.Fatalf("registrations = %d, want 1", reg.calls)
 	}
 }

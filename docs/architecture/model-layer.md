@@ -107,7 +107,8 @@ The `model` node is a node handler in `model/node` (ADR-0011):
 4. **Follow** events to the bus (`streaming.md`), and wait for the result in a
    heartbeating step, or through a gate resolved by a webhook.
 5. **Ingest** output files into content-addressed blob storage with provenance
-   (REQ-MODEL-008).
+   (REQ-MODEL-008). Outputs from a successful invocation with no blob store
+   configured fail the node instead of being dropped.
 6. **Settle**: charge the actual cost or release the reservation. The cost is
    the provider's, or else the price formula on the actual usage. Every priced
    invocation reserves against the run's budget; a priced call with no run
