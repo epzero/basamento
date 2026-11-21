@@ -59,10 +59,11 @@ scenarios:
         reqs:
             - REQ-MODEL-004
         tier: P0
-        author: claude-code:spec-author:34bca5
-        reviewer: antigravity:spec-reviewer:cc9645
-        approved_at: "2026-11-01"
-        note: 'Money safety: idempotent starts, ambiguous starts, reservation, budget and cancellation settlement.'
+        author: opencode:spec-author:14c2fa
+        reviewer: cursor:spec-reviewer:1c21de
+        approved_at: "2026-11-21"
+        note: 'Money safety: model-node client ref stays stable across retries of one logical invocation, including after a transient rejection or an unacknowledged start (REQ-MODEL-004 restored; MODEL-004-01).'
+        ref: https://github.com/epzero/basamento/pull/137
         human:
             status: accepted
             by: human:epzero
