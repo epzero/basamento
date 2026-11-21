@@ -89,8 +89,9 @@ func Initialize(sc *godog.ScenarioContext) {
 // durationPassStepPattern is the shared "N … pass" step. It is anchored on a
 // duration phrase parseElapsed accepts so godog's single step namespace is not
 // stolen from capabilities that own sentences ending in "pass" (for example a
-// runtime run start or a worker grace period).
-const durationPassStepPattern = `^(-?\d+ [a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
+// runtime run start or a worker grace period). Models middleware scenarios say
+// "1 more second passes"; advanceClockByDurationPhrase strips the word "more".
+const durationPassStepPattern = `^(-?\d+ (?:more )?[a-z]+(?: \d+ [a-z]+)*) pass(?:es)?$`
 
 func registerSharedSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the call fails with code "([^"]*)"$`, assertCallFailsWithCode)

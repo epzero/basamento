@@ -19,6 +19,7 @@ func TestDurationPassStepPattern(t *testing.T) {
 		{step: "365 days pass", want: "365 days"},
 		{step: "0 seconds pass", want: "0 seconds"},
 		{step: "-5 seconds pass", want: "-5 seconds"},
+		{step: "1 more second passes", want: "1 more second"},
 	}
 	for _, tt := range match {
 		t.Run("match/"+tt.step, func(t *testing.T) {
@@ -37,7 +38,7 @@ func TestDurationPassStepPattern(t *testing.T) {
 		`the lease of worker "w1" expires and the grace period passes`,
 		"250 milliseconds pass on the clock",
 		"time passes",
-		"1 more second passes",
+		"more seconds pass",
 	}
 	for _, step := range noMatch {
 		t.Run("no/"+step, func(t *testing.T) {
