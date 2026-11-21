@@ -118,7 +118,10 @@ the same change that first uses it.
 | **Prompt template** | A prompt stored under an id and a version (`<id>@<version>`, the **template reference**) that never changes once registered in the **prompt registry**. It declares its inputs, each `trusted` or not, and is made of segments. |
 | **Segment** | A named part of a prompt template of one kind: `static`, `semi-static`, `dynamic`, `history` or `user`. A **segment budget** is the most characters it may hold; a template may also have a **total budget**. |
 | **Assembled prompt** | What the **assembler** makes from a template reference, inputs and history: segments in order, history trimmed to fit, a content hash. |
-| **Cache hint** | The mark an assembled prompt carries after its **cacheable prefix**, the `static` and `semi-static` segments; the **prefix hash** identifies that prefix. |
+| **Cache hint (prompt)** | The `cache_after` mark an assembled prompt carries after its **cacheable prefix**, the `static` and `semi-static` segments; the **prompt prefix hash** identifies that prefix. |
+| **Cache hint (model)** | `model.CacheHint`: up to three advisory, vendor-neutral breakpoints in a model request — the last non-empty system message, the last non-empty tool definition and the last non-empty message block. A provider adapter maps it or ignores it; it never fails an invocation. |
+| **Prompt prefix hash** | The SHA-256 of an assembled prompt's rendered `static` and `semi-static` parts, which identifies its cacheable prefix (REQ-PROMPT-013). |
+| **Model prefix hash** | `model.PrefixHash`: the SHA-256 of a request's tool definitions in request order followed by its system messages in request order, order-sensitive; it identifies the stable cacheable prefix across agent turns and is internal (ADR-0019). |
 | **Untrusted value** | An input value not declared `trusted`, or a history entry. The assembler wraps it in **untrusted-content delimiters** labelled with its source. |
 | **Prompt lint** | The checks run on a prompt template before it is registered, and on an assembled prompt; each finding has a rule, a severity (`error` or `warning`) and a segment. |
 | **Setting** | One configuration key of a `kit` process, written with dots (`listen.addr`). Each process reads settings from flags, environment variables, a configuration file and defaults. |

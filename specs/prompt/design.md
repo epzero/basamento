@@ -1,10 +1,10 @@
 # Prompt: design
 
 Decisions the implementer of WP-L3-05 follows. The package `prompt` imports
-only `core` (`layering.yaml`); callers such as `agent` hand the assembled
-prompt to the model layer. The prompt-level hint is `cache_after`; the
-model-level hint is `model.CacheHint` and the vendor mapping is the provider
-adapters' (ADR-0019). Neither is part of this package.
+only `core` (`layering.yaml`); callers hand the assembled prompt to the model
+layer. The prompt-level hint is `cache_after`; the model-level hint is
+`model.CacheHint` and the vendor mapping is the provider adapters'
+(ADR-0019). Neither is part of this package.
 
 ## 1. Templates and references
 
@@ -79,15 +79,21 @@ An assembled prompt holds:
 - the template reference it was assembled from.
 
 `cache_after` is the prompt-level form of the model layer's system
-breakpoint: a caller that hands the assembled prompt to the model layer sets
-`model.CacheHint.System` when `cache_after` is non-empty (ADR-0019). The
-model layer's tool and rolling-message breakpoints are not prompt segments;
-the caller sets them from the request it builds. `prefix_hash` stays the hash
-of the prompt's cacheable parts; the model layer's `model.PrefixHash` covers
-the tool definitions as well.
+breakpoint. A caller that maps an assembled prompt to a model request places
+the `static` and `semi-static` parts in system messages and the `dynamic`,
+`history` and `user` parts in non-system messages. It sets
+`model.CacheHint.System` only when the last system message ends exactly at
+`cache_after`. When that precondition fails — for example a dynamic part
+follows the boundary, or the boundary falls inside a system message — the
+caller sets no system breakpoint and the request proceeds unannotated; the
+invocation never fails for it (ADR-0019). The model layer's tool and
+rolling-message breakpoints are not prompt segments; the caller sets them from
+the request it builds. `prefix_hash` stays the hash of the prompt's cacheable
+parts; the model layer's `model.PrefixHash` covers the tool definitions as
+well and is order-sensitive over tools then system messages.
 
-Hashes cover a canonical encoding, so they do not depend on input order or Go
-map order (REQ-PROMPT-007).
+The prompt hashes cover a canonical encoding, so they do not depend on input
+order or Go map order (REQ-PROMPT-007).
 
 ## 5. Untrusted values
 
