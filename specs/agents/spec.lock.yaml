@@ -466,7 +466,7 @@ scenarios:
             - REQ-AGENT-031
         tier: P2
         author: caster:spec-author:d823bf
-        reviewer: cursor:spec-reviewer:99c8d6
+        reviewer: cursor:spec-reviewer:496725
         approved_at: "2026-11-21"
         note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
         ref: https://github.com/epzero/basamento/pull/159
@@ -478,7 +478,7 @@ scenarios:
             - REQ-AGENT-031
         tier: P2
         author: caster:spec-author:d823bf
-        reviewer: cursor:spec-reviewer:99c8d6
+        reviewer: cursor:spec-reviewer:496725
         approved_at: "2026-11-21"
         note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
         ref: https://github.com/epzero/basamento/pull/159
@@ -490,7 +490,7 @@ scenarios:
             - REQ-AGENT-032
         tier: P2
         author: caster:spec-author:d823bf
-        reviewer: cursor:spec-reviewer:99c8d6
+        reviewer: cursor:spec-reviewer:496725
         approved_at: "2026-11-21"
         note: Input seed and no-user-message backstop before reserve or invoke (ADR-0011 handler contract).
         ref: https://github.com/epzero/basamento/pull/159
