@@ -786,6 +786,62 @@ func TestMemoryPolicyWeighsTurnsWithoutUsage(t *testing.T) {
 	}
 }
 
+// CR2-01: a turn with no recorded usage weighs every string the assistant
+// produced, not only Content. A reasoning-only reply or a multi-content part
+// carries the same bulk as text and must not slip under the input token limit.
+func TestMemoryPolicyWeighsAssistantOutputParts(t *testing.T) {
+	big := strings.Repeat("x", 4000)
+	marshal := func(m *schema.Message) json.RawMessage {
+		t.Helper()
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{"reasoning", marshal(&schema.Message{Role: schema.Assistant, ReasoningContent: big})},
+		{"multi-content text", json.RawMessage(`{"role":"assistant","multi_content":[{"type":"text","text":"` + big + `"}]}`)},
+		{"assistant-generated text", marshal(&schema.Message{Role: schema.Assistant, AssistantGenMultiContent: []schema.MessageOutputPart{
+			{Type: schema.ChatMessagePartTypeText, Text: big},
+		}})},
+		{"assistant-generated reasoning", marshal(&schema.Message{Role: schema.Assistant, AssistantGenMultiContent: []schema.MessageOutputPart{
+			{Type: schema.ChatMessagePartTypeReasoning, Reasoning: &schema.MessageOutputReasoning{Text: big}},
+		}})},
+		{"tool arguments", marshal(&schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+			{ID: "call-1", Type: "function", Function: schema.FunctionCall{Name: "search", Arguments: big}},
+		}})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			turns := []agent.Turn{{Message: tc.raw}}
+			if _, _, err := agent.BuildMessagesForTest(nil, turns, 1000); core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("err = %v, want invalid_argument; the %s was free", err, tc.name)
+			}
+			if _, _, err := agent.BuildMessagesForTest(nil, turns, 0); err != nil {
+				t.Fatalf("no limit: %v", err)
+			}
+		})
+	}
+}
+
+// CR2-01: the estimate charges one envelope token per message, not one per
+// part, so many small parts are weighed by their bytes and do not inflate a
+// turn past the limit on envelopes alone.
+func TestMemoryPolicyCountsOneEnvelopePerTurn(t *testing.T) {
+	parts := make([]string, 200)
+	for i := range parts {
+		parts[i] = `{"type":"text","text":"x"}`
+	}
+	raw := json.RawMessage(`{"role":"assistant","multi_content":[` + strings.Join(parts, ",") + `]}`)
+	if _, _, err := agent.BuildMessagesForTest(nil, []agent.Turn{{Message: raw}}, 100); err != nil {
+		t.Fatalf("err = %v; 200 one-byte parts must weigh their bytes, not one envelope each", err)
+	}
+}
+
 // TestMemoryPolicyProperty checks the retention invariant over random token
 // costs: whatever is kept stays within the limit, includes the first turn, and
 // is the first turn plus a suffix of the latest turns.

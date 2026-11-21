@@ -133,18 +133,90 @@ func turnTokens(t Turn) int64 {
 }
 
 // assistantTokens estimates a recorded model turn's weight when its step
-// reported no usage: its content and tool-call arguments at four bytes per
-// token, plus the message envelope.
+// reported no usage. It weighs every string the assistant produced - text,
+// reasoning, the parts of legacy multi-content and assistant-generated
+// content, and each tool call's id, type, name and arguments - at four bytes
+// per token, rounded up, plus one token for the message envelope. The string
+// set mirrors the chat adapter's payload walk (model/chat/output.go
+// foreachAssistantOutputString, tool calls included); the loop does not import
+// the adapter, so the two walks are kept in step by hand. A turn that puts its
+// bulk in reasoning or a multi-content part must not weigh as if it were
+// empty.
 func assistantTokens(raw json.RawMessage) int64 {
 	var m schema.Message
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return (int64(len(raw)) + 3) / 4
 	}
-	total := contentTokens(m.Content)
-	for _, call := range m.ToolCalls {
-		total += contentTokens(call.Function.Arguments)
+	bytes := 0
+	forEachAssistantString(&m, func(s string) { bytes += len(s) })
+	return 1 + (int64(bytes)+3)/4
+}
+
+// forEachAssistantString calls fn for every string of an assistant message
+// that travels back to the model. It mirrors foreachAssistantOutputString in
+// model/chat/output.go with tool calls included, without depending on the chat
+// adapter package.
+func forEachAssistantString(m *schema.Message, fn func(string)) {
+	fn(m.Content)
+	fn(m.ReasoningContent)
+	for i := range m.ToolCalls {
+		call := &m.ToolCalls[i]
+		fn(call.ID)
+		fn(call.Type)
+		fn(call.Function.Name)
+		fn(call.Function.Arguments)
 	}
-	return total
+	// MultiContent is deprecated in eino but ConcatMessages still merges it.
+	for i := range m.MultiContent {
+		part := &m.MultiContent[i]
+		fn(part.Text)
+		if part.ImageURL != nil {
+			fn(part.ImageURL.URL)
+			fn(part.ImageURL.URI)
+		}
+		if part.AudioURL != nil {
+			fn(part.AudioURL.URL)
+			fn(part.AudioURL.URI)
+		}
+		if part.VideoURL != nil {
+			fn(part.VideoURL.URL)
+			fn(part.VideoURL.URI)
+		}
+		if part.FileURL != nil {
+			fn(part.FileURL.URL)
+			fn(part.FileURL.URI)
+		}
+	}
+	for i := range m.AssistantGenMultiContent {
+		part := &m.AssistantGenMultiContent[i]
+		fn(part.Text)
+		if part.Reasoning != nil {
+			fn(part.Reasoning.Text)
+		}
+		if part.Image != nil {
+			appendMessagePartCommon(part.Image.MessagePartCommon, fn)
+		}
+		if part.Audio != nil {
+			appendMessagePartCommon(part.Audio.MessagePartCommon, fn)
+		}
+		if part.Video != nil {
+			appendMessagePartCommon(part.Video.MessagePartCommon, fn)
+		}
+	}
+}
+
+// appendMessagePartCommon passes the string fields of a media part to fn.
+func appendMessagePartCommon(c schema.MessagePartCommon, fn func(string)) {
+	if c.URL != nil {
+		fn(*c.URL)
+	}
+	if c.Base64Data != nil {
+		fn(*c.Base64Data)
+	}
+	if c.FileID != nil {
+		fn(*c.FileID)
+	}
+	fn(c.MIMEType)
 }
 
 // contentTokens estimates a message's input tokens at four bytes per token,
