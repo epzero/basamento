@@ -319,12 +319,9 @@ type ctxHonoringKeySet struct {
 	key any
 }
 
-func (c ctxHonoringKeySet) VerificationKey(ctx context.Context, kid string) (any, error) {
+func (c ctxHonoringKeySet) VerificationKey(ctx context.Context, _ string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if kid != "" {
-		return c.key, nil
 	}
 	return c.key, nil
 }
@@ -337,6 +334,7 @@ func TestOIDCAuthenticateMapsContextErrors(t *testing.T) {
 	cases := map[string]struct {
 		keys     KeySet
 		ctx      context.Context
+		token    string
 		wantCode core.Code
 	}{
 		"key set cancelled": {
@@ -354,6 +352,12 @@ func TestOIDCAuthenticateMapsContextErrors(t *testing.T) {
 			ctx:      func() context.Context { c, cancel := context.WithCancel(context.Background()); cancel(); return c }(),
 			wantCode: core.CodeCancelled,
 		},
+		"parse fails before key function on cancelled ctx": {
+			keys:     ctxHonoringKeySet{key: &key.PublicKey},
+			ctx:      func() context.Context { c, cancel := context.WithCancel(context.Background()); cancel(); return c }(),
+			token:    "not.a.token",
+			wantCode: core.CodeUnauthenticated,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -363,7 +367,11 @@ func TestOIDCAuthenticateMapsContextErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = verifier.Authenticate(tc.ctx, raw)
+			token := raw
+			if tc.token != "" {
+				token = tc.token
+			}
+			_, err = verifier.Authenticate(tc.ctx, token)
 			if core.CodeOf(err) != tc.wantCode {
 				t.Fatalf("code = %s, want %s", core.CodeOf(err), tc.wantCode)
 			}
