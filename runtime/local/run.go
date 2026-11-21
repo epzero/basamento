@@ -108,7 +108,7 @@ func (r *run) execute() {
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				err = flowPanicErr(recovered)
+				err = flowPanicErr()
 				r.rt.logPanic(r.tenant, r.id, "", recovered)
 			}
 		}()

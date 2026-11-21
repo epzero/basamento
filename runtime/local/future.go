@@ -117,13 +117,13 @@ func invalidErr(message string, details map[string]any) error {
 
 // flowPanicErr turns a recovered host panic into a failed run. The panic value is
 // logged, not attached as Cause, so callers never see it through Error().
-func flowPanicErr(recovered any) error {
+func flowPanicErr() error {
 	return core.NewError(core.CodeInternal, "local: the flow host panicked", nil)
 }
 
 // stepPanicErr turns a recovered step panic into a non-retryable step error. The
 // wrapper is deliberately not marked retryable, so runStep's retryable check ends
 // attempts after the first panic. The panic value is logged, not Cause.
-func stepPanicErr(step string, recovered any) error {
+func stepPanicErr(step string) error {
 	return core.NewError(core.CodeInternal, "local: the step panicked", map[string]any{"step": step})
 }

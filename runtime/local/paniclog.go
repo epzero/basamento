@@ -8,6 +8,9 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// logPanic records one Error for a recovered flow or step panic. It runs outside
+// the run lock from the recovering goroutine. A nil Runtime logger uses
+// slog.Default() at call time.
 func (r *Runtime) logPanic(tenant core.TenantID, runID, step string, recovered any) {
 	logger := r.logger
 	if logger == nil {

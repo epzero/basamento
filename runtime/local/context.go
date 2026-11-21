@@ -108,7 +108,7 @@ func (r *run) runStep(f *future, step string, fn runtime.StepFunc, in json.RawMe
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					err = stepPanicErr(step, recovered)
+					err = stepPanicErr(step)
 					r.rt.logPanic(r.tenant, r.id, step, recovered)
 				}
 			}()
@@ -168,7 +168,7 @@ func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
 
 	go func() {
 		defer r.rt.wg.Done()
-		r.waitTimer(timer, func() {
+		r.waitTimer(timer, nil, func() {
 			if !f.Ready() {
 				f.complete(nil, cancelledErr("timer cancelled"))
 			}
@@ -207,7 +207,11 @@ func (dc *durableContext) Await(spec runtime.GateSpec) runtime.Future {
 		go func() {
 			defer r.rt.wg.Done()
 			defer r.gateTimeouts.Add(-1)
-			r.waitGateTimeout(timer, g, stop)
+			r.waitTimer(timer, stop, func() {
+				if !g.future.Ready() {
+					g.future.complete(nil, cancelledErr("gate cancelled"))
+				}
+			})
 		}()
 	}
 	r.mu.Unlock()
@@ -278,18 +282,16 @@ func (dc *durableContext) Checkpoint(runtime.SnapshotRef) error { return nil }
 func (dc *durableContext) Capabilities() runtime.Caps { return dc.run.rt.Capabilities() }
 
 // Child starts a child run of flow in the parent's tenant and returns a future
-// for its output (REQ-RT-014). The parent's close policy applies when the
-// parent ends (REQ-RT-015).
+// for its output (REQ-RT-014). The parent's close policy applies when the parent
+// ends (REQ-RT-015). Re-attach with the same parent run, flow and id returns the
+// first call's future and keeps its policy; a closed or shutting-down parent
+// returns cancelled without starting a new run unless the child is already
+// recorded on the journal.
 func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOptions) runtime.Future {
 	r := dc.run
-	policy := o.ParentClose
-	if policy == "" {
-		policy = defaultParentClose
-	}
-	switch policy {
-	case "terminate", "request_cancel", "abandon":
-	default:
-		return failedFuture(r, invalidErr(fmt.Sprintf("local: unknown parent close policy %q", policy), map[string]any{"policy": policy}))
+	policy, err := childPolicy(o.ParentClose)
+	if err != nil {
+		return failedFuture(r, err)
 	}
 	raw, err := rawInput(in)
 	if err != nil {
@@ -300,16 +302,8 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 		id = dc.NewID("child")
 	}
 	r.mu.Lock()
-	for _, link := range r.children {
-		if link.run.id == id && link.run.flow == flow {
-			r.mu.Unlock()
-			return link.future
-		}
-	}
-	if r.state != stateRunning || r.shuttingDown {
+	if f, ok := r.recordedOrClosedChildFuture(id, flow); ok {
 		r.mu.Unlock()
-		f := newFuture(r)
-		f.complete(nil, cancelledErr("local: the parent is closed"))
 		return f
 	}
 	r.mu.Unlock()
@@ -318,35 +312,7 @@ func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOpt
 	if err != nil {
 		return failedFuture(r, err)
 	}
-
-	r.mu.Lock()
-	for _, link := range r.children {
-		if link.run == child {
-			r.mu.Unlock()
-			return link.future
-		}
-	}
-	f := newFuture(r)
-	child.mu.Lock()
-	if child.state == stateRunning {
-		child.waiters = append(child.waiters, f)
-	}
-	out, childErr := child.output, child.err
-	state := child.state
-	child.mu.Unlock()
-	if state != stateRunning {
-		f.complete(out, childErr)
-	}
-
-	if r.state == stateRunning && !r.shuttingDown {
-		r.children = append(r.children, &childLink{run: child, policy: policy, future: f})
-		r.mu.Unlock()
-		return f
-	}
-	r.mu.Unlock()
-	child.applyParentClose(policy)
-	f.complete(nil, cancelledErr("local: the parent closed before the child was linked"))
-	return f
+	return r.linkChild(child, policy)
 }
 
 func mergeOptions(o, d runtime.StepOptions) runtime.StepOptions {

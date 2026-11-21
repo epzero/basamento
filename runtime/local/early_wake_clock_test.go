@@ -2,10 +2,12 @@ package local
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/runtime"
 )
@@ -15,6 +17,7 @@ import (
 type manualAfterClock struct {
 	*coretest.FakeClock
 	afterCalls chan time.Duration
+	done       chan struct{}
 
 	mu      sync.Mutex
 	pending []*manualWake
@@ -26,11 +29,15 @@ type manualWake struct {
 	out  chan time.Time
 }
 
-func newManualAfterClock(at time.Time) *manualAfterClock {
-	return &manualAfterClock{
+func newManualAfterClock(t *testing.T, at time.Time) *manualAfterClock {
+	t.Helper()
+	c := &manualAfterClock{
 		FakeClock:  coretest.NewFakeClock(at),
 		afterCalls: make(chan time.Duration, 8),
+		done:       make(chan struct{}),
 	}
+	t.Cleanup(func() { close(c.done) })
+	return c
 }
 
 func (c *manualAfterClock) After(d time.Duration) <-chan time.Time {
@@ -40,8 +47,11 @@ func (c *manualAfterClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Unlock()
 	c.afterCalls <- d
 	go func() {
-		<-w.fire
-		w.out <- time.Time{}
+		select {
+		case <-w.fire:
+			w.out <- time.Time{}
+		case <-c.done:
+		}
 	}()
 	return w.out
 }
@@ -58,17 +68,23 @@ func (c *manualAfterClock) fire(d time.Duration) {
 	}
 }
 
-func TestSleepRearmsOnEarlyWake(t *testing.T) {
-	clock := newManualAfterClock(time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+func manualFixture(t *testing.T, clock *manualAfterClock) *fixture {
+	t.Helper()
 	f := &fixture{clock: clock.FakeClock, host: testHost{}}
 	var err error
-	f.rt, err = New(Options{Clock: clock})
+	f.rt, err = New(Options{Clock: clock, Logger: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.rt.RegisterFlowHost(f.host.Run); err != nil {
 		t.Fatal(err)
 	}
+	return f
+}
+
+func TestSleepRearmsOnEarlyWake(t *testing.T) {
+	clock := newManualAfterClock(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	f := manualFixture(t, clock)
 	defer f.close(t)
 
 	sleeping := make(chan struct{})
@@ -93,7 +109,7 @@ func TestSleepRearmsOnEarlyWake(t *testing.T) {
 	if second != 6*time.Second {
 		t.Fatalf("re-arm After %v, want 6s", second)
 	}
-	pollUntil(t, "sleep still running", func() bool { return f.state(t, "acme", "r1") == stateRunning })
+	// Re-arm observation is the happens-before anchor: sleep must not complete yet.
 	select {
 	case err := <-done:
 		t.Fatalf("sleep completed early: %v", err)
@@ -101,23 +117,15 @@ func TestSleepRearmsOnEarlyWake(t *testing.T) {
 	}
 	clock.Set(clock.Now().Add(6 * time.Second))
 	clock.fire(6 * time.Second)
-	if err := <-done; err != nil {
+	if err := recvWithin(t, done, "sleep completion"); err != nil {
 		t.Fatalf("sleep after real deadline: %v", err)
 	}
 	f.waitState(t, "acme", "r1", stateCompleted)
 }
 
-func TestGateTimeoutRearmsOnEarlyWake(t *testing.T) {
-	clock := newManualAfterClock(time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
-	f := &fixture{clock: clock.FakeClock, host: testHost{}}
-	var err error
-	f.rt, err = New(Options{Clock: clock})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.rt.RegisterFlowHost(f.host.Run); err != nil {
-		t.Fatal(err)
-	}
+func TestGateTimeoutEarlyWakeTimesOut(t *testing.T) {
+	clock := newManualAfterClock(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	f := manualFixture(t, clock)
 	defer f.close(t)
 
 	atGate := make(chan struct{})
@@ -129,20 +137,42 @@ func TestGateTimeoutRearmsOnEarlyWake(t *testing.T) {
 	f.start(t, "acme", "r1", "waiting", `{}`)
 	waitOn(t, "gate wait", atGate)
 
-	first := recvWithin(t, clock.afterCalls, "gate timeout After")
-	if first != time.Hour {
-		t.Fatalf("first After %v, want 1h", first)
-	}
+	recvWithin(t, clock.afterCalls, "first gate After")
 	clock.Set(clock.Now().Add(10 * time.Minute))
 	clock.fire(time.Hour)
+	recvWithin(t, clock.afterCalls, "re-arm gate After")
 
-	second := recvWithin(t, clock.afterCalls, "gate timeout re-arm")
-	if second != 50*time.Minute {
-		t.Fatalf("re-arm %v, want 50m", second)
+	clock.Set(clock.Now().Add(50 * time.Minute))
+	clock.fire(50 * time.Minute)
+	f.waitState(t, "acme", "r1", stateFailed)
+}
+
+func TestGateTimeoutEarlyWakeResolveWins(t *testing.T) {
+	clock := newManualAfterClock(t, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
+	f := manualFixture(t, clock)
+	defer f.close(t)
+
+	atGate := make(chan struct{})
+	f.flow("waiting", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		wait := dc.Await(runtime.GateSpec{Name: "approve", Timeout: time.Hour})
+		close(atGate)
+		return nil, wait.Get(nil)
+	})
+	f.start(t, "acme", "r1", "waiting", `{}`)
+	waitOn(t, "gate wait", atGate)
+	target := f.rt.lookup(core.TenantID("acme"), "r1")
+	if target == nil {
+		t.Fatal("run not found")
 	}
-	pollUntil(t, "still running after early wake", func() bool { return f.state(t, "acme", "r1") == stateRunning })
+
+	recvWithin(t, clock.afterCalls, "first gate After")
+	clock.Set(clock.Now().Add(10 * time.Minute))
+	clock.fire(time.Hour)
+	recvWithin(t, clock.afterCalls, "re-arm gate After")
+
 	if err := f.rt.Resolve(tenantCtx("acme"), runtime.RunRef{RunID: "r1"}, "approve", json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
+	waitGateTimeouts(t, target, 0)
 	f.waitState(t, "acme", "r1", stateCompleted)
 }

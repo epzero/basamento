@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	goruntime "runtime"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func newFixture(t *testing.T, at time.Time) *fixture {
 	clock := coretest.NewFakeClock(at)
 	f := &fixture{clock: clock, host: testHost{}}
 	var err error
-	f.rt, err = New(Options{Clock: clock, IDs: &coretest.SeqIds{}})
+	f.rt, err = New(Options{Clock: clock, IDs: &coretest.SeqIds{}, Logger: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

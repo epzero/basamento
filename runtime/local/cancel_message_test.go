@@ -1,6 +1,10 @@
 package local
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestCancelMessageBoundsReason(t *testing.T) {
 	long := make([]byte, 10_000)
@@ -14,7 +18,7 @@ func TestCancelMessageBoundsReason(t *testing.T) {
 }
 
 func TestCancelMessageRuneBoundary(t *testing.T) {
-	// 255 ASCII bytes plus one 3-byte rune; cut at 256 bytes must not split the rune.
+	// 255 ASCII runes plus one 3-byte rune; cut at 256 runes must not split the rune.
 	prefix := make([]byte, 255)
 	for i := range prefix {
 		prefix[i] = 'a'
@@ -24,6 +28,25 @@ func TestCancelMessageRuneBoundary(t *testing.T) {
 	if got != "run cancelled: "+string(prefix)+"€" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+func TestCancelMessage300EuroSigns(t *testing.T) {
+	reason := strings.Repeat("€", 300)
+	got := cancelMessage(reason)
+	want := "run cancelled: " + strings.Repeat("€", 256)
+	if got != want {
+		t.Fatalf("got len %d runes %d, want 256 euros", len(got), utf8.RuneCountInString(got))
+	}
+}
+
+func TestCancelMessageInvalidUTF8InCutRegion(t *testing.T) {
+	reason := strings.Repeat("a", 255) + "\xff" + strings.Repeat("b", 100)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("cancelMessage panicked: %v", r)
+		}
+	}()
+	_ = cancelMessage(reason)
 }
 
 func TestCancelMessageEmptyAndExact(t *testing.T) {

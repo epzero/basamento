@@ -59,10 +59,14 @@ func TestAbandonChildLeavesGrandchildRunning(t *testing.T) {
 	})
 	f.flow("parent", func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
 		dc.Child(runtime.FlowRef{Name: "child"}, nil, runtime.ChildOptions{ID: "c1", ParentClose: "abandon"})
-		return json.RawMessage(`{}`), nil
+		return nil, dc.Await(runtime.GateSpec{Name: "parent-hold"}).Get(nil)
 	})
 	f.start(t, "acme", "p1", "parent", `{}`)
 	waitOn(t, "child tree ready", treeReady)
+	f.waitState(t, "acme", "gc1", stateRunning)
+	if err := f.rt.Resolve(tenantCtx("acme"), runtime.RunRef{RunID: "p1"}, "parent-hold", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
 	f.waitState(t, "acme", "p1", stateCompleted)
 	f.waitState(t, "acme", "c1", stateRunning)
 	f.waitState(t, "acme", "gc1", stateRunning)

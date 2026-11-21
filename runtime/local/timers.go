@@ -96,26 +96,29 @@ func (r *run) fireDue(signaled *runTimer) time.Duration {
 	return rearm
 }
 
-func (r *run) waitTimer(timer *runTimer, onCancel func()) {
+// waitTimer waits for timer wakes until the timer future is ready, the run
+// context is cancelled (onCancel runs once), or stop is closed when non-nil.
+// A nil stop never selects on stop (used by Sleep). An early After wake
+// re-arms for the remaining duration because REQ-RT-008 requires the runtime
+// clock to reach the deadline before the timer completes.
+func (r *run) waitTimer(timer *runTimer, stop <-chan struct{}, onCancel func()) {
 	for {
-		select {
-		case <-timer.wake:
-			remaining := r.fireDue(timer)
-			if timer.future.Ready() {
+		if stop == nil {
+			select {
+			case <-timer.wake:
+				remaining := r.fireDue(timer)
+				if timer.future.Ready() {
+					return
+				}
+				if remaining > 0 {
+					timer.wake = r.rt.after(remaining)
+				}
+			case <-r.ctx.Done():
+				onCancel()
 				return
 			}
-			if remaining > 0 {
-				timer.wake = r.rt.after(remaining)
-			}
-		case <-r.ctx.Done():
-			onCancel()
-			return
+			continue
 		}
-	}
-}
-
-func (r *run) waitGateTimeout(timer *runTimer, g *gate, stop <-chan struct{}) {
-	for {
 		select {
 		case <-timer.wake:
 			remaining := r.fireDue(timer)
@@ -128,9 +131,7 @@ func (r *run) waitGateTimeout(timer *runTimer, g *gate, stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-r.ctx.Done():
-			if !g.future.Ready() {
-				g.future.complete(nil, cancelledErr("gate cancelled"))
-			}
+			onCancel()
 			return
 		}
 	}

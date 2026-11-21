@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	goruntime "runtime"
 	"sync"
 	"time"
@@ -98,7 +99,11 @@ func (w *localWorld) runtimeLocked(ctx context.Context) *local.Runtime {
 	if w.registered == nil {
 		w.registered = map[string]bool{}
 	}
-	rt, err := local.New(local.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	rt, err := local.New(local.Options{
+		Clock:  world(ctx).Core.clock,
+		IDs:    &coretest.SeqIds{},
+		Logger: slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
 		panic(err)
 	}
