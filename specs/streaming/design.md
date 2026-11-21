@@ -1,8 +1,9 @@
 # Streaming designs
 
-Decisions the implementer must follow, on top of the requirements. Scope here:
-the durable event log and relay (WP-L6-01, REQ-STRM-008 … 022, 024, 025); deltas,
-snapshots and reattach are REQ-STRM-001 … 007 and `docs/architecture/streaming.md` §2–3.
+Decisions the implementer must follow, on top of the requirements. Scope: the
+durable event log and relay (WP-L6-01, REQ-STRM-008 … 022, 024, 025) and live
+streaming with reattach (WP-L6-02, REQ-STRM-001 … 007); deltas, snapshots and
+reattach are `docs/architecture/streaming.md` §2–3.
 
 ## Durable event log and relay (WP-L6-01)
 
@@ -94,6 +95,50 @@ REQ-STRM-015). The test-only store wrapper and bus in `_test.go` /
 `internal/bdd` call a hook when the point is reached and return an error or
 drop the process, so every point is hit deterministically. There is no
 timing in the gate.
+
+## Live streaming and reattach (WP-L6-02)
+
+### Location
+
+`stream`, which may import only `core` and `platform` (`layering.yaml`). It
+uses `stream/eventlog` for durable events and `platform.Bus` for the deltas'
+retention and cross-server publication.
+
+### Attach
+
+`Broker.Attach(ctx, runID, cursor)` replays `eventlog.Read` after `cursor.Seq`
+under the run's lock and registers the attachment before releasing it, so no
+durable event can fall between the replay and the live stream (REQ-STRM-002,
+REQ-STRM-007). It then sends one `Snapshot` per message still in flight, with
+the text received so far and the last `dseq`, so the live deltas start at
+`dseq + 1` (REQ-STRM-003). A cursor past the end replays nothing
+(REQ-STRM-021) and the tenant always comes from `core.TenantFrom`
+(REQ-STRM-022, REQ-STRM-025).
+
+### Producers
+
+`Publish` numbers the delta per message, keeps its text for snapshots and
+publishes it on `run.<run_id>.deltas`. `Reset` clears the partial text, takes
+the message's next `dseq` and reaches the client before the new attempt's
+deltas (REQ-STRM-004). `CompleteMessage` writes `message.completed` with the
+final text and `dseq`, so a reattach after completion still sees the text once
+(REQ-STRM-002).
+
+### Cancellation and detach
+
+`Cancel` closes the run's cancellation channel, records every in-flight message
+as interrupted with the text received so far and moves the run to `cancelled`
+(REQ-STRM-005). A producer learns of it on `Heartbeat`, which is why a step
+stops within one heartbeat interval; publishing after it fails with `cancelled`.
+`EnforceDetachPolicies` runs on the `core.Clock`: when the last attachment
+detaches, it starts `on_detach`'s duration and cancels the run once the clock
+passes it, unless a client reattaches first (REQ-STRM-006).
+
+### Fault injection in the gate
+
+The scenarios move the fake clock and drive the broker through the scripted
+model and the `platform.Bus` fake in `internal/bdd`; no test sleeps or reads
+the wall clock.
 
 ## Open questions
 
