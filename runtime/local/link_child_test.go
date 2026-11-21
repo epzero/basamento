@@ -193,7 +193,11 @@ func TestLinkChildAfterParentClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.waitState(t, "acme", "p1", stateCancelled)
-		if err := parent.linkChild(child, "abandon").Get(nil); codeOf(err) != "cancelled" {
+		fut := parent.linkChild(child, "abandon")
+		if !fut.Ready() {
+			t.Fatal("future not ready after linkChild on closed parent")
+		}
+		if err := fut.Get(nil); codeOf(err) != "cancelled" {
 			t.Fatalf("link future error %v, want cancelled", err)
 		}
 		f.waitState(t, "acme", "c1", stateTerminated)
