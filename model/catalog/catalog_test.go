@@ -922,3 +922,41 @@ func TestFormulaAmountMustBeExactInteger(t *testing.T) {
 		})
 	}
 }
+
+func TestStartPricesAtTheRunClockWhenGiven(t *testing.T) {
+	t.Parallel()
+	c, _ := newCatalog(t) // its clock reads 12:00 UTC
+	mustAdd(t, c, chatDescriptor("sim-chat"))
+	mustSetSnapshot(t, c, "sim-chat", catalog.Price{Rules: []catalog.Rule{
+		{When: "at.getHours('UTC') >= 17", Rates: catalog.Rates{"input": 140, "output": 550}},
+		{Rates: catalog.Rates{"input": 280, "output": 1100}},
+	}})
+	runAt := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
+	q, err := c.Start(context.Background(), catalog.Request{
+		Model:       "sim-chat",
+		InputTokens: 1_000_000,
+		At:          runAt,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if q.Estimate != 140 || q.Rule != "at.getHours('UTC') >= 17" {
+		t.Fatalf("quote = %+v, want the off-peak estimate at the run clock", q)
+	}
+	charge, err := c.Settle(q, model.Usage{InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Settle: %v", err)
+	}
+	if charge.MilliPoints != 140 || charge.Rule != "at.getHours('UTC') >= 17" {
+		t.Fatalf("charge = %+v, want the quote's off-peak rule", charge)
+	}
+
+	// Without At the catalog's own clock (12:00) still applies.
+	q2, err := c.Start(context.Background(), catalog.Request{Model: "sim-chat", InputTokens: 1_000_000})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if q2.Estimate != 280 || q2.Rule != "" {
+		t.Fatalf("quote = %+v, want the standard estimate from the catalog clock", q2)
+	}
+}

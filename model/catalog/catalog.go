@@ -197,8 +197,8 @@ func (c *Catalog) precompileSource(modelID, src string) error {
 	return nil
 }
 
-// Start prices a call before it starts, records the start time and returns the
-// pinned quote. Its estimate is the model's formula on the counted input
+// Start prices a call before it starts, records the start time (the request's
+// At, or the catalog's clock when it is zero) and returns the pinned quote. Its estimate is the model's formula on the counted input
 // tokens and the output limit (REQ-MODEL-077). A model with no price in any
 // layer, or whose chosen layer has no rule that holds, fails with
 // core.CodeUnsupported (REQ-MODEL-073).
@@ -206,7 +206,11 @@ func (c *Catalog) Start(ctx context.Context, req Request) (Quote, error) {
 	if req.Model == "" {
 		return Quote{}, core.NewError(core.CodeInvalidArgument, "request has no model", nil)
 	}
-	at := c.clock.Now().UTC()
+	at := req.At
+	if at.IsZero() {
+		at = c.clock.Now()
+	}
+	at = at.UTC()
 	tenant, _ := core.TenantFrom(ctx)
 	entry, descriptorFormula, ok := c.priceFor(tenant, req.Model)
 	if !ok {

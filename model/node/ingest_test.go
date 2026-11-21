@@ -4,8 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,5 +207,103 @@ func TestParamHashIsStableAndCanonical(t *testing.T) {
 	}
 	if ParamHash(nil) != ParamHash(json.RawMessage(`{}`)) {
 		t.Fatal("absent params should hash as an empty object")
+	}
+}
+
+func TestDefaultFetcherRequiresHTTPS(t *testing.T) {
+	t.Parallel()
+	_, _, err := defaultFetcher(t.Context(), model.Output{URL: "http://vendor.test/a.png"})
+	if err == nil || !strings.Contains(err.Error(), "not https") {
+		t.Fatalf("err = %v, want an https requirement", err)
+	}
+}
+
+func TestDefaultFetcherRejectsNonPublicAddresses(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		"https://127.0.0.1/a.png",
+		"https://10.1.2.3/a.png",
+		"https://192.168.0.1/a.png",
+		"https://172.16.0.1/a.png",
+		"https://169.254.1.1/a.png",
+		"https://0.0.0.0/a.png",
+		"https://[::1]/a.png",
+		"https://[fd00::1]/a.png",
+	} {
+		_, _, err := defaultFetcher(t.Context(), model.Output{URL: raw})
+		if err == nil || !strings.Contains(err.Error(), "non-public") {
+			t.Fatalf("%s: err = %v, want a non-public address refusal", raw, err)
+		}
+	}
+}
+
+func TestOutputFetcherRefusesRedirects(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://vendor.test/other.png", http.StatusFound)
+	}))
+	defer server.Close()
+	f := outputFetcher{
+		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		},
+		transport: server.Client().Transport,
+	}
+	_, _, err := f.fetch(t.Context(), model.Output{URL: server.URL + "/a.png"})
+	if !errors.Is(err, errRedirect) {
+		t.Fatalf("err = %v, want a refused redirect", err)
+	}
+}
+
+func TestReadBoundedStopsAtTheLimit(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "frame.png")
+	if err := os.WriteFile(path, make([]byte, 100), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readBounded(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 11 {
+		t.Fatalf("read %d bytes, want limit+1 = 11", len(data))
+	}
+}
+
+func TestIngestErrorDetailsCarryNoPresignedURL(t *testing.T) {
+	t.Parallel()
+	const signed = "https://vendor.test/a.png?X-Amz-Signature=secret"
+	h := testHandler(t, Deps{
+		Blobs: newMemBlob(),
+		Fetch: func(context.Context, model.Output) ([]byte, string, error) {
+			return nil, "", errors.New(`Get "` + signed + `": connection reset`)
+		},
+	})
+	raw, err := json.Marshal(ingestIn{
+		Model:  "sim-image",
+		Op:     "image.generate",
+		Output: []model.Output{{URL: signed, Media: "image"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.ingestStep(t.Context(), raw)
+	if core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("err = %v, want vendor", err)
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Fatalf("err %q leaks the URL", err)
+	}
+	ce, ok := err.(*core.Error)
+	if !ok {
+		t.Fatalf("err = %T, want *core.Error", err)
+	}
+	if ce.Details["cause"] != "fetch_failed" || ce.Details["host"] != "vendor.test" || ce.Details["media"] != "image" {
+		t.Fatalf("details = %v, want a fixed cause and non-sensitive fields", ce.Details)
+	}
+	for _, value := range ce.Details {
+		if text, ok := value.(string); ok && strings.Contains(text, "secret") {
+			t.Fatalf("details %v leak the URL", ce.Details)
+		}
 	}
 }

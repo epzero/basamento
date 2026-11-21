@@ -19,8 +19,9 @@ type scriptInvoker struct {
 	lookups  int
 	accepted map[string]model.Handle
 
-	events []model.Event
-	result model.Result
+	events    []model.Event
+	eventsErr error
+	result    model.Result
 }
 
 func newScriptInvoker() *scriptInvoker {
@@ -46,6 +47,9 @@ func (s *scriptInvoker) Lookup(_ context.Context, clientRef string) (*model.Hand
 }
 
 func (s *scriptInvoker) Events(context.Context, model.Handle, int64) (<-chan model.Event, error) {
+	if s.eventsErr != nil {
+		return nil, s.eventsErr
+	}
 	ch := make(chan model.Event, len(s.events))
 	for _, event := range s.events {
 		ch <- event

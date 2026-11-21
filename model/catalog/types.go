@@ -17,6 +17,10 @@ type Request struct {
 	Params      json.RawMessage
 	InputTokens int64
 	OutputLimit int64
+	// At is the run clock's time to price at. It is zero when the caller uses
+	// the catalog's own clock; a run passes dc.Now() so a replay prices a
+	// time-based rule at the same instant (REQ-MODEL-078).
+	At time.Time
 }
 
 // Quote pins the price entry, the model's formula, the start time, the tenant
