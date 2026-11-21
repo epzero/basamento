@@ -38,7 +38,7 @@ of `kit`. Status words: **Implemented**,
 | Secrets (key wrapping) | local key | KMS or Vault Transit (`hashivault://`; refused at open until ADR-0017's driver) | `gocloud.dev/secrets` + Tink (+ our Transit keeper) |
 | Credentials (the vault) | SQL rows, envelope-encrypted | the same, or HashiCorp Vault or a cloud secret manager | own `Credentials` port |
 | Audit | SQLite, append-only table, tenant-scoped reads | Postgres | `Audit` port over SQL; one store for every producer |
-| Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `jwx`, `go-webauthn` |
+| Identity | none (loopback) or local accounts | OIDC (Logto or any issuer) | `golang-jwt/jwt/v5`, `go-webauthn` |
 | Telemetry | slog + OTel spans to SQLite for the inspector | OTLP | `opentelemetry-go` |
 
 Ports are selected by URL in configuration (see `platform/platform.go`).

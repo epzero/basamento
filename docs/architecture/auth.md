@@ -1,14 +1,47 @@
 # Auth
 
-Status: **Planned** (WP-L8-01, WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
+Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
+records (WP-L8-01, `auth/authn`). **Planned**: local accounts (argon2id
+passwords, passkeys, cookie sessions), request wiring in the API, and
+authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
 
 | Mode | For | How |
 | --- | --- | --- |
 | `none` | Single user on their own machine | Listens on loopback only; refuses any other address (REQ-AUTH-001). |
-| `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. |
-| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. We only validate JWTs (issuer keys via JWKS, audience, expiry) and map organization roles from claims (REQ-AUTH-003). Logto runs as a separate service; it is never part of the embedded binary. |
+| `local` | Small self-hosted teams | In-app accounts: argon2id passwords, passkeys (`go-webauthn`), cookie sessions, hashed scoped API tokens. Listens on loopback only until request authentication is wired into `kit serve`. |
+| `oidc` | SaaS, enterprise self-hosting | Any OIDC issuer; **Logto** (self-hosted MPL-2.0 core or Logto Cloud) is the reference. JWT validation covers issuer keys (JWKS or configured set), audience and expiry (REQ-AUTH-003). Organization role mapping belongs to authorization (WP-L8-02). Logto runs as a separate service; it is never part of the embedded binary. Listens on loopback only until request authentication is wired into `kit serve`. |
+
+`auth/authn` implements the modes. `kit serve` validates `listen.addr` against
+`auth.mode`: every mode accepts loopback only until request authentication is
+wired (REQ-AUTH-001 for `none`; the same loopback rule for `local` and `oidc`
+while bearer verification on requests is planned in WP-L6-03). Verifying bearer
+tokens on requests for `local` and `oidc` is planned in the API work (WP-L6-03);
+authorization in WP-L8-02.
+
+OIDC verification requires the issuer, the audience, a non-expired `exp` and a
+signature by one of the issuer's keys. A `JWKS` key set is cached; fetches use
+https (http only to loopback), and neither the default nor a supplied HTTP
+client follows redirects,
+and at most one refresh attempt per `MinRefresh` interval (30 s by default), so a
+token signed with a brand-new key may be rejected until the next attempt. The JWKS
+URL must not carry credentials. While the cache is empty, a recent fetch failure is
+reported again inside the cooldown instead of `ErrUnknownKey`. A fetch response with
+no usable signing key leaves the previous keys in place. Clock skew
+is an explicit leeway capped at five minutes, zero by default. The token's
+`tenant` claim (name configurable) must satisfy the tenant grammar when present.
+When absent, `Principal.Tenant` is empty; request wiring must refuse such a
+principal wherever a tenant is required. Bearer JWT verification returns
+`cancelled` or `timeout` when the caller's context is done or a JWKS lookup
+hits its fetch deadline; every other verification or fetch failure is
+`unauthenticated`. Errors never carry the token, a claim, or the JWKS URL.
+
+Local-mode bearer tokens are opaque 256-bit secrets. Only their SHA-256 hash is
+stored; verification compares hashes in constant time and enforces a fixed
+expiry. A token carries its tenant and scopes, and rotating it means minting a
+new one and replacing the stored record. Every rejection is
+`unauthenticated` with a message that carries no credential or claim detail.
 
 ## 2. Authorization
 

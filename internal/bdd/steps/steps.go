@@ -28,6 +28,7 @@ type World struct {
 	Bus         *busWorld
 	Secrets     *secretsWorld
 	Config      *configWorld
+	Auth        *authWorld
 	Credentials *credentialsWorld
 	Flow        *flowWorld
 	FlowBuilder *builderWorld
@@ -54,6 +55,7 @@ func Initialize(sc *godog.ScenarioContext) {
 			Blob:        newBlobWorld(),
 			Secrets:     newSecretsWorld(),
 			Config:      newConfigWorld(),
+			Auth:        newAuthWorld(),
 			Flow:        newFlowWorld(),
 			FlowBuilder: newBuilderWorld(),
 			Catalog:     newCatalogWorld(),
@@ -82,6 +84,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerSecrets(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
+	registerAuth(sc)
 	registerOpeningSteps(sc)
 	registerCredentials(sc)
 	registerCatalog(sc)
