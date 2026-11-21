@@ -35,6 +35,7 @@ type nightlyWorkflowDoc struct {
 type nightlyJobExpect struct {
 	jobName      string
 	testTimeout  string
+	testCount    string // empty means not pinned (slow-lanes)
 	testRunMatch func(run string) bool
 }
 
@@ -163,10 +164,17 @@ func checkNightlyGoTest(jobName string, job nightlyWorkflowJob, testIdx int, exp
 		return []string{fmt.Sprintf("%s: missing go test step", jobName)}
 	}
 	run := job.Steps[testIdx].Run
-	if strings.Contains(run, "-timeout "+expect.testTimeout) {
-		return nil
+	var missing []string
+	if !strings.Contains(run, "-timeout "+expect.testTimeout) {
+		missing = append(missing, fmt.Sprintf("%s: go test must pass -timeout %s", jobName, expect.testTimeout))
 	}
-	return []string{fmt.Sprintf("%s: go test must pass -timeout %s", jobName, expect.testTimeout)}
+	if expect.testCount != "" {
+		countPat := `(^|\s)-count=` + regexp.QuoteMeta(expect.testCount) + `(\s|$)`
+		if !regexp.MustCompile(countPat).MatchString(run) {
+			missing = append(missing, fmt.Sprintf("%s: go test must pass -count=%s", jobName, expect.testCount))
+		}
+	}
+	return missing
 }
 
 func nightlyJobExpects() map[string]nightlyJobExpect {
@@ -174,6 +182,7 @@ func nightlyJobExpects() map[string]nightlyJobExpect {
 		"flake-hunt": {
 			jobName:     "flake-hunt",
 			testTimeout: "90m",
+			testCount:   "10",
 			testRunMatch: func(run string) bool {
 				return strings.Contains(run, "./...")
 			},
@@ -189,7 +198,7 @@ func nightlyJobExpects() map[string]nightlyJobExpect {
 }
 
 // TestNightlyWorkflowPostgresGuards pins flake-hunt and slow-lanes on strict,
-// prefetched Postgres (EP0-154).
+// prefetched Postgres, flake-hunt's -count=10 and per-job -timeout (EP0-154).
 func TestNightlyWorkflowPostgresGuards(t *testing.T) {
 	doc := readNightlyWorkflow(t)
 	for name, exp := range nightlyJobExpects() {
@@ -248,6 +257,12 @@ func TestNightlyWorkflowPostgresGuardsMutations(t *testing.T) {
 		{"flake-hunt", "no test timeout", func(d *nightlyWorkflowDoc) {
 			d.Jobs["flake-hunt"] = stripNightlyTestTimeout(d.Jobs["flake-hunt"], expects["flake-hunt"])
 		}, "-timeout 90m"},
+		{"flake-hunt", "count lowered to 1", func(d *nightlyWorkflowDoc) {
+			d.Jobs["flake-hunt"] = replaceNightlyTestCount(d.Jobs["flake-hunt"], expects["flake-hunt"], "10", "1")
+		}, "-count=10"},
+		{"flake-hunt", "no count flag", func(d *nightlyWorkflowDoc) {
+			d.Jobs["flake-hunt"] = stripNightlyTestCount(d.Jobs["flake-hunt"], expects["flake-hunt"])
+		}, "-count=10"},
 		{"slow-lanes", "no GATE_STRICT", func(d *nightlyWorkflowDoc) {
 			j := d.Jobs["slow-lanes"]
 			delete(j.Env, "GATE_STRICT")
@@ -320,6 +335,34 @@ func stripNightlyTestTimeout(job nightlyWorkflowJob, expect nightlyJobExpect) ni
 			continue
 		}
 		s.Run = strings.ReplaceAll(s.Run, "-timeout "+expect.testTimeout, "")
+		out.Steps[i] = s
+	}
+	return out
+}
+
+func stripNightlyTestCount(job nightlyWorkflowJob, expect nightlyJobExpect) nightlyWorkflowJob {
+	out := cloneNightlyJob(job)
+	if expect.testCount == "" {
+		return out
+	}
+	countRe := regexp.MustCompile(`(^|\s)-count=` + regexp.QuoteMeta(expect.testCount) + `(\s|$)`)
+	for i, s := range out.Steps {
+		if s.Run == "" || !strings.Contains(s.Run, "go test") || !expect.testRunMatch(s.Run) {
+			continue
+		}
+		s.Run = strings.TrimSpace(countRe.ReplaceAllString(s.Run, " "))
+		out.Steps[i] = s
+	}
+	return out
+}
+
+func replaceNightlyTestCount(job nightlyWorkflowJob, expect nightlyJobExpect, from, to string) nightlyWorkflowJob {
+	out := cloneNightlyJob(job)
+	for i, s := range out.Steps {
+		if s.Run == "" || !strings.Contains(s.Run, "go test") || !expect.testRunMatch(s.Run) {
+			continue
+		}
+		s.Run = strings.ReplaceAll(s.Run, "-count="+from, "-count="+to)
 		out.Steps[i] = s
 	}
 	return out

@@ -36,7 +36,9 @@ var (
 )
 
 // InitPostgres resolves BDD_POSTGRES_URL or starts embedded Postgres 16 once per
-// process (ADR-0015 G3). Every later call returns the first call's outcome.
+// TestFeatures run (ADR-0015 G3): TestFeatures calls ResetPostgresForTest first,
+// so every -count repetition starts clean; until the next reset every call returns
+// the first call's outcome.
 func InitPostgres(ctx context.Context) error {
 	pgInit.Do(func() {
 		err := initPostgres(ctx)
@@ -49,7 +51,9 @@ func InitPostgres(ctx context.Context) error {
 	return pgInitErr
 }
 
-// ResetPostgresForTest clears per-process InitPostgres state; tests call this between cases.
+// ResetPostgresForTest stops an embedded server, forgets the InitPostgres outcome
+// and the reported source. TestFeatures calls it at the start of each run; tests
+// call it between cases.
 func ResetPostgresForTest() {
 	_ = ClosePostgres()
 	pgMu.Lock()
@@ -59,7 +63,7 @@ func ResetPostgresForTest() {
 	pgMu.Unlock()
 }
 
-// ClosePostgres stops an embedded server started for this process.
+// ClosePostgres stops an embedded server InitPostgres started.
 func ClosePostgres() error {
 	pgMu.Lock()
 	defer pgMu.Unlock()
