@@ -57,7 +57,8 @@ live state.
 ```go
 // CacheHint marks up to three cache breakpoints in a request: the last
 // non-empty system message, the last non-empty tool definition, and the last
-// message. A nil hint asks for none.
+// non-empty content block of the last non-empty message. A nil hint asks for
+// none.
 type CacheHint struct {
 	System  bool `json:"system,omitempty"`
 	Tools   bool `json:"tools,omitempty"`
@@ -87,11 +88,14 @@ fails for it. `specs/prompt/design.md` states the same constraint.
 `model.PrefixHash(r Request) string` returns the SHA-256 of a canonical byte
 string: the request's tool definitions in request order, then its system
 messages in request order. It is order-sensitive. A tool definition
-contributes its name, description and parameter schema; a system message
+contributes the JSON object `Request.Tools` carries — `name`, `desc`, its
+parameter schema and every other field such as `extra` — and a system message
 contributes the JSON object `Request.Messages` carries — `role`, `content`,
 `multi_content`, `user_input_multi_content`, `name` and every other field —
-with object keys sorted and no insignificant whitespace. The hash is empty
-when the request has neither a tool definition nor a system message. It
+with object keys sorted and no insignificant whitespace. Hashing the full wire
+object means a tool `extra` that changes the sent bytes also changes the hash;
+nothing is excluded or stripped before hashing. The hash is empty when the
+request has neither a tool definition nor a system message. It
 ignores the hint: two requests with the same tools and system messages hash
 the same whether or not they mark breakpoints. It is the model-layer
 counterpart of `prompt.PrefixHash` (`prompt/hash.go:36-48`), which covers only
@@ -542,7 +546,8 @@ mapping note from `specs/prompt/design.md`, and the split cache-hint rows from
 | `model/catalog/types.go` | `Request.Cache bool`, set from `model.Request.Cache != nil`. | WP-L3-06 (done); changed by WP-L3-04 |
 | `model/chat/chat.go` | `CacheAnnotator`; ignore an annotator error; `usageOf` maps `InputTokens`, `CachedTokens` and `CacheWriteTokens` from `PromptTokens` and `PromptTokenDetails`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `model/providers/` | Provider composition root and per-vendor annotators. | WP-L3-04 |
-| `model/catalog/price.go` | `rates.cache_write`, the default formula, `validateUsage` (negative `W`, `C + W > I`), the missing-rate checks and the reservation estimate. | WP-L3-06 (done); changed by WP-L3-04 |
+| `model/catalog/price.go` | `rates.cache_write`, the default formula, `validateUsage` (negative `W`, `C + W > I`), the missing-rate checks, `usage.cache_write_tokens` in `bindings`, and the `max(input, cache_write)` reservation estimate. | WP-L3-06 (done); changed by WP-L3-04 |
+| `model/catalog/catalog.go` | `usage.cache_write_tokens` in the CEL usage schema. | WP-L3-06 (done); changed by WP-L3-04 |
 | `contracts/basamento/invoke/v1/invoke.proto` | Additive `StartRequest.cache`. | WP-L3-01 (done); changed by WP-L3-04 |
 | `contracts/basamento/worker` | Additive cache hint in the worker start request. | WP-L3-07 |
 | `agent/handler.go` | Set and journal the hint on every turn; the estimator wiring passes `Cache: req.Cache != nil` into `catalog.Request`. | WP-L7-01 |
@@ -550,7 +555,7 @@ mapping note from `specs/prompt/design.md`, and the split cache-hint rows from
 | `specs/models/contract.feature` | MODEL-089-01..04 and MODEL-090-01. | caster |
 | `specs/models/catalog.feature` | MODEL-085-02. | caster |
 | `specs/models/cost.feature` | MODEL-091-01..02 and MODEL-092-01..02. | caster |
-| `specs/models/design.md` | C3: `Usage` has five fields, the `W` term, `C + W > I` and the negative-`W` check; C4: the cache-aware estimate; remove the "Cache writes are not priced" note. | caster |
+| `specs/models/design.md` | C3: `model.Usage` has five fields (was "exactly four"), the `W` term, `C + W > I` and the negative-`W` check; C4: the `counted × max(input, cache_write)` estimate; remove the "Cache writes are not priced" note. | caster |
 | `specs/agents/requirements.md` | REQ-AGENT-031. | caster |
 | `specs/agents/cache.feature` | AGENT-031-01 and AGENT-031-02. | caster |
 

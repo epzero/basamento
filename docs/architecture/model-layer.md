@@ -30,7 +30,8 @@ It is vendor-neutral and advisory:
 ```go
 // CacheHint marks up to three cache breakpoints in a request: the last
 // non-empty system message, the last non-empty tool definition, and the last
-// message. A nil hint asks for none.
+// non-empty content block of the last non-empty message. A nil hint asks for
+// none.
 type CacheHint struct {
     System  bool `json:"system,omitempty"`
     Tools   bool `json:"tools,omitempty"`
@@ -56,16 +57,16 @@ it sets no system breakpoint and the request proceeds unannotated
 
 `model.PrefixHash(Request)` returns the SHA-256 of a canonical byte string: the
 request's tool definitions in request order, then its system messages in
-request order. It is order-sensitive; a tool definition contributes its name,
-description and parameter schema, and a system message contributes the JSON
-object the contract carries (`role`, `content`, `multi_content`,
-`user_input_multi_content`, `name` and every other field), with object keys
-sorted. It is empty when the request has neither a tool definition nor a
-system message, and it ignores the hint. It is the model-layer counterpart of
-`prompt.PrefixHash`: the agent loop asserts that two consecutive turns have
-the same stable prefix hash (REQ-AGENT-031) while the tool set is unchanged,
-while the rolling message marker extends the cached prefix without changing
-the stable one. `PrefixHash` is internal: never logged, never returned to a
+request order. It is order-sensitive; a tool definition contributes the JSON
+object the contract carries (`name`, `desc`, its parameter schema and every
+other field such as `extra`), and a system message contributes its JSON object
+(`role`, `content`, `multi_content`, `user_input_multi_content`, `name` and
+every other field), with object keys sorted. It is empty when the request has
+neither a tool definition nor a system message, and it ignores the hint. It is
+the model-layer counterpart of `prompt.PrefixHash`: the agent loop asserts that
+two consecutive turns have the same stable prefix hash (REQ-AGENT-031) while
+the tool set is unchanged, while the rolling message marker extends the cached
+prefix without changing the stable one. `PrefixHash` is internal: never logged, never returned to a
 tenant, and never a cache key without tenant and credential scope.
 
 | Vendor protocol | Adapter mapping | Typical capabilities |
