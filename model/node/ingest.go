@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -129,8 +131,11 @@ func (h *Handler) ingestStep(ctx context.Context, raw json.RawMessage) (json.Raw
 	for _, output := range in.Output {
 		data, mime, err := fetch(ctx, output)
 		if err != nil {
+			// A provider URL is presigned: its path and query are a credential,
+			// so the details carry a fixed cause and the host only.
 			return nil, core.NewError(core.CodeVendor,
-				"model node: cannot read an output", map[string]any{"media": output.Media, "cause": err.Error()})
+				"model node: cannot read an output",
+				map[string]any{"media": output.Media, "host": outputHost(output), "cause": "fetch_failed"})
 		}
 		if len(data) > maxOutputBytes {
 			return nil, core.NewError(core.CodeInvalidArgument,
@@ -176,32 +181,122 @@ func sha256Sum(data []byte) []byte {
 }
 
 // defaultFetcher reads an output from its URL or, for a command-line provider,
-// its path. It never follows a redirect to another scheme.
+// its path. A URL must be https and must not resolve to an address this
+// process should not reach; redirects are refused.
 func defaultFetcher(ctx context.Context, out model.Output) ([]byte, string, error) {
+	return outputFetcher{lookupIP: net.DefaultResolver.LookupIPAddr}.fetch(ctx, out)
+}
+
+// outputFetcher is the production fetcher. Its resolver and transport are
+// fields so tests can exercise the address checks without a network.
+type outputFetcher struct {
+	lookupIP  func(context.Context, string) ([]net.IPAddr, error)
+	transport http.RoundTripper
+}
+
+// errRedirect is returned when an output URL redirects. Following one would
+// let a vendor's URL reach an address the initial check approved only for the
+// original host.
+var errRedirect = errors.New("output fetch does not follow redirects")
+
+func (f outputFetcher) fetch(ctx context.Context, out model.Output) ([]byte, string, error) {
 	switch {
 	case out.URL != "":
-		client := &http.Client{Timeout: ingestTimeout}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, out.URL, nil)
-		if err != nil {
-			return nil, "", err
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, "", err
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, "", fmt.Errorf("status %d", resp.StatusCode)
-		}
-		data, err := io.ReadAll(io.LimitReader(resp.Body, maxOutputBytes+1))
-		if err != nil {
-			return nil, "", err
-		}
-		return data, resp.Header.Get("Content-Type"), nil
+		return f.fetchURL(ctx, out.URL)
 	case out.Path != "":
-		data, err := os.ReadFile(out.Path)
+		data, err := readBounded(out.Path, maxOutputBytes)
 		return data, out.Mime, err
 	default:
 		return nil, "", errors.New("output has no URL or path")
 	}
+}
+
+func (f outputFetcher) fetchURL(ctx context.Context, raw string) ([]byte, string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, "", errors.New("output URL is not a valid URL")
+	}
+	if u.Scheme != "https" {
+		return nil, "", fmt.Errorf("output URL scheme %q is not https", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return nil, "", errors.New("output URL has no host")
+	}
+	ips, err := f.lookupIP(ctx, host)
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot resolve output host %q", host)
+	}
+	if len(ips) == 0 {
+		return nil, "", fmt.Errorf("output host %q has no address", host)
+	}
+	for _, ip := range ips {
+		if !publicAddress(ip.IP) {
+			return nil, "", fmt.Errorf("output host %q resolves to a non-public address", host)
+		}
+	}
+	client := &http.Client{
+		Timeout:   ingestTimeout,
+		Transport: f.transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errRedirect
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, "", errors.New("output URL is not a valid request")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if errors.Is(err, errRedirect) {
+			return nil, "", errRedirect
+		}
+		// The client's error embeds the full URL, including a presigned query;
+		// keep it out of logs and error details.
+		return nil, "", errors.New("output fetch failed")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxOutputBytes+1))
+	if err != nil {
+		return nil, "", errors.New("reading the output failed")
+	}
+	return data, resp.Header.Get("Content-Type"), nil
+}
+
+// readBounded reads at most limit+1 bytes, so the caller can tell an oversized
+// file from one that fits without buffering the whole file.
+func readBounded(path string, limit int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	return io.ReadAll(io.LimitReader(file, limit+1))
+}
+
+// publicAddress reports whether ip is safe to fetch an output from: not
+// loopback, private, link-local, unspecified or multicast.
+func publicAddress(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())
+}
+
+// outputHost is the non-sensitive part of an output's source for error
+// details: the host of its URL, without path, query or userinfo. A path
+// output has no host.
+func outputHost(out model.Output) string {
+	if out.URL == "" {
+		return ""
+	}
+	u, err := url.Parse(out.URL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }

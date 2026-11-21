@@ -109,8 +109,9 @@ The `model` node is a node handler in `model/node` (ADR-0011):
 5. **Ingest** output files into content-addressed blob storage with provenance
    (REQ-MODEL-008).
 6. **Settle**: charge the actual cost or release the reservation. The cost is
-   the provider's, or else the price formula on the actual usage; a run
-   without a budget is unmetered and reserves nothing.
+   the provider's, or else the price formula on the actual usage. Every priced
+   invocation reserves against the run's budget; a priced call with no run
+   budget fails before it starts. Only a model with no price runs unmetered.
 
 **Ambiguous start** (for example a timeout after sending): call `Lookup`. If
 the provider can't answer, open the `ambiguous_start` gate for a person.

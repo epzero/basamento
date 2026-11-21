@@ -123,8 +123,10 @@ type Deps struct {
 	Catalog *catalog.Catalog
 	// Steps registers the node's durable steps on first use.
 	Steps StepRegistrar
-	// Blobs, when set, stores output files ingested with provenance
-	// (REQ-MODEL-008).
+	// Blobs stores output files ingested with provenance (REQ-MODEL-008).
+	// It is required for a model that returns output files: a successful
+	// invocation with outputs and no blob store fails the node instead of
+	// dropping them.
 	Blobs platform.Blob
 	// Fetch downloads an output. Nil uses HTTP for a URL and the filesystem
 	// for a path.
@@ -165,8 +167,10 @@ func New(d Deps) (*Handler, error) {
 //
 // The returned error is a platform error: invalid_argument, budget_exceeded,
 // unsupported, vendor_error, cancelled, ambiguous_start or the provider's own
-// code. The reservation is settled on every path after it was taken.
-func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMessage) (Output, error) {
+// code. The reservation is settled on every path after it was taken. When the
+// invocation started but its actual charge is unknown, the node fails closed
+// and charges the reserved estimate rather than releasing it.
+func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMessage) (out Output, retErr error) {
 	if dc == nil {
 		return Output{}, core.NewError(core.CodeInternal, "model node: nil durable context", nil)
 	}
@@ -188,14 +192,14 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 		return Output{}, err
 	}
 
-	ref := ClientRef(dc.NewID(visitToken), cfg.Name, refInput(input))
+	ref := ClientRef(runSalt(dc), dc.NewID(visitToken), cfg.Name, refInput(input))
 	req := request(cfg, in, ref)
 
-	// Pricing exists to reserve and settle. A metered run must be priced: a
-	// model with no price in any layer fails with unsupported (REQ-MODEL-073).
-	// An unmetered run is priced when it can be, for the usage-based
-	// settlement below, but an unpriced model is not an error there: it has
-	// nothing to reserve.
+	// Every priced invocation reserves before it starts (REQ-MODEL-006): a
+	// priced call with no run budget, or one the price table cannot price,
+	// fails before the provider is reached. A genuinely unpriced model may
+	// still run unmetered; with a budget, an unpriced model fails with
+	// unsupported (REQ-MODEL-073).
 	var quote catalog.Quote
 	priced := false
 	budget, metered := BudgetFrom(dc.Context())
@@ -204,6 +208,9 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 		Params:      in.Params,
 		InputTokens: inputTokens(cfg, in),
 		OutputLimit: outputLimit(cfg, in),
+		// Price at the run's clock, not the catalog's process clock, so a
+		// replay prices a time-based rule at the same instant (REQ-MODEL-078).
+		At: dc.Now(),
 	})
 	if err != nil {
 		if metered || core.CodeOf(err) != core.CodeUnsupported {
@@ -212,87 +219,121 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	} else {
 		priced = true
 	}
+	if priced && !metered {
+		return Output{}, core.NewError(core.CodeInternal,
+			fmt.Sprintf("model node %q: a priced invocation needs a run budget", cfg.Name),
+			map[string]any{"node": cfg.Name, "model": cfg.Model})
+	}
+	// A priced call that estimates at zero would reserve nothing and let its
+	// actual usage charge past the limit; fail closed instead of trusting an
+	// undeclared usage.
+	if priced && quote.Estimate <= 0 {
+		return Output{}, core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("model node %q: a priced call to %q has no positive estimate; declare the call's usage", cfg.Name, cfg.Model),
+			map[string]any{"node": cfg.Name, "model": cfg.Model})
+	}
 
-	out := Output{ClientRef: ref}
+	out = Output{ClientRef: ref}
 	var charged int64
-	reserved := false
-	if metered {
+	settled := false
+	if priced {
 		if err := budget.Reserve(ref, quote.Estimate); err != nil {
 			return Output{}, err
 		}
-		reserved = true
 		out.ReservedMpts = quote.Estimate
 	}
-	settled := false
-	// Every path after the reservation settles it: success charges the actual
-	// cost, a failure, an ambiguity or a cancellation releases what is left
-	// (REQ-MODEL-006, REQ-MODEL-009).
+	// Every path after the reservation settles it (REQ-MODEL-006). A failure
+	// before the invocation started releases it; a failure after it started
+	// leaves the actual charge unknown, and the node fails closed by charging
+	// the reserved estimate. Settlement is first-wins, so releasing there
+	// would make the undercharge permanent.
+	started := false
 	defer func() {
-		if reserved && !settled {
-			_ = budget.Settle(ref, charged)
+		if !priced || settled {
+			return
 		}
-	}()
-	settle := func(actual int64) {
+		actual := charged
+		if started {
+			actual = quote.Estimate
+		}
+		// Do not mark the reservation settled unless the budget accepted it:
+		// a failed settlement leaves it open for the next attempt.
+		if err := budget.Settle(ref, actual); err != nil {
+			if retErr == nil {
+				retErr = err
+			}
+			return
+		}
+		settled = true
 		charged = actual
-		out.CostMpts = actual
-		if reserved && !settled {
-			_ = budget.Settle(ref, actual)
+	}()
+	settle := func(actual int64) error {
+		if priced && !settled {
+			if err := budget.Settle(ref, actual); err != nil {
+				return err
+			}
 			settled = true
+			charged = actual
 		}
+		out.CostMpts = actual
+		return nil
 	}
 
-	started, err := h.startInvocation(dc, cfg, req, ref)
+	startOutcome, err := h.startInvocation(dc, cfg, req, ref)
 	if err != nil {
 		return Output{}, err
 	}
-	if started.Ambiguous {
+	started = true
+	if startOutcome.Ambiguous {
 		handle, err := h.resolveAmbiguous(dc, cfg, ref)
 		if err != nil {
 			return Output{}, err
 		}
-		started.Handle = handle
+		startOutcome.Handle = handle
 	}
 
-	followed, err := h.followInvocation(dc, cfg, started.Handle, ref)
+	followed, err := h.followInvocation(dc, cfg, startOutcome.Handle, ref)
 	if err != nil {
 		return Output{}, err
 	}
 
 	// Settle before anything that can fail after the invocation ended: the
-	// provider already ran and may have charged. Progress deltas are
-	// best-effort and never fail a paid invocation that already settled.
+	// provider already ran and may have charged.
 	result := followed.Result
 	actual, err := h.actualCost(result, quote, priced)
 	if err != nil {
-		settle(0)
 		return Output{}, err
 	}
-	settle(actual)
+	if err := settle(actual); err != nil {
+		return out, err
+	}
 
 	out.State = result.State
 	out.Message = result.Message
 	out.Vectors = result.Vectors
 	out.Usage = result.Usage
 
-	for _, event := range followed.Events {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		_ = dc.Emit(runtime.ProgressEvent{Type: "model.delta", Data: data})
-	}
-	if len(result.Outputs) > 0 && h.deps.Blobs != nil {
-		assets, err := h.ingestOutputs(dc, cfg, req, result, actual, ref)
-		if err != nil {
-			return out, err
-		}
-		out.Assets = assets
-	}
+	// A cancellation or a failed invocation never ingests: checking it first
+	// keeps an ingest failure from masking the real outcome (REQ-MODEL-009).
 	if followed.Cancelled {
 		return out, core.NewError(core.CodeCancelled, "model node: invocation cancelled with the run", nil)
 	}
 	if result.State == model.StateFailed {
 		return out, failureError(result)
+	}
+	if len(result.Outputs) > 0 {
+		// REQ-MODEL-008 requires ingestion; silently dropping a successful
+		// invocation's outputs would lose them, so fail closed instead.
+		if h.deps.Blobs == nil {
+			return out, core.NewError(core.CodeInternal,
+				"model node: the invocation returned output files but no blob store is configured",
+				map[string]any{"node": cfg.Name, "outputs": len(result.Outputs)})
+		}
+		assets, err := h.ingestOutputs(dc, cfg, req, result, actual, ref)
+		if err != nil {
+			return out, err
+		}
+		out.Assets = assets
 	}
 	return out, nil
 }
@@ -339,7 +380,15 @@ func (h *Handler) resolveAmbiguous(dc runtime.DurableContext, cfg Config, ref st
 	}).Get(&payload); err != nil {
 		return model.Handle{}, err
 	}
-	if payload.Handle != nil && payload.Handle.ClientRef != "" {
+	if payload.Handle != nil {
+		// One gate serves the whole run, so a handle from another node's
+		// invocation may be waiting there; only this invocation's ref is
+		// acceptable.
+		if payload.Handle.ClientRef != ref {
+			return model.Handle{}, core.NewError(core.CodeAmbiguousStart,
+				fmt.Sprintf("model node %q: the gate's handle belongs to another invocation", cfg.Name),
+				map[string]any{"node": cfg.Name, "client_ref": ref, "cause": "handle_ref_mismatch"})
+		}
 		return *payload.Handle, nil
 	}
 	name := stepName(cfg, "lookup", ref)
@@ -350,7 +399,7 @@ func (h *Handler) resolveAmbiguous(dc runtime.DurableContext, cfg Config, ref st
 	if err := dc.Step(name, lookupIn{ClientRef: ref}, runtime.StepOptions{IdempotencyKey: name}).Get(&out); err != nil {
 		return model.Handle{}, core.NewError(core.CodeAmbiguousStart,
 			fmt.Sprintf("model node %q: the start of %q cannot be resolved", cfg.Name, ref),
-			map[string]any{"node": cfg.Name, "client_ref": ref, "cause": err.Error()})
+			map[string]any{"node": cfg.Name, "client_ref": ref, "cause": "lookup_failed"})
 	}
 	if !out.Found {
 		return model.Handle{}, core.NewError(core.CodeAmbiguousStart,
@@ -402,9 +451,10 @@ func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.Raw
 	if err != nil {
 		return nil, model.MapError(err)
 	}
-	var collected []model.Event
-	for event := range events {
-		collected = append(collected, event)
+	// Drain the provider's stream: progress deltas are bus-only
+	// (docs/architecture/streaming.md §2, §4) and publishing them is
+	// WP-L6-02's job. The durable step keeps the final result, not the log.
+	for range events {
 	}
 	if ctx.Err() != nil {
 		// The run was cancelled while the invocation was in flight. Cancel at
@@ -418,13 +468,13 @@ func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.Raw
 		if err != nil {
 			return nil, model.MapError(err)
 		}
-		return json.Marshal(followOutcome{Events: collected, Result: result, Cancelled: true})
+		return json.Marshal(followOutcome{Result: result, Cancelled: true})
 	}
 	result, err := h.deps.Invoker.Result(ctx, in.Handle)
 	if err != nil {
 		return nil, model.MapError(err)
 	}
-	return json.Marshal(followOutcome{Events: collected, Result: result}) // normal
+	return json.Marshal(followOutcome{Result: result})
 }
 
 // actualCost is what the run is charged: the cost the provider reports, or
@@ -585,7 +635,6 @@ type followIn struct {
 }
 
 type followOutcome struct {
-	Events    []model.Event `json:"events,omitempty"`
-	Result    model.Result  `json:"result"`
-	Cancelled bool          `json:"cancelled,omitempty"`
+	Result    model.Result `json:"result"`
+	Cancelled bool         `json:"cancelled,omitempty"`
 }

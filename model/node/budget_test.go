@@ -118,6 +118,37 @@ func TestMemoryRejectsNegativeAmounts(t *testing.T) {
 	}
 }
 
+func TestMemorySettledChargesCountAgainstTheLimit(t *testing.T) {
+	t.Parallel()
+	b := NewMemory(1000)
+	if err := b.Reserve("ref-1", 600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Settle("ref-1", 400); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Reserve("ref-2", 500); err != nil {
+		t.Fatalf("a released reservation must not free its charge: %v", err)
+	}
+	if got := b.HeldTotal(); got != 500 {
+		t.Fatalf("held = %d, want 500", got)
+	}
+	err := b.Reserve("ref-3", 200)
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("err = %v, want budget_exceeded", err)
+	}
+	details, ok := err.(*core.Error).Details["remaining"]
+	if !ok || details != int64(100) {
+		t.Fatalf("remaining = %v, want 100", details)
+	}
+	if got := b.HeldTotal(); got != 500 {
+		t.Fatalf("held = %d after a refused reservation, want 500", got)
+	}
+	if got := b.ChargedTotal(); got != 400 {
+		t.Fatalf("charged = %d, want 400", got)
+	}
+}
+
 func TestMemoryUnlimited(t *testing.T) {
 	t.Parallel()
 	b := NewMemory(-1)

@@ -38,8 +38,10 @@ func WithBudget(ctx context.Context, b Budget) context.Context {
 }
 
 // BudgetFrom returns the budget carried by ctx, and whether there is one. A
-// run without a budget is unmetered: the node prices the call and reports its
-// cost, but reserves and settles nothing.
+// run without a budget cannot start a priced invocation: every priced call
+// reserves the estimate before it starts (REQ-MODEL-006), so the node fails
+// one before it reaches the provider. Only a model with no price runs
+// unmetered.
 func BudgetFrom(ctx context.Context) (Budget, bool) {
 	if ctx == nil {
 		return nil, false
@@ -50,7 +52,9 @@ func BudgetFrom(ctx context.Context) (Budget, bool) {
 
 // Memory is an in-process Budget for tests and the embedded profile. It is
 // safe for concurrent use and records every reservation so a caller can read
-// back what was held and what was charged per key.
+// back what was held and what was charged per key. A settled charge keeps
+// counting against the limit: settlement frees the reservation, not the
+// money.
 type Memory struct {
 	mu      sync.Mutex
 	limit   int64
@@ -93,10 +97,15 @@ func (m *Memory) Reserve(key string, amount int64) error {
 	if e := m.entries[key]; e != nil {
 		return nil
 	}
-	if m.limit >= 0 && m.held+amount > m.limit {
+	if m.limit >= 0 && m.held+amount > m.limit-m.charged {
 		return core.NewError(core.CodeBudgetExceeded,
 			fmt.Sprintf("reservation of %d milli-points exceeds the run's remaining budget", amount),
-			map[string]any{"remaining": m.limit - m.held, "estimate": amount})
+			map[string]any{
+				"remaining": m.limit - m.charged - m.held,
+				"estimate":  amount,
+				"charged":   m.charged,
+				"held":      m.held,
+			})
 	}
 	m.entries[key] = &entry{amount: amount}
 	m.held += amount
