@@ -1,4 +1,4 @@
-@planned @wp:WP-L1-05 @level:component
+@wp:WP-L1-05 @level:component
 Feature: Validating the configuration
   A wrong setting is reported before anything opens, names the key that is
   wrong, and never echoes the value of a secret.
