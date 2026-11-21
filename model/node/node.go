@@ -284,6 +284,18 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 		}
 		settled = true
 		charged = actual
+		// The deferred settlement is a settlement like any other: a charge
+		// past the ceiling still fails the node, with the earlier failure as
+		// the cause.
+		if err := checkBudgetCeiling(budget, priced, actual); err != nil {
+			if retErr != nil {
+				var pe *core.Error
+				if errors.As(err, &pe) {
+					pe.Cause = retErr
+				}
+			}
+			retErr = err
+		}
 	}()
 	settle := func(actual int64) error {
 		if priced && !settled {
@@ -294,7 +306,10 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 			settled = true
 		}
 		out.CostMpts = actual
-		return nil
+		// Every settlement path fails the node when the recorded charge
+		// carries the run past its ceiling; the charge itself stays recorded
+		// (REQ-MODEL-006, REQ-MODEL-007).
+		return checkBudgetCeiling(budget, priced, actual)
 	}
 
 	startOutcome, err := h.startInvocation(dc, cfg, req, ref)
@@ -369,9 +384,6 @@ func (h *Handler) Handle(dc runtime.DurableContext, cfg Config, input json.RawMe
 	// Any failure above still settles through the defer, by the pinned actual
 	// charge rather than the estimate.
 	if err := settle(actual); err != nil {
-		return out, err
-	}
-	if err := checkBudgetCeiling(budget, priced, actual); err != nil {
 		return out, err
 	}
 	return out, nil

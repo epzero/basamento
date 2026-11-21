@@ -1194,3 +1194,102 @@ func TestHandleFailsClosedWhenTheActualChargeCarriesTheRunPastItsBudget(t *testi
 		t.Fatalf("cost = %d, want the actual 8001", out.CostMpts)
 	}
 }
+
+func TestHandleFailsClosedWhenAFailedInvocationsChargeCarriesTheRunPastItsBudget(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// The estimate reserves 500; the failed invocation still reports 8001, so
+	// the settlement carries the run's 600 ceiling past its limit.
+	inv.result = model.Result{State: model.StateFailed, CostMpts: 8001}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(600)
+
+	out, err := runNode(t, h, reg, t.Context(), budget, `{"params":{"duration_s":5}}`)
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("err = %v, want budget_exceeded, not the provider's failure", err)
+	}
+	// The charge is recorded rather than hidden, and the node fails so the
+	// run stops spending after an understated reservation.
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 8001 {
+		t.Fatalf("charged = %d, want the actual 8001", got)
+	}
+	if out.CostMpts != 8001 {
+		t.Fatalf("cost = %d, want the actual 8001", out.CostMpts)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
+
+func TestHandleFailsClosedWhenACancelledInvocationsChargeCarriesTheRunPastItsBudget(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// A cancelled invocation that reports a cost is settled by it; 8001 past
+	// the run's 600 ceiling fails the node instead of only returning cancelled.
+	inv.result = model.Result{State: model.StateCancelled, CostMpts: 8001}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(600)
+
+	out, err := runNode(t, h, reg, t.Context(), budget, `{"params":{"duration_s":5}}`)
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("err = %v, want budget_exceeded, not cancelled", err)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 8001 {
+		t.Fatalf("charged = %d, want the actual 8001", got)
+	}
+	if out.CostMpts != 8001 {
+		t.Fatalf("cost = %d, want the actual 8001", out.CostMpts)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
+
+func TestHandleFailsClosedWhenAnIngestFailuresSettlementCarriesTheRunPastItsBudget(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{ClientRef: req.ClientRef}, nil
+	}
+	// The deferred settlement still runs after a failed ingest; its actual
+	// charge (8001) is past the run's 600 ceiling, so the node fails closed
+	// with budget_exceeded even though the ingest failed first.
+	inv.result = model.Result{
+		State:    model.StateSucceeded,
+		CostMpts: 8001,
+		Outputs:  []model.Output{{URL: "https://vendor.test/a.png", Media: "image"}},
+	}
+	reg := newFakeRegistrar()
+	budget := NewMemory(600)
+	h := testHandler(t, Deps{
+		Invoker: inv,
+		Catalog: videoCatalog(t),
+		Steps:   reg,
+		Blobs:   newMemBlob(),
+		Fetch: func(context.Context, model.Output) ([]byte, string, error) {
+			return nil, "", errors.New("the vendor is gone")
+		},
+	})
+
+	_, err := runNode(t, h, reg, t.Context(), budget, `{"params":{"duration_s":5}}`)
+	if core.CodeOf(err) != core.CodeBudgetExceeded {
+		t.Fatalf("err = %v, want budget_exceeded", err)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 8001 {
+		t.Fatalf("charged = %d, want the pinned actual 8001", got)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
