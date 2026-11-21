@@ -24,6 +24,33 @@ type Invoker interface {
 func Invoke(ctx, Invoker, Request) (Result, error)          // blocking form: Start + Result
 ```
 
+A request may carry a **cache hint** (ADR-0019), `Request.Cache *CacheHint`.
+It is vendor-neutral and advisory:
+
+```go
+// CacheHint marks up to three cache breakpoints in a request: the last system
+// message, the last tool definition, and the last message. A nil hint asks
+// for none.
+type CacheHint struct {
+    System  bool `json:"system,omitempty"`
+    Tools   bool `json:"tools,omitempty"`
+    Message bool `json:"message,omitempty"`
+}
+```
+
+The three breakpoints are the last system block, the last tool and a rolling
+marker on the last message block. The hint is part of the durable request, so
+a replay annotates the same request the same way. A provider that cannot
+express a breakpoint ignores it; a hint never fails an invocation. The
+provider adapter, not the caller, turns it into the vendor's wire form.
+
+`model.PrefixHash(Request)` returns the SHA-256 of the stable cacheable
+prefix — the tool definitions and the system messages, in canonical order —
+and is empty when the request has neither. It is the model-layer counterpart
+of `prompt.PrefixHash`: the agent loop asserts that two consecutive turns have
+the same stable prefix hash (REQ-AGENT-031), while the rolling message marker
+extends the cached prefix without changing the stable one.
+
 | Vendor protocol | Adapter mapping | Typical capabilities |
 | --- | --- | --- |
 | `stream` (one request, streamed reply) | `Start` opens the stream; `Events` yields chunks; `Result` is the assembled reply | chat, streaming TTS |
@@ -90,6 +117,18 @@ Every model has a `Descriptor`:
 | Remote invokers | Any service implementing `basamento.invoke.v1.InvocationService` over connect (for example the browser runner, ADR-0009). |
 | Vendor-specific adapters | Only where a manifest cannot express the protocol. |
 
+Cache annotations are the provider adapters' (ADR-0019). Anthropic-compatible
+adapters mark the last system block, the last tool definition and the last
+message content block with `cache_control: {"type":"ephemeral"}`. Providers
+with automatic prefix caching (OpenAI-compatible, DeepSeek, Qwen, MiniMax,
+GLM, OpenRouter, Ollama) ignore the hint. Gemini uses the stable system+tools
+prefix as explicit cached content where the model supports it and ignores the
+rolling message marker, which has no per-block equivalent. A
+generic manifest provider ignores the hint unless its manifest declares an
+annotation mapping. The provider composition root is `model/providers`
+(WP-L3-04), under the `model` layer; it supplies each adapter's annotator and
+is called from `cmd/kit` and the BDD harness.
+
 Every provider ships with a **simulator** and contract tests (WP-L3-04).
 
 ## 4. The model node in a flow
@@ -155,6 +194,12 @@ reads that final state before falling back to the estimate.
   provider error retries the same rung. The local repair runs in process after
   the last supported rung: it strips prose and code fences and fixes JSON
   syntax, never a field, so a missing field is not fabricated.
+- **Cache hints.** `model/chat` forwards `Request.Cache` to the provider's
+  `CacheAnnotator`; it never writes vendor syntax itself. The annotator is a
+  pure function of the decoded messages, the tools and the hint, so a replay
+  of the same durable request produces the same annotation. The rolling
+  marker's position is the last message block of that request; no turn
+  counter or clock is read.
 - **Middleware order** (`model/middleware`): call log ∘ recording ∘ fallback ∘
   metering ∘ structured ∘ retry (jitter, Retry-After) ∘ timeouts (first chunk, idle, total).
   Every attempt of one call, across rungs and retries, spends one budget of 3
