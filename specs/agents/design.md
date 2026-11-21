@@ -198,6 +198,14 @@ messages), and any new tool results. If total message tokens exceed
    model turn with the tool-call results it asked for (REQ-AGENT-024,
    REQ-AGENT-025).
 
+When counting tokens, a tool-result message reports no usage of its own: its
+input tokens are estimated from its content at four bytes per token, rounded up,
+plus one token for the message envelope. A turn's weight is its recorded usage
+tokens plus the estimated tokens of its tool results; this content-based estimate
+applies only to tool results, since the system messages' and each turn's tokens
+come from declared or recorded usage. The kept set is measured once its messages
+are assembled.
+
 The count of dropped messages is recorded in the turn's step result (`turn-<n>`),
 not kept elsewhere: the run's messages stay complete for its output. A kept set
 that still exceeds `input_tokens` fails the run with `invalid_argument` before
