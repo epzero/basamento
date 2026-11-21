@@ -1,6 +1,6 @@
 # Config: design
 
-**Status:** draft, WP-L1-05, spec review pending.
+**Status:** implemented (WP-L1-05)
 
 Decisions the implementer of WP-L1-05 must follow. They refine the
 requirements; where this file and the requirements disagree, the requirements
@@ -14,9 +14,18 @@ ADR-0004 fixes the mechanism: koanf, plain constructors (`wireEmbedded`,
 | Package | Role | Owned by |
 | --- | --- | --- |
 | `internal/config` | load, validate, effective report, schema of known keys | WP-L1-05 |
-| `structs.go` in `internal/config` | the `Config` struct with `koanf` tags | WP-L1-05 |
+| `structs.go` in `internal/config` | the `Config` struct plus one key table (key, Go field, default, validator, apply path), with no `koanf` tags | WP-L1-05 |
 | `cmd/kit` | `serve` and `config validate` commands, start-up order, signals | WP-L1-05 |
 | `platform`, `platform/sql`, `platform/blob`, `platform/bus`, `platform/secrets` | the ports and their constructors | WP-L1-01 … 04 |
+
+`serve.go` in `internal/config` provides `config.Server`: it serves an
+already-bound listener and, on shutdown, drains requests in flight and closes
+the ports it is given. It does not load or validate configuration, open ports,
+bind the listener, install a signal handler or print the ready line; `cmd/kit`
+does all of those and hands the bound listener and opened ports to
+`config.Server`. Section 5 records that start-up order, including the step
+where WP-L5-02 and WP-L5-03 hook in starting the temporal runtime (a no-op
+until then).
 
 `internal/gate/layering.go` fails the gate for every package `layering.yaml`
 does not assign to a layer (`package not assigned to a layer in
@@ -83,6 +92,7 @@ renders and what the environment mapping is derived from.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `profile` | string | `embedded` | one of `embedded`, `cloud` |
+| `auth.mode` | string | `none` | one of `none`, `local`, `oidc` |
 | `listen.addr` | host:port | `127.0.0.1:8080` | parses, port > 0 |
 | `data.dir` | path | `./.kit/data` | non-empty |
 | `log.level` | string | `info` | one of `debug`, `info`, `warn`, `error` |
@@ -93,12 +103,20 @@ renders and what the environment mapping is derived from.
 | `secrets.url` | URL | profile-dependent | scheme per profile |
 | `shutdown.timeout` | duration | `10s` | > 0, < 5m |
 
+`auth.mode` selects the authentication mode (ADR-0008); in `none` the server refuses a non-loopback `listen.addr` (REQ-AUTH-001).
+
 The embedded profile defaults the four port URLs to
 `sqlite://$(data.dir)/kit.db`, `file://$(data.dir)/blobs`,
 `nats-embedded://$(data.dir)/nats`, `localsecrets://$(data.dir)/secrets.key`.
 `$(data.dir)` is expanded after loading, so changing `data.dir` moves every
 default port URL with it. The cloud profile has no default for a port URL:
 each must be set (REQ-CONFIG-010).
+
+For the embedded bus, the `bus.url` path names the JetStream store directory.
+`platform/bus` keeps its store in `<data dir>/nats`: a path ending in `nats`
+(the default, `<data.dir>/nats`) has its parent passed as the bus data
+directory, while any other path is the bus data directory itself. A host other
+than `localhost` in the URL is the first path segment (`localhost` is dropped).
 
 ## 3. Loading
 
