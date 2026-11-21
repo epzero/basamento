@@ -11,6 +11,9 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// MaxLeeway is the largest clock skew OIDC verification accepts.
+const MaxLeeway = 5 * time.Minute
+
 // KeySet resolves the verification key an issuer published. kid names the key
 // a token was signed with; an empty kid asks for the set's only key.
 type KeySet interface {
@@ -61,8 +64,9 @@ type OIDC struct {
 	parser      *jwt.Parser
 }
 
-// NewOIDC returns a verifier for opts. It reports invalid_argument for missing
-// or malformed options and never echoes a key.
+// NewOIDC returns a verifier for opts. The issuer URL may be http or https; it
+// is matched against the token's iss claim and is not fetched. It reports
+// invalid_argument for missing or malformed options and never echoes a key.
 func NewOIDC(opts OIDCOptions) (*OIDC, error) {
 	u, err := url.Parse(opts.Issuer)
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
@@ -79,6 +83,9 @@ func NewOIDC(opts OIDCOptions) (*OIDC, error) {
 	}
 	if opts.Leeway < 0 {
 		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.leeway must not be negative", map[string]any{"key": "auth.oidc.leeway"})
+	}
+	if opts.Leeway > MaxLeeway {
+		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.leeway exceeds the maximum", map[string]any{"key": "auth.oidc.leeway"})
 	}
 	tenantClaim := opts.TenantClaim
 	if tenantClaim == "" {

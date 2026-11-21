@@ -282,6 +282,18 @@ func TestOIDCTenantClaimIsConfigurable(t *testing.T) {
 	}
 }
 
+
+func TestNewOIDCAcceptsMaxLeeway(t *testing.T) {
+	clock := coretest.NewFakeClock(testNow())
+	key := rsaPrivateKey(t)
+	if _, err := NewOIDC(OIDCOptions{
+		Issuer: testIssuer, Audience: testAudience,
+		Keys: StaticKeys{testKeyID: &key.PublicKey}, Clock: clock, Leeway: MaxLeeway,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNewOIDCRejectsIncompleteOptions(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	key := rsaPrivateKey(t)
@@ -292,7 +304,8 @@ func TestNewOIDCRejectsIncompleteOptions(t *testing.T) {
 		"no audience": {Issuer: testIssuer, Keys: keys, Clock: clock},
 		"no keys":     {Issuer: testIssuer, Audience: testAudience, Clock: clock},
 		"no clock":    {Issuer: testIssuer, Audience: testAudience, Keys: keys},
-		"bad leeway":  {Issuer: testIssuer, Audience: testAudience, Keys: keys, Clock: clock, Leeway: -time.Second},
+		"bad leeway":       {Issuer: testIssuer, Audience: testAudience, Keys: keys, Clock: clock, Leeway: -time.Second},
+		"leeway too large": {Issuer: testIssuer, Audience: testAudience, Keys: keys, Clock: clock, Leeway: MaxLeeway + time.Nanosecond},
 	}
 	for name, opts := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -23,59 +23,173 @@ import (
 // ErrUnknownKey reports that a key set has no key for the requested id.
 var ErrUnknownKey = errors.New("authn: unknown verification key")
 
+var errNoUsableSigningKey = errors.New("authn: JWKS has no usable signing key")
+
+// defaultMinRefresh is the minimum time between JWKS fetch attempts after the
+// first one, unless JWKSOptions.MinRefresh overrides it.
+const defaultMinRefresh = 30 * time.Second
+
+const jwksFetchTimeout = 10 * time.Second
+
 // maxJWKSBytes bounds an issuer's key set response; a key set is small.
 const maxJWKSBytes = 1 << 20
 
+// JWKSOptions configures a JWKS key set read from an issuer URL.
+type JWKSOptions struct {
+	// URL is the issuer JWKS endpoint. It must be https, or http when the host
+	// is loopback. Credentials in the URL are never echoed in errors.
+	URL string
+	// Client performs fetches. When nil, the default client applies a 10 s
+	// timeout and does not follow redirects; a supplied client keeps its own
+	// timeout and redirect policy.
+	Client *http.Client
+	// Clock records fetch-attempt times for rate limiting.
+	Clock core.Clock
+	// MinRefresh is the minimum time between fetch attempts after the first.
+	// Zero means defaultMinRefresh; negative values are rejected.
+	MinRefresh time.Duration
+}
+
 // JWKS validates tokens against keys fetched from an issuer's JSON Web Key Set
-// URL. The set is cached; a token naming an unknown key id triggers one refresh,
-// which is how an issuer rotates keys without a restart.
+// URL. The set is cached; a token naming an unknown key id may trigger one
+// refresh subject to single-flight and rate limits.
 type JWKS struct {
-	url    string
-	client *http.Client
+	url        string
+	client     *http.Client
+	clock      core.Clock
+	minRefresh time.Duration
 
-	mu   sync.Mutex
-	keys map[string]any
+	mu          sync.RWMutex
+	keys        map[string]any
+	lastAttempt time.Time
+
+	flightMu sync.Mutex
+	flight   *jwksFlight
 }
 
-// NewJWKS returns a key set read from rawURL. The default HTTP client has a
-// finite timeout so a slow issuer cannot hold a request open.
-func NewJWKS(rawURL string) (*JWKS, error) {
-	return NewJWKSClient(rawURL, &http.Client{Timeout: 10 * time.Second})
+type jwksFlight struct {
+	done chan struct{}
+	err  error
 }
 
-// NewJWKSClient is NewJWKS with a caller-supplied client, such as one with a
-// private transport. A nil client gets the default.
-func NewJWKSClient(rawURL string, client *http.Client) (*JWKS, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+// NewJWKS returns a key set for opts.
+func NewJWKS(opts JWKSOptions) (*JWKS, error) {
+	if opts.Clock == nil {
+		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks clock is required", map[string]any{"key": "auth.oidc.jwks"})
+	}
+	minRefresh := opts.MinRefresh
+	if minRefresh == 0 {
+		minRefresh = defaultMinRefresh
+	} else if minRefresh < 0 {
+		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks min refresh must not be negative", map[string]any{"key": "auth.oidc.jwks"})
+	}
+	u, err := url.Parse(opts.URL)
+	if err != nil || u.Host == "" {
 		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must be an http or https URL", map[string]any{"key": "auth.oidc.jwks"})
 	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackHost(u.Hostname()) {
+			return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must use https except on loopback", map[string]any{"key": "auth.oidc.jwks"})
+		}
+	default:
+		return nil, core.NewError(core.CodeInvalidArgument, "auth.oidc.jwks must be an http or https URL", map[string]any{"key": "auth.oidc.jwks"})
+	}
+	client := opts.Client
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = defaultJWKSHTTPClient()
 	}
-	return &JWKS{url: rawURL, client: client}, nil
+	return &JWKS{
+		url:        opts.URL,
+		client:     client,
+		clock:      opts.Clock,
+		minRefresh: minRefresh,
+	}, nil
 }
 
-// VerificationKey returns the key named kid. It serves a cached key without a
-// request, refreshes on a miss and reports ErrUnknownKey when the refreshed set
-// still lacks the key.
+func defaultJWKSHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: jwksFetchTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// VerificationKey returns the key named kid. It serves a cached key under a
+// short read lock, refreshes on a miss with single-flight and rate limits, and
+// reports ErrUnknownKey when the set still lacks the key after a refresh.
 func (j *JWKS) VerificationKey(ctx context.Context, kid string) (any, error) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	if key, ok := j.match(kid); ok {
+	j.mu.RLock()
+	key, ok := j.matchLocked(kid)
+	j.mu.RUnlock()
+	if ok {
 		return key, nil
 	}
-	if err := j.refresh(ctx); err != nil {
-		return nil, err
-	}
-	if key, ok := j.match(kid); ok {
-		return key, nil
-	}
-	return nil, ErrUnknownKey
+	return j.lookupAfterRefresh(ctx, kid)
 }
 
-func (j *JWKS) match(kid string) (any, bool) {
+func (j *JWKS) lookupAfterRefresh(ctx context.Context, kid string) (any, error) {
+	waiter, cooldown := j.beginRefresh(ctx)
+	if cooldown {
+		return nil, ErrUnknownKey
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-waiter.done:
+		if waiter.err != nil {
+			return nil, waiter.err
+		}
+		j.mu.RLock()
+		key, ok := j.matchLocked(kid)
+		j.mu.RUnlock()
+		if ok {
+			return key, nil
+		}
+		return nil, ErrUnknownKey
+	}
+}
+
+func (j *JWKS) beginRefresh(ctx context.Context) (*jwksFlight, bool) {
+	j.flightMu.Lock()
+	if j.flight != nil {
+		w := j.flight
+		j.flightMu.Unlock()
+		return w, false
+	}
+
+	j.mu.Lock()
+	now := j.clock.Now()
+	if !j.lastAttempt.IsZero() && now.Sub(j.lastAttempt) < j.minRefresh {
+		j.mu.Unlock()
+		j.flightMu.Unlock()
+		return nil, true
+	}
+	j.lastAttempt = now
+	j.mu.Unlock()
+
+	w := &jwksFlight{done: make(chan struct{})}
+	j.flight = w
+	j.flightMu.Unlock()
+
+	go func() {
+		defer close(w.done)
+		defer func() {
+			j.flightMu.Lock()
+			j.flight = nil
+			j.flightMu.Unlock()
+		}()
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jwksFetchTimeout)
+		defer cancel()
+		w.err = j.fetch(fetchCtx)
+	}()
+
+	return w, false
+}
+
+func (j *JWKS) matchLocked(kid string) (any, bool) {
 	if kid != "" {
 		key, ok := j.keys[kid]
 		return key, ok
@@ -88,7 +202,7 @@ func (j *JWKS) match(kid string) (any, bool) {
 	return nil, false
 }
 
-func (j *JWKS) refresh(ctx context.Context) error {
+func (j *JWKS) fetch(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, j.url, nil)
 	if err != nil {
 		return err
@@ -114,6 +228,9 @@ func (j *JWKS) refresh(ctx context.Context) error {
 	}
 	keys := make(map[string]any, len(set.Keys))
 	for _, key := range set.Keys {
+		if key.Use == "enc" {
+			continue
+		}
 		if key.Use != "" && key.Use != "sig" {
 			continue
 		}
@@ -123,7 +240,12 @@ func (j *JWKS) refresh(ctx context.Context) error {
 		}
 		keys[key.Kid] = public
 	}
+	if len(keys) == 0 {
+		return errNoUsableSigningKey
+	}
+	j.mu.Lock()
 	j.keys = keys
+	j.mu.Unlock()
 	return nil
 }
 
