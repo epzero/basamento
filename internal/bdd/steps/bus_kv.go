@@ -307,9 +307,7 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		return nil
 	})
 
-	sc.Step(`^the read fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		return world(ctx).Bus.checkCode(world(ctx).Bus.lastReadErr, code)
-	})
+	sc.Step(`^the read fails with code "([^"]*)"$`, readFailsWithCode)
 
 	sc.Step(`^reading entry "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, key, code string) error {
 		_, _, err := world(ctx).Bus.bus.Get(ctx, key)
@@ -358,5 +356,4 @@ func registerBusKV(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-
 }

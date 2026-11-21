@@ -1,4 +1,4 @@
-@planned @wp:WP-L6-01 @level:component
+@wp:WP-L6-01 @level:component
 Feature: Durable event log and relay
   Every durable event of a run is written with the state change that produced
   it, numbered per run, and relayed to the bus at least once in order.
