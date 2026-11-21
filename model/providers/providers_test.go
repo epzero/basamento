@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/providers"
 	"github.com/epzero/basamento/model/providers/sim"
@@ -772,6 +773,144 @@ func TestHTTPFollowRetriesATransientStatusError(t *testing.T) {
 	}
 }
 
+// retryClock is a fake clock that reports each wait it is asked to schedule,
+// so a test can advance time exactly when the poll loop is waiting.
+type retryClock struct {
+	*coretest.FakeClock
+	waits chan time.Duration
+}
+
+func (c *retryClock) After(d time.Duration) <-chan time.Time {
+	ch := c.FakeClock.After(d)
+	c.waits <- d
+	return ch
+}
+
+// R2-1: a Retry-After hint from a retryable status error replaces the poll
+// interval, so the next status call happens after the vendor asked, on the
+// provider's clock.
+func TestHTTPFollowHonoursRetryAfter(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	statuses := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses++
+			if statuses == 1 {
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"state":"succeeded","outputs":[]}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	clock := &retryClock{
+		FakeClock: coretest.NewFakeClock(time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)),
+		waits:     make(chan time.Duration, 1),
+	}
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: clock})
+
+	ctx := testCtx(t)
+	h, err := p.Start(ctx, model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan model.Result, 1)
+	go func() {
+		res, _ := p.Result(ctx, h)
+		results <- res
+	}()
+	var res model.Result
+	select {
+	case wait := <-clock.waits:
+		if wait != 30*time.Second {
+			t.Fatalf("retry wait = %v, want 30s (Retry-After capped, not the 250ms poll)", wait)
+		}
+		clock.Advance(wait)
+		res = <-results
+	case res = <-results:
+		t.Fatalf("run finished without honouring Retry-After: %+v", res)
+	}
+	if res.State != model.StateSucceeded {
+		t.Fatalf("state = %q, want succeeded", res.State)
+	}
+	mu.Lock()
+	got := statuses
+	mu.Unlock()
+	if got != 2 {
+		t.Fatalf("status calls = %d, want 2", got)
+	}
+}
+
+// R2-1: a vendor that keeps answering retryably fails the run within the
+// retry time budget instead of holding it open for every Retry-After.
+func TestHTTPFollowBoundsStatusRetryBudget(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	statuses := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses++
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	clock := &retryClock{
+		FakeClock: coretest.NewFakeClock(time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)),
+		waits:     make(chan time.Duration, 1),
+	}
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: clock})
+
+	ctx := testCtx(t)
+	h, err := p.Start(ctx, model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan model.Result, 1)
+	go func() {
+		res, _ := p.Result(ctx, h)
+		results <- res
+	}()
+	for {
+		select {
+		case wait := <-clock.waits:
+			clock.Advance(wait)
+		case res := <-results:
+			if res.State != model.StateFailed {
+				t.Fatalf("state = %q, want failed", res.State)
+			}
+			mu.Lock()
+			got := statuses
+			mu.Unlock()
+			if got >= 6 {
+				t.Fatalf("status calls = %d, want the time budget to stop before the retry limit", got)
+			}
+			if elapsed := clock.Now().Sub(time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)); elapsed != 2*time.Minute {
+				t.Fatalf("retried for %v, want exactly the 2m budget", elapsed)
+			}
+			return
+		}
+	}
+}
+
 // F7: a vendor state the manifest does not map fails the run instead of
 // leaving it running forever.
 func TestHTTPUnmappedVendorStateFailsTheRun(t *testing.T) {
@@ -883,6 +1022,51 @@ models:
 		if len(res.Outputs) != 1 || filepath.Base(res.Outputs[0].Path) != want {
 			t.Fatalf("%s outputs = %+v, want only %s", ref, res.Outputs, want)
 		}
+	}
+}
+
+// R2-2: a client ref whose earlier run was evicted starts in a clean
+// invocation directory, so the earlier run's files are not reported again.
+func TestCLINewRunAfterEvictionClearsTheInvocationDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := readManifest(t, `name: local-render
+locality: machine_local
+protocol: command
+cli:
+  command: [render]
+  dir: `+dir+`
+  outputs: ["out/*.png"]
+models:
+  - id: local-render
+    caps: [image.generate]
+`)
+	clock := coretest.NewFakeClock(time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC))
+	p, err := providers.NewCLI(m, providers.CLIOptions{Clock: clock, Runner: &fileRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "ref-evicted"
+	start := func() model.Result {
+		t.Helper()
+		h, err := p.Start(testCtx(t), model.Request{Model: "local-render", Op: model.CapImageGenerate, ClientRef: ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := p.Result(testCtx(t), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := start()
+	if len(res.Outputs) != 1 || filepath.Base(res.Outputs[0].Path) != "file-1.png" {
+		t.Fatalf("first run outputs = %+v, want only file-1.png", res.Outputs)
+	}
+	clock.Advance(model.DefaultRetention + time.Second)
+	res = start()
+	if len(res.Outputs) != 1 || filepath.Base(res.Outputs[0].Path) != "file-2.png" {
+		t.Fatalf("second run outputs = %+v, want only file-2.png", res.Outputs)
 	}
 }
 

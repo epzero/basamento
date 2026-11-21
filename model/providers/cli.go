@@ -201,9 +201,18 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 	if err != nil {
 		return model.Handle{}, err
 	}
-	run, _, err := c.runs.Begin(ctx, r.ClientRef)
+	run, existed, err := c.runs.Begin(ctx, r.ClientRef)
 	if err != nil {
 		return model.Handle{}, err
+	}
+	if !existed {
+		// The ref was evicted, so the directory still holds the earlier run's
+		// files; a fresh invocation must not report them as its outputs.
+		if err := os.RemoveAll(dir); err != nil {
+			run.Fail(core.NewError(core.CodeVendor,
+				"command-line provider could not clear the invocation directory", map[string]any{"cause": err.Error()}))
+			return run.Handle(), nil
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		run.Fail(core.NewError(core.CodeVendor,

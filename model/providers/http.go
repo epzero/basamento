@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,9 +55,18 @@ type HTTPOptions struct {
 	// back to back; zero uses DefaultPollInterval. Tests set a negative value
 	// so no clock or sleep is involved.
 	PollInterval time.Duration
-	// Clock stamps the invocation registry's retention window. Required: the
-	// registry fails closed without one.
+	// Clock supplies Now for the registry's retention window and After for the
+	// poll and retry waits. It must be a timer clock (core.SystemClock and
+	// coretest.FakeClock implement it). Required: the registry fails closed
+	// without one.
 	Clock core.Clock
+}
+
+// wakeClock is the clock port the HTTP provider uses for Now and timer
+// wake-ups. core.SystemClock and coretest.FakeClock implement it.
+type wakeClock interface {
+	core.Clock
+	After(time.Duration) <-chan time.Time
 }
 
 // HTTP is a provider driven by a manifest over an HTTP API: start, status,
@@ -71,6 +81,7 @@ type HTTP struct {
 	credentials CredentialResolver
 	assets      AssetResolver
 	poll        time.Duration
+	clock       wakeClock
 
 	start  *compiledCall
 	status *compiledCall
@@ -104,6 +115,11 @@ func NewHTTP(m *Manifest, opts HTTPOptions) (*HTTP, error) {
 	if opts.Clock == nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "http provider has no clock", nil)
 	}
+	clock, ok := opts.Clock.(wakeClock)
+	if !ok {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"http provider clock cannot schedule timers", nil)
+	}
 	descs, err := m.Descriptors()
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, err.Error(), nil)
@@ -128,6 +144,7 @@ func NewHTTP(m *Manifest, opts HTTPOptions) (*HTTP, error) {
 		credentials: opts.Credentials,
 		assets:      opts.Assets,
 		poll:        opts.PollInterval,
+		clock:       clock,
 		start:       start,
 		runs:        runs,
 	}
@@ -369,6 +386,15 @@ func (h *HTTP) inputFor(ctx context.Context, r model.Request) (map[string]any, e
 // while the vendor job continues; a persistent one still ends it.
 const statusRetryLimit = 5
 
+// maxStatusRetryWait caps one wait between status retries, so a vendor's
+// Retry-After hint cannot park the poll loop for hours.
+const maxStatusRetryWait = 30 * time.Second
+
+// statusRetryBudget bounds the total time one burst of status retries may
+// spend waiting. A vendor that keeps asking for more time fails the run
+// instead of holding it open indefinitely.
+const statusRetryBudget = 2 * time.Minute
+
 // follow polls the status endpoint until the invocation ends.
 func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 	if h.status == nil {
@@ -378,6 +404,7 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 	ctx := run.Context()
 	lastProgress := -1.0
 	retries := 0
+	var retryStart time.Time
 	for {
 		input, err := inputFor(model.Request{ClientRef: clientRef}, id, "")
 		if err != nil {
@@ -390,8 +417,17 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 				run.Fail(err)
 				return
 			}
+			now := h.clock.Now()
+			if retries == 0 {
+				retryStart = now
+			}
+			wait := h.statusRetryWait(err)
+			if now.Add(wait).Sub(retryStart) > statusRetryBudget {
+				run.Fail(err)
+				return
+			}
 			retries++
-			if !h.pause(ctx) {
+			if !h.sleep(ctx, wait) {
 				return
 			}
 			continue
@@ -420,22 +456,44 @@ func (h *HTTP) follow(run *model.Run, id, clientRef string) {
 // (a negative interval, which tests use so no clock is involved). It reports
 // false when the invocation's context ended.
 func (h *HTTP) pause(ctx context.Context) bool {
-	if h.poll > 0 {
-		timer := time.NewTimer(h.poll)
+	return h.sleep(ctx, h.poll)
+}
+
+// sleep waits d on the provider's clock, or returns at once when d is not
+// positive. It reports false when the invocation's context ended.
+func (h *HTTP) sleep(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
 		select {
-		case <-timer.C:
 		case <-ctx.Done():
-			timer.Stop()
 			return false
+		default:
+			return true
 		}
-		return true
 	}
 	select {
+	case <-h.clock.After(d):
+		return true
 	case <-ctx.Done():
 		return false
-	default:
-		return true
 	}
+}
+
+// statusRetryWait returns how long to wait after a retryable status error: the
+// poll interval, or the vendor's Retry-After hint when it is longer, both
+// capped so a hint cannot park the poll loop.
+func (h *HTTP) statusRetryWait(err error) time.Duration {
+	wait := h.poll
+	var pe *core.Error
+	if errors.As(err, &pe) && pe.RetryAfter > wait {
+		wait = pe.RetryAfter
+	}
+	if wait > maxStatusRetryWait {
+		wait = maxStatusRetryWait
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	return wait
 }
 
 // deliver reads a document that carries a final or current state and ends the

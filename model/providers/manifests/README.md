@@ -56,8 +56,10 @@ mapped state that is not `running` ends the invocation.
 
 A `cli` manifest adds `command` (argv prefix), `args` (a gojq expression
 producing the rest of argv), `dir`, `env`, `outputs` (file globs, relative to
-`dir`) and `progress` (a regular expression with one number group, matched
-against stdout lines and reported as the number over 100).
+the invocation directory `dir/runs/<client-ref>-<hash>`, which is also the
+command's working directory) and `progress` (a regular expression with one
+number group, matched against stdout lines and reported as the number over
+100).
 
 The HTTP driver carries `single`, `poll` and `webhook` today. A WebSocket
 vendor needs an adapter until the driver carries `socket`; the protocol is
