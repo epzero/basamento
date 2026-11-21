@@ -302,7 +302,7 @@ func TestCodecCancelledGetFailsWorkflowTask(t *testing.T) {
 	}
 }
 
-func TestCodecPermanentCancelledPutFailsFlow(t *testing.T) {
+func TestCodecPermanentInvalidArgumentPutFailsFlowWithCode(t *testing.T) {
 	fb := &faultBlob{
 		inner:  testBlobStore(t),
 		putErr: core.NewError(core.CodeInvalidArgument, "bad blob", nil),

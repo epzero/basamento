@@ -51,15 +51,15 @@ func workflowCodecPolicy(wfBound bool, log func(*core.Error), ioCtx context.Cont
 	if !wfBound {
 		return err
 	}
+	if err == nil {
+		return nil
+	}
 	if ioCtx != nil && ioCtx.Err() != nil {
 		pe := &core.Error{Code: core.CodeTimeout, Message: "workflow codec I/O bound exceeded", Cause: ioCtx.Err()}
 		if log != nil {
 			log(pe)
 		}
 		panic(taskFailure{code: core.CodeTimeout})
-	}
-	if err == nil {
-		return nil
 	}
 	var pe *core.Error
 	if !errors.As(err, &pe) {

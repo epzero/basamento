@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,20 +51,53 @@ func TestWorkflowCodecPolicyDeadlineExceededCause(t *testing.T) {
 	}
 }
 
-func TestWorkflowCodecPolicyExpiredIOContextAlone(t *testing.T) {
+func TestWorkflowCodecPolicyExpiredIOContextNilErrorReturnsNil(t *testing.T) {
 	ioCtx := expiredCodecCtx()
 	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic")
-		}
-		tf, ok := r.(taskFailure)
-		if !ok || tf.code != core.CodeTimeout {
-			t.Fatalf("panic %v", r)
+		if r := recover(); r != nil {
+			t.Fatalf("unexpected panic %v", r)
 		}
 	}()
 	if ret := workflowCodecPolicy(true, nil, ioCtx, nil); ret != nil {
 		t.Fatalf("unexpected return %v", ret)
+	}
+}
+
+func TestWorkflowCodecPolicyNonCoreError(t *testing.T) {
+	plain := errors.New("vendor broke")
+	cases := []struct {
+		name    string
+		ioCtx   context.Context
+		wantPan bool
+	}{
+		{"expired_io", expiredCodecCtx(), true},
+		{"fresh_io", context.Background(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantPan {
+				defer func() {
+					r := recover()
+					if r == nil {
+						t.Fatal("expected panic")
+					}
+					tf, ok := r.(taskFailure)
+					if !ok || tf.code != core.CodeTimeout {
+						t.Fatalf("panic %v", r)
+					}
+				}()
+			} else {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("unexpected panic %v", r)
+					}
+				}()
+			}
+			got := workflowCodecPolicy(true, nil, tc.ioCtx, plain)
+			if !tc.wantPan && !errors.Is(got, plain) {
+				t.Fatalf("got %v want %v", got, plain)
+			}
+		})
 	}
 }
 
