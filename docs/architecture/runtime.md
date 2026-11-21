@@ -2,9 +2,9 @@
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
 **Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
-(`runtime/local`, WP-L5-01); `temporal` **In progress** — data path
-(`runtime/temporal`, WP-L5-02 pull request (a); control plane and Await still
-planned in the same WP).
+(`runtime/local`, WP-L5-01); `temporal` **In progress** — data path and workflow features
+(`runtime/temporal`, WP-L5-02 pull requests (a) and (b); control plane still
+planned in pull request (c)).
 Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
@@ -102,7 +102,10 @@ as an activity. This change delivers:
   tenant, workflow id) and panic as a sanitized `taskFailure`, so the **workflow
   task** fails and the server retries (the run is not failed). Permanent errors
   are returned. That covers step argument and result encode/decode, workflow input
-  decode, workflow result encode, and later workflow-side uses in (b)/(c). Client
+  decode, workflow result encode, and in pull request (b) the continuation journal
+  (`HostInput.Continuation` on ContinueAsNew), `Emit` activity arguments, gate
+  Update payloads (`GateResolution`), and child workflow inputs and results
+  (`HostInput` on `ExecuteChildWorkflow`). Client
   and activity converters (`WithContext`) return errors without panicking.
   Permanent step-argument encode failures are still surfaced to the flow as a failed
   `Step` future (`Step` recovers the SDK panic). Workflow I/O is bounded at 30 s
@@ -115,17 +118,13 @@ as an activity. This change delivers:
   in the flow host still fail the run once with `temporal: the flow host panicked`;
   SDK non-determinism and illegal-state panics are out of scope here.
 - A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
-  `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities`; `Child`, `Await`,
-  `Emit` and `Checkpoint` return `unsupported` until the next changes of
-  WP-L5-02.
+  `Rand`, `Step`, `Sleep`, `Select`, and `Capabilities` (pull request (a)).
 - **Step activity** retries: `MaxAttempts` 0 → 3, listed `NonRetryable` codes and
   non-retryable `core.Error` values stop after one attempt; Temporal backoff is
   1 s initial, ×2, cap 100 s (the local runtime retries immediately). Codes and
   the `Retryable` flag cross the activity boundary on `Future.Get`.
 - **Registration** (`RegisterFlowHost`, `RegisterStep`, `Register`,
   `DataConverter`) without control-plane `runtime.Runtime` (pull request (c)).
-- **`Capabilities()`** on `DurableContext` reports only `durable` and
-  `polyglot_queues` until pull requests (b) and (c) add gates and ContinueAsNew.
 
 **Plain text in history:** Temporal stores failure messages and the tenant
 header unencrypted; payload bytes go through the codec only. History carries only
@@ -142,7 +141,141 @@ client tenant context, injects RT-032/033 faults on activity results). Productio
 code has no test hooks. Real-server version pinning is pull request (c) and
 WP-L5-03.
 
-## 7. Local runtime: behaviours the specs leave open
+## 7. Temporal runtime: workflow features (WP-L5-02, pull request (b))
+
+Pull request (b) adds **gates** (`Await`, Temporal Updates), **Emit** (outbox
+activity), **Child** workflows, **Checkpoint** / ContinueAsNew, and the
+**continuation journal** in `HostInput.Continuation`. After ContinueAsNew the
+host workflow runs the flow function again from its first line; values from
+earlier executions come from `HostInput.Continuation`, not from re-running side
+effects.
+
+### Continuation journal
+
+The journal holds only what flow code cannot recompute on replay. It grows with
+the run (every finished step outcome stays in it) and serializes through the
+shared data converter (encrypted per tenant, claim-checked over the threshold;
+see section 6 for blob retention).
+
+| JSON field | Meaning | Replay rule |
+| --- | --- | --- |
+| `steps` | Finished step outcomes | Key = step name; return journaled result or error |
+| `children` | Finished child outcomes | Key = child run id |
+| `gates` | `GateJournal` per gate name | Pending, resolved, timed out, or cancelled |
+| `timers` | `Sleep(d>0)` calls | Match by call order; deadline and `fired` |
+| `selects` | `Select` branch indices | Match by call order |
+| `nows` | `Now()` samples | Match by call order |
+| `emitted` | Count of stored Emit events | Dense `seq` = `emitted + 1` for the next append |
+| `emit_failures` | Terminal Emit failures | Key = 1-based Emit call ordinal |
+| `checkpoints` | Honored Checkpoint calls | Ordinal already continued returns nil |
+
+`NewID` and `Rand` counters are **not** carried: they restart per execution and
+reproduce the same values when the flow calls them in the same order
+(`NewID(kind)` is `kind_N`, not run-scoped).
+
+### Replay-stable flow code
+
+Durable calls (`Step`, `Sleep`, `Select`, `Child`, `Await`, `Emit`, `Now`,
+`Checkpoint`) must happen in the same order on every execution. Timers,
+`Select`, and `Now` journal entries match by **call order**; steps by **name**;
+children by **id**; gates by **name**. A flow that branches on `Future.Ready()`
+across a `Checkpoint` can diverge (a replayed future is ready at once); use
+`Select`.
+
+**Step memoization:** step outcomes are keyed by name (same as `runtime/local`,
+REQ-RT-007). Inside one execution, `Step` memoizes by name in `stepFutures`, so
+a second call with the same name returns the first call's future regardless of
+input. After ContinueAsNew, finished outcomes live in the journal field `steps`; a
+second call with the same name returns the journaled result or error and does
+not run the activity again.
+
+### Checkpoint (REQ-RT-034, REQ-RT-035, REQ-RT-036, REQ-RT-038)
+
+`Checkpoint` compares `GetCurrentHistoryLength()` to
+`Options.CheckpointEventThreshold`, default **2000** (`DefaultCheckpointEventThreshold`);
+negative disables ContinueAsNew. Below the threshold it returns nil and does
+nothing. At or above it the runtime waits for in-flight steps and children
+(including children with parent-close `abandon`) and for Update handlers to
+finish without re-running them, snapshots the journal, and continues as new.
+The deciding `Checkpoint` returns the ContinueAsNew error; **the flow must
+return that error immediately** (the host workflow still continues as new if
+the flow ignores it; blocking on a future created before the decision keeps
+the run alive until that wait ends). New durable calls after the decision
+fail fast with code `cancelled` and message `temporal: the run is continuing as new`.
+A Checkpoint whose ordinal was already honored in an earlier execution returns
+nil on replay. `SnapshotRef` is unused. See the spec-silent table below for a
+cancelled run at threshold.
+
+### Gates (Temporal Updates)
+
+Resolution is Update `basamento-resolve-gate` with payload `{gate, payload}`.
+The validator rejects, in order: run continuing as new → `unavailable`
+`temporal: the run is continuing as new; retry`; gate not in the journal →
+`not_found` `temporal: no gate with that name on the run`; already resolved →
+`conflict` `temporal: the gate was already resolved`; wait already ended by
+timeout or cancel → `conflict` `temporal: the gate wait already ended`. Gates
+are journal-driven: the journal entry is created when the flow first calls
+`Await` (no create-on-miss). After ContinueAsNew, pending gates stay in the
+journal; when replay reaches `Await`, the wait is re-armed from stored
+deadline (absolute time, so remaining time carries over; a past deadline times
+out at once). Run cancellation settles pending gates as
+`cancelled` (`temporal: gate cancelled`) and journals that. `GateSpec.Schema`
+and `AcceptIf` are not evaluated (FLOW-006-01, WP-L5-04).
+
+### Emit
+
+A synchronous outbox activity `basamento-emit` calls
+`Outbox.Append(ctx, run, seq, event)` with the tenant in context and
+`RunRef.TenantID`. `seq` is dense and counts stored events only (`emitted + 1`),
+so replay and activity retries are idempotent by `seq`. Retryable errors retry
+without attempt limit (1 s initial, ×2, cap 1 min, 1 min
+`StartToCloseTimeout` per attempt). A non-retryable error fails that `Emit` once,
+is journaled in `emit_failures`, and is returned identically on replay after
+ContinueAsNew (the activity does not run again). `New` requires `Outbox` at the
+composition root; production ships no in-memory sink.
+
+### Child
+
+A child is another host workflow with Temporal workflow id `<tenant>/<child run
+id>` on the same task queue. `ChildOptions.ID` empty → `NewID("child")`
+(`child_N`). Parent-close policies map like the local runtime: `terminate`
+(default), `request_cancel`, `abandon` → Temporal `PARENT_CLOSE_POLICY_*`.
+Finished child results are journaled by child id. **Caveat:** default child ids
+(`child_N`) are per-execution counters, not scoped to the parent run; two
+concurrent parent runs in one tenant that both use default ids target the same
+workflow id and the second start fails with the SDK's already-started error.
+Callers running many parents concurrently should set `ChildOptions.ID`.
+
+### Test environment limits
+
+A child's own ContinueAsNew is not exercised in the SDK test environment (child
+environments do not inherit parent history length); child ContinueAsNew rests on
+the same code path as the parent and on review. Claim-check blobs are not
+garbage-collected (section 6).
+
+In SDK v1.47.0 the test environment hands the workflow-bound data converter to
+the activity side. With `workflow.DataConverterWithoutDeadlockDetection` that can
+deadlock the environment (lock inversion between the deadlock detector's pause and
+a coroutine ticker's end), so test converters derive the activity-side converter
+from the unbound one, as `clientConverter` and the BDD `recordingConverter` do.
+Production workers are not affected.
+
+### Capabilities
+
+`Capabilities()` reports `durable`, `sync_gate_updates`, `continue_as_new`, and
+`polyglot_queues`.
+
+### Behaviours the specs leave open (Temporal, pull request (b))
+
+| Behaviour | Spec coverage |
+| --- | --- |
+| `Checkpoint` on a cancelled run at threshold → `cancelled` `temporal: the run was cancelled`, no ContinueAsNew | spec-silent (`TestCheckpointOnCancelledRunReturnsCancelledAndDoesNotContinue`) |
+| Non-retryable `Emit` failure journaled in `emit_failures` and replayed identically | spec-silent (`TestEmitFailureIsJournaledAndReplayedAsFailure`) |
+| Default child id `child_N` not parent-scoped; concurrent parents can collide on workflow id | spec-silent (no unit test: Temporal workflow-id uniqueness; SDK test env runs one workflow) |
+| Step keyed by name; second call with same name returns first outcome (`stepFutures` or journal `steps`) | spec-silent (`TestStepMemoizedByName`, `TestContinuationDoesNotExecuteFinishedStepsAgain`; same as local REQ-RT-007) |
+| Flow should return ContinueAsNew error from `Checkpoint`; host continues as new even if the flow ignores it; `Checkpoint` at threshold waits for pre-decision in-flight work | spec-silent (`TestCheckpointContinuesWhenHistoryAtThreshold`, `TestCheckpointErrorIgnoredByFlowStillContinuesAsNew`, `TestCheckpointAtThresholdWaitsForInFlightStepAndDoesNotRunItAgain`) |
+
+## 8. Local runtime: behaviours the specs leave open
 
 These are implementation choices for `runtime/local` (WP-L5-01). Where a row
 names a requirement or scenario id, the gate exercises it; otherwise the
