@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestValidateRunIDRejectsSlash(t *testing.T) {
+	for _, id := range []string{"a/b", "/x", "x/"} {
+		if err := validateRunID(id); err == nil {
+			t.Fatalf("validateRunID(%q) should reject slash", id)
+		}
+	}
+}
+
 func TestDefaultNewRunIDFormat(t *testing.T) {
 	const pattern = `^run_[0-9a-f]{32}$`
 	re := regexp.MustCompile(pattern)

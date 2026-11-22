@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -34,6 +35,9 @@ func validateRunID(runID string) error {
 		if unicode.IsControl(r) {
 			return core.NewError(core.CodeInvalidArgument, "temporal: invalid run id", nil)
 		}
+	}
+	if strings.ContainsRune(runID, '/') {
+		return core.NewError(core.CodeInvalidArgument, "temporal: invalid run id", nil)
 	}
 	return nil
 }

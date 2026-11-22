@@ -45,12 +45,15 @@ func (r *Runtime) Start(ctx context.Context, req runtime.StartRequest) (runtime.
 	} else if err := validateRunID(runID); err != nil {
 		return runtime.RunRef{}, err
 	}
+	wfID, err := controlWorkflowID(tenant, runID)
+	if err != nil {
+		return runtime.RunRef{}, err
+	}
 
 	cl, err := r.clientFor()
 	if err != nil {
 		return runtime.RunRef{}, err
 	}
-	wfID := workflowID(tenant, runID)
 	searchAttrs := temporal.NewSearchAttributes(flowSearchAttributeKey.ValueSet(req.Flow.Name))
 	opts := client.StartWorkflowOptions{
 		ID:                                       wfID,

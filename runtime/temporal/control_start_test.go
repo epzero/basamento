@@ -143,8 +143,12 @@ func TestStartRunIDGenerationAndValidation(t *testing.T) {
 	if _, err := rt.Start(ctx, runtime.StartRequest{Flow: runtime.FlowRef{Name: "f"}, RunID: ""}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rt.Start(ctx, runtime.StartRequest{Flow: runtime.FlowRef{Name: "f"}, RunID: "a/b"}); err != nil {
-		t.Fatal("slash allowed")
+	opsBefore := fc.clientOps()
+	if _, err := rt.Start(ctx, runtime.StartRequest{Flow: runtime.FlowRef{Name: "f"}, RunID: "a/b"}); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("slash run id rejected: %v", err)
+	}
+	if fc.clientOps() != opsBefore {
+		t.Fatalf("ExecuteWorkflow called for slash run id: ops=%d before=%d", fc.clientOps(), opsBefore)
 	}
 	if _, err := rt.Start(ctx, runtime.StartRequest{Flow: runtime.FlowRef{Name: ""}, RunID: "r"}); err == nil || core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("empty flow %v", err)

@@ -61,6 +61,9 @@ func (r *Runtime) clientError(op string, err error) error {
 	if re := (*serviceerror.ResourceExhausted)(nil); errors.As(err, &re) {
 		return core.NewError(core.CodeRateLimited, "temporal: rate limited", opDetail(op))
 	}
+	if wnr := (*serviceerror.WorkflowNotReady)(nil); errors.As(err, &wnr) {
+		return core.NewError(core.CodeUnavailable, "temporal: the run is not ready for the call", opDetail(op))
+	}
 	if nnf := (*serviceerror.NamespaceNotFound)(nil); errors.As(err, &nnf) {
 		return core.NewError(core.CodeUnavailable, "temporal: the namespace does not exist", opDetail(op))
 	}

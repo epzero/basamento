@@ -319,8 +319,12 @@ tenant payload converter and `TenantPropagator`. One client is dialled lazily
 
 ### Start and idempotency (D2)
 
-`Start` uses workflow id `<tenant>/<run id>` (`workflowID`). Empty `RunID` →
-cryptographic `run_<hex>`. Policies: `RejectDuplicate`, `Fail`,
+`Start` uses workflow id `<tenant>/<run id>` (`workflowID`). An explicit run id
+must be non-empty, at most 255 bytes, valid UTF-8, free of control characters
+and free of `/` (the workflow id is `<tenant>/<run id>`); anything else is
+`invalid_argument` before any call. Describe, Cancel and Resolve apply the same
+rule to the run id they are given. Empty `RunID` on start → cryptographic
+`run_<hex>`. Policies: `RejectDuplicate`, `Fail`,
 `WorkflowExecutionErrorWhenAlreadyStarted`: an existing id (running or closed)
 → `conflict` (`temporal: a run with that id already exists`). A non-empty
 `IdempotencyKey` with no `RunID` derives the run id deterministically
@@ -350,8 +354,10 @@ no cancellation-reason field and history would store it in plaintext.
 Synchronous Update `basamento-resolve-gate` with `{gate, payload}`; waits until
 `WorkflowUpdateStageCompleted`. A validator rejection returns the workflow's
 `core` code (`not_found`, `conflict`, `unavailable` while the run is continuing
-as new); a missing run is `not_found`. No internal retry on `unavailable`; the
-caller retries.
+as new); a missing run is `not_found`. A run that is not ready for the update
+(its first workflow task has not started, or its workflow task is failing)
+returns `unavailable`; the caller retries. No internal retry on `unavailable`;
+the caller retries.
 
 ### List, query shapes and cursor (D6)
 
@@ -416,7 +422,10 @@ in the log) so a supervisor can restart the process.
 
 Control-plane scenarios run the real SDK client against an in-process gRPC stub
 of `WorkflowService` and `OperatorService` in `internal/bdd/steps` (no
-DataConverter on stub dial; deterministic injected clock). The stub implements
+DataConverter on stub dial; deterministic injected clock). The rejection steps
+for describe, cancel, resolve and list also require that the stub's request log
+holds no request of the rejected operation, because the stub never changes a
+run's state by itself (a rejected call must not reach the server). The stub implements
 the query shapes of `list.go`, start policies, search-attribute registration,
 poller long-polls, and Update/cancel/describe/list RPCs. It **does not execute
 workflow code**: a started run stays RUNNING until the test calls `Finish`.
@@ -436,6 +445,7 @@ stub and no payload recorded by the harness converter.
 | Fatal worker error message does not include SDK cause text in the returned error | spec-silent (`TestServeWorkerFatalError`) |
 | `Start` idempotent duplicate returns success with no conflict details | spec-silent (`TestStartIdempotentDuplicateHasNoConflictDetails`) |
 | Tenant rejection on every control op before dial when id is unsafe for visibility | spec-silent (`TestControlTenantRejectsBeforeDial`, `TestTenantRejectsEachQuoteClass`) |
+| A run id containing `/`, or an empty/overlong/control-character run id, is rejected on every control call before any dial | spec-silent (`TestStartRejectsSlashRunIDBeforeDial`, `TestDescribeCancelResolveRejectSlashRunIDBeforeDial`, `TestControlWorkflowIDOnAcceptedRunIDs`) |
 
 ## 9. Local runtime: behaviours the specs leave open
 

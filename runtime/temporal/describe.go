@@ -19,14 +19,15 @@ func (r *Runtime) Describe(ctx context.Context, ref runtime.RunRef) (runtime.Run
 	if err != nil {
 		return runtime.RunStatus{}, err
 	}
-	if ref.RunID == "" {
-		return runtime.RunStatus{}, core.NewError(core.CodeInvalidArgument, "temporal: empty run id", nil)
+	wfID, err := controlWorkflowID(tenant, ref.RunID)
+	if err != nil {
+		return runtime.RunStatus{}, err
 	}
 	cl, err := r.clientFor()
 	if err != nil {
 		return runtime.RunStatus{}, err
 	}
-	resp, err := cl.DescribeWorkflowExecution(ctx, workflowID(tenant, ref.RunID), "")
+	resp, err := cl.DescribeWorkflowExecution(ctx, wfID, "")
 	if err != nil {
 		return runtime.RunStatus{}, r.clientError("describe", err)
 	}

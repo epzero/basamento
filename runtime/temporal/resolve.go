@@ -18,8 +18,9 @@ func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, 
 	if err != nil {
 		return err
 	}
-	if ref.RunID == "" {
-		return core.NewError(core.CodeInvalidArgument, "temporal: empty run id", nil)
+	wfID, err := controlWorkflowID(tenant, ref.RunID)
+	if err != nil {
+		return err
 	}
 	if gate == "" {
 		return core.NewError(core.CodeInvalidArgument, "temporal: gate name is required", nil)
@@ -29,7 +30,7 @@ func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, 
 		return err
 	}
 	handle, err := cl.UpdateWorkflow(ctx, client.UpdateWorkflowOptions{
-		WorkflowID:   workflowID(tenant, ref.RunID),
+		WorkflowID:   wfID,
 		UpdateName:   ResolveGateUpdate,
 		Args:         []any{GateResolution{Gate: gate, Payload: payload}},
 		WaitForStage: client.WorkflowUpdateStageCompleted,

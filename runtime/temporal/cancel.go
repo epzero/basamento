@@ -3,7 +3,6 @@ package temporal
 import (
 	"context"
 
-	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/runtime"
 )
 
@@ -14,14 +13,15 @@ func (r *Runtime) Cancel(ctx context.Context, ref runtime.RunRef, _ string) erro
 	if err != nil {
 		return err
 	}
-	if ref.RunID == "" {
-		return core.NewError(core.CodeInvalidArgument, "temporal: empty run id", nil)
+	wfID, err := controlWorkflowID(tenant, ref.RunID)
+	if err != nil {
+		return err
 	}
 	cl, err := r.clientFor()
 	if err != nil {
 		return err
 	}
-	err = cl.CancelWorkflow(ctx, workflowID(tenant, ref.RunID), "")
+	err = cl.CancelWorkflow(ctx, wfID, "")
 	if err != nil {
 		return r.clientError("cancel", err)
 	}

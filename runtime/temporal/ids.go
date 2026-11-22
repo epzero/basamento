@@ -6,6 +6,19 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// controlWorkflowID validates runID and forms the tenant-scoped workflow id
+// passed to the SDK. No control call may hand an empty workflow id to the client.
+func controlWorkflowID(tenant core.TenantID, runID string) (string, error) {
+	if err := validateRunID(runID); err != nil {
+		return "", err
+	}
+	id := workflowID(tenant, runID)
+	if id == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "temporal: invalid run id", nil)
+	}
+	return id, nil
+}
+
 // workflowID forms a tenant-scoped Temporal workflow id. The first "/" is the
 // tenant/run separator, so it returns "" when the tenant is invalid or the run
 // id already contains "/": such an id cannot be split back into its parts.
