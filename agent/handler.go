@@ -316,12 +316,14 @@ func userMessage(input json.RawMessage) (*schema.Message, error) {
 	if len(trimmed) == 0 {
 		return nil, nil
 	}
-	var text string
-	if err := json.Unmarshal(trimmed, &text); err == nil {
-		if strings.TrimSpace(text) == "" {
+	// A JSON string decodes to text; JSON null decodes to a nil pointer and is
+	// not a string, so it and every other non-string JSON seed their bytes.
+	var text *string
+	if err := json.Unmarshal(trimmed, &text); err == nil && text != nil {
+		if strings.TrimSpace(*text) == "" {
 			return nil, nil
 		}
-		return &schema.Message{Role: schema.User, Content: text}, nil
+		return &schema.Message{Role: schema.User, Content: *text}, nil
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, trimmed); err != nil {

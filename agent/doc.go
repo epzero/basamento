@@ -3,9 +3,10 @@
 // output is recorded, retried and metered. Caps (steps, cost, tokens, time)
 // are checked at each turn boundary in flow code. A run that does not start
 // from a handoff seeds its history with one user message from the node input;
-// a request with no user message fails before the model is invoked. A handoff
-// returns the target node and the run's turns to the flow; the target starts
-// with them and is not seeded again.
+// a request with no non-system message fails before the model is invoked
+// (REQ-AGENT-032), while a handoff target carries no user message and must run.
+// A handoff returns the target node and the run's turns to the flow; the target
+// starts with them and is not seeded again.
 //
 // The loop is runtime-neutral: it is written against runtime.DurableContext
 // and imports no durable-execution vendor (ADR-0002). It is composed with the

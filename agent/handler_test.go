@@ -1233,20 +1233,46 @@ func TestRunSeedsTheFirstUserMessage(t *testing.T) {
 
 // AGENT-031-01: any other non-empty JSON seeds the user message with its
 // compact bytes, so an object input reaches the model unchanged but for its
-// whitespace.
+// whitespace. Only an object whose state is "handoff" is an envelope: keys
+// that clash with the envelope's types are plain input, and JSON null is not a
+// string.
 func TestRunSeedFromNonStringInputIsCompactJSON(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"object", `{ "q": "x" }`, `{"q":"x"}`},
+		{"object with an envelope key", `{"output":{"text":"hi"}}`, `{"output":{"text":"hi"}}`},
+		{"object with another envelope key", `{"turns":5}`, `{"turns":5}`},
+		{"null", ` null `, `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+			m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+			h := newHandler(dc, m, newTools(dc), nil)
+			if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage(tc.input)); err != nil {
+				t.Fatal(err)
+			}
+			var msgs []*schema.Message
+			if err := json.Unmarshal(m.requests[0].Messages, &msgs); err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 || msgs[0].Role != schema.User || msgs[0].Content != tc.want {
+				t.Fatalf("turn 1 messages = %s, want the compact %s", m.requests[0].Messages, tc.want)
+			}
+		})
+	}
+}
+
+// A real handoff whose envelope does not decode still fails (REQ-AGENT-017,
+// REQ-AGENT-031), so a malformed handoff is never silently seeded.
+func TestMalformedHandoffFails(t *testing.T) {
 	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
 	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
 	h := newHandler(dc, m, newTools(dc), nil)
-	if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage("{ \"q\": \"x\" }")); err != nil {
-		t.Fatal(err)
+	_, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage(`{"state":"handoff","turns":5}`))
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument", err)
 	}
-	var msgs []*schema.Message
-	if err := json.Unmarshal(m.requests[0].Messages, &msgs); err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 1 || msgs[0].Role != schema.User || msgs[0].Content != `{"q":"x"}` {
-		t.Fatalf("turn 1 messages = %s, want the compact object", m.requests[0].Messages)
+	if m.invoked != 0 {
+		t.Fatalf("model invoked %d times, want 0", m.invoked)
 	}
 }
 
