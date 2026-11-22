@@ -36,7 +36,7 @@ func ForType(t reflect.Type) (*Schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, err := gjschema.ForType(t, opts)
+	s, err := gjschema.ForType(t, opts.lib)
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}

@@ -1,16 +1,10 @@
-// Package tool defines the Tool port (name, input JSON Schema, Run), per-agent
-// allowlists, the MCP client adapter (github.com/modelcontextprotocol/go-sdk),
-// tools served by workers on other machines (ADR-0012), and the sandbox-exec
-// port for generated code.
-//
-// Status: the port's types are implemented (contract-first, WP-L7-01); the
-// registry, RunStep, allowlists, MCP client and sandbox port are planned
-// (WP-L7-02). See specs/tools/design.md §2.
 package tool
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -32,7 +26,7 @@ type Tool struct {
 
 // Result is a successful tool result.
 type Result struct {
-	Content    json.RawMessage // or a JSON string, for a tool whose result is text
+	Content    json.RawMessage // or a JSON string, for a tool whose result is text; a sandbox result with both streams is an object
 	BlobRef    string          // set instead of Content when the result exceeded MaxResult
 	ExitStatus int             // set by a sandbox command (REQ-TOOL-021)
 	Truncated  bool            // set by a sandbox result whose output was cut (REQ-TOOL-020)
@@ -54,6 +48,30 @@ func (s *Set) Get(name string) (Tool, bool) {
 		}
 	}
 	return Tool{}, false
+}
+
+// Merge adds another set's tools to s, keeping the set sorted. A name that
+// appears in both sets is rejected with code conflict: a duplicate would make
+// Get return whichever came first, which could route a call to the wrong
+// server with its credential.
+func (s *Set) Merge(other *Set) error {
+	if other == nil || len(other.Tools) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(s.Tools)+len(other.Tools))
+	for _, t := range s.Tools {
+		seen[t.Name] = true
+	}
+	for _, t := range other.Tools {
+		if seen[t.Name] {
+			return core.NewError(core.CodeConflict,
+				fmt.Sprintf("tool %q is offered more than once", t.Name), map[string]any{"tool": t.Name})
+		}
+		seen[t.Name] = true
+	}
+	s.Tools = append(s.Tools, other.Tools...)
+	sort.Slice(s.Tools, func(i, j int) bool { return s.Tools[i].Name < s.Tools[j].Name })
+	return nil
 }
 
 // Names returns the set's tool names, in order.
@@ -102,7 +120,8 @@ func (o Outcome) Text() string {
 }
 
 // Runner runs one call as the side effect of a durable step. The agent loop
-// supplies it; WP-L7-02's RunStep is the production implementation. It must
-// not retry a failed call: an Outcome records the failure and the step
-// succeeds, and a Go error means the layer itself failed.
+// supplies it; a *Layer's Step is the production implementation (RunStep is
+// the package-level convenience). It must not retry a failed call: an Outcome
+// records the failure and the step succeeds, and a Go error means the layer
+// itself failed.
 type Runner func(ctx context.Context, set *Set, call Call) (Outcome, error)

@@ -59,9 +59,10 @@ func registerTelemetrySetup(sc *godog.ScenarioContext) {
 		world(ctx).Core.clock.Advance(time.Duration(ms) * time.Millisecond)
 		return nil
 	})
+	// The tool scenarios advance the layer's clock with this phrase too; the
+	// tool world owns the pending call's settlement when one is running.
 	sc.Step(`^the clock advances by (\d+) seconds?$`, func(ctx context.Context, seconds int) error {
-		world(ctx).Core.clock.Advance(time.Duration(seconds) * time.Second)
-		return nil
+		return world(ctx).Tool.advance(world(ctx), time.Duration(seconds)*time.Second)
 	})
 	sc.Step(`^(\d+) hours and (\d+) (seconds?|minutes?) pass on the clock and the span store purges expired spans$`, func(ctx context.Context, hours, amount int, unit string) error {
 		w := world(ctx).Telemetry

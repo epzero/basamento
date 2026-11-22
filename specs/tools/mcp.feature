@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-02 @level:component
+@wp:WP-L7-02 @level:component
 Feature: Tools found on an MCP server
   An agent reaches the tools of an MCP server by describing that server. The
   server's tools appear as if they were local, a call is forwarded and its

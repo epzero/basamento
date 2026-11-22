@@ -5,13 +5,11 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-
-	gjschema "github.com/google/jsonschema-go/jsonschema"
 )
 
 // patchEmbeddedJSONFields aligns generated struct object schemas with encoding/json
 // for anonymous embedded fields that google/jsonschema-go does not model.
-func patchEmbeddedJSONFields(raw json.RawMessage, root reflect.Type, opts *gjschema.ForOptions) (json.RawMessage, error) {
+func patchEmbeddedJSONFields(raw json.RawMessage, root reflect.Type, opts *genOptions) (json.RawMessage, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return raw, nil
@@ -49,7 +47,7 @@ func patchEmbeddedJSONFields(raw json.RawMessage, root reflect.Type, opts *gjsch
 	return out, nil
 }
 
-func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOptions) error {
+func patchStructObject(obj map[string]any, t reflect.Type, opts *genOptions) error {
 	if structEmbedsRawMessage(t) {
 		clearEmbeddedRawMessageObjectSchema(obj)
 		return nil
@@ -179,8 +177,8 @@ func patchStructObject(obj map[string]any, t reflect.Type, opts *gjschema.ForOpt
 	return nil
 }
 
-func typeSchemaMap(t reflect.Type, opts *gjschema.ForOptions) (map[string]any, error) {
-	s, err := gjschema.ForType(t, opts)
+func typeSchemaMap(t reflect.Type, opts *genOptions) (map[string]any, error) {
+	s, err := librarySchema(t, opts)
 	if err != nil {
 		return nil, invalidArg(err.Error(), nil)
 	}
@@ -235,7 +233,7 @@ func schemaMapFromMarshaled(t reflect.Type, raw []byte) (map[string]any, error) 
 	return nil, invalidArgf("unmarshal subschema: invalid schema %s", raw)
 }
 
-func patchElementSchema(node map[string]any, elem reflect.Type, opts *gjschema.ForOptions) error {
+func patchElementSchema(node map[string]any, elem reflect.Type, opts *genOptions) error {
 	elem = structFieldType(elem)
 	if elem.Kind() != reflect.Struct {
 		return nil
