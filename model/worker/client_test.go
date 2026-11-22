@@ -49,25 +49,25 @@ func (f *fakeTransport) Join(context.Context, JoinRequest) (Worker, error) {
 func (f *fakeTransport) Lease(context.Context, LeaseRequest) ([]Invocation, error) {
 	return f.leased, nil
 }
-func (f *fakeTransport) Starting(context.Context, string, string, string) error {
+func (f *fakeTransport) Starting(context.Context, string, string, string, int) error {
 	f.record("starting")
 	return nil
 }
-func (f *fakeTransport) Started(_ context.Context, _, _, _, handle string) error {
+func (f *fakeTransport) Started(_ context.Context, _, _, _, handle string, _ int) error {
 	f.mu.Lock()
 	f.started = append(f.started, handle)
 	f.mu.Unlock()
 	f.record("started")
 	return nil
 }
-func (f *fakeTransport) Events(_ context.Context, _, _, _ string, events []Event) error {
+func (f *fakeTransport) Events(_ context.Context, _, _, _ string, _ int, events []Event) error {
 	f.mu.Lock()
 	f.events = append(f.events, events)
 	f.mu.Unlock()
 	f.record("events")
 	return nil
 }
-func (f *fakeTransport) Finish(_ context.Context, _, _, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error {
+func (f *fakeTransport) Finish(_ context.Context, _, _, clientRef, state string, result json.RawMessage, code core.Code, cost int64, _ int) error {
 	f.mu.Lock()
 	f.finishes = append(f.finishes, finishCall{clientRef, state, result, code, cost})
 	err := f.finishErr
@@ -75,14 +75,14 @@ func (f *fakeTransport) Finish(_ context.Context, _, _, clientRef, state string,
 	f.record("finish")
 	return err
 }
-func (f *fakeTransport) Release(_ context.Context, _, _, _ string, unused bool, _ time.Time) error {
+func (f *fakeTransport) Release(_ context.Context, _, _, _ string, unused bool, _ time.Time, _ int) error {
 	f.mu.Lock()
 	f.releases = append(f.releases, unused)
 	f.mu.Unlock()
 	f.record("release")
 	return nil
 }
-func (f *fakeTransport) Resume(_ context.Context, _, _, clientRef string) error {
+func (f *fakeTransport) Resume(_ context.Context, _, _, clientRef string, _ int) error {
 	f.mu.Lock()
 	f.resumes = append(f.resumes, clientRef)
 	err := f.resumeErr
@@ -259,7 +259,7 @@ func TestClientFinishJournalsTheOutcomeBeforeTheTransportCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := json.RawMessage(`{"ok":true}`)
-	if err := client.Finish(ctx, "r1", string(model.StateSucceeded), result, "", 9); err == nil {
+	if err := client.Finish(ctx, "r1", string(model.StateSucceeded), result, "", 9, 1); err == nil {
 		t.Fatal("Finish succeeded while the transport was down")
 	}
 	pending, err := j.Pending()
@@ -273,7 +273,7 @@ func TestClientFinishJournalsTheOutcomeBeforeTheTransportCall(t *testing.T) {
 	tr.mu.Lock()
 	tr.finishErr = nil
 	tr.mu.Unlock()
-	if err := client.Finish(ctx, "r1", string(model.StateSucceeded), result, "", 9); err != nil {
+	if err := client.Finish(ctx, "r1", string(model.StateSucceeded), result, "", 9, 1); err != nil {
 		t.Fatal(err)
 	}
 	pending, err = j.Pending()
@@ -292,21 +292,21 @@ func TestStoreEventsKeepsPayloadAndMonotonicSequence(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "r1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "r1", 1); err != nil {
 		t.Fatal(err)
 	}
 	// The second and third batches deliberately restart at 1, as a new
 	// attempt or a restarted worker does.
-	if err := s.Events(ctx, w.ID, w.Credential, "r1", []Event{{Seq: 1, Kind: "text", Text: "a"}}); err != nil {
+	if err := s.Events(ctx, w.ID, w.Credential, "r1", 1, []Event{{Seq: 1, Kind: "text", Text: "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Events(ctx, w.ID, w.Credential, "r1", []Event{{
+	if err := s.Events(ctx, w.ID, w.Credential, "r1", 1, []Event{{
 		Seq: 1, Kind: "audio", Audio: []byte{7}, Progress: 0.25, Attempt: 2,
 		Data: json.RawMessage(`{"x":1}`),
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Events(ctx, w.ID, w.Credential, "r1", []Event{{Seq: 1, Kind: "progress", Progress: 0.5}}); err != nil {
+	if err := s.Events(ctx, w.ID, w.Credential, "r1", 1, []Event{{Seq: 1, Kind: "progress", Progress: 0.5}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendReset(ctx, s.db.Execer(), "r1"); err != nil {

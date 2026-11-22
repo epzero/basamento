@@ -255,6 +255,15 @@ func (w *workerWorld) leaseFor(ctx context.Context, name string, free int) error
 	return nil
 }
 
+// reportAttempt reads the attempt a lease-scoped report must carry.
+func reportAttempt(ctx context.Context, st *worker.Store, clientRef string) (int, error) {
+	inv, err := st.Invocation(ctx, clientRef)
+	if err != nil {
+		return 0, err
+	}
+	return inv.Attempt, nil
+}
+
 // start records that a worker reported starting its provider call.
 func (w *workerWorld) start(ctx context.Context, name, clientRef string) error {
 	jw, ok := w.workers[name]
@@ -265,7 +274,11 @@ func (w *workerWorld) start(ctx context.Context, name, clientRef string) error {
 	if err != nil {
 		return err
 	}
-	if err := st.Starting(ctx, jw.worker.ID, jw.credential, clientRef); err != nil {
+	attempt, err := reportAttempt(ctx, st, clientRef)
+	if err != nil {
+		return err
+	}
+	if err := st.Starting(ctx, jw.worker.ID, jw.credential, clientRef, attempt); err != nil {
 		w.lastErr = err
 		return nil
 	}
@@ -766,7 +779,11 @@ func registerWorker(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		return st.Resume(ctx, jw.worker.ID, jw.credential, ref)
+		attempt, err := reportAttempt(ctx, st, ref)
+		if err != nil {
+			return err
+		}
+		return st.Resume(ctx, jw.worker.ID, jw.credential, ref, attempt)
 	})
 	sc.Step(`^worker "([^"]*)" reports success for invocation "([^"]*)"$`, func(ctx context.Context, name, ref string) error {
 		w := world(ctx).Worker
@@ -778,7 +795,11 @@ func registerWorker(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		w.lastErr = st.Finish(ctx, jw.worker.ID, jw.credential, ref, "succeeded", json.RawMessage(`{}`), "", 0)
+		attempt, err := reportAttempt(ctx, st, ref)
+		if err != nil {
+			return err
+		}
+		w.lastErr = st.Finish(ctx, jw.worker.ID, jw.credential, ref, "succeeded", json.RawMessage(`{}`), "", 0, attempt)
 		return nil
 	})
 	sc.Step(`^invocation "([^"]*)" of "([^"]*)" ended as "([^"]*)" with code "([^"]*)" while worker "([^"]*)" was away$`, func(ctx context.Context, ref, modelID, state, code, name string) error {

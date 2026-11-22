@@ -213,9 +213,9 @@ func (l *workerLoop) heartbeat(ctx context.Context, stop <-chan struct{}) {
 				continue
 			}
 			for _, ref := range answer.Cancel {
-				if !l.runner.Cancel(ref) {
-					// The invocation is still queued; the platform removes it
-					// itself. Nothing local to cancel.
+				attempt := answer.CancelAttempts[ref]
+				if !l.runner.Cancel(ref, attempt) {
+					// The cancel names another attempt; this run is not it.
 					continue
 				}
 			}
@@ -309,7 +309,10 @@ func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync
 		if l.once {
 			wait = 0
 		}
-		leased, err := l.client.LeaseOnce(ctx, free, l.warm, 30*time.Second, wait)
+		// The worker does not cap a run's declared runtime: the lease is
+		// renewed by heartbeats and the pool's lease bounds a lost worker
+		// (ADR-0012 §4, §6).
+		leased, err := l.client.LeaseOnce(ctx, free, l.warm, 0, wait)
 		if err != nil {
 			_, _ = fmt.Fprintln(l.stderr, "kit worker: lease:", err)
 			if fatalError(err) {
@@ -347,7 +350,7 @@ func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync
 			if l.once && ran {
 				// --once runs at most one invocation even when the platform
 				// hands back several for the free units.
-				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
+				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{}, inv.Attempt)
 				continue
 			}
 			if ctx.Err() != nil {
@@ -356,7 +359,7 @@ func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync
 			if l.draining.Load() || l.fatal.Load() {
 				// A signal arrived between the lease and the start: hand the
 				// lease back unused instead of abandoning it.
-				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
+				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{}, inv.Attempt)
 				continue
 			}
 			ran = true
@@ -408,18 +411,28 @@ func (l *workerLoop) replay(ctx context.Context) error {
 		return nil
 	}
 	_, _ = fmt.Fprintf(l.stdout, "kit worker: resuming %d invocations from the journal\n", len(pending))
+	var redeliver []worker.JournalEntry
 	for _, p := range pending {
+		if p.Attempt == 0 {
+			p.Attempt = l.attemptOf(ctx, p.ClientRef)
+		}
 		if p.Kind == "result" {
-			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts)
+			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts, p.Attempt)
 			if err == nil || core.CodeOf(err) == worker.CodeLeaseLost {
 				l.markDone(p.ClientRef)
 				continue
 			}
 			_, _ = fmt.Fprintf(l.stderr, "kit worker: redeliver %s: %v\n", p.ClientRef, err)
+			// A transient failure must not wait for the next restart: the
+			// lease expires meanwhile (ADR-0012 §7).
+			redeliver = append(redeliver, p)
 			continue
 		}
-		if err := l.client.Resume(ctx, p.ClientRef); err != nil {
+		if err := l.client.Resume(ctx, p.ClientRef, p.Attempt); err != nil {
 			if core.CodeOf(err) == worker.CodeLeaseLost {
+				// The platform no longer holds the lease; the provider may
+				// still run, so it must be cancelled rather than orphaned.
+				l.runner.CancelProvider(ctx, p.Model, p.ClientRef, p.ProviderHandle)
 				l.markDone(p.ClientRef)
 				continue
 			}
@@ -439,7 +452,37 @@ func (l *workerLoop) replay(ctx context.Context) error {
 			_, _ = fmt.Fprintf(l.stderr, "kit worker: invocation %s: %v\n", p.ClientRef, runErr)
 		}
 	}
+	for len(redeliver) > 0 && ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+		var again []worker.JournalEntry
+		for _, p := range redeliver {
+			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts, p.Attempt)
+			if err == nil || core.CodeOf(err) == worker.CodeLeaseLost {
+				l.markDone(p.ClientRef)
+				continue
+			}
+			again = append(again, p)
+		}
+		redeliver = again
+	}
 	return nil
+}
+
+// attemptOf reads the current attempt of a journal entry written before the
+// attempt was recorded.
+func (l *workerLoop) attemptOf(ctx context.Context, clientRef string) int {
+	if l.store == nil {
+		return 0
+	}
+	inv, err := l.store.Invocation(ctx, clientRef)
+	if err != nil {
+		return 0
+	}
+	return inv.Attempt
 }
 
 func (l *workerLoop) markDone(clientRef string) {

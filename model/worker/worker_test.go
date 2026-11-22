@@ -113,7 +113,7 @@ func TestRestartSafeExpiryAddsResetEvent(t *testing.T) {
 	w1 := joinWorker(t, s, "p", pool.Token, "m", 1, true)
 	enqueue(t, s, "t1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w1, 1)
-	if err := s.Starting(ctx, w1.ID, w1.Credential, "t1"); err != nil {
+	if err := s.Starting(ctx, w1.ID, w1.Credential, "t1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
@@ -143,7 +143,7 @@ func TestUnsafeStartedLeaseStaysInDoubtThenFailsWorkerLost(t *testing.T) {
 	w1 := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 500)
 	lease(t, s, w1, 1)
-	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
@@ -174,17 +174,17 @@ func TestResumeInsideGraceFinishesSuccessfully(t *testing.T) {
 	w1 := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w1, 1)
-	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
 	if err := s.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Resume(ctx, w1.ID, w1.Credential, "v1"); err != nil {
+	if err := s.Resume(ctx, w1.ID, w1.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Finish(ctx, w1.ID, w1.Credential, "v1", stateSucceeded, json.RawMessage(`{}`), "", 0); err != nil {
+	if err := s.Finish(ctx, w1.ID, w1.Credential, "v1", stateSucceeded, json.RawMessage(`{}`), "", 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	if inv := state(t, s, "v1"); inv.State != stateSucceeded {
@@ -205,7 +205,7 @@ func TestThirdExpiryFailsWorkerLost(t *testing.T) {
 		if got := lease(t, s, w, 1); len(got) != 1 {
 			t.Fatalf("lease %d got %v", i+1, refs(got))
 		}
-		if err := s.Starting(ctx, w.ID, w.Credential, "x"); err != nil {
+		if err := s.Starting(ctx, w.ID, w.Credential, "x", i+1); err != nil {
 			t.Fatal(err)
 		}
 		clock.Advance(2 * time.Minute)
@@ -227,7 +227,7 @@ func TestRecoverExtendsLeasesFromRestart(t *testing.T) {
 	w1 := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w1, 1)
-	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w1.ID, w1.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(10 * time.Minute)
@@ -254,10 +254,7 @@ func TestHeartbeatCarriesCancellation(t *testing.T) {
 	if err := s.Cancel(ctx, "r1"); err != nil {
 		t.Fatal(err)
 	}
-	answer, err := s.Heartbeat(ctx, w1.ID, w1.Credential, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	answer := beat(t, s, &w1, 1)
 	if len(answer.Cancel) != 1 || answer.Cancel[0] != "r1" {
 		t.Fatalf("cancel %v, want r1", answer.Cancel)
 	}

@@ -137,6 +137,8 @@ message StartingRequest {
   string worker_id = 1;
   string credential = 2;
   string client_ref = 3;
+  // Attempt of the lease this report belongs to.
+  int32 attempt = 4;
 }
 
 // StartingResponse is empty.
@@ -148,6 +150,8 @@ message StartedRequest {
   string credential = 2;
   string client_ref = 3;
   string provider_handle = 4;
+  // Attempt of the lease this report belongs to.
+  int32 attempt = 5;
 }
 
 // StartedResponse is empty.
@@ -169,6 +173,8 @@ message ResumeRequest {
   string worker_id = 1;
   string credential = 2;
   string client_ref = 3;
+  // Attempt of the lease to take back.
+  int32 attempt = 4;
 }
 
 // ResumeResponse is empty.
@@ -180,6 +186,8 @@ message EventsRequest {
   string credential = 2;
   string client_ref = 3;
   repeated Event events = 4;
+  // Attempt of the lease this output belongs to.
+  int32 attempt = 5;
 }
 
 // EventsResponse is empty.
@@ -195,6 +203,8 @@ message FinishRequest {
   google.protobuf.Struct result = 5;
   string error_code = 6;
   int64 cost_milli_points = 7;
+  // Attempt of the lease this result belongs to.
+  int32 attempt = 8;
 }
 
 // FinishResponse is empty.
@@ -207,6 +217,8 @@ message ReleaseRequest {
   string client_ref = 3;
   bool unused = 4;
   int64 not_before_unix_ms = 5;
+  // Attempt of the lease being released.
+  int32 attempt = 6;
 }
 
 // ReleaseResponse is empty.

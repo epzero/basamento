@@ -390,7 +390,7 @@ func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote
 			if !cancelled {
 				// A cancel that arrived just before the result still ends the
 				// invocation cancelled, never as a success.
-				if inv, err := s.Invocation(ctx, clientRef); err == nil && inv.CancelRequested {
+				if inv, err := s.Invocation(ctx, clientRef); err == nil && (inv.CancelRequested || inv.State == stateCancelled) {
 					cancelled = true
 					_ = target.Invoker.Cancel(context.WithoutCancel(ctx), handle)
 				}
@@ -402,6 +402,9 @@ func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote
 				return model.Result{}, errLeaseLost(clientRef), cancelled
 			}
 			if isTerminal(inv.State) {
+				// The row was ended elsewhere (a cancel or the claim
+				// deadline). The remote start must not become a paid orphan.
+				_ = target.Invoker.Cancel(context.WithoutCancel(ctx), handle)
 				return model.Result{}, errLeaseLost(clientRef), cancelled
 			}
 			if !cancelled && inv.CancelRequested {

@@ -26,6 +26,8 @@ type loopTransport struct {
 	left      chan struct{}
 	lastLease worker.LeaseRequest
 	leases    int
+	// twoLeases closes when Lease has been called a second time.
+	twoLeases chan struct{}
 }
 
 type finishCall struct {
@@ -51,24 +53,27 @@ func (t *loopTransport) Lease(_ context.Context, req worker.LeaseRequest) ([]wor
 	defer t.mu.Unlock()
 	t.lastLease = req
 	t.leases++
+	if t.leases == 2 && t.twoLeases != nil {
+		close(t.twoLeases)
+	}
 	out := t.leased
 	t.leased = nil
 	return out, nil
 }
-func (t *loopTransport) Starting(_ context.Context, _, _, ref string) error {
+func (t *loopTransport) Starting(_ context.Context, _, _, ref string, _ int) error {
 	select {
 	case t.starting <- ref:
 	default:
 	}
 	return nil
 }
-func (t *loopTransport) Started(context.Context, string, string, string, string) error {
+func (t *loopTransport) Started(context.Context, string, string, string, string, int) error {
 	return nil
 }
-func (t *loopTransport) Events(context.Context, string, string, string, []worker.Event) error {
+func (t *loopTransport) Events(context.Context, string, string, string, int, []worker.Event) error {
 	return nil
 }
-func (t *loopTransport) Finish(_ context.Context, _, _, ref, state string, _ json.RawMessage, code core.Code, cost int64) error {
+func (t *loopTransport) Finish(_ context.Context, _, _, ref, state string, _ json.RawMessage, code core.Code, cost int64, _ int) error {
 	t.mu.Lock()
 	t.finishes = append(t.finishes, finishCall{ref, state, code, cost})
 	t.mu.Unlock()
@@ -78,13 +83,13 @@ func (t *loopTransport) Finish(_ context.Context, _, _, ref, state string, _ jso
 	}
 	return nil
 }
-func (t *loopTransport) Release(_ context.Context, _, _, ref string, _ bool, _ time.Time) error {
+func (t *loopTransport) Release(_ context.Context, _, _, ref string, _ bool, _ time.Time, _ int) error {
 	t.mu.Lock()
 	t.releases = append(t.releases, ref)
 	t.mu.Unlock()
 	return nil
 }
-func (t *loopTransport) Resume(_ context.Context, _, _, ref string) error {
+func (t *loopTransport) Resume(_ context.Context, _, _, ref string, _ int) error {
 	t.mu.Lock()
 	t.resumes = append(t.resumes, ref)
 	t.mu.Unlock()
@@ -413,6 +418,7 @@ func TestWorkerLoopFreesUnitsAfterAnInvocationFinishes(t *testing.T) {
 	}
 	defer func() { _ = j.Close() }()
 	finished := make(chan string, 4)
+	tr.twoLeases = make(chan struct{})
 	p := &loopProvider{}
 	tr.finished = finished
 	client := loopClient(t, tr, j)
@@ -429,20 +435,7 @@ func TestWorkerLoopFreesUnitsAfterAnInvocationFinishes(t *testing.T) {
 	if got := <-finished; got != "r1" {
 		t.Fatalf("finished %q, want r1", got)
 	}
-	deadline := time.After(2 * time.Second)
-	for {
-		tr.mu.Lock()
-		n := tr.leases
-		tr.mu.Unlock()
-		if n >= 2 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("the worker asked for work %d times after finishing with capacity 1, want at least 2", n)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
+	<-tr.twoLeases
 	if free := loop.free(); free != 1 {
 		t.Fatalf("free units %d after a finished invocation, want 1", free)
 	}

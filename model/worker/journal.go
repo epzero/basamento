@@ -166,6 +166,10 @@ func (j *Journal) Pending() ([]JournalEntry, error) {
 				order = append(order, e.ClientRef)
 			}
 			leases[e.ClientRef] = e
+			// A later lease is a new attempt: an earlier done or result
+			// belongs to an attempt that no longer holds the work.
+			delete(finished, e.ClientRef)
+			delete(results, e.ClientRef)
 		case "handle":
 			if prev, ok := leases[e.ClientRef]; ok {
 				prev.ProviderHandle = e.ProviderHandle

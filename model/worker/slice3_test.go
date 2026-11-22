@@ -395,10 +395,10 @@ func TestReleaseOfAStartedRestartSafeInvocationResetsFollowers(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, true)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w, 1)
-	if err := s.Started(ctx, w.ID, w.Credential, "r1", "h1"); err != nil {
+	if err := s.Started(ctx, w.ID, w.Credential, "r1", "h1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, time.Time{}); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, time.Time{}, 1); err != nil {
 		t.Fatal(err)
 	}
 	inv := state(t, s, "r1")
@@ -422,10 +422,10 @@ func TestReleaseUnusedRequeuesANonRestartSafeInvocation(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "r1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "r1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", true, time.Time{}); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", true, time.Time{}, 1); err != nil {
 		t.Fatal(err)
 	}
 	inv := state(t, s, "r1")
@@ -512,8 +512,9 @@ func TestRecoverExtendsAndNeverShortens(t *testing.T) {
 	// The in-doubt deadline is extended with the grace period and also never
 	// shortened.
 	enqueue(t, s, "v2", "p", "acme", "m", ClassNormal, 0)
+	beat(t, s, &w, 8)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v2"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v2", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
@@ -637,7 +638,7 @@ func TestSupersededWorkerIsToldToCancel(t *testing.T) {
 	w2 := joinWorker(t, s, "p", pool.Token, "m", 1, true)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w1, 1)
-	if err := s.Starting(ctx, w1.ID, w1.Credential, "r1"); err != nil {
+	if err := s.Starting(ctx, w1.ID, w1.Credential, "r1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
@@ -647,10 +648,7 @@ func TestSupersededWorkerIsToldToCancel(t *testing.T) {
 	if got := lease(t, s, w2, 1); len(got) != 1 || got[0].ClientRef != "r1" {
 		t.Fatalf("w2 leased %v, want r1", refs(got))
 	}
-	answer, err := s.Heartbeat(ctx, w1.ID, w1.Credential, 8)
-	if err != nil {
-		t.Fatal(err)
-	}
+	answer := beat(t, s, &w1, 8)
 	found := false
 	for _, ref := range answer.Cancel {
 		if ref == "r1" {
@@ -660,14 +658,15 @@ func TestSupersededWorkerIsToldToCancel(t *testing.T) {
 	if !found {
 		t.Fatalf("heartbeat answer %v does not tell the superseded worker to cancel", answer.Cancel)
 	}
-	again, err := s.Heartbeat(ctx, w1.ID, w1.Credential, 8)
-	if err != nil {
-		t.Fatal(err)
-	}
+	again := beat(t, s, &w1, 8)
+	still := false
 	for _, ref := range again.Cancel {
 		if ref == "r1" {
-			t.Fatalf("cancel delivered twice: %v", again.Cancel)
+			still = true
 		}
+	}
+	if !still {
+		t.Fatalf("cancel %v lost before the invocation ended; it must be repeated until acknowledged", again.Cancel)
 	}
 }
 

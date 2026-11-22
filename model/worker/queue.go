@@ -288,7 +288,8 @@ func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID str
 		`UPDATE worker_invocations SET state = ?, worker_id = ?, attempt = attempt + 1,
 			started = 0, in_doubt = 0, provider_handle = '', leased_unix_ms = ?, lease_expires_unix_ms = ?,
 			in_doubt_until_unix_ms = 0, not_before_unix_ms = 0
-		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND not_before_unix_ms <= ?`,
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND not_before_unix_ms <= ?
+		   AND cancel_requested = 0 AND attempt < 3`,
 		stateLeased, workerID, unixms(now), unixms(expires), inv.ClientRef, stateWaiting, inv.WorkerID, unixms(now))
 	if err != nil {
 		return false, err
@@ -303,7 +304,7 @@ func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID str
 	// A row that still names an earlier worker is a takeover: tell that
 	// worker to cancel at its provider in its next heartbeat (ADR-0012 §7).
 	if inv.WorkerID != "" && inv.WorkerID != workerID {
-		if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+		if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID, inv.Attempt); err != nil {
 			return false, err
 		}
 	}
@@ -311,10 +312,11 @@ func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID str
 }
 
 // addCancelTx records that workerID must cancel clientRef at its provider.
-func addCancelTx(ctx context.Context, tx *psql.Execer, clientRef, workerID string) error {
+func addCancelTx(ctx context.Context, tx *psql.Execer, clientRef, workerID string, attempt int) error {
 	_, err := tx.Exec(ctx,
-		`INSERT INTO worker_cancels (client_ref, worker_id) VALUES (?, ?) ON CONFLICT (client_ref, worker_id) DO NOTHING`,
-		clientRef, workerID)
+		`INSERT INTO worker_cancels (client_ref, worker_id, attempt) VALUES (?, ?, ?)
+		 ON CONFLICT (client_ref, worker_id) DO UPDATE SET attempt = excluded.attempt`,
+		clientRef, workerID, attempt)
 	return err
 }
 
@@ -322,7 +324,7 @@ func addCancelTx(ctx context.Context, tx *psql.Execer, clientRef, workerID strin
 // oldest first, before ordering.
 func (s *Store) waitingCandidates(ctx context.Context, exec *psql.Execer, poolID string, models map[string]Descriptor, now time.Time) ([]Invocation, error) {
 	rows, err := exec.Query(ctx, selectInvocation+` WHERE pool_id = ? AND state = ? AND not_before_unix_ms <= ?
-		ORDER BY queued_unix_ms, client_ref`, poolID, stateWaiting, unixms(now))
+		AND cancel_requested = 0 ORDER BY queued_unix_ms, client_ref`, poolID, stateWaiting, unixms(now))
 	if err != nil {
 		return nil, err
 	}
@@ -583,31 +585,50 @@ type Event struct {
 }
 
 // Events appends partial output for a lease.
-func (s *Store) Events(ctx context.Context, workerID, credential, clientRef string, events []Event) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+func (s *Store) Events(ctx context.Context, workerID, credential, clientRef string, attempt int, events []Event) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
 		return err
 	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
+	if len(events) > MaxEventsPerBatch {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("worker: more than %d events in one report", MaxEventsPerBatch), nil)
 	}
-	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
-		return errLeaseLost(clientRef)
+	var bytes int64
+	for _, e := range events {
+		if n := int64(len(e.Text) + len(e.Audio) + len(e.Data)); n > MaxEventBytes {
+			return core.NewError(core.CodeInvalidArgument,
+				fmt.Sprintf("worker: event larger than %d bytes", MaxEventBytes), nil)
+		}
+		bytes += int64(len(e.Text) + len(e.Audio) + len(e.Data))
 	}
-	if err := s.refusePastGrace(inv); err != nil {
-		return err
+	if bytes > MaxEventBatchBytes {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("worker: event batch larger than %d bytes", MaxEventBatchBytes), nil)
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
 		return err
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
+		// The no-op update takes the row lock and checks the attempt in one
+		// statement, so a sweep cannot end the invocation between the read
+		// and the inserts.
+		guard, err := tx.Exec(ctx,
+			`UPDATE worker_invocations SET in_doubt = in_doubt
+			 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+			clientRef, stateLeased, w.ID, attempt)
+		if err != nil {
+			return err
+		}
+		if err := affected(guard, clientRef); err != nil {
+			return err
+		}
 		if inv.InDoubt {
 			if _, err := tx.Exec(ctx,
 				`UPDATE worker_invocations SET in_doubt = 0, in_doubt_until_unix_ms = 0,
-					lease_expires_unix_ms = ? WHERE client_ref = ?`,
-				unixms(s.now().Add(pool.Lease)), clientRef); err != nil {
+					lease_expires_unix_ms = ? WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+				unixms(s.now().Add(pool.Lease)), clientRef, stateLeased, w.ID, attempt); err != nil {
 				return err
 			}
 		}
@@ -640,23 +661,12 @@ func (s *Store) Events(ctx context.Context, workerID, credential, clientRef stri
 
 // Finish reports the result of a lease. A report on an invocation that has
 // already ended is refused with lease_lost and the recorded result stands
-// (REQ-MODEL-024).
-func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+// (REQ-MODEL-024). The worker's cost is bounded: ADR-0012 §9 prices an
+// invocation on the platform, so a worker cannot charge more than the
+// reservation or the configured ceiling.
+func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64, attempt int) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
-		return err
-	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
-	}
-	if isTerminal(inv.State) {
-		return errLeaseLost(clientRef)
-	}
-	if inv.State != stateLeased || inv.WorkerID != w.ID {
-		return errLeaseLost(clientRef)
-	}
-	if err := s.refusePastGrace(inv); err != nil {
 		return err
 	}
 	switch state {
@@ -730,15 +740,20 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 			notBefore = limit
 		}
 		if notBefore.After(now) {
-			notBeforeMS = unixms(notBefore.UTC())
+			notBeforeMS = unixms(notBefore)
 		}
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
-		if _, err := tx.Exec(ctx,
+		res, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, in_doubt = 0,
-				provider_handle = '', lease_expires_unix_ms = 0, leased_unix_ms = 0,
-				in_doubt_until_unix_ms = 0, not_before_unix_ms = ?
-			 WHERE client_ref = ?`, stateWaiting, notBeforeMS, clientRef); err != nil {
+				in_doubt_until_unix_ms = 0, provider_handle = '', lease_expires_unix_ms = 0,
+				leased_unix_ms = 0, not_before_unix_ms = ?
+			 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+			stateWaiting, notBeforeMS, clientRef, stateLeased, w.ID, attempt)
+		if err != nil {
+			return err
+		}
+		if err := affected(res, clientRef); err != nil {
 			return err
 		}
 		if restartSafe {
@@ -886,8 +901,9 @@ func (s *Store) Cancel(ctx context.Context, clientRef string) error {
 	}
 	if inv.State == stateWaiting {
 		_, err = s.db.Execer().Exec(ctx,
-			`UPDATE worker_invocations SET state = ?, charged_mpts = 0, code = ? WHERE client_ref = ?`,
-			stateCancelled, string(core.CodeCancelled), clientRef)
+			`UPDATE worker_invocations SET state = ?, charged_mpts = 0, code = ?, ended_unix_ms = ?
+			 WHERE client_ref = ? AND state = ?`,
+			stateCancelled, string(core.CodeCancelled), unixms(s.now()), clientRef, stateWaiting)
 		return err
 	}
 	_, err = s.db.Execer().Exec(ctx,
@@ -943,9 +959,39 @@ func (s *Store) Recover(ctx context.Context) error {
 // the third attempt's worker_lost (REQ-MODEL-014, -021, -022, -025).
 func (s *Store) Sweep(ctx context.Context) error { return s.sweep(ctx) }
 
+// RunJanitor applies the queue's time-driven rules every interval until ctx
+// ends. The platform process owns it: a pool with no worker still times out,
+// expires its leases and forgets ended invocations (REQ-MODEL-014, -025, -088).
+func (s *Store) RunJanitor(ctx context.Context, interval time.Duration, onError func(error)) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.sweep(ctx); err != nil && onError != nil {
+				onError(err)
+			}
+		}
+	}
+}
+
 func (s *Store) sweep(ctx context.Context) error {
-	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
+	var gone []absentWorker
+	err := s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		now := s.now()
+		var err error
+		gone, err = s.expireWorkersTx(ctx, tx, now)
+		if err != nil {
+			return err
+		}
+		if err := s.evictEndedTx(ctx, tx, now); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, selectInvocation+` WHERE state IN (?, ?, ?)`, stateWaiting, stateLeased, stateSpilling)
 		if err != nil {
 			return err
@@ -968,8 +1014,22 @@ func (s *Store) sweep(ctx context.Context) error {
 		for _, inv := range all {
 			switch {
 			case inv.State == stateWaiting:
+				if inv.Attempt >= 3 {
+					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
+						return err
+					}
+					touched[inv.Pool] = true
+					continue
+				}
+				if inv.CancelRequested {
+					if err := cancelRowTx(ctx, tx, inv, 0, now); err != nil {
+						return err
+					}
+					touched[inv.Pool] = true
+					continue
+				}
 				if inv.QueueTimeout > 0 && !now.Before(inv.QueuedAt.Add(inv.QueueTimeout)) {
-					if err := failRow(ctx, tx, inv, core.CodeUnavailable, 0); err != nil {
+					if err := failRow(ctx, tx, inv, core.CodeUnavailable, 0, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -981,19 +1041,19 @@ func (s *Store) sweep(ctx context.Context) error {
 				// keeps the reservation, because the provider may have run.
 				switch {
 				case inv.CancelRequested:
-					if err := cancelRowTx(ctx, tx, inv.ClientRef, inv.ReservedMpts); err != nil {
+					if err := cancelRowTx(ctx, tx, inv, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
-					if err := failRow(ctx, tx, inv, core.CodeUnavailable, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv, core.CodeUnavailable, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				}
 			case inv.InDoubt:
 				if !inv.InDoubtUntil.IsZero() && !now.Before(inv.InDoubtUntil) {
-					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1001,11 +1061,11 @@ func (s *Store) sweep(ctx context.Context) error {
 			case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
 				if inv.Attempt >= 3 {
 					if inv.Started && inv.WorkerID != "" {
-						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID, inv.Attempt); err != nil {
 							return err
 						}
 					}
-					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1015,8 +1075,9 @@ func (s *Store) sweep(ctx context.Context) error {
 					if _, err := tx.Exec(ctx,
 						`UPDATE worker_invocations SET state = ?, worker_id = '', provider_handle = '',
 							lease_expires_unix_ms = 0, leased_unix_ms = 0, in_doubt = 0,
-							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
-						stateWaiting, inv.ClientRef); err != nil {
+							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0
+						 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+						stateWaiting, inv.ClientRef, stateLeased, inv.WorkerID, inv.Attempt); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1027,18 +1088,26 @@ func (s *Store) sweep(ctx context.Context) error {
 					return err
 				}
 				if d.RestartSafe {
+					if inv.CancelRequested {
+						if err := cancelRowTx(ctx, tx, inv, 0, now); err != nil {
+							return err
+						}
+						touched[inv.Pool] = true
+						continue
+					}
 					// The old attempt may still be alive; it is told to
 					// cancel while the new attempt takes the work.
 					if inv.WorkerID != "" {
-						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID, inv.Attempt); err != nil {
 							return err
 						}
 					}
 					if _, err := tx.Exec(ctx,
 						`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, provider_handle = '',
 							lease_expires_unix_ms = 0, leased_unix_ms = 0, in_doubt = 0,
-							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
-						stateWaiting, inv.ClientRef); err != nil {
+							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0
+						 WHERE client_ref = ? AND state = ? AND attempt = ?`,
+						stateWaiting, inv.ClientRef, stateLeased, inv.Attempt); err != nil {
 						return err
 					}
 					if err := appendReset(ctx, tx, inv.ClientRef); err != nil {
@@ -1048,6 +1117,11 @@ func (s *Store) sweep(ctx context.Context) error {
 					continue
 				}
 				if err := markInDoubtTx(ctx, tx, inv, s.now()); err != nil {
+					// A report ended or requeued the row first; the sweep
+					// leaves the newer outcome alone.
+					if core.CodeOf(err) == CodeLeaseLost {
+						continue
+					}
 					return err
 				}
 				touched[inv.Pool] = true
@@ -1076,25 +1150,107 @@ func (s *Store) sweep(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	for _, w := range gone {
+		_ = s.auditEventFor(ctx, w.Tenant, "worker.absent", w.Pool, "allowed", "heartbeat")
+	}
+	return nil
 }
 
-func failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Code, charged int64) error {
+// evictEndedTx forgets ended invocations and their events after the retention
+// window and above the ended bound, oldest ended first (REQ-MODEL-088).
+func (s *Store) evictEndedTx(ctx context.Context, tx *psql.Execer, now time.Time) error {
+	rows, err := tx.Query(ctx,
+		`SELECT client_ref, ended_unix_ms FROM worker_invocations WHERE ended_unix_ms > 0
+		 ORDER BY ended_unix_ms DESC, client_ref`)
+	if err != nil {
+		return err
+	}
+	var keep int
+	var drop []string
+	cutoff := unixms(now.Add(-s.retention))
+	for rows.Next() {
+		var ref string
+		var ended int64
+		if err := rows.Scan(&ref, &ended); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		keep++
+		if ended <= cutoff || keep > s.maxEnded {
+			drop = append(drop, ref)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, ref := range drop {
+		if _, err := tx.Exec(ctx, `DELETE FROM worker_events WHERE client_ref = ?`, ref); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM worker_cancels WHERE client_ref = ?`, ref); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM worker_invocations WHERE client_ref = ? AND ended_unix_ms > 0`, ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Code, charged int64, now time.Time) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
-			cancel_requested = 0 WHERE client_ref = ? AND state = ?`,
-		stateFailed, string(code), charged, inv.ClientRef, inv.State)
-	return err
+			cancel_requested = 0, ended_unix_ms = ? WHERE client_ref = ? AND state = ? AND attempt = ?`,
+		stateFailed, string(code), charged, unixms(now), inv.ClientRef, inv.State, inv.Attempt)
+	if err != nil {
+		return err
+	}
+	return clearCancels(ctx, tx, inv.ClientRef)
 }
 
 // cancelRowTx ends a row the caller asked to cancel, keeping the cost the
 // provider may already have incurred.
-func cancelRowTx(ctx context.Context, tx *psql.Execer, clientRef string, charged int64) error {
+func cancelRowTx(ctx context.Context, tx *psql.Execer, inv Invocation, charged int64, now time.Time) error {
+	// The state and attempt guard the write: a concurrent report that already
+	// ended or requeued the row wins, and the sweep leaves it alone.
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
-			cancel_requested = 0 WHERE client_ref = ?`,
-		stateCancelled, string(core.CodeCancelled), charged, clientRef)
+			cancel_requested = 0, ended_unix_ms = ? WHERE client_ref = ? AND state = ? AND attempt = ?`,
+		stateCancelled, string(core.CodeCancelled), charged, unixms(now), inv.ClientRef, inv.State, inv.Attempt)
+	if err != nil {
+		return err
+	}
+	return clearCancels(ctx, tx, inv.ClientRef)
+}
+
+// cancelLeasedTx ends one attempt as cancelled, guarded by its worker and
+// attempt, and keeps no charge for work nobody wanted.
+func cancelLeasedTx(ctx context.Context, tx *psql.Execer, inv Invocation, now time.Time) error {
+	res, err := tx.Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = 0, in_doubt = 0,
+			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
+			cancel_requested = 0, ended_unix_ms = ?
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+		stateCancelled, string(core.CodeCancelled), unixms(now), inv.ClientRef, stateLeased, inv.WorkerID, inv.Attempt)
+	if err != nil {
+		return err
+	}
+	if err := affected(res, inv.ClientRef); err != nil {
+		return err
+	}
+	return clearCancels(ctx, tx, inv.ClientRef)
+}
+
+// clearCancels drops the cancel hints of an invocation that ended.
+func clearCancels(ctx context.Context, tx *psql.Execer, clientRef string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM worker_cancels WHERE client_ref = ?`, clientRef)
 	return err
 }
 
@@ -1103,10 +1259,14 @@ func markInDoubtTx(ctx context.Context, tx *psql.Execer, inv Invocation, now tim
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx,
+	res, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, in_doubt = 1, in_doubt_until_unix_ms = ?, lease_expires_unix_ms = 0
-		 WHERE client_ref = ?`, stateLeased, unixms(now.Add(pool)), inv.ClientRef)
-	return err
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+		stateLeased, unixms(now.Add(pool)), inv.ClientRef, stateLeased, inv.WorkerID, inv.Attempt)
+	if err != nil {
+		return err
+	}
+	return affected(res, inv.ClientRef)
 }
 
 func (s *Store) markInDoubt(ctx context.Context, inv Invocation) error {

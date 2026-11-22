@@ -18,12 +18,12 @@ import (
 type Transport interface {
 	Join(ctx context.Context, req JoinRequest) (Worker, error)
 	Lease(ctx context.Context, req LeaseRequest) ([]Invocation, error)
-	Starting(ctx context.Context, workerID, credential, clientRef string) error
-	Started(ctx context.Context, workerID, credential, clientRef, providerHandle string) error
-	Events(ctx context.Context, workerID, credential, clientRef string, events []Event) error
-	Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error
-	Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error
-	Resume(ctx context.Context, workerID, credential, clientRef string) error
+	Starting(ctx context.Context, workerID, credential, clientRef string, attempt int) error
+	Started(ctx context.Context, workerID, credential, clientRef, providerHandle string, attempt int) error
+	Events(ctx context.Context, workerID, credential, clientRef string, attempt int, events []Event) error
+	Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64, attempt int) error
+	Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time, attempt int) error
+	Resume(ctx context.Context, workerID, credential, clientRef string, attempt int) error
 	Heartbeat(ctx context.Context, workerID, credential string, freeUnits int) (HeartbeatAnswer, error)
 	Leave(ctx context.Context, workerID, credential string) error
 }
@@ -106,51 +106,51 @@ func (c *Client) LeaseOnce(ctx context.Context, free int, warm []string, timeLef
 }
 
 // Starting tells the platform the worker is about to call its provider.
-func (c *Client) Starting(ctx context.Context, clientRef string) error {
-	return c.transport.Starting(ctx, c.worker.ID, c.worker.Credential, clientRef)
+func (c *Client) Starting(ctx context.Context, clientRef string, attempt int) error {
+	return c.transport.Starting(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt)
 }
 
 // Started reports the provider's handle.
-func (c *Client) Started(ctx context.Context, clientRef, handle string) error {
+func (c *Client) Started(ctx context.Context, clientRef, handle string, attempt int) error {
 	if c.journal != nil {
-		if err := c.journal.Record(JournalEntry{Kind: "handle", ClientRef: clientRef, ProviderHandle: handle}); err != nil {
+		if err := c.journal.Record(JournalEntry{Kind: "handle", ClientRef: clientRef, Attempt: attempt, ProviderHandle: handle}); err != nil {
 			return err
 		}
 	}
-	return c.transport.Started(ctx, c.worker.ID, c.worker.Credential, clientRef, handle)
+	return c.transport.Started(ctx, c.worker.ID, c.worker.Credential, clientRef, handle, attempt)
 }
 
 // Events reports partial output for a lease.
-func (c *Client) Events(ctx context.Context, clientRef string, events []Event) error {
+func (c *Client) Events(ctx context.Context, clientRef string, attempt int, events []Event) error {
 	if len(events) == 0 {
 		return nil
 	}
-	return c.transport.Events(ctx, c.worker.ID, c.worker.Credential, clientRef, events)
+	return c.transport.Events(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt, events)
 }
 
 // Resume takes back an in-doubt invocation inside its grace period
 // (REQ-MODEL-023).
-func (c *Client) Resume(ctx context.Context, clientRef string) error {
-	return c.transport.Resume(ctx, c.worker.ID, c.worker.Credential, clientRef)
+func (c *Client) Resume(ctx context.Context, clientRef string, attempt int) error {
+	return c.transport.Resume(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt)
 }
 
 // Finish reports a result and marks the journal entry delivered. The outcome
 // is journaled before the transport call, so a failed call leaves it for a
 // restart to redeliver (ADR-0012 §7).
-func (c *Client) Finish(ctx context.Context, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error {
+func (c *Client) Finish(ctx context.Context, clientRef, state string, result json.RawMessage, code core.Code, cost int64, attempt int) error {
 	if c.journal != nil {
 		if err := c.journal.Record(JournalEntry{
-			Kind: "result", ClientRef: clientRef, State: state,
+			Kind: "result", ClientRef: clientRef, Attempt: attempt, State: state,
 			Result: result, ErrorCode: string(code), CostMpts: cost,
 		}); err != nil {
 			return err
 		}
 	}
-	if err := c.transport.Finish(ctx, c.worker.ID, c.worker.Credential, clientRef, state, result, code, cost); err != nil {
+	if err := c.transport.Finish(ctx, c.worker.ID, c.worker.Credential, clientRef, state, result, code, cost, attempt); err != nil {
 		return err
 	}
 	if c.journal != nil {
-		if err := c.journal.Record(JournalEntry{Kind: "done", ClientRef: clientRef}); err != nil {
+		if err := c.journal.Record(JournalEntry{Kind: "done", ClientRef: clientRef, Attempt: attempt}); err != nil {
 			return err
 		}
 	}
@@ -159,12 +159,12 @@ func (c *Client) Finish(ctx context.Context, clientRef, state string, result jso
 
 // Release gives a lease back. Unused says the worker never started the
 // invocation.
-func (c *Client) Release(ctx context.Context, clientRef string, unused bool, notBefore time.Time) error {
-	if err := c.transport.Release(ctx, c.worker.ID, c.worker.Credential, clientRef, unused, notBefore); err != nil {
+func (c *Client) Release(ctx context.Context, clientRef string, unused bool, notBefore time.Time, attempt int) error {
+	if err := c.transport.Release(ctx, c.worker.ID, c.worker.Credential, clientRef, unused, notBefore, attempt); err != nil {
 		return err
 	}
 	if c.journal != nil {
-		return c.journal.Record(JournalEntry{Kind: "done", ClientRef: clientRef})
+		return c.journal.Record(JournalEntry{Kind: "done", ClientRef: clientRef, Attempt: attempt})
 	}
 	return nil
 }
@@ -201,8 +201,14 @@ type Runner struct {
 	Client    *Client
 	Providers map[string]model.Invoker
 
-	mu   sync.Mutex
-	runs map[string]context.CancelFunc
+	mu      sync.Mutex
+	runs    map[string]runHandle
+	pending map[string]int
+}
+
+type runHandle struct {
+	cancel  context.CancelFunc
+	attempt int
 }
 
 // Run executes one leased invocation and reports its terminal state to the
@@ -222,23 +228,49 @@ func (r *Runner) RunResumed(ctx context.Context, inv Invocation, providerHandle 
 }
 
 // Cancel asks the run for clientRef to stop: the provider is cancelled and the
-// invocation is reported cancelled. It reports whether a local run matched.
-func (r *Runner) Cancel(clientRef string) bool {
+// invocation is reported cancelled. attempt names the attempt the cancel is
+// for, so a cancel for a superseded attempt never stops the current one. A
+// cancel that arrives before the run is tracked is kept and honoured at its
+// start. It reports whether a local run matched.
+func (r *Runner) Cancel(clientRef string, attempt int) bool {
 	r.mu.Lock()
-	cancel, ok := r.runs[clientRef]
-	r.mu.Unlock()
-	if ok {
-		cancel()
+	defer r.mu.Unlock()
+	if run, ok := r.runs[clientRef]; ok {
+		if attempt != 0 && run.attempt != attempt {
+			return false
+		}
+		run.cancel()
+		return true
 	}
-	return ok
+	if r.pending == nil {
+		r.pending = map[string]int{}
+	}
+	r.pending[clientRef] = attempt
+	return true
 }
 
-func (r *Runner) track(clientRef string, cancel context.CancelFunc) func() {
+func (r *Runner) takePending(clientRef string, attempt int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	got, ok := r.pending[clientRef]
+	if !ok || got != 0 && got != attempt {
+		return false
+	}
+	delete(r.pending, clientRef)
+	return true
+}
+
+func (r *Runner) track(clientRef string, attempt int, cancel context.CancelFunc) func() {
 	r.mu.Lock()
 	if r.runs == nil {
-		r.runs = map[string]context.CancelFunc{}
+		r.runs = map[string]runHandle{}
 	}
-	r.runs[clientRef] = cancel
+	r.runs[clientRef] = runHandle{cancel: cancel, attempt: attempt}
+	// A cancel may have arrived between the lease and this point.
+	if got, ok := r.pending[clientRef]; ok && (got == 0 || got == attempt) {
+		delete(r.pending, clientRef)
+		cancel()
+	}
 	r.mu.Unlock()
 	return func() {
 		r.mu.Lock()
@@ -250,26 +282,29 @@ func (r *Runner) track(clientRef string, cancel context.CancelFunc) func() {
 func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string) error {
 	provider := r.providers()[inv.Model]
 	if provider == nil {
-		_ = r.Client.Release(ctx, inv.ClientRef, true, time.Time{})
+		_ = r.Client.Release(ctx, inv.ClientRef, true, time.Time{}, inv.Attempt)
 		return core.NewError(core.CodeUnsupported,
 			"worker loaded no provider for the model", map[string]any{"model": inv.Model})
 	}
 	req, err := decodeRequest(inv)
 	if err != nil {
-		_ = r.Client.Finish(ctx, inv.ClientRef, string(model.StateFailed), nil, core.CodeInvalidArgument, 0)
+		_ = r.Client.Finish(ctx, inv.ClientRef, string(model.StateFailed), nil, core.CodeInvalidArgument, 0, inv.Attempt)
 		return err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	untrack := r.track(inv.ClientRef, cancel)
+	if r.takePending(inv.ClientRef, inv.Attempt) {
+		return r.finishCancelled(ctx, inv.ClientRef, inv.Attempt, 0)
+	}
+	untrack := r.track(inv.ClientRef, inv.Attempt, cancel)
 	defer untrack()
 
-	if err := r.Client.Starting(runCtx, inv.ClientRef); err != nil {
+	if err := r.Client.Starting(runCtx, inv.ClientRef, inv.Attempt); err != nil {
 		if runCtx.Err() != nil {
-			return r.finishCancelled(ctx, inv.ClientRef)
+			return r.finishCancelled(ctx, inv.ClientRef, inv.Attempt, 0)
 		}
 		// Nothing was started; hand the lease back unused.
-		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
+		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{}, inv.Attempt)
 		return err
 	}
 	var handle model.Handle
@@ -277,32 +312,32 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 		handle, err = provider.Start(runCtx, req)
 		if err != nil {
 			if runCtx.Err() != nil {
-				return r.finishCancelled(ctx, inv.ClientRef)
+				return r.finishCancelled(ctx, inv.ClientRef, inv.Attempt, 0)
 			}
 			if definitiveFailure(err) {
 				// The provider refused the call and is not running it:
 				// report the failure instead of leaving the invocation to
 				// expire as worker_lost.
-				_ = r.Client.Finish(ctx, inv.ClientRef, string(model.StateFailed), nil, core.CodeOf(err), 0)
+				_ = r.Client.Finish(ctx, inv.ClientRef, string(model.StateFailed), nil, core.CodeOf(err), 0, inv.Attempt)
 			} else {
-				_ = r.Client.Release(ctx, inv.ClientRef, false, time.Time{})
+				_ = r.Client.Release(ctx, inv.ClientRef, false, time.Time{}, inv.Attempt)
 			}
 			return err
 		}
 	} else {
 		handle = model.Handle{ID: providerHandle, ClientRef: inv.ClientRef}
 	}
-	if err := r.Client.Started(runCtx, inv.ClientRef, handle.ID); err != nil {
+	if err := r.Client.Started(runCtx, inv.ClientRef, handle.ID, inv.Attempt); err != nil {
 		if runCtx.Err() != nil {
-			return r.finishCancelled(ctx, inv.ClientRef)
+			return r.finishCancelled(ctx, inv.ClientRef, inv.Attempt, 0)
 		}
 		// The provider may be running: leave the lease in doubt rather than
 		// start a second paid attempt.
-		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{})
+		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{}, inv.Attempt)
 		return err
 	}
 
-	eventsDone := r.forwardEvents(runCtx, inv.ClientRef, provider, handle, cancel)
+	eventsDone := r.forwardEvents(runCtx, inv.ClientRef, inv.Attempt, provider, handle, cancel)
 
 	type outcome struct {
 		result model.Result
@@ -325,7 +360,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 			// The caller is going away; hand the lease back rather than
 			// leave it in doubt for the whole grace period.
 			_ = provider.Cancel(context.Background(), handle)
-			_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{})
+			_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{}, inv.Attempt)
 			return ctx.Err()
 		}
 		cancelled = true
@@ -349,7 +384,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 		reportCtx = context.WithoutCancel(ctx)
 	}
 	if cancelled {
-		err := r.finishCancelled(reportCtx, inv.ClientRef)
+		err := r.finishCancelled(reportCtx, inv.ClientRef, inv.Attempt, res.CostMpts)
 		if core.CodeOf(err) == CodeLeaseLost {
 			_ = provider.Cancel(context.Background(), handle)
 		}
@@ -363,9 +398,9 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 			if core.CodeOf(resErr) == core.CodeCancelled {
 				state = string(model.StateCancelled)
 			}
-			_ = r.Client.Finish(reportCtx, inv.ClientRef, state, nil, core.CodeOf(resErr), res.CostMpts)
+			_ = r.Client.Finish(reportCtx, inv.ClientRef, state, nil, core.CodeOf(resErr), res.CostMpts, inv.Attempt)
 		} else {
-			_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{})
+			_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{}, inv.Attempt)
 		}
 		return resErr
 	}
@@ -383,7 +418,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 	default:
 		// The provider has not ended; an in-doubt lease is the honest
 		// answer, so a second paid attempt is never started.
-		_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{})
+		_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{}, inv.Attempt)
 		return core.NewError(core.CodeAmbiguousStart,
 			"the provider has not reported a result", map[string]any{"client_ref": inv.ClientRef})
 	}
@@ -391,7 +426,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 	if len(res.Message) > 0 {
 		raw = res.Message
 	}
-	err = r.Client.Finish(reportCtx, inv.ClientRef, state, raw, code, res.CostMpts)
+	err = r.Client.Finish(reportCtx, inv.ClientRef, state, raw, code, res.CostMpts, inv.Attempt)
 	if core.CodeOf(err) == CodeLeaseLost {
 		// The platform already has a result; do not leave the provider
 		// running a superseded attempt (ADR-0012 §7).
@@ -404,7 +439,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 // runs. The sequence is the worker's own and stays monotonic across a run; the
 // store also refuses to go backwards. Partial output is best-effort: a failed
 // batch does not lose the result, and a lease that is gone cancels the run.
-func (r *Runner) forwardEvents(ctx context.Context, clientRef string, provider model.Invoker, handle model.Handle, cancel context.CancelFunc) <-chan struct{} {
+func (r *Runner) forwardEvents(ctx context.Context, clientRef string, attempt int, provider model.Invoker, handle model.Handle, cancel context.CancelFunc) <-chan struct{} {
 	events, err := provider.Events(ctx, handle, 0)
 	if err != nil || events == nil {
 		return nil
@@ -415,7 +450,7 @@ func (r *Runner) forwardEvents(ctx context.Context, clientRef string, provider m
 		var seq int64
 		for e := range events {
 			seq++
-			if err := r.Client.Events(ctx, clientRef, []Event{{
+			if err := r.Client.Events(ctx, clientRef, attempt, []Event{{
 				Seq: seq, Kind: string(e.Kind), Text: e.Text, Audio: e.Audio,
 				Progress: e.Progress, Attempt: e.Attempt, Data: e.Data,
 			}}); err != nil && core.CodeOf(err) == CodeLeaseLost {
@@ -427,11 +462,22 @@ func (r *Runner) forwardEvents(ctx context.Context, clientRef string, provider m
 	return done
 }
 
-func (r *Runner) finishCancelled(ctx context.Context, clientRef string) error {
+func (r *Runner) finishCancelled(ctx context.Context, clientRef string, attempt int, cost int64) error {
 	if ctx.Err() != nil {
 		ctx = context.WithoutCancel(ctx)
 	}
-	return r.Client.Finish(ctx, clientRef, string(model.StateCancelled), nil, core.CodeCancelled, 0)
+	return r.Client.Finish(ctx, clientRef, string(model.StateCancelled), nil, core.CodeCancelled, cost, attempt)
+}
+
+// CancelProvider cancels a provider handle the worker journaled but can no
+// longer report (a superseded attempt).
+func (r *Runner) CancelProvider(ctx context.Context, modelID, clientRef, handle string) {
+	if handle == "" {
+		return
+	}
+	if p := r.providers()[modelID]; p != nil {
+		_ = p.Cancel(ctx, model.Handle{ID: handle, ClientRef: clientRef})
+	}
 }
 
 func (r *Runner) providers() map[string]model.Invoker {
@@ -487,33 +533,33 @@ func (t LocalTransport) Lease(ctx context.Context, req LeaseRequest) ([]Invocati
 }
 
 // Starting implements Transport.
-func (t LocalTransport) Starting(ctx context.Context, workerID, credential, clientRef string) error {
-	return t.Store.Starting(ctx, workerID, credential, clientRef)
+func (t LocalTransport) Starting(ctx context.Context, workerID, credential, clientRef string, attempt int) error {
+	return t.Store.Starting(ctx, workerID, credential, clientRef, attempt)
 }
 
 // Started implements Transport.
-func (t LocalTransport) Started(ctx context.Context, workerID, credential, clientRef, providerHandle string) error {
-	return t.Store.Started(ctx, workerID, credential, clientRef, providerHandle)
+func (t LocalTransport) Started(ctx context.Context, workerID, credential, clientRef, providerHandle string, attempt int) error {
+	return t.Store.Started(ctx, workerID, credential, clientRef, providerHandle, attempt)
 }
 
 // Events implements Transport.
-func (t LocalTransport) Events(ctx context.Context, workerID, credential, clientRef string, events []Event) error {
-	return t.Store.Events(ctx, workerID, credential, clientRef, events)
+func (t LocalTransport) Events(ctx context.Context, workerID, credential, clientRef string, attempt int, events []Event) error {
+	return t.Store.Events(ctx, workerID, credential, clientRef, attempt, events)
 }
 
 // Finish implements Transport.
-func (t LocalTransport) Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error {
-	return t.Store.Finish(ctx, workerID, credential, clientRef, state, result, code, cost)
+func (t LocalTransport) Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64, attempt int) error {
+	return t.Store.Finish(ctx, workerID, credential, clientRef, state, result, code, cost, attempt)
 }
 
 // Release implements Transport.
-func (t LocalTransport) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error {
-	return t.Store.Release(ctx, workerID, credential, clientRef, unused, notBefore)
+func (t LocalTransport) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time, attempt int) error {
+	return t.Store.Release(ctx, workerID, credential, clientRef, unused, notBefore, attempt)
 }
 
 // Resume implements Transport.
-func (t LocalTransport) Resume(ctx context.Context, workerID, credential, clientRef string) error {
-	return t.Store.Resume(ctx, workerID, credential, clientRef)
+func (t LocalTransport) Resume(ctx context.Context, workerID, credential, clientRef string, attempt int) error {
+	return t.Store.Resume(ctx, workerID, credential, clientRef, attempt)
 }
 
 // Heartbeat implements Transport.

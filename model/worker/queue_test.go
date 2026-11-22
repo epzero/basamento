@@ -282,7 +282,7 @@ func TestReportsPastGraceAreRefused(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 500)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
@@ -294,11 +294,11 @@ func TestReportsPastGraceAreRefused(t *testing.T) {
 	}
 	clock.Advance(2 * time.Minute)
 	for name, err := range map[string]error{
-		"starting": s.Starting(ctx, w.ID, w.Credential, "v1"),
-		"resume":   s.Resume(ctx, w.ID, w.Credential, "v1"),
-		"events":   s.Events(ctx, w.ID, w.Credential, "v1", []Event{{Seq: 1, Kind: "text", Text: "late"}}),
-		"release":  s.Release(ctx, w.ID, w.Credential, "v1", false, time.Time{}),
-		"finish":   s.Finish(ctx, w.ID, w.Credential, "v1", stateSucceeded, json.RawMessage(`{}`), "", 0),
+		"starting": s.Starting(ctx, w.ID, w.Credential, "v1", 1),
+		"resume":   s.Resume(ctx, w.ID, w.Credential, "v1", 1),
+		"events":   s.Events(ctx, w.ID, w.Credential, "v1", 1, []Event{{Seq: 1, Kind: "text", Text: "late"}}),
+		"release":  s.Release(ctx, w.ID, w.Credential, "v1", false, time.Time{}, 1),
+		"finish":   s.Finish(ctx, w.ID, w.Credential, "v1", stateSucceeded, json.RawMessage(`{}`), "", 0, 1),
 	} {
 		if core.CodeOf(err) != CodeLeaseLost {
 			t.Fatalf("%s past the grace deadline: got %v, want lease_lost", name, err)
@@ -321,11 +321,11 @@ func TestStartingRenewsLeaseOfAliveWorker(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 500)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(2 * time.Minute)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(30 * time.Second)
@@ -402,7 +402,7 @@ func TestReleaseKeepsOriginalQueueTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease(t, s, w, 1)
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour)); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour), 1); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(11 * time.Minute)
@@ -425,7 +425,7 @@ func TestReleaseClampsNotBeforeToLease(t *testing.T) {
 	lease(t, s, w, 1)
 	// A vendor rate limit beyond one lease period is clamped: a worker must
 	// not be able to park work indefinitely.
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour)); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour), 1); err != nil {
 		t.Fatal(err)
 	}
 	if got := lease(t, s, w, 1); len(got) != 0 {
@@ -435,6 +435,7 @@ func TestReleaseClampsNotBeforeToLease(t *testing.T) {
 		t.Fatalf("queued at %s not before %s, want %s and %s", inv.QueuedAt, inv.NotBefore, at, at.Add(5*time.Minute))
 	}
 	clock.Advance(4 * time.Minute)
+	beat(t, s, &w, 8)
 	if got := lease(t, s, w, 1); len(got) != 0 {
 		t.Fatalf("leased %v before the clamped not_before", refs(got))
 	}
@@ -453,7 +454,7 @@ func TestFinishRejectsNegativeCost(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 500)
 	lease(t, s, w, 1)
-	err := s.Finish(ctx, w.ID, w.Credential, "r1", stateSucceeded, json.RawMessage(`{}`), "", -5)
+	err := s.Finish(ctx, w.ID, w.Credential, "r1", stateSucceeded, json.RawMessage(`{}`), "", -5, 1)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("got %v, want invalid_argument", err)
 	}
