@@ -10,6 +10,7 @@ func TestGrantRequirementsUnion(t *testing.T) {
 		{action: "binding.grant", role: RoleViewer},
 		{action: "binding.revoke", role: RoleMember},
 		{action: "binding.grant", role: RoleAdmin},
+		{action: "binding.grant", role: Role("custom-unknown")},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.role), func(t *testing.T) {

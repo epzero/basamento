@@ -116,7 +116,11 @@ func (a *Authorizer) Check(ctx context.Context, principal authn.Principal, actio
 }
 
 // authorize performs one store read and evaluates every required action.
+// An empty required list is denied as undeclared-action before any store read.
 func (a *Authorizer) authorize(ctx context.Context, principal authn.Principal, resource Resource, required ...string) error {
+	if len(required) == 0 {
+		return a.deny(ctx, principal, resource, ReasonUndeclaredAction)
+	}
 	ctxTenant, ctxOK := core.TenantFrom(ctx)
 	if !ctxOK || ctxTenant != principal.Tenant {
 		return a.deny(ctx, principal, resource, ReasonTenantMismatch)

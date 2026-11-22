@@ -98,16 +98,30 @@ func newConditionCache(max int) *conditionCache {
 
 func (c *conditionCache) get(text string, compile func(string) (*expr.Program, error)) (*expr.Program, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if p, ok := c.m[text]; ok {
 		c.touch(text)
+		c.mu.Unlock()
 		return p, nil
 	}
 	if e, ok := c.err[text]; ok {
 		c.touch(text)
+		c.mu.Unlock()
 		return nil, e
 	}
+	c.mu.Unlock()
+
 	p, err := compile(text)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if p2, ok := c.m[text]; ok {
+		c.touch(text)
+		return p2, nil
+	}
+	if e2, ok := c.err[text]; ok {
+		c.touch(text)
+		return nil, e2
+	}
 	if err != nil {
 		if len(c.order) >= c.max {
 			c.evictOldest()

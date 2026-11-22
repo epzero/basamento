@@ -85,6 +85,37 @@ func openTestSQLStore(t *testing.T) *psql.Store {
 	return s
 }
 
+func TestAuthorizeEmptyRequiredDenied(t *testing.T) {
+	cs := &countingStore{inner: nilBindingsStore{}}
+	audit := &recordingAudit{}
+	a := &Authorizer{
+		store:     cs,
+		audit:     audit,
+		clock:     coretest.NewFakeClock(time.Unix(0, 0)),
+		compile:   mustCompiler(t, defaultCostLimit),
+		cache:     newConditionCache(8),
+		costLimit: defaultCostLimit,
+		roles:     testRoles(),
+	}
+	ctx := core.WithTenant(context.Background(), "acme")
+	p := authn.Principal{ID: "ada", Tenant: "acme"}
+	res := Resource{Project: "p1", Kind: "project", ID: "p1"}
+	err := a.authorize(ctx, p, res)
+	if core.CodeOf(err) != core.CodePermissionDenied {
+		t.Fatalf("err %v", err)
+	}
+	if cs.bindings != 0 {
+		t.Fatalf("store reads %d want 0", cs.bindings)
+	}
+	if audit.calls != 1 {
+		t.Fatalf("audit calls %d", audit.calls)
+	}
+	ev := audit.events[0]
+	if ev.Action != "authz.deny" || ev.Reason != ReasonUndeclaredAction {
+		t.Fatalf("event %+v", ev)
+	}
+}
+
 func TestAuthorizeMemberDenyGrantOneAudit(t *testing.T) {
 	sqlStore := openTestSQLStore(t)
 	store := NewSQLStore(sqlStore)
