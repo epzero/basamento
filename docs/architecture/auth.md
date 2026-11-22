@@ -65,8 +65,12 @@ new one and replacing the stored record. Every rejection is
 - Optional **CEL conditions** for attribute rules (`resource.owner ==
   principal.id`), reusing the expression engine. No Casbin.
 - **Tenancy**: every repository call takes a tenant context, set with
-  `core.WithTenant` and read with `core.TenantFrom` (REQ-AUTH-002). Postgres row-level security is a second line of defense in
-  the cloud profile.
+  `core.WithTenant` and read with `core.TenantFrom` (REQ-AUTH-002). Postgres
+  row-level security is a second line of defense in the cloud profile
+  ([ADR-0022](../adr/0022-postgres-row-level-security.md)): session- and
+  transaction-scoped `app.tenant` via a `platform/sql` connector, `bas_app`
+  without `BYPASSRLS`, `FORCE` policies on every tenant table, enforced in the
+  gate by opening the store as `bas_app`.
 - **Worker tokens**: scoped to one session's resources with a fixed expiry,
   for the browser runner and other external services (REQ-AUTH-005).
 - **Pool tokens**: let a `kit worker` join one pool, and nothing else.

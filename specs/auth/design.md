@@ -248,41 +248,47 @@ returns `permission_denied` — and the failure is logged and counted as a metri
 
 This is the second line of defence behind the tenant filter every
 `platform/sql` repository already applies ([`specs/sql/design.md` §4](../sql/design.md)).
-It is enforced only in the cloud profile.
+It is enforced only in the cloud profile. Architecture decisions:
+[ADR-0022](../../docs/adr/0022-postgres-row-level-security.md). Implementer
+rules below use **D1**–**D5** from that ADR.
 
-- **Connection identity.** Migrations create an owner role that owns the tenant
-  tables and a separate application role used by the running process. The
-  application role has no `BYPASSRLS` and is not the owner, so it cannot turn
-  policies off.
-- **Tenant variable.** Before each transaction, `platform/sql` calls
-  `set_config('app.tenant', $1, true)` with the tenant from the context as a
-  bound parameter — never string-concatenated. `true` scopes it to the
-  transaction. `current_setting('app.tenant', true)` returns NULL when unset.
-- **Policy shape**, for every tenant table:
+- **D1 — Tenant variable (not only inside transactions).** `platform/sql`
+  sets `app.tenant` from `core.TenantFrom(ctx)` with a bound parameter, never
+  concatenation. On the pooled `Execer` it uses session `set_config(...,
+  false)` when the connection's applied value differs; inside `Store.InTx` it
+  uses `set_config(..., true)` once at begin. `RESET app.tenant` runs when a
+  connection returns to the pool. `current_setting('app.tenant', true)` is SQL
+  NULL when never set; after `RESET` or a rolled-back session set it is an empty
+  string — both yield no visible rows under the policy (REQ-AUTH-028). Failure
+  to apply the variable fails the statement; unscoped SQL never runs.
+- **D2 — Connection identity (roles).** Postgres-only migrations create or
+  assume roles `bas_owner` (owns tenant tables) and `bas_app` (`LOGIN`, no
+  `BYPASSRLS`, not owner). Production uses two URLs (`sql.migrate_url` for
+  migrate, `sql.url` for the app pool); passwords only through the secrets port.
+  The gate connects as `bas_app` after migrate (ADR-0015 admin creates the
+  database; see `specs/sql/design.md` §4). Superuser sessions do not prove RLS.
+- **D3 — Policy shape**, for every row in D4:
 
   ```sql
   ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
   ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
   CREATE POLICY tenant_isolation ON <table>
-    USING (tenant = current_setting('app.tenant', true))
-    WITH CHECK (tenant = current_setting('app.tenant', true));
+    USING (<tenant_col> = current_setting('app.tenant', true))
+    WITH CHECK (<tenant_col> = current_setting('app.tenant', true));
   ```
 
-  With the variable unset the predicate is unknown for every row, so the
-  transaction sees no rows (REQ-AUTH-028). `FORCE` is required because the
-  application role would otherwise be subject to policies only as non-owner;
-  being a non-owner without `BYPASSRLS` is also required (REQ-AUTH-027).
-- **Tables.** Every tenant table, including the credential store's, the audit
-  store's and the new `authz_bindings` table, gets the policy. Migrations create
-  the roles and the policies (REQ-AUTH-029); SQLite has no RLS and is unaffected.
-- **Gate proof.** The scenarios tagged `@profile:cloud` run on the Postgres lane
-  of the gate as [ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md)
-  decides: a fresh database per scenario, a server from `BDD_POSTGRES_URL` or an
-  embedded Postgres 16, and a `postgres-unavailable` skip only when no server is
-  usable. The component driver opens the store through its public port and
-  asserts, on both the audit and `authz_bindings` tables, that a transaction with
-  one tenant set sees only that tenant's rows and a transaction with no tenant
-  variable sees none. No test hook is added to production code.
+  `<tenant_col>` is `tenant` or `tenant_id` as the table defines. `FORCE` and a
+  non-owner application role satisfy REQ-AUTH-027.
+- **D4 — Tables.** Credentials, audit, `authz_bindings` (REQ-AUTH-029), every
+  `stream/eventlog` table with a tenant key, and `telemetry_spans`. Each owning
+  package ships postgres-only goose files; see ADR-0022 D4 and `go tool gate rls`
+  (designer spec).
+- **D5 — Gate proof.** Scenarios tagged `@profile:cloud` run on the Postgres lane
+  ([ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md)): fresh
+  database, store opened as `bas_app`, steps seed two tenants and assert
+  isolation on credentials, audit and `authz_bindings` per REQ-AUTH-027–029.
+  Steps set tenant through the public store API (not raw SQL); a scope with no
+  tenant sees no audit rows. No production test hooks.
 
 ## 9. Delivery split
 
