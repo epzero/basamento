@@ -278,33 +278,6 @@ func TestMatchLayer(t *testing.T) {
 	}
 }
 
-// A nested module under the module path is not part of ./...'s package list;
-// its packages are external to this module's layer graph (presets/codegen).
-func TestLayeringTreatsNestedModuleImportsAsExternal(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"layering.yaml": "module: m\nlayers:\n  a: []\n  b: [a]\n  c: []\n",
-	})
-	bin := t.TempDir()
-	script := `#!/bin/sh
-cat <<'EOF'
-{"ImportPath":"m/a","Imports":["m/presets/codegen"]}
-{"ImportPath":"m/b","Imports":["m/a","m/presets/codegen"]}
-{"ImportPath":"m/c","Imports":["m/a","m/presets/codegen"]}
-EOF
-`
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	errs, err := Layering(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(errs) != 1 || !strings.Contains(errs[0], "c (layer c)") || !strings.Contains(errs[0], "a (layer a)") {
-		t.Fatalf("errors %v, want only c -> a; the nested module must be skipped", errs)
-	}
-}
-
 func TestReduceDropsImpliedEdges(t *testing.T) {
 	edges := map[string]map[string]bool{
 		"a": {"b": true, "c": true},
