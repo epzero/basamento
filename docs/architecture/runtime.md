@@ -356,8 +356,8 @@ Synchronous Update `basamento-resolve-gate` with `{gate, payload}`; waits until
 `core` code (`not_found`, `conflict`, `unavailable` while the run is continuing
 as new); a missing run is `not_found`. A run that is not ready for the update
 (its first workflow task has not started, or its workflow task is failing)
-returns `unavailable`; the caller retries. No internal retry on `unavailable`;
-the caller retries.
+returns `unavailable`. There is no internal retry on `unavailable`; the caller
+retries.
 
 ### List, query shapes and cursor (D6)
 

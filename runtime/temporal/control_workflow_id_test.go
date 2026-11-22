@@ -3,6 +3,7 @@ package temporal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,62 @@ import (
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/runtime"
 )
+
+func TestControlWorkflowIDTable(t *testing.T) {
+	const emptyRunIDMsg = "temporal: empty run id"
+	type row struct {
+		name      string
+		tenant    core.TenantID
+		runID     string
+		wantID    string
+		wantMsg   string
+		wantEmpty bool
+	}
+	rows := []row{
+		{name: "plain", tenant: "acme", runID: "r1", wantID: "acme/r1"},
+		{name: "underscore", tenant: "acme", runID: "r_1", wantID: "acme/r_1"},
+		{name: "dot", tenant: "acme", runID: "r.1", wantID: "acme/r.1"},
+		{name: "spaces", tenant: "acme", runID: "r 1", wantID: "acme/r 1"},
+		{name: "unicode", tenant: "acme", runID: "r\u00e9", wantID: "acme/r\u00e9"},
+		{name: "max_len", tenant: "acme", runID: strings.Repeat("x", 255), wantID: "acme/" + strings.Repeat("x", 255)},
+		{name: "single_tenant", tenant: "", runID: "r1", wantID: "r1"},
+		{name: "empty", tenant: "acme", runID: "", wantMsg: emptyRunIDMsg, wantEmpty: true},
+		{name: "overlong", tenant: "acme", runID: strings.Repeat("x", 256), wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "bad_utf8", tenant: "acme", runID: "r\xff", wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "control", tenant: "acme", runID: "r\x01", wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "slash_mid", tenant: "acme", runID: "a/b", wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "slash_leading", tenant: "acme", runID: "/x", wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "slash_trailing", tenant: "acme", runID: "x/", wantMsg: invalidRunIDMsg, wantEmpty: true},
+		{name: "unscopable_tenant", tenant: "acme/eu", runID: "r1", wantMsg: invalidRunIDMsg, wantEmpty: true},
+	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			gotID, err := controlWorkflowID(tc.tenant, tc.runID)
+			if (gotID == "") != (err != nil) {
+				t.Fatalf("invariant (id empty) == (err != nil): id=%q err=%v", gotID, err)
+			}
+			if tc.wantEmpty {
+				if gotID != "" {
+					t.Fatalf("id: got %q want empty", gotID)
+				}
+				var pe *core.Error
+				if err == nil || !errors.As(err, &pe) || pe.Code != core.CodeInvalidArgument || pe.Message != tc.wantMsg {
+					t.Fatalf("expected invalid_argument %q, got %v", tc.wantMsg, err)
+				}
+				if tc.runID != "" && strings.Contains(err.Error(), tc.runID) {
+					t.Fatal("error echoed run id")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotID != tc.wantID {
+				t.Fatalf("id: got %q want %q", gotID, tc.wantID)
+			}
+		})
+	}
+}
 
 func TestDescribeSendsTenantPrefixedWorkflowID(t *testing.T) {
 	start := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)

@@ -42,8 +42,6 @@ func (r *Runtime) Start(ctx context.Context, req runtime.StartRequest) (runtime.
 		if err != nil {
 			return runtime.RunRef{}, core.NewError(core.CodeInternal, "temporal: generate run id", map[string]any{"cause": err.Error()})
 		}
-	} else if err := validateRunID(runID); err != nil {
-		return runtime.RunRef{}, err
 	}
 	wfID, err := controlWorkflowID(tenant, runID)
 	if err != nil {
