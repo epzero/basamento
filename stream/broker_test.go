@@ -21,6 +21,7 @@ var brokerNow = time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
 // not need subscriptions to prove the scenarios.
 type fakeBus struct {
 	published []publishedDelta
+	purged    []string
 	down      bool
 }
 
@@ -47,9 +48,21 @@ func (b *fakeBus) Subscribe(context.Context, string, uint64) (<-chan platform.Me
 }
 
 func (b *fakeBus) LastSeq(context.Context, string) (uint64, error) { return 0, nil }
-func (b *fakeBus) Purge(context.Context, string) error             { return nil }
+func (b *fakeBus) Purge(_ context.Context, subject string) error {
+	b.purged = append(b.purged, subject)
+	return nil
+}
 
 func testBroker(t *testing.T) (*Broker, *eventlog.Log, *coretest.FakeClock, *fakeBus) {
+	t.Helper()
+	bus := &fakeBus{}
+	broker, log, clock := newTestBroker(t, bus, nil)
+	return broker, log, clock, bus
+}
+
+// newTestBroker builds a broker over a fresh SQLite log, with bus and an
+// optional eventlog fault for the tests that stop the writer at a point.
+func newTestBroker(t *testing.T, bus platform.Bus, fault eventlog.Fault) (*Broker, *eventlog.Log, *coretest.FakeClock) {
 	t.Helper()
 	dir := t.TempDir()
 	store, err := psql.Open(context.Background(), "sqlite:///"+filepath.Join(dir, "kit.db"), eventlog.Migrations())
@@ -58,16 +71,15 @@ func testBroker(t *testing.T) (*Broker, *eventlog.Log, *coretest.FakeClock, *fak
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	clock := coretest.NewFakeClock(brokerNow)
-	log, err := eventlog.New(store, eventlog.Options{Clock: clock})
+	log, err := eventlog.New(store, eventlog.Options{Clock: clock, Fault: fault})
 	if err != nil {
 		t.Fatalf("new log: %v", err)
 	}
-	bus := &fakeBus{}
 	broker, err := NewBroker(log, bus, BrokerOptions{Clock: clock})
 	if err != nil {
 		t.Fatalf("new broker: %v", err)
 	}
-	return broker, log, clock, bus
+	return broker, log, clock
 }
 
 func tenant(tenantID string) context.Context {
@@ -496,7 +508,7 @@ func TestAPublishedDeltaCarriesItsRunAndSubject(t *testing.T) {
 		t.Fatalf("bus got %d deltas, want 1", len(bus.published))
 	}
 	got := bus.published[0]
-	if got.subject != "run.r1.deltas" || got.delta.RunID != "r1" || got.delta.DSeq != 1 {
+	if got.subject != "run.61636d65.r1.deltas" || got.delta.RunID != "r1" || got.delta.DSeq != 1 {
 		t.Fatalf("published %+v", got)
 	}
 }

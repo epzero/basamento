@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"regexp"
 	"sort"
@@ -18,9 +19,9 @@ import (
 // (REQ-STRM-005).
 const DefaultHeartbeat = 5 * time.Second
 
-// maxBufferedFrames bounds one attachment's queue. A client that falls this far
-// behind is detached instead of exhausting memory; it reattaches from its
-// cursor.
+// maxBufferedFrames bounds one attachment's queue and one attach's replay. A
+// client that falls this far behind is detached instead of exhausting memory;
+// it reattaches from its cursor.
 const maxBufferedFrames = 4096
 
 // RunOptions is what a flow's stream declaration asks of the live layer.
@@ -55,6 +56,14 @@ type Broker struct {
 type liveRun struct {
 	mu sync.Mutex
 
+	// pubMu serialises the run's publishes so the bus sees each message's dseq
+	// in order. It is held across the bus call, while mu is not: a stalled bus
+	// must not keep Cancel or Heartbeat waiting past the heartbeat
+	// (REQ-STRM-005).
+	pubMu sync.Mutex
+
+	clock core.Clock
+
 	tenant      core.TenantID
 	id          string
 	detachAfter time.Duration
@@ -75,6 +84,25 @@ type liveMessage struct {
 	text      string
 	attempt   int
 	completed bool
+}
+
+func newLiveRun(clock core.Clock, tenant core.TenantID, id string, detachAfter time.Duration, finished bool) *liveRun {
+	run := &liveRun{
+		clock:       clock,
+		tenant:      tenant,
+		id:          id,
+		detachAfter: detachAfter,
+		canceled:    make(chan struct{}),
+		finished:    finished,
+		messages:    map[string]*liveMessage{},
+		subs:        map[*Attachment]struct{}{},
+	}
+	if detachAfter > 0 && !finished {
+		// A run that is never attached to is unattended from the start, so its
+		// detach policy counts from creation (REQ-STRM-006).
+		run.detachedAt = clock.Now()
+	}
+	return run
 }
 
 // NewBroker builds a broker over log. bus receives the run's deltas; a nil bus
@@ -123,11 +151,22 @@ func checkMessageID(messageID string) error {
 	return nil
 }
 
-// DeltaSubject is the bus subject that retains a run's deltas.
-func DeltaSubject(runID string) string { return "run." + runID + ".deltas" }
+// DeltaSubject is the bus subject that retains a run's deltas. Like the event
+// log's subject it names the tenant, because a run id is unique only within a
+// tenant (REQ-RT-046); two tenants' run "r1" must not share one subject.
+func DeltaSubject(tenant core.TenantID, runID string) (string, error) {
+	if tenant == "" {
+		return "", core.NewError(core.CodeInvalidArgument, "stream: tenant required", nil)
+	}
+	if !eventlog.ValidRunID(runID) {
+		return "", core.NewError(core.CodeInvalidArgument, "stream: invalid run id", map[string]any{"run_id": runID})
+	}
+	return "run." + hex.EncodeToString([]byte(tenant)) + "." + runID + ".deltas", nil
+}
 
 // Open starts live streaming for a run that the log already holds. The run
-// keeps its tenant from ctx. Opening a run twice is a conflict.
+// keeps its tenant from ctx. Opening a run twice, or opening a run the log
+// already holds in a terminal state, is a conflict.
 func (b *Broker) Open(ctx context.Context, runID string, opts RunOptions) error {
 	tenant, err := requireTenant(ctx)
 	if err != nil {
@@ -136,17 +175,14 @@ func (b *Broker) Open(ctx context.Context, runID string, opts RunOptions) error 
 	if opts.DetachAfter < 0 {
 		return core.NewError(core.CodeInvalidArgument, "stream: negative detach policy", nil)
 	}
-	if _, err := b.log.State(ctx, runID); err != nil {
+	state, err := b.log.State(ctx, runID)
+	if err != nil {
 		return err
 	}
-	run := &liveRun{
-		tenant:      tenant,
-		id:          runID,
-		detachAfter: opts.DetachAfter,
-		canceled:    make(chan struct{}),
-		messages:    map[string]*liveMessage{},
-		subs:        map[*Attachment]struct{}{},
+	if terminalState(state) {
+		return core.NewError(core.CodeConflict, "stream: run has finished", map[string]any{"run_id": runID})
 	}
+	run := newLiveRun(b.clock, tenant, runID, opts.DetachAfter, false)
 	key := runKey(tenant, runID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -186,7 +222,7 @@ func (b *Broker) StartMessage(ctx context.Context, runID, messageID string) erro
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	if err := run.writable(); err != nil {
+	if err := b.writable(ctx, run); err != nil {
 		return err
 	}
 	run.message(messageID)
@@ -204,7 +240,7 @@ func (b *Broker) AppendChange(ctx context.Context, runID, state string, events [
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	if err := run.writable(); err != nil {
+	if err := b.writable(ctx, run); err != nil {
 		return nil, err
 	}
 	out, err := b.log.AppendChange(ctx, runID, state, events)
@@ -217,7 +253,7 @@ func (b *Broker) AppendChange(ctx context.Context, runID, state string, events [
 		run.broadcast(Frame{Durable: &out[i]})
 	}
 	if terminalState(state) {
-		run.finished = true
+		run.settleLocked()
 	}
 	return out, nil
 }
@@ -265,15 +301,22 @@ func (b *Broker) publish(ctx context.Context, runID string, delta Delta, reset b
 	if err != nil {
 		return Delta{}, err
 	}
+	run.pubMu.Lock()
+	defer run.pubMu.Unlock()
+
 	run.mu.Lock()
-	defer run.mu.Unlock()
-	if err := run.writable(); err != nil {
+	if err := b.writable(ctx, run); err != nil {
+		run.mu.Unlock()
 		return Delta{}, err
 	}
 	msg := run.message(delta.MessageID)
 	if msg.completed {
+		run.mu.Unlock()
 		return Delta{}, core.NewError(core.CodeConflict, "stream: message is already completed", map[string]any{"message_id": delta.MessageID})
 	}
+	// Keep every field the numbering and the text touch, so a failed publish
+	// can restore all of them, not only dseq.
+	prev := *msg
 	msg.dseq++
 	delta.RunID = runID
 	delta.DSeq = msg.dseq
@@ -286,33 +329,45 @@ func (b *Broker) publish(ctx context.Context, runID string, delta Delta, reset b
 		}
 		msg.text += delta.Text
 	}
+	var subject string
+	var data []byte
 	if b.bus != nil {
-		data, err := json.Marshal(delta)
+		subject, err = DeltaSubject(run.tenant, runID)
 		if err != nil {
+			*msg = prev
+			run.mu.Unlock()
+			return Delta{}, err
+		}
+		data, err = json.Marshal(delta)
+		if err != nil {
+			*msg = prev
+			run.mu.Unlock()
 			return Delta{}, core.NewError(core.CodeInternal, "stream: encode delta", nil)
 		}
-		if _, err := b.bus.Publish(ctx, DeltaSubject(runID), data); err != nil {
+	}
+	run.mu.Unlock()
+
+	if b.bus != nil {
+		if _, err := b.bus.Publish(ctx, subject, data); err != nil {
 			// The delta was not retained; undo the numbering so a retry keeps
 			// the per-message order.
-			msg.dseq--
-			if delta.Kind != "reset" {
-				msg.text = trimSuffix(msg.text, delta.Text)
-			}
+			run.mu.Lock()
+			*msg = prev
+			run.mu.Unlock()
 			return Delta{}, err
 		}
 	}
+
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	if err := run.writableLocal(); err != nil {
+		// A cancellation or completion that landed while the bus was publishing
+		// wins: the delta is not delivered live and its numbering is undone.
+		*msg = prev
+		return Delta{}, err
+	}
 	run.broadcast(Frame{Delta: &delta})
 	return delta, nil
-}
-
-func trimSuffix(text, suffix string) string {
-	if suffix == "" || len(text) < len(suffix) {
-		return text
-	}
-	if text[len(text)-len(suffix):] == suffix {
-		return text[:len(text)-len(suffix)]
-	}
-	return text
 }
 
 // CompleteMessage records the finished message as a durable event carrying its
@@ -328,7 +383,7 @@ func (b *Broker) CompleteMessage(ctx context.Context, runID, messageID string, i
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	if err := run.writable(); err != nil {
+	if err := b.writable(ctx, run); err != nil {
 		return err
 	}
 	msg, ok := run.messages[messageID]
@@ -358,9 +413,11 @@ func (b *Broker) CompleteMessage(ctx context.Context, runID, messageID string, i
 	return nil
 }
 
-// Cancel stops the run: it closes the cancellation signal the producer reads on
-// its next heartbeat, records every in-flight message as interrupted with the
-// text received so far, and moves the run to cancelled (REQ-STRM-005).
+// Cancel stops the run: it records every in-flight message as interrupted with
+// the text received so far, moves the run to cancelled, and only then closes
+// the cancellation signal the producer reads on its next heartbeat
+// (REQ-STRM-005). If the durable append fails, the run keeps running and the
+// producer is not told to stop.
 func (b *Broker) Cancel(ctx context.Context, runID string) error {
 	run, err := b.live(ctx, runID)
 	if err != nil {
@@ -375,7 +432,6 @@ func (b *Broker) cancel(ctx context.Context, run *liveRun) error {
 	if run.finished {
 		return nil
 	}
-	run.cancelOnce.Do(func() { close(run.canceled) })
 	ids := make([]string, 0, len(run.messages))
 	for id, msg := range run.messages {
 		if !msg.completed {
@@ -399,19 +455,21 @@ func (b *Broker) cancel(ctx context.Context, run *liveRun) error {
 		events = append(events, eventlog.NewEvent{Type: "message.completed", Data: data})
 	}
 	events = append(events, eventlog.NewEvent{Type: "run.cancelled"})
-	out, err := b.log.AppendChange(ctx, run.id, "cancelled", events)
+	// The append outlives the request: if the caller's context ends mid-write
+	// the run must still reach cancelled, or the log would stay running while
+	// the producer was already told to stop. WithoutCancel keeps the tenant.
+	appendCtx := context.WithoutCancel(ctx)
+	out, err := b.log.AppendChange(appendCtx, run.id, "cancelled", events)
 	if err != nil {
 		return err
 	}
+	run.cancelOnce.Do(func() { close(run.canceled) })
 	run.lastSeq = out[len(out)-1].Seq
 	for i := range out {
 		run.noteEvent(&out[i])
 		run.broadcast(Frame{Durable: &out[i]})
 	}
-	for _, id := range ids {
-		run.messages[id].completed = true
-	}
-	run.finished = true
+	run.settleLocked()
 	return nil
 }
 
@@ -425,7 +483,7 @@ func (b *Broker) Heartbeat(ctx context.Context, runID string) error {
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
-	return run.writable()
+	return b.writable(ctx, run)
 }
 
 // EnforceDetachPolicies cancels every run whose declared on_detach duration has
@@ -469,26 +527,82 @@ func (b *Broker) Canceled(ctx context.Context, runID string) (<-chan struct{}, e
 	return run.canceled, nil
 }
 
-// Finish marks the run closed and drops its retained deltas; a later attach
-// replays the durable events, which carry completed messages' text. Both
-// operations are safe to repeat.
+// Finish marks the run closed, drops its retained text and deltas, ends every
+// attachment with ErrDetached and forgets the run; a later attach replays the
+// durable events, which carry completed messages' text. Both operations are
+// safe to repeat.
 func (b *Broker) Finish(ctx context.Context, runID string) error {
-	run, err := b.live(ctx, runID)
+	tenant, err := requireTenant(ctx)
 	if err != nil {
 		return err
 	}
-	run.mu.Lock()
-	run.finished = true
-	run.mu.Unlock()
+	key := runKey(tenant, runID)
+	b.mu.Lock()
+	run := b.runs[key]
+	if run != nil {
+		delete(b.runs, key)
+	}
+	b.mu.Unlock()
+
+	if run == nil {
+		state, err := b.log.State(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if !terminalState(state) {
+			return core.NewError(core.CodeNotFound, "stream: run is not streaming", map[string]any{"run_id": runID})
+		}
+	} else {
+		run.mu.Lock()
+		run.settleLocked()
+		run.mu.Unlock()
+	}
+
+	subject, err := DeltaSubject(tenant, runID)
+	if err != nil {
+		return err
+	}
 	if b.bus != nil {
-		if err := b.bus.Purge(ctx, DeltaSubject(runID)); err != nil && core.CodeOf(err) != core.CodeNotFound {
+		if err := b.bus.Purge(ctx, subject); err != nil && core.CodeOf(err) != core.CodeNotFound {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *liveRun) writable() error {
+// writable reports whether the run accepts writes. It re-derives the run's
+// state from the log instead of trusting only the in-memory flag, so a run
+// another writer completed cannot be published to through a stale liveRun.
+func (b *Broker) writable(ctx context.Context, run *liveRun) error {
+	if err := run.writableLocal(); err != nil {
+		return err
+	}
+	state, err := b.log.State(ctx, run.id)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case "cancelled":
+		run.markTerminalLocked(state)
+		return core.NewError(core.CodeCancelled, "stream: run is cancelled", map[string]any{"run_id": run.id})
+	case "completed", "failed":
+		run.markTerminalLocked(state)
+		return core.NewError(core.CodeConflict, "stream: run has finished", map[string]any{"run_id": run.id})
+	}
+	return nil
+}
+
+// markTerminalLocked records a terminal state read from the log. A cancelled
+// run also closes its cancellation signal, so producers see cancelled rather
+// than a generic conflict. The caller holds mu.
+func (r *liveRun) markTerminalLocked(state string) {
+	if state == "cancelled" {
+		r.cancelOnce.Do(func() { close(r.canceled) })
+	}
+	r.finished = true
+}
+
+func (r *liveRun) writableLocal() error {
 	select {
 	case <-r.canceled:
 		return core.NewError(core.CodeCancelled, "stream: run is cancelled", map[string]any{"run_id": r.id})
@@ -498,6 +612,17 @@ func (r *liveRun) writable() error {
 		return core.NewError(core.CodeConflict, "stream: run has finished", map[string]any{"run_id": r.id})
 	}
 	return nil
+}
+
+// settleLocked makes the run terminal: it stops accepting writes, ends every
+// attachment and drops the text it kept for snapshots. The caller holds mu.
+func (r *liveRun) settleLocked() {
+	r.finished = true
+	for a := range r.subs {
+		delete(r.subs, a)
+		a.release()
+	}
+	r.messages = map[string]*liveMessage{}
 }
 
 func (r *liveRun) state() string {
@@ -544,9 +669,17 @@ func (r *liveRun) noteEvents(events []eventlog.Event) {
 	}
 }
 
+// broadcast pushes frame to every attachment. The caller holds mu. An
+// attachment that falls too far behind is removed here, so the detach policy
+// sees the run as unattended instead of waiting forever on a closed client.
 func (r *liveRun) broadcast(frame Frame) {
 	for a := range r.subs {
-		a.push(frame)
+		if a.push(frame) {
+			delete(r.subs, a)
+			if len(r.subs) == 0 {
+				r.detachedAt = r.clock.Now()
+			}
+		}
 	}
 }
 

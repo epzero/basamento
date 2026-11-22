@@ -46,10 +46,10 @@ The Go implementation is `stream.Broker` (WP-L6-02). `Attach` replays through
 `stream/eventlog` under the run's lock, so a durable event cannot slip between
 the replay and the live stream; it then sends one `Snapshot` per message still
 in flight and follows the deltas. Deltas are numbered per message, kept for the
-message's lifetime, published on `run.<run_id>.deltas` and fanned out to the
-attachments of the server that owns them. `EnforceDetachPolicies` is the clock-
-driven loop that applies `on_detach`; `Heartbeat` is how a producer learns of a
-cancellation, which records the in-flight messages as interrupted.
+message's lifetime, published on `run.<hex(tenant)>.<run_id>.deltas` and fanned
+out to the attachments of the server that owns them. `EnforceDetachPolicies` is
+the clock-driven loop that applies `on_detach`; `Heartbeat` is how a producer
+learns of a cancellation, which records the in-flight messages as interrupted.
 
 ## 4. Producers
 

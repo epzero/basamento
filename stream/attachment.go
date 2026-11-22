@@ -47,8 +47,8 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 	if err != nil {
 		return nil, err
 	}
-	if cursor.Seq < 0 {
-		return nil, core.NewError(core.CodeInvalidArgument, "stream: negative cursor", nil)
+	if err := checkCursor(cursor); err != nil {
+		return nil, err
 	}
 	a := &Attachment{
 		broker: b,
@@ -64,21 +64,63 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 	run.mu.Lock()
 	defer run.mu.Unlock()
 
+	// Do not trust only the in-memory flag: another writer may have finished
+	// the run in the log since this liveRun was created.
+	if state, err := b.log.State(ctx, runID); err != nil {
+		return nil, err
+	} else if terminalState(state) {
+		run.markTerminalLocked(state)
+	}
+
 	events, err := b.log.Read(ctx, runID, uint64(cursor.Seq))
 	if err != nil {
 		return nil, err
+	}
+	if len(events) > maxBufferedFrames {
+		return nil, core.NewError(core.CodeUnavailable,
+			"stream: replay is larger than the attachment buffer",
+			map[string]any{"events": len(events), "limit": maxBufferedFrames})
 	}
 	for i := range events {
 		a.buf = append(a.buf, Frame{Durable: &events[i]})
 		a.seq = int64(events[i].Seq)
 	}
 	run.noteEvents(events)
+	// A cursor that claims more deltas than the live message holds would make
+	// the snapshot skip the text and leave a gap; reject it instead of
+	// replaying silently from a later point.
+	for id, dseq := range a.open {
+		msg, ok := run.messages[id]
+		// A completed message needs no snapshot: its durable event carries the
+		// text, so a cursor past the live dseq is not a gap. An in-flight one
+		// would silently lose the missing deltas.
+		if ok && !msg.completed && dseq > msg.dseq {
+			return nil, core.NewError(core.CodeInvalidArgument,
+				"stream: cursor is ahead of the message",
+				map[string]any{"message_id": id, "dseq": dseq, "have": msg.dseq})
+		}
+	}
 	a.buf = append(a.buf, run.snapshotFrames(a.open)...)
 	if !run.finished {
 		run.subs[a] = struct{}{}
 		run.detachedAt = time.Time{}
 	}
 	return a, nil
+}
+
+func checkCursor(cursor Cursor) error {
+	if cursor.Seq < 0 {
+		return core.NewError(core.CodeInvalidArgument, "stream: negative cursor", nil)
+	}
+	for id, dseq := range cursor.Open {
+		if err := checkMessageID(id); err != nil {
+			return err
+		}
+		if dseq < 0 {
+			return core.NewError(core.CodeInvalidArgument, "stream: negative cursor dseq", map[string]any{"message_id": id})
+		}
+	}
+	return nil
 }
 
 func (b *Broker) ensureRun(ctx context.Context, runID string) (*liveRun, error) {
@@ -192,18 +234,33 @@ func (a *Attachment) Close() error {
 	return nil
 }
 
-func (a *Attachment) push(frame Frame) {
+// push appends frame unless the attachment is closed. It reports true when
+// this call closed the attachment, so the run can remove it from its
+// subscribers and start its detach policy (REQ-STRM-006).
+func (a *Attachment) push(frame Frame) bool {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
-		return
+		return false
 	}
 	if len(a.buf) >= maxBufferedFrames {
 		a.err = core.NewError(core.CodeUnavailable, "stream: attachment fell behind", nil)
 		a.closed = true
-	} else {
-		a.buf = append(a.buf, frame)
+		a.mu.Unlock()
+		a.signal()
+		return true
 	}
+	a.buf = append(a.buf, frame)
+	a.mu.Unlock()
+	a.signal()
+	return false
+}
+
+// release ends the attachment from the run's side without an error: once the
+// frames already buffered are read, Next returns ErrDetached.
+func (a *Attachment) release() {
+	a.mu.Lock()
+	a.closed = true
 	a.mu.Unlock()
 	a.signal()
 }

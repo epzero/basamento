@@ -15,7 +15,8 @@
 // Every call takes its tenant from core.TenantFrom and never from an argument,
 // so a caller cannot read or stop another tenant's run (constitution article 8,
 // REQ-STRM-022, REQ-STRM-025). Attachments are served in process; deltas are
-// also published on the run's bus subject run.<run_id>.deltas, which is the
+// also published on the run's bus subject run.<hex(tenant)>.<run_id>.deltas,
+// which is the
 // retention the cloud profile shares between servers (ADR-0005).
 //
 // Layer: stream (core, platform and their sub-packages only).
