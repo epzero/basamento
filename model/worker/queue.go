@@ -941,7 +941,7 @@ func (s *Store) sweep(ctx context.Context) error {
 			switch {
 			case inv.State == stateWaiting:
 				if inv.QueueTimeout > 0 && !now.Before(inv.QueuedAt.Add(inv.QueueTimeout)) {
-					if err := failRow(ctx, tx, inv.ClientRef, core.CodeUnavailable, 0); err != nil {
+					if err := failRow(ctx, tx, inv, core.CodeUnavailable, 0); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -949,16 +949,23 @@ func (s *Store) sweep(ctx context.Context) error {
 			case inv.State == stateSpilling:
 				// A spilled invocation whose remote start has not reported
 				// back by the claim deadline is failed rather than started a
-				// second time.
-				if !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires) {
-					if err := failRow(ctx, tx, inv.ClientRef, core.CodeUnavailable, inv.ReservedMpts); err != nil {
+				// second time. A cancel on a claimed row ends it cancelled and
+				// keeps the reservation, because the provider may have run.
+				switch {
+				case inv.CancelRequested:
+					if err := cancelRowTx(ctx, tx, inv.ClientRef, inv.ReservedMpts); err != nil {
+						return err
+					}
+					touched[inv.Pool] = true
+				case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
+					if err := failRow(ctx, tx, inv, core.CodeUnavailable, inv.ReservedMpts); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				}
 			case inv.InDoubt:
 				if !inv.InDoubtUntil.IsZero() && !now.Before(inv.InDoubtUntil) {
-					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -970,7 +977,7 @@ func (s *Store) sweep(ctx context.Context) error {
 							return err
 						}
 					}
-					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
+					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1043,12 +1050,23 @@ func (s *Store) sweep(ctx context.Context) error {
 	})
 }
 
-func failRow(ctx context.Context, tx *psql.Execer, clientRef string, code core.Code, charged int64) error {
+func failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Code, charged int64) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
+			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
+			cancel_requested = 0 WHERE client_ref = ? AND state = ?`,
+		stateFailed, string(code), charged, inv.ClientRef, inv.State)
+	return err
+}
+
+// cancelRowTx ends a row the caller asked to cancel, keeping the cost the
+// provider may already have incurred.
+func cancelRowTx(ctx context.Context, tx *psql.Execer, clientRef string, charged int64) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
 			cancel_requested = 0 WHERE client_ref = ?`,
-		stateFailed, string(code), charged, clientRef)
+		stateCancelled, string(core.CodeCancelled), charged, clientRef)
 	return err
 }
 

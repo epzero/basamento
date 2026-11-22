@@ -202,16 +202,19 @@ type SpillResult struct {
 }
 
 // Spill moves queued work of tenants that turned spill-over on to another
-// provider of the model once it has waited their spill-over time. The remote
-// start is made before the row leaves the queue, so a failed start is recorded
-// as a failure rather than a success, and the remote result is carried back
+// provider of the model once it has waited their spill-over time. The row is
+// claimed for the remote provider before its paid start, so no worker can lease
+// it in between and a crash after the start leaves a claimed row that the
+// sweep fails at its claim deadline rather than work that starts twice
 // (REQ-MODEL-032, REQ-MODEL-033). Off stays off: a tenant with spill-over off
-// never has work moved.
+// never has work moved. A shared pool applies each invocation's tenant
+// settings; a remote must carry the labels the call requires.
 func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, error) {
 	pools, err := s.ListPools(ctx)
 	if err != nil {
 		return nil, err
 	}
+	required := requiredLabels(ctx)
 	now := s.now()
 	var out []SpillResult
 	for _, poolID := range pools {
@@ -219,22 +222,28 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 		if err != nil {
 			return nil, err
 		}
-		if pool.Tenant == "" {
-			continue
-		}
-		settings, err := s.TenantSettings(ctx, poolID, pool.Tenant)
-		if err != nil {
-			return nil, err
-		}
-		if !settings.SpillOver || settings.SpillAfter <= 0 {
-			continue
-		}
 		waiting, err := s.waiting(ctx, poolID)
 		if err != nil {
 			return nil, err
 		}
+		settings := map[core.TenantID]TenantSettings{}
 		for _, inv := range waiting {
-			if now.Sub(inv.QueuedAt) < settings.SpillAfter {
+			tenant := inv.Tenant
+			if pool.Tenant != "" {
+				tenant = pool.Tenant
+			}
+			ts, ok := settings[tenant]
+			if !ok {
+				ts, err = s.TenantSettings(ctx, poolID, tenant)
+				if err != nil {
+					return nil, err
+				}
+				settings[tenant] = ts
+			}
+			if !ts.SpillOver || ts.SpillAfter <= 0 || inv.CancelRequested {
+				continue
+			}
+			if now.Sub(inv.QueuedAt) < ts.SpillAfter {
 				continue
 			}
 			req, err := decodeRequest(inv)
@@ -244,26 +253,23 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 				}
 				continue
 			}
-			var target *Remote
-			for i := range remotes {
-				if remotes[i].Invoker != nil && remotes[i].serves(inv.Model, req.Op) {
-					target = &remotes[i]
-					break
-				}
-			}
+			target := pickRemote(remotes, inv.Model, req.Op, required)
 			if target == nil {
 				continue
 			}
-			// Reserve before the paid start so a crash between the two still
-			// leaves the charge visible (REQ-MODEL-033).
-			owned, err := s.reserveSpill(ctx, inv.ClientRef, target.Estimate)
+			deadline, owned, err := s.claimSpill(ctx, inv, target.Name, target.Estimate)
 			if err != nil {
 				return nil, err
 			}
 			if !owned {
+				// A worker leased the row or another replica spilled it.
 				continue
 			}
-			handle, err := target.Invoker.Start(ctx, req)
+			startCtx := ctx
+			if inv.Tenant != "" {
+				startCtx = core.WithTenant(ctx, inv.Tenant)
+			}
+			handle, err := target.Invoker.Start(startCtx, req)
 			if err != nil {
 				// The invocation was never accepted remotely. A definitive
 				// refusal costs nothing; an ambiguous one settles the
@@ -277,17 +283,22 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 				}
 				continue
 			}
-			if err := s.markSpilled(ctx, inv, target.Name, target.Estimate, handle.ID); err != nil {
-				// The row left the queue between the read and the claim; the
-				// remote start we just made must not become a paid orphan.
-				_ = target.Invoker.Cancel(ctx, handle)
+			if err := s.attachSpillHandle(ctx, inv.ClientRef, handle.ID); err != nil {
+				// The claim was lost: the sweep ended the row at its
+				// deadline. The remote start must not become a paid orphan.
+				_ = target.Invoker.Cancel(context.WithoutCancel(ctx), handle)
 				if core.CodeOf(err) == core.CodeConflict {
 					continue
 				}
 				return nil, err
 			}
-			res, resErr := target.Invoker.Result(ctx, handle)
-			if err := s.finishSpilled(ctx, inv.ClientRef, res, resErr, target.Estimate); err != nil {
+			res, resErr, cancelled := s.awaitSpill(ctx, inv.ClientRef, target, handle, deadline)
+			if core.CodeOf(resErr) == CodeLeaseLost || ctx.Err() != nil {
+				// The platform already ended the row, or the janitor is
+				// shutting down and the claim deadline will settle it.
+				continue
+			}
+			if err := s.finishSpilled(ctx, inv.ClientRef, res, resErr, target.Estimate, cancelled); err != nil {
 				return nil, err
 			}
 			out = append(out, SpillResult{ClientRef: inv.ClientRef, Pool: poolID, Remote: target.Name, Reserved: target.Estimate})
@@ -297,68 +308,146 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 	return out, nil
 }
 
-// reserveSpill records a remote provider's reservation on a waiting row
-// before the start. It reports whether the row was still waiting: another
-// replica may have leased or spilled it in the meantime.
-func (s *Store) reserveSpill(ctx context.Context, clientRef string, reserved int64) (bool, error) {
-	res, err := s.db.Execer().Exec(ctx,
-		`UPDATE worker_invocations SET reserved_mpts = ? WHERE client_ref = ? AND state = ?`,
-		reserved, clientRef, stateWaiting)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n == 1, nil
-}
-
-// markSpilled claims a waiting invocation for a remote provider after that
-// provider accepted the start. The row is not terminal yet: finishSpilled
-// records the remote result. The claim deadline keeps a crashed spill from
-// being retried as a second paid start.
-func (s *Store) markSpilled(ctx context.Context, inv Invocation, remote string, reserved int64, handle string) error {
-	pool, err := s.Pool(ctx, inv.Pool)
-	if err != nil {
-		return err
-	}
-	now := s.now()
-	res, err := s.db.Execer().Exec(ctx,
-		`UPDATE worker_invocations SET state = ?, spilled = 1, reserved_mpts = ?, worker_id = ?,
-			provider_handle = ?, lease_expires_unix_ms = ?, leased_unix_ms = ?
-		 WHERE client_ref = ? AND state = ?`,
-		stateSpilling, reserved, remote, handle, unixms(now.Add(pool.Lease)), unixms(now),
-		inv.ClientRef, stateWaiting)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return core.NewError(core.CodeConflict, "invocation is no longer waiting", map[string]any{"client_ref": inv.ClientRef})
+// pickRemote returns the first remote that serves the model and operation and
+// carries the labels the call requires.
+func pickRemote(remotes []Remote, modelID string, op model.Capability, required map[string]string) *Remote {
+	for i := range remotes {
+		if remotes[i].Invoker == nil || !labelsMatch(remotes[i].Labels, required) {
+			continue
+		}
+		if remotes[i].serves(modelID, op) {
+			return &remotes[i]
+		}
 	}
 	return nil
 }
 
-// failSpill records a spill whose remote start was refused. The invocation is
+// claimSpill moves a waiting invocation to spilling for a remote provider
+// before its paid start. The update is the claim: only one caller can take
+// the row, and while it is spilling no worker lease can reach it. The claim
+// deadline is the pool lease; the sweep fails the row if the remote has not
+// reported by then, so a crash never turns into a second paid start.
+func (s *Store) claimSpill(ctx context.Context, inv Invocation, remote string, reserved int64) (time.Time, bool, error) {
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	now := s.now()
+	deadline := now.Add(pool.Lease)
+	res, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, spilled = 1, reserved_mpts = ?, worker_id = ?,
+			provider_handle = '', lease_expires_unix_ms = ?, leased_unix_ms = ?
+		 WHERE client_ref = ? AND state = ? AND cancel_requested = 0`,
+		stateSpilling, reserved, remote, unixms(deadline), unixms(now), inv.ClientRef, stateWaiting)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return deadline, n == 1, nil
+}
+
+// attachSpillHandle records the remote handle on the claimed row.
+func (s *Store) attachSpillHandle(ctx context.Context, clientRef, handle string) error {
+	res, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET provider_handle = ? WHERE client_ref = ? AND state = ?`,
+		handle, clientRef, stateSpilling)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return core.NewError(core.CodeConflict, "the spill claim is no longer held", map[string]any{"client_ref": clientRef})
+	}
+	return nil
+}
+
+// awaitSpill waits for the remote result while the row is claimed. A cancel
+// on the row reaches the remote provider and the invocation ends cancelled
+// with what the provider reports, never as a charge for work nobody wanted
+// (REQ-MODEL-026). The wait ends at the claim deadline, which leaves the row
+// spilling for the sweep to settle.
+func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote, handle model.Handle, deadline time.Time) (model.Result, error, bool) {
+	type outcome struct {
+		res model.Result
+		err error
+	}
+	results := make(chan outcome, 1)
+	go func() {
+		res, err := target.Invoker.Result(ctx, handle)
+		results <- outcome{res: res, err: err}
+	}()
+	cancelled := false
+	for {
+		select {
+		case out := <-results:
+			if !cancelled {
+				// A cancel that arrived just before the result still ends the
+				// invocation cancelled, never as a success.
+				if inv, err := s.Invocation(ctx, clientRef); err == nil && inv.CancelRequested {
+					cancelled = true
+					_ = target.Invoker.Cancel(context.WithoutCancel(ctx), handle)
+				}
+			}
+			return out.res, out.err, cancelled
+		case <-s.after(pollInterval):
+			inv, err := s.Invocation(ctx, clientRef)
+			if err != nil {
+				return model.Result{}, errLeaseLost(clientRef), cancelled
+			}
+			if isTerminal(inv.State) {
+				return model.Result{}, errLeaseLost(clientRef), cancelled
+			}
+			if !cancelled && inv.CancelRequested {
+				cancelled = true
+				if err := target.Invoker.Cancel(context.WithoutCancel(ctx), handle); err != nil {
+					return model.Result{}, err, cancelled
+				}
+			}
+			if !s.now().Before(deadline) {
+				return model.Result{}, core.NewError(core.CodeAmbiguousStart,
+					"the remote provider did not report before the claim deadline", nil), cancelled
+			}
+		case <-ctx.Done():
+			return model.Result{}, ctx.Err(), cancelled
+		}
+	}
+}
+
+// failSpill records a spill that never reached a result. The invocation is
 // failed with the provider's code, never reported as a success.
 func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code, charged int64) error {
 	_, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
-			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0
-		 WHERE client_ref = ? AND state = ?`,
-		stateFailed, string(code), charged, clientRef, stateWaiting)
+			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
+			cancel_requested = 0
+		 WHERE client_ref = ? AND state IN (?, ?)`,
+		stateFailed, string(code), charged, clientRef, stateWaiting, stateSpilling)
 	return err
 }
 
 // finishSpilled writes the remote result onto the claimed row. A remote that
-// failed or was cancelled ends failed or cancelled with its code; only a
-// success becomes stateRemote.
-func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.Result, resErr error, estimate int64) error {
+// failed ends failed with its code; only a success becomes stateRemote. A
+// cancelled spill ends cancelled and keeps the cost the provider reported.
+func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.Result, resErr error, estimate int64, cancelled bool) error {
 	var state string
 	code := core.Code("")
 	charged := res.CostMpts
 	switch {
+	case cancelled:
+		state = stateCancelled
+		code = core.CodeCancelled
+		if charged < 0 {
+			charged = 0
+		}
+		if resErr != nil && !definitiveFailure(resErr) && charged < estimate {
+			charged = estimate
+		}
 	case resErr != nil:
 		code = core.CodeOf(resErr)
 		state = stateFailed
@@ -394,7 +483,8 @@ func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.R
 	}
 	_, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, charged_mpts = ?, code = ?, result = ?,
-			in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0
+			in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
+			cancel_requested = 0
 		 WHERE client_ref = ? AND state = ?`,
 		state, charged, string(code), string(result), clientRef, stateSpilling)
 	return err

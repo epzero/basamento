@@ -125,10 +125,13 @@ type workerLoop struct {
 	sweeps <-chan time.Time
 	swept  chan<- struct{}
 
-	mu        sync.Mutex
-	inUse     int
-	draining  atomic.Bool
-	fatal     atomic.Bool
+	mu       sync.Mutex
+	inUse    int
+	draining atomic.Bool
+	fatal    atomic.Bool
+	// spilling guards the one in-flight spill pass: a remote start or result
+	// may take minutes and must not hold the janitor's sweep cadence.
+	spilling  atomic.Bool
 	drained   chan struct{}
 	drainOnce sync.Once
 }
@@ -259,11 +262,18 @@ func (l *workerLoop) janitor(ctx context.Context, stop <-chan struct{}) {
 			if err := l.store.Sweep(ctx); err != nil {
 				_, _ = fmt.Fprintln(l.stderr, "kit worker: sweep:", err)
 			}
-			// The embedded deployment configures remote providers with the
-			// run API (a later work package); with none, there is nothing to
-			// spill and the call is a no-op.
-			if _, err := l.store.Spill(ctx, l.remotes...); err != nil {
-				_, _ = fmt.Fprintln(l.stderr, "kit worker: spill:", err)
+			// A remote start or result may take minutes. Spill runs beside
+			// the sweep so the queue's time-driven rules keep advancing; one
+			// pass at a time. The embedded deployment configures remote
+			// providers with the run API (a later work package); with none,
+			// there is nothing to spill and the pass is a no-op.
+			if l.spilling.CompareAndSwap(false, true) {
+				go func(ctx context.Context) {
+					defer l.spilling.Store(false)
+					if _, err := l.store.Spill(ctx, l.remotes...); err != nil {
+						_, _ = fmt.Fprintln(l.stderr, "kit worker: spill:", err)
+					}
+				}(ctx)
 			}
 			if l.swept != nil {
 				select {

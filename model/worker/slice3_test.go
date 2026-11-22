@@ -88,7 +88,7 @@ func (r *scriptedRemote) Lookup(context.Context, string) (*model.Handle, error) 
 	return nil, nil
 }
 
-func spillPool(t *testing.T, s *Store, clock *coretest.FakeClock) {
+func spillPool(t *testing.T, s *Store, clock *coretest.FakeClock) Pool {
 	t.Helper()
 	pool := mustPool(t, s, PoolSpec{ID: "acme-llm", Tenant: "acme", Lease: time.Minute, Grace: 5 * time.Minute})
 	if _, err := s.Join(context.Background(), JoinRequest{
@@ -113,6 +113,7 @@ func spillPool(t *testing.T, s *Store, clock *coretest.FakeClock) {
 		t.Fatal(err)
 	}
 	clock.Advance(3 * time.Minute)
+	return pool
 }
 
 func TestSpillStartsBeforeMarkingAndCarriesTheRemoteResult(t *testing.T) {
@@ -127,11 +128,11 @@ func TestSpillStartsBeforeMarkingAndCarriesTheRemoteResult(t *testing.T) {
 	}
 	remote.startHook = func() {
 		inv := state(t, s, "r1")
-		if inv.State != stateWaiting {
-			t.Fatalf("the row is %q before the remote accepted the start, want waiting", inv.State)
+		if inv.State != stateSpilling {
+			t.Fatalf("the row is %q before the remote accepted the start, want spilling", inv.State)
 		}
-		if inv.ReservedMpts != 300 {
-			t.Fatalf("the row reserved %d before the start, want 300", inv.ReservedMpts)
+		if inv.ReservedMpts != 300 || inv.WorkerID != "cloud" {
+			t.Fatalf("the row reserved %d for %q before the start, want 300 for cloud", inv.ReservedMpts, inv.WorkerID)
 		}
 	}
 	spilled, err := s.Spill(ctx, remote.Remote("cloud"))
@@ -661,5 +662,149 @@ func TestMetricsLeaseAgeStartsAtTheLease(t *testing.T) {
 	}
 	if m.MaxLeaseAge != time.Minute {
 		t.Fatalf("max lease age %s, want 1m (not the queue age)", m.MaxLeaseAge)
+	}
+}
+
+func TestSpillClaimsTheRowSoAWorkerCannotTakeIt(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	pool := spillPool(t, s, clock)
+	w := joinWith(t, s, pool.Token, 1, descriptor("chat", 1, false))
+	remote := &scriptedRemote{
+		descriptors: []model.Descriptor{{ID: "chat", Caps: []model.Capability{model.CapChat}}},
+		estimate:    300,
+		result:      model.Result{State: model.StateSucceeded},
+	}
+	remote.startHook = func() {
+		if got := lease(t, s, w, 1); len(got) != 0 {
+			t.Fatalf("a worker leased %v while the row was claimed for a remote", got)
+		}
+	}
+	if _, err := s.Spill(ctx, remote.Remote("cloud")); err != nil {
+		t.Fatal(err)
+	}
+	if inv := state(t, s, "r1"); inv.State != stateRemote {
+		t.Fatalf("invocation %s, want remote", inv.State)
+	}
+}
+
+func TestSpillHonoursRequiredLabels(t *testing.T) {
+	ctx := core.WithTenant(context.Background(), "acme")
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	spillPool(t, s, clock)
+	remote := &scriptedRemote{
+		descriptors: []model.Descriptor{{ID: "chat", Caps: []model.Capability{model.CapChat}}},
+		estimate:    300,
+		result:      model.Result{State: model.StateSucceeded},
+	}
+	us := remote.Remote("us")
+	us.Labels = map[string]string{"region": "us"}
+	eu := remote.Remote("eu")
+	eu.Labels = map[string]string{"region": "eu"}
+	required := WithLabels(ctx, map[string]string{"region": "eu"})
+	spilled, err := s.Spill(required, us)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spilled) != 0 || remote.accepted != 0 {
+		t.Fatalf("spilled %v with %d starts, want none for a remote in another region", spilled, remote.accepted)
+	}
+	spilled, err = s.Spill(required, us, eu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spilled) != 1 || spilled[0].Remote != "eu" {
+		t.Fatalf("spilled %v, want one on eu", spilled)
+	}
+}
+
+func TestSpillAppliesSharedPoolTenantSettings(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	mustPool(t, s, PoolSpec{ID: "shared", Lease: time.Minute, Grace: time.Minute})
+	if err := s.SetTenantSettings(ctx, "shared", "acme", TenantSettings{
+		Weight: 1, SpillOver: true, SpillAfter: 2 * time.Minute,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	enqueue(t, s, "r1", "shared", "acme", "chat", ClassNormal, 100)
+	clock.Advance(3 * time.Minute)
+	remote := &scriptedRemote{
+		descriptors: []model.Descriptor{{ID: "chat", Caps: []model.Capability{model.CapChat}}},
+		estimate:    300,
+		result:      model.Result{State: model.StateSucceeded},
+	}
+	spilled, err := s.Spill(ctx, remote.Remote("cloud"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spilled) != 1 {
+		t.Fatalf("spilled %v from a shared pool with spill-over on, want one", spilled)
+	}
+	if inv := state(t, s, "r1"); inv.State != stateRemote {
+		t.Fatalf("invocation %s, want remote", inv.State)
+	}
+}
+
+// cancellingRemote holds its result until the test releases it, and records a
+// cancel it receives.
+type cancellingRemote struct {
+	scriptedRemote
+	started   chan struct{}
+	release   chan struct{}
+	cancelled chan struct{}
+	once      sync.Once
+}
+
+func (r *cancellingRemote) Start(ctx context.Context, req model.Request) (model.Handle, error) {
+	h, err := r.scriptedRemote.Start(ctx, req)
+	close(r.started)
+	return h, err
+}
+
+func (r *cancellingRemote) Result(context.Context, model.Handle) (model.Result, error) {
+	<-r.release
+	return model.Result{State: model.StateCancelled, CostMpts: 42}, nil
+}
+
+func (r *cancellingRemote) Cancel(context.Context, model.Handle) error {
+	r.once.Do(func() { close(r.cancelled) })
+	return nil
+}
+
+func TestCancelReachesASpillingRemoteAndKeepsItsCost(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	spillPool(t, s, clock)
+	remote := &cancellingRemote{
+		scriptedRemote: scriptedRemote{
+			descriptors: []model.Descriptor{{ID: "chat", Caps: []model.Capability{model.CapChat}}},
+			estimate:    300,
+		},
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+	rem := Remote{Name: "cloud", Invoker: remote, Descriptors: remote.descriptors, Estimate: 300}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Spill(ctx, rem)
+		done <- err
+	}()
+	<-remote.started
+	if err := s.Cancel(ctx, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	close(remote.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	inv := state(t, s, "r1")
+	if inv.State != stateCancelled || inv.ChargedMpts != 42 {
+		t.Fatalf("invocation %s charged %d, want cancelled with the provider's 42", inv.State, inv.ChargedMpts)
 	}
 }
