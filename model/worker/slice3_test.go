@@ -215,15 +215,42 @@ func TestSpillRemoteFailureCarriesItsCode(t *testing.T) {
 	}
 }
 
+// beat heartbeats a worker and keeps the rotated credential, as the client
+// loop does.
+func beat(t *testing.T, s *Store, w *Worker, free int) HeartbeatAnswer {
+	t.Helper()
+	answer, err := s.Heartbeat(context.Background(), w.ID, w.Credential, free)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.Credential != "" {
+		w.Credential = answer.Credential
+	}
+	return answer
+}
+
+// advanceAlive advances the clock while keeping the worker's credential
+// renewed, as a live worker's heartbeat loop does.
+func advanceAlive(t *testing.T, s *Store, w *Worker, clock *coretest.FakeClock, d time.Duration) {
+	t.Helper()
+	for d > 0 {
+		step := 4 * time.Minute
+		if d < step {
+			step = d
+		}
+		beat(t, s, w, 8)
+		clock.Advance(step)
+		d -= step
+	}
+}
+
 func TestHeartbeatRecordsUnitsInUseFromFreeUnits(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	s, _ := testStore(t, at)
 	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme"})
 	w := joinWith(t, s, pool.Token, 4, descriptor("m", 1, false))
-	if _, err := s.Heartbeat(ctx, w.ID, w.Credential, 1); err != nil {
-		t.Fatal(err)
-	}
+	beat(t, s, &w, 1)
 	got, err := s.Worker(ctx, w.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -231,9 +258,7 @@ func TestHeartbeatRecordsUnitsInUseFromFreeUnits(t *testing.T) {
 	if got.UnitsInUse != 3 {
 		t.Fatalf("units_used %d, want 3 (capacity 4, free 1)", got.UnitsInUse)
 	}
-	if _, err := s.Heartbeat(ctx, w.ID, w.Credential, 9); err != nil {
-		t.Fatal(err)
-	}
+	beat(t, s, &w, 9)
 	if got, _ := s.Worker(ctx, w.ID); got.UnitsInUse != 0 {
 		t.Fatalf("units_used %d, want 0 when free exceeds capacity", got.UnitsInUse)
 	}
@@ -462,10 +487,10 @@ func TestRecoverExtendsAndNeverShortens(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
-	clock.Advance(10 * time.Minute)
+	advanceAlive(t, s, &w, clock, 10*time.Minute)
 	if err := s.Recover(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -531,11 +556,11 @@ func TestOpenRecoversExpiredLeases(t *testing.T) {
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "v1", "p", "acme", "m", ClassNormal, 0)
 	lease(t, s, w, 1)
-	if err := s.Starting(ctx, w.ID, w.Credential, "v1"); err != nil {
+	if err := s.Starting(ctx, w.ID, w.Credential, "v1", 1); err != nil {
 		t.Fatal(err)
 	}
-	clock.Advance(10 * time.Minute)
-	reopened, err := Open(ctx, db, Options{Clock: clock, IDs: &coretest.SeqIds{}})
+	advanceAlive(t, s, &w, clock, 10*time.Minute)
+	reopened, err := Open(ctx, db, Options{Clock: clock, IDs: &coretest.SeqIds{}, Recover: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +678,7 @@ func TestMetricsLeaseAgeStartsAtTheLease(t *testing.T) {
 	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme", Lease: 5 * time.Minute})
 	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
 	enqueue(t, s, "r1", "p", "acme", "m", ClassNormal, 0)
-	clock.Advance(10 * time.Minute)
+	advanceAlive(t, s, &w, clock, 10*time.Minute)
 	lease(t, s, w, 1)
 	clock.Advance(time.Minute)
 	m, err := s.Metrics(ctx, "p")
@@ -806,5 +831,110 @@ func TestCancelReachesASpillingRemoteAndKeepsItsCost(t *testing.T) {
 	inv := state(t, s, "r1")
 	if inv.State != stateCancelled || inv.ChargedMpts != 42 {
 		t.Fatalf("invocation %s charged %d, want cancelled with the provider's 42", inv.State, inv.ChargedMpts)
+	}
+}
+
+func TestCrashedWorkerLeavesAvailability(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme", Lease: time.Minute})
+	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
+	if got, err := s.Availability(ctx, "p", "m"); err != nil || got != AvailabilityOnline {
+		t.Fatalf("availability %q err %v, want online", got, err)
+	}
+	clock.Advance(2 * time.Minute)
+	if err := s.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.mustWorker(t, w.ID); got.Present {
+		t.Fatalf("a worker that missed its heartbeats is still present")
+	}
+	if got, err := s.Availability(ctx, "p", "m"); err != nil || got != AvailabilityOffline {
+		t.Fatalf("availability %q err %v, want offline after the presence deadline", got, err)
+	}
+	// The credential outlives presence: the worker's next heartbeat makes it
+	// present again without a rejoin.
+	beat(t, s, &w, 8)
+	if got, err := s.Availability(ctx, "p", "m"); err != nil || got != AvailabilityOnline {
+		t.Fatalf("availability %q err %v, want online after a heartbeat", got, err)
+	}
+	// A draining worker takes no work and is not online.
+	if err := s.SetState(ctx, w.ID, StateDraining); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Availability(ctx, "p", "m"); err != nil || got != AvailabilityOffline {
+		t.Fatalf("availability %q err %v, want offline for a draining worker", got, err)
+	}
+}
+
+func (s *Store) mustWorker(t *testing.T, id string) Worker {
+	t.Helper()
+	w, err := s.Worker(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func TestWorkerCredentialExpiresWithoutAHeartbeat(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, clock := testStore(t, at)
+	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme", Lease: time.Minute})
+	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
+	clock.Advance(61 * time.Minute) // past credentialLifetime heartbeat intervals
+	if _, err := s.Heartbeat(ctx, w.ID, w.Credential, 1); core.CodeOf(err) != core.CodeUnauthenticated {
+		t.Fatalf("heartbeat with an expired credential: got %v, want unauthenticated", err)
+	}
+	if _, err := s.Lease(ctx, LeaseRequest{WorkerID: w.ID, Credential: w.Credential, FreeUnits: 1}); core.CodeOf(err) != core.CodeUnauthenticated {
+		t.Fatalf("lease with an expired credential: got %v, want unauthenticated", err)
+	}
+}
+
+func TestHeartbeatRotatesTheCredential(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, _ := testStore(t, at)
+	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme", Lease: time.Minute})
+	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
+	old := w.Credential
+	answer := beat(t, s, &w, 1)
+	if answer.Credential == "" || answer.Credential == old {
+		t.Fatalf("heartbeat credential %q, want a rotation of the join credential", answer.Credential)
+	}
+	// The rotated credential works, and the lost-response case is covered by
+	// the predecessor staying valid until its own expiry.
+	if _, err := s.Lease(ctx, LeaseRequest{WorkerID: w.ID, Credential: answer.Credential, FreeUnits: 1}); err != nil {
+		t.Fatalf("lease with the rotated credential: %v", err)
+	}
+	if _, err := s.Lease(ctx, LeaseRequest{WorkerID: w.ID, Credential: old, FreeUnits: 1}); err != nil {
+		t.Fatalf("lease with the predecessor credential: %v", err)
+	}
+}
+
+func TestCredentialSurvivesTwoMissedRotations(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, _ := testStore(t, at)
+	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme", Lease: time.Minute})
+	w := joinWorker(t, s, "p", pool.Token, "m", 1, false)
+	old := w.Credential
+	first := beat(t, s, &w, 1)
+	// The worker lost that answer and heartbeats again with its join
+	// credential. The rotation must still keep the credential it presents
+	// valid; otherwise two lost answers lock a live worker out.
+	second, err := s.Heartbeat(ctx, w.ID, old, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Credential == "" || second.Credential == first.Credential {
+		t.Fatalf("second rotation %q, want a fresh credential", second.Credential)
+	}
+	if _, err := s.Lease(ctx, LeaseRequest{WorkerID: w.ID, Credential: old, FreeUnits: 1}); err != nil {
+		t.Fatalf("lease with the credential the worker still holds: %v", err)
+	}
+	if _, err := s.Heartbeat(ctx, w.ID, second.Credential, 1); err != nil {
+		t.Fatalf("heartbeat with the latest credential: %v", err)
 	}
 }

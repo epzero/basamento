@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/platform"
 	psql "github.com/epzero/basamento/platform/sql"
 )
@@ -26,6 +28,20 @@ type Options struct {
 	// HeartbeatInterval is the cadence the join answer tells a worker to
 	// use; zero reads as DefaultHeartbeatInterval.
 	HeartbeatInterval time.Duration
+	// MaxCostMpts bounds the cost a worker may report for one invocation
+	// (ADR-0012 §9). Zero reads as DefaultMaxCostMpts; a reservation lower
+	// than this is the tighter bound.
+	MaxCostMpts int64
+	// Recover extends the leases of an outage when the platform starts. A
+	// worker process must leave it false: only a platform start recovers
+	// (REQ-MODEL-027).
+	Recover bool
+	// Retention is how long an ended invocation and its events are kept;
+	// zero reads as model.DefaultRetention.
+	Retention time.Duration
+	// MaxEnded is how many ended invocations are kept; zero reads as
+	// model.DefaultMaxEnded.
+	MaxEnded int
 }
 
 // Store is the platform side of the worker layer: pools, workers and the SQL
@@ -37,7 +53,14 @@ type Store struct {
 	audit     platform.Audit
 	ids       core.Ids
 	heartbeat time.Duration
+	maxCost   int64
+	retention time.Duration
+	maxEnded  int
 }
+
+// DefaultMaxCostMpts is the ceiling for a worker-reported cost when the
+// invocation carries no reservation.
+const DefaultMaxCostMpts int64 = 1_000_000
 
 // schema is created on first use. The queue is a table and the bus only wakes
 // lease requests, so both profiles behave the same and several replicas can
@@ -79,6 +102,9 @@ var schema = []string{
 		present INTEGER NOT NULL DEFAULT 1,
 		removed INTEGER NOT NULL DEFAULT 0,
 		credential_hash TEXT NOT NULL,
+		previous_credential_hash TEXT NOT NULL DEFAULT '',
+		credential_expires_unix_ms INTEGER NOT NULL DEFAULT 0,
+		previous_credential_expires_unix_ms INTEGER NOT NULL DEFAULT 0,
 		joined_unix_ms INTEGER NOT NULL,
 		heartbeat_ms INTEGER NOT NULL
 	)`,
@@ -109,7 +135,8 @@ var schema = []string{
 		result TEXT NOT NULL DEFAULT '',
 		provider_handle TEXT NOT NULL DEFAULT '',
 		spilled INTEGER NOT NULL DEFAULT 0,
-		trace_parent TEXT NOT NULL DEFAULT ''
+		trace_parent TEXT NOT NULL DEFAULT '',
+		ended_unix_ms INTEGER NOT NULL DEFAULT 0
 	)`,
 	`CREATE TABLE IF NOT EXISTS worker_events (
 		client_ref TEXT NOT NULL,
@@ -124,6 +151,7 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS worker_cancels (
 		client_ref TEXT NOT NULL,
 		worker_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (client_ref, worker_id)
 	)`,
 }
@@ -142,17 +170,28 @@ func Open(ctx context.Context, db *psql.Store, opts Options) (*Store, error) {
 	if opts.HeartbeatInterval <= 0 {
 		opts.HeartbeatInterval = DefaultHeartbeatInterval
 	}
-	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs, heartbeat: opts.HeartbeatInterval}
+	if opts.MaxCostMpts <= 0 {
+		opts.MaxCostMpts = DefaultMaxCostMpts
+	}
+	if opts.Retention <= 0 {
+		opts.Retention = model.DefaultRetention
+	}
+	if opts.MaxEnded <= 0 {
+		opts.MaxEnded = model.DefaultMaxEnded
+	}
+	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs, heartbeat: opts.HeartbeatInterval,
+		maxCost: opts.MaxCostMpts, retention: opts.Retention, maxEnded: opts.MaxEnded}
 	for _, q := range schema {
 		if _, err := db.Execer().Exec(ctx, q); err != nil {
 			return nil, err
 		}
 	}
-	// The platform extends the leases an outage of its own may have expired
-	// before it serves a single request (REQ-MODEL-027). Recover only ever
-	// lengthens a deadline.
-	if err := s.Recover(ctx); err != nil {
-		return nil, err
+	// Only a platform start recovers: every worker start opening the store
+	// must not extend another worker's leases (REQ-MODEL-027).
+	if opts.Recover {
+		if err := s.Recover(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -320,14 +359,16 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 			`UPDATE worker_pools SET created_unix_ms = created_unix_ms WHERE pool_id = ?`, pool.ID); err != nil {
 			return err
 		}
-		if err := checkConflictTx(ctx, tx, pool.ID, req.Descriptors); err != nil {
+		if err := s.checkConflictTx(ctx, tx, pool.ID, req.Descriptors, s.now()); err != nil {
 			return err
 		}
+		now := s.now()
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, credential_hash, joined_unix_ms, heartbeat_ms)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, 0)`,
+			`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, credential_hash,
+			   credential_expires_unix_ms, joined_unix_ms, heartbeat_ms)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, ?, ?)`,
 			id, pool.ID, string(StateActive), string(descJSON), string(labelsJSON), req.Capacity,
-			hashToken(credential), unixms(s.now())); err != nil {
+			hashToken(credential), unixms(now.Add(s.credentialTTL())), unixms(now), unixms(now)); err != nil {
 			return err
 		}
 		for _, d := range req.Descriptors {
@@ -400,9 +441,9 @@ func normalizeLabels(labels map[string]string) map[string]string {
 	return out
 }
 
-func checkConflictTx(ctx context.Context, exec *psql.Execer, poolID string, descriptors []Descriptor) error {
+func (s *Store) checkConflictTx(ctx context.Context, exec *psql.Execer, poolID string, descriptors []Descriptor, now time.Time) error {
 	rows, err := exec.Query(ctx,
-		`SELECT worker_id, descriptors FROM worker_workers WHERE pool_id = ? AND present = 1 AND removed = 0`, poolID)
+		`SELECT worker_id, descriptors, heartbeat_ms FROM worker_workers WHERE pool_id = ? AND present = 1 AND removed = 0`, poolID)
 	if err != nil {
 		return err
 	}
@@ -413,12 +454,19 @@ func checkConflictTx(ctx context.Context, exec *psql.Execer, poolID string, desc
 	}
 	for rows.Next() {
 		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
+		var lastSeen int64
+		if err := rows.Scan(&id, &raw, &lastSeen); err != nil {
 			return err
+		}
+		if presenceStale(fromms(lastSeen), now, s.heartbeat) {
+			// A crashed worker that missed its heartbeats does not hold a
+			// descriptor against a replacement (ADR-0012 §2, §4).
+			continue
 		}
 		var got []Descriptor
 		if err := json.Unmarshal([]byte(raw), &got); err != nil {
-			continue
+			return core.NewError(core.CodeInternal, "worker: stored descriptors are corrupt",
+				map[string]any{"worker": id, "cause": err.Error()})
 		}
 		for _, d := range got {
 			if c, ok := want[d.ID]; ok && c != d.canonical() {
@@ -439,13 +487,18 @@ func (s *Store) Leave(ctx context.Context, workerID, credential string) error {
 		return err
 	}
 	if _, err := s.db.Execer().Exec(ctx,
-		`UPDATE worker_workers SET present = 0, state = ? WHERE worker_id = ?`, string(StateLeft), w.ID); err != nil {
+		`UPDATE worker_workers SET present = 0, state = ?, credential_hash = '', previous_credential_hash = '',
+			credential_expires_unix_ms = 0, previous_credential_expires_unix_ms = 0
+		 WHERE worker_id = ?`, string(StateLeft), w.ID); err != nil {
 		return err
 	}
 	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, w.ID); err != nil {
 		return err
 	}
-	s.auditEvent(ctx, "worker.leave", w.Pool, "allowed", "")
+	tenant := s.poolTenant(ctx, w.Pool)
+	if err := s.auditEventFor(ctx, tenant, "worker.leave", w.Pool, "allowed", ""); err != nil {
+		return auditUnavailable(err)
+	}
 	return nil
 }
 
@@ -495,17 +548,93 @@ func (s *Store) authenticate(ctx context.Context, workerID, credential string) (
 	if err != nil {
 		return Worker{}, err
 	}
-	var hash string
+	var hash, previous string
 	var removed int
+	var expires, previousExpires int64
 	if err := s.db.Execer().QueryRow(ctx,
-		`SELECT credential_hash, removed FROM worker_workers WHERE worker_id = ?`, workerID).
-		Scan(&hash, &removed); err != nil {
+		`SELECT credential_hash, previous_credential_hash, removed, credential_expires_unix_ms,
+		        previous_credential_expires_unix_ms
+		 FROM worker_workers WHERE worker_id = ?`, workerID).
+		Scan(&hash, &previous, &removed, &expires, &previousExpires); err != nil {
 		return Worker{}, err
 	}
-	if removed != 0 || hash != hashToken(credential) {
+	now := unixms(s.now())
+	given := hashToken(credential)
+	current := hash != "" && expires > now && subtle.ConstantTimeCompare([]byte(hash), []byte(given)) == 1
+	// A rotated credential's predecessor stays valid until its own expiry so
+	// a heartbeat response lost on the wire does not lock the worker out.
+	prior := previous != "" && previousExpires > now && subtle.ConstantTimeCompare([]byte(previous), []byte(given)) == 1
+	if removed != 0 || !current && !prior {
 		return Worker{}, core.NewError(core.CodeUnauthenticated, "worker credential is not valid", nil)
 	}
+	// A live worker's credential slides forward on use; only an idle one
+	// expires. Heartbeats rotate it (ADR-0012 §10).
+	if current {
+		if _, err := s.db.Execer().Exec(ctx,
+			`UPDATE worker_workers SET credential_expires_unix_ms = ? WHERE worker_id = ?`,
+			unixms(s.now().Add(s.credentialTTL())), workerID); err != nil {
+			return Worker{}, err
+		}
+	}
 	return w, nil
+}
+
+// touchWorker records a lease or heartbeat as the worker's last sign of life
+// and makes it present again after a missed-heartbeat deadline. A worker that
+// was paused or is draining stays in that state.
+func (s *Store) touchWorker(ctx context.Context, workerID string) error {
+	_, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_workers SET heartbeat_ms = ?, present = CASE WHEN removed = 0 THEN 1 ELSE present END
+		 WHERE worker_id = ?`, unixms(s.now()), workerID)
+	return err
+}
+
+// absentWorker is one worker the sweep found past its presence deadline.
+type absentWorker struct {
+	ID     string
+	Pool   string
+	Tenant core.TenantID
+}
+
+// expireWorkersTx marks workers absent once they have missed presenceMisses
+// heartbeats and hold no live lease. A crashed worker must not stay online,
+// block a descriptor rollout or count as capacity (ADR-0012 §2, §4).
+func (s *Store) expireWorkersTx(ctx context.Context, tx *psql.Execer, now time.Time) ([]absentWorker, error) {
+	cutoff := unixms(now.Add(-presenceMisses * s.heartbeat))
+	rows, err := tx.Query(ctx,
+		`SELECT w.worker_id, w.pool_id, p.tenant FROM worker_workers w
+		 JOIN worker_pools p ON p.pool_id = w.pool_id
+		 WHERE w.present = 1 AND w.removed = 0 AND w.heartbeat_ms > 0 AND w.heartbeat_ms <= ?
+		   AND NOT EXISTS (SELECT 1 FROM worker_invocations i
+		                   WHERE i.worker_id = w.worker_id AND i.state IN (?, ?)
+		                     AND (i.lease_expires_unix_ms = 0 OR i.lease_expires_unix_ms > ?))`,
+		cutoff, stateLeased, stateSpilling, unixms(now))
+	if err != nil {
+		return nil, err
+	}
+	var gone []absentWorker
+	for rows.Next() {
+		var w absentWorker
+		var tenant string
+		if err := rows.Scan(&w.ID, &w.Pool, &tenant); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		w.Tenant = core.TenantID(tenant)
+		gone = append(gone, w)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+	for _, w := range gone {
+		if _, err := tx.Exec(ctx,
+			`UPDATE worker_workers SET present = 0 WHERE worker_id = ?`, w.ID); err != nil {
+			return nil, err
+		}
+	}
+	return gone, nil
 }
 
 // Worker reads one worker.
@@ -514,11 +643,12 @@ func (s *Store) Worker(ctx context.Context, id string) (Worker, error) {
 		w                   Worker
 		state, desc, labels string
 		present, removed    int
+		lastSeen            int64
 	)
 	err := s.db.Execer().QueryRow(ctx,
-		`SELECT worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed
+		`SELECT worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, heartbeat_ms
 		 FROM worker_workers WHERE worker_id = ?`, id).
-		Scan(&w.ID, &w.Pool, &state, &desc, &labels, &w.Capacity, &w.UnitsInUse, &present, &removed)
+		Scan(&w.ID, &w.Pool, &state, &desc, &labels, &w.Capacity, &w.UnitsInUse, &present, &removed, &lastSeen)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return Worker{}, core.NewError(core.CodeNotFound, fmt.Sprintf("worker %q does not exist", id), map[string]any{"worker": id})
 	}
@@ -528,8 +658,17 @@ func (s *Store) Worker(ctx context.Context, id string) (Worker, error) {
 	w.State = State(state)
 	w.Present = present != 0
 	w.Removed = removed != 0
-	_ = json.Unmarshal([]byte(desc), &w.Descriptors)
-	_ = json.Unmarshal([]byte(labels), &w.Labels)
+	if lastSeen > 0 {
+		w.LastSeen = fromms(lastSeen)
+	}
+	if err := json.Unmarshal([]byte(desc), &w.Descriptors); err != nil {
+		return Worker{}, core.NewError(core.CodeInternal, "worker: stored descriptors are corrupt",
+			map[string]any{"worker": id, "cause": err.Error()})
+	}
+	if err := json.Unmarshal([]byte(labels), &w.Labels); err != nil {
+		return Worker{}, core.NewError(core.CodeInternal, "worker: stored labels are corrupt",
+			map[string]any{"worker": id, "cause": err.Error()})
+	}
 	if w.Labels == nil {
 		w.Labels = map[string]string{}
 	}
@@ -654,8 +793,9 @@ func (s *Store) Availability(ctx context.Context, poolID, modelID string) (Avail
 		return "", err
 	}
 	require := requiredLabels(ctx)
+	now := s.now()
 	for _, w := range workers {
-		if !w.Present || w.State != StateActive && w.State != StateDraining {
+		if !s.serving(w, now) {
 			continue
 		}
 		if !labelsMatch(w.Labels, require) {
@@ -717,15 +857,62 @@ func boolInt(b bool) int {
 	return 0
 }
 
-func (s *Store) auditEvent(ctx context.Context, action, resource, outcome, reason string) {
-	if s.audit == nil {
-		return
+// poolTenant is the tenant a pool belongs to; a shared or unknown pool is
+// deployment-level (empty).
+func (s *Store) poolTenant(ctx context.Context, poolID string) core.TenantID {
+	p, err := s.Pool(ctx, poolID)
+	if err != nil {
+		return ""
 	}
-	_ = s.audit.Record(ctx, platform.AuditEvent{
+	return p.Tenant
+}
+
+// auditUnavailable fails a security decision closed when its audit record
+// cannot be written (auth.md §2).
+func auditUnavailable(cause error) error {
+	return core.NewError(core.CodeInternal, "worker: audit record could not be written",
+		map[string]any{"cause": cause.Error()})
+}
+
+// auditEventFor records a security decision for tenant. A tenant-scoped
+// producer fails closed: its error is returned so the caller can refuse the
+// operation (auth.md §2). poolTenant reports the tenant a pool belongs to;
+// an unknown or shared pool is deployment-level.
+func (s *Store) auditEventFor(ctx context.Context, tenant core.TenantID, action, resource, outcome, reason string) error {
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(ctx, platform.AuditEvent{
 		Time:     s.now(),
+		Tenant:   tenant,
 		Action:   action,
 		Resource: resource,
 		Outcome:  outcome,
 		Reason:   reason,
 	})
+}
+
+// credentialTTL is how long a join credential stays valid without a
+// heartbeat. It is longer than the presence deadline so a transient network
+// partition does not force a rejoin.
+func (s *Store) credentialTTL() time.Duration { return credentialLifetime * s.heartbeat }
+
+// presenceMisses is how many heartbeat intervals a worker may miss before it
+// is no longer present (ADR-0012 §4).
+const presenceMisses = 3
+
+func presenceStale(lastSeen, now time.Time, heartbeat time.Duration) bool {
+	return lastSeen.IsZero() || now.Sub(lastSeen) > presenceMisses*heartbeat
+}
+
+// serving reports whether a worker can take work now: present, active and
+// heartbeating. Draining, paused and missed workers are not online.
+func (s *Store) serving(w Worker, now time.Time) bool {
+	if !w.Present || w.Removed || w.State != StateActive {
+		return false
+	}
+	if w.LastSeen.IsZero() {
+		return false
+	}
+	return now.Sub(w.LastSeen) <= presenceMisses*s.heartbeat
 }

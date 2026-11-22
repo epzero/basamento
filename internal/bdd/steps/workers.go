@@ -401,6 +401,10 @@ func workerHeartbeat(ctx context.Context, name string, minutes int) error {
 	if err != nil {
 		return err
 	}
+	if answer.Credential != "" {
+		jw.credential = answer.Credential
+		jw.worker.Credential = answer.Credential
+	}
 	w.lastHeartbeat = answer
 	return nil
 }

@@ -153,7 +153,7 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := s.sweep(ctx); err != nil {
+	if err := s.touchWorker(ctx, w.ID); err != nil {
 		return nil, err
 	}
 	for {
@@ -759,15 +759,35 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
-	if err := s.sweep(ctx); err != nil {
-		return HeartbeatAnswer{}, err
-	}
 	pool, err := s.Pool(ctx, w.Pool)
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
 	expires := s.now().Add(pool.Lease)
+	now := s.now()
+	rotated, err := newToken()
+	if err != nil {
+		return HeartbeatAnswer{}, err
+	}
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
+		// Rotate the credential, keeping the one the worker presented valid
+		// until its own expiry: a lost heartbeat response must not lock a
+		// live worker out (ADR-0012 §10).
+		// The credential the worker presented becomes the predecessor, whatever
+		// it was: a worker that did not receive the last rotation keeps its
+		// credential and still receives a new one (ADR-0012 §10).
+		presented := hashToken(credential)
+		if _, err := tx.Exec(ctx,
+			`UPDATE worker_workers
+			 SET heartbeat_ms = ?, present = CASE WHEN removed = 0 THEN 1 ELSE present END,
+			     previous_credential_hash = ?,
+			     previous_credential_expires_unix_ms = CASE WHEN credential_hash = ? THEN credential_expires_unix_ms
+			                                              ELSE previous_credential_expires_unix_ms END,
+			     credential_hash = ?, credential_expires_unix_ms = ?
+			 WHERE worker_id = ?`,
+			unixms(now), presented, presented, hashToken(rotated), unixms(now.Add(s.credentialTTL())), w.ID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET lease_expires_unix_ms = ?
 			 WHERE worker_id = ? AND state = ? AND in_doubt = 0`,
@@ -793,7 +813,10 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
-	answer := HeartbeatAnswer{Drain: w.State == StateDraining, LeaseExpires: expires, State: w.State}
+	answer := HeartbeatAnswer{
+		Drain: w.State == StateDraining, LeaseExpires: expires, State: w.State,
+		Credential: rotated, CancelAttempts: map[string]int{},
+	}
 	seen := map[string]bool{}
 	add := func(ref string) {
 		if !seen[ref] {
@@ -802,18 +825,20 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 		}
 	}
 	rows, err := s.db.Execer().Query(ctx,
-		`SELECT client_ref FROM worker_invocations WHERE worker_id = ? AND state = ? AND cancel_requested = 1 ORDER BY client_ref`,
+		`SELECT client_ref, attempt FROM worker_invocations WHERE worker_id = ? AND state = ? AND cancel_requested = 1 ORDER BY client_ref`,
 		w.ID, stateLeased)
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
 	for rows.Next() {
 		var ref string
-		if err := rows.Scan(&ref); err != nil {
+		var attempt int
+		if err := rows.Scan(&ref, &attempt); err != nil {
 			_ = rows.Close()
 			return HeartbeatAnswer{}, err
 		}
 		add(ref)
+		answer.CancelAttempts[ref] = attempt
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
@@ -823,26 +848,29 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 	// A superseded attempt is told to cancel at its provider even though the
 	// invocation now belongs to another worker (ADR-0012 §7).
 	cancels, err := s.db.Execer().Query(ctx,
-		`SELECT client_ref FROM worker_cancels WHERE worker_id = ? ORDER BY client_ref`, w.ID)
+		`SELECT client_ref, attempt FROM worker_cancels WHERE worker_id = ? ORDER BY client_ref`, w.ID)
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
 	for cancels.Next() {
 		var ref string
-		if err := cancels.Scan(&ref); err != nil {
+		var attempt int
+		if err := cancels.Scan(&ref, &attempt); err != nil {
 			_ = cancels.Close()
 			return HeartbeatAnswer{}, err
 		}
 		add(ref)
+		if attempt > 0 {
+			answer.CancelAttempts[ref] = attempt
+		}
 	}
 	if err := cancels.Err(); err != nil {
 		_ = cancels.Close()
 		return HeartbeatAnswer{}, err
 	}
 	_ = cancels.Close()
-	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, w.ID); err != nil {
-		return HeartbeatAnswer{}, err
-	}
+	// The rows stay until the invocation is terminal: a dropped heartbeat
+	// response must not lose a cancel (REQ-MODEL-026).
 	return answer, nil
 }
 

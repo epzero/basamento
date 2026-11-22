@@ -204,7 +204,23 @@ type Worker struct {
 	// HeartbeatInterval is the cadence the join answer told the worker to
 	// use; zero reads as DefaultHeartbeatInterval.
 	HeartbeatInterval time.Duration
+	// LastSeen is the last join, lease or heartbeat. A worker that misses
+	// presenceMisses intervals is no longer present.
+	LastSeen time.Time
 }
+
+// credentialLifetime is how many heartbeat intervals a join credential lasts
+// without renewal.
+const credentialLifetime = 120
+
+// Event limits bound what one worker can write (ADR-0012 §10): a batch, one
+// event and all events of an invocation.
+const (
+	MaxEventsPerBatch      = 256
+	MaxEventBytes          = 256 << 10
+	MaxEventBatchBytes     = 1 << 20
+	MaxEventsPerInvocation = 10_000
+)
 
 // Invocation is one queued unit of work.
 type Invocation struct {
@@ -256,6 +272,11 @@ type HeartbeatAnswer struct {
 	Drain        bool
 	LeaseExpires time.Time
 	State        State
+	// Credential is the rotated credential; empty means the caller keeps the
+	// one it has.
+	Credential string
+	// CancelAttempts names the attempt each cancel refers to.
+	CancelAttempts map[string]int
 }
 
 // QueueMetrics is what operating a pool reads (ADR-0012 §11).

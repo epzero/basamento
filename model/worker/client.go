@@ -175,6 +175,11 @@ func (c *Client) Heartbeat(ctx context.Context, free int) (HeartbeatAnswer, erro
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
+	if answer.Credential != "" {
+		// The platform rotates the credential on every heartbeat; the next
+		// call must present the new one (ADR-0012 §10).
+		c.worker.Credential = answer.Credential
+	}
 	c.state = answer.State
 	return answer, nil
 }

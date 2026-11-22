@@ -179,8 +179,9 @@ func (s *Store) poolHasLabels(ctx context.Context, poolID, modelID string, op mo
 	if err != nil {
 		return false, err
 	}
+	now := s.now()
 	for _, w := range workers {
-		if !w.Present || w.Removed || !labelsMatch(w.Labels, labels) {
+		if !s.serving(w, now) || !labelsMatch(w.Labels, labels) {
 			continue
 		}
 		for _, d := range w.Descriptors {
@@ -524,8 +525,9 @@ func (s *Store) ExpectedWait(ctx context.Context, poolID, modelID string) (time.
 		return 0, err
 	}
 	var units int
+	now := s.now()
 	for _, w := range workers {
-		if !w.Present || w.State != StateActive {
+		if !s.serving(w, now) {
 			continue
 		}
 		for _, d := range w.Descriptors {

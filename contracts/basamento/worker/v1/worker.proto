@@ -228,6 +228,10 @@ message HeartbeatResponse {
   // New lease expiry, Unix milliseconds; zero leaves the leases as they are.
   int64 lease_expires_unix_ms = 3;
   WorkerState state = 4;
+  // Rotated credential; empty keeps the current one. Heartbeats renew it.
+  string credential = 5;
+  // Attempt each cancel in `cancel` refers to.
+  map<string, int32> cancel_attempts = 6;
 }
 
 // LeaveRequest is a clean exit.
