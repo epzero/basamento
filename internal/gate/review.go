@@ -267,7 +267,7 @@ func ChangedFiles(root, base, head string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"diff", "--name-only", "-z", from}
+	args := []string{"diff", "--name-only", "--no-renames", "-z", from}
 	if head != "" {
 		args = append(args, head)
 	}

@@ -14,7 +14,7 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Go release line from go.mod
         id: gover
         run: |
@@ -24,7 +24,7 @@ jobs:
             exit 1
           fi
           echo "line=$line" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ steps.gover.outputs.line }}
           check-latest: true
@@ -51,8 +51,8 @@ jobs:
       GOTOOLCHAIN: local
       GATE_STRICT: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: Postgres bundle cache location and version
@@ -61,7 +61,7 @@ jobs:
           echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
 
       - name: Postgres bundle cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
           key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -80,8 +80,8 @@ jobs:
       GOTOOLCHAIN: local
       GATE_STRICT: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: Postgres bundle cache location and version
@@ -90,7 +90,7 @@ jobs:
           echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
 
       - name: Postgres bundle cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
           key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -113,8 +113,8 @@ jobs:
       GOTOOLCHAIN: local
       GATE_STRICT: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: Postgres bundle cache location and version
@@ -123,7 +123,7 @@ jobs:
           echo "PG_MODULE_VERSION=$(go list -m -f '{{.Version}}' github.com/fergusstrange/embedded-postgres/v2)" >> "$GITHUB_ENV"
 
       - name: Postgres bundle cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.BDD_POSTGRES_CACHE_DIR }}
           key: embedded-postgres-${{ env.PG_MODULE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -144,8 +144,8 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # Informational: pending P0 acceptances are expected; blocking signal is line. The reviewer lead reads the schedule via go tool gate nightly (docs/engineering/qa-gate.md, "Who reads the nightly").

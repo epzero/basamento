@@ -5,6 +5,15 @@ merges only when every blocking gate passes. Tools that are not installed
 locally are skipped with a notice; CI sets `GATE_STRICT=1` and installs them
 with `make tools`, which pins their versions in the `Makefile`.
 
+**Workflow actions.** Every `uses:` line in `.github/workflows` pins third-party
+actions to the full commit SHA of the newest release within the same major, with
+a trailing comment naming that release (for example `# v4.4.0`). A test in
+`internal/gate` fails the gate when a remote action is not pinned this way. To
+bump an action, find the new release tag, resolve its commit with
+`gh api repos/<owner>/<repo>/git/matching-refs/tags/<major>.` (dereference
+annotated tags), and replace the SHA and comment together in one reviewed change
+(`.github/**` is high tier; there is no bot on purpose).
+
 | Gate | Checks | Blocks | Where |
 | --- | --- | --- | --- |
 | **G1 Static** | `gofmt`, `go vet`, `golangci-lint`, `govulncheck` in every module root (`make vuln` / nightly **line** job, `ADR-0014`), `CGO_ENABLED=0 go build`, `gate layering` (production and test imports from `go list`, plus imports in build-excluded `.go` files under the module root, all against `layering.yaml`; `ADR-0018`; also fails when a `deny_external` or `test_only_allowed_from` key names no layer), `gate hygiene` (test determinism, production isolation and, with `BASE`, spec/code separation; see [Hygiene](#hygiene)), `gate gomod` (every tracked `go.mod` names the same `go 1.M.P` line, `ADR-0014`), `go-licenses` (no forbidden or restricted licenses), `buf lint`, `buf breaking` against the base (after publication) | yes | `make gate` |
