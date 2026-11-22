@@ -10,4 +10,6 @@ Owns: `auth/authn`.
 ### WP-L8-02 — Authorization
 Depends: WP-L8-01.
 Owns: `auth/authz`.
-In-app RBAC with CEL conditions, audit events for denials, through the `platform.Audit` port (store from WP-L1-06), Postgres row-level security in the cloud profile. Specs: `specs/auth/permissions.feature`.
+In-app RBAC with CEL conditions, audit events for denials, through the `platform.Audit` port (store from WP-L1-06), Postgres row-level security in the cloud profile. Specs: `specs/auth/permissions.feature`, design in `specs/auth/design.md`.
+
+Delivered in two parts: **(a)** the core — action catalog, built-in roles, caller-supplied resource, binding store and API, grant authority, decision procedure, CEL conditions and denial audit; **(b)** Postgres row-level security in the cloud profile. WP-L6-03 needs only the check, roles, bindings and audit from part (a), so the API surface does not wait for RLS.
