@@ -257,3 +257,142 @@ func TestADetachDeadlineRecheckSparesAReattachedRun(t *testing.T) {
 		t.Fatalf("policy pass canceled %v err %v while a client is attached", canceled, err)
 	}
 }
+
+// attachGate pauses the first read of an attach at point until resume, so a
+// test can put an external append in the attach's unlocked window without
+// timing or sleeps.
+type attachGate struct {
+	point   string
+	entered chan struct{}
+	release chan struct{}
+	armed   bool
+	blocked bool
+}
+
+func newAttachGate(point string) *attachGate {
+	return &attachGate{point: point, entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *attachGate) arm() { g.armed = true }
+
+func (g *attachGate) resume() { close(g.release) }
+
+func (g *attachGate) fault(point string) error {
+	if !g.armed || point != g.point {
+		return nil
+	}
+	if !g.blocked {
+		g.blocked = true
+		close(g.entered)
+		<-g.release
+	}
+	return nil
+}
+
+func nextFrame(t *testing.T, a *Attachment) (Frame, error) {
+	t.Helper()
+	guard, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return a.Next(guard)
+}
+
+func assertDurableThenDetached(t *testing.T, a *Attachment, seqs ...int64) {
+	t.Helper()
+	for _, want := range seqs {
+		frame, err := nextFrame(t, a)
+		if err != nil {
+			t.Fatalf("next durable %d: %v", want, err)
+		}
+		if frame.Durable == nil || int64(frame.Durable.Seq) != want {
+			t.Fatalf("frame %+v, want durable seq %d", frame, want)
+		}
+	}
+	if _, err := nextFrame(t, a); !errors.Is(err, ErrDetached) {
+		t.Fatalf("next after the replay: %v, want ErrDetached", err)
+	}
+}
+
+// EP114-R2-01 / ATTACH-TERMINAL-STALE: the state read before the replay is
+// stale once another writer finishes the run in the log. Attach must refresh
+// under run.mu and settle the run, or it registers on a run that is already
+// over: Next never returns and the terminal event is never delivered
+// (REQ-STRM-002).
+func TestAttachSettlesARunFinishedBeforeItTakesTheLock(t *testing.T) {
+	ctx := tenant("acme")
+	gate := newAttachGate(eventlog.PointStateRead)
+	broker, log, _ := newTestBroker(t, &fakeBus{}, gate.fault)
+	startRun(t, broker, log, "r1")
+	run, err := broker.live(ctx, "r1")
+	if err != nil {
+		t.Fatalf("live: %v", err)
+	}
+
+	// Hold the run's lock across the attach's unlocked reads, so the terminal
+	// append lands in the gap before the attachment's registration.
+	run.mu.Lock()
+	gate.arm()
+	var a *Attachment
+	var attachErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a, attachErr = broker.Attach(ctx, "r1", Cursor{Seq: 1})
+	}()
+	<-gate.entered
+	// Another writer finishes the run in the log; this liveRun knows nothing
+	// about it.
+	if _, err := log.AppendChange(ctx, "r1", "completed", []eventlog.NewEvent{{Type: "run.completed"}}); err != nil {
+		t.Fatalf("record completion: %v", err)
+	}
+	gate.resume()
+	run.mu.Unlock()
+	<-done
+	if attachErr != nil {
+		t.Fatalf("attach: %v", attachErr)
+	}
+	if a == nil {
+		t.Fatal("attach returned no attachment")
+	}
+	assertDurableThenDetached(t, a, 2, 3)
+}
+
+// EP114-R2-01 / ATTACH-TERMINAL-STALE: an external append made while the
+// unlocked replay is running is missing from both the replay and the stale
+// state. Attach must extend the replay to the durable head under the lock and
+// settle the run from the fresh state (REQ-STRM-002).
+func TestAttachReplaysATerminalAppendMadeDuringTheUnlockedReplay(t *testing.T) {
+	ctx := tenant("acme")
+	gate := newAttachGate(eventlog.PointEventsRead)
+	broker, log, _ := newTestBroker(t, &fakeBus{}, gate.fault)
+	startRun(t, broker, log, "r1")
+	run, err := broker.live(ctx, "r1")
+	if err != nil {
+		t.Fatalf("live: %v", err)
+	}
+
+	run.mu.Lock()
+	gate.arm()
+	var a *Attachment
+	var attachErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a, attachErr = broker.Attach(ctx, "r1", Cursor{Seq: 1})
+	}()
+	<-gate.entered
+	// The replay returned sequence 2 and paused; another writer appends the
+	// run's end while the attach still holds no lock and no subscription.
+	if _, err := log.AppendChange(ctx, "r1", "completed", []eventlog.NewEvent{{Type: "run.completed"}}); err != nil {
+		t.Fatalf("record completion: %v", err)
+	}
+	gate.resume()
+	run.mu.Unlock()
+	<-done
+	if attachErr != nil {
+		t.Fatalf("attach: %v", attachErr)
+	}
+	if a == nil {
+		t.Fatal("attach returned no attachment")
+	}
+	assertDurableThenDetached(t, a, 2, 3)
+}

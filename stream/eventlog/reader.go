@@ -8,6 +8,17 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
+// Read-path fault points, in the order a read reaches them. Tests use them to
+// interleave a write with a read; production passes a nil Fault.
+const (
+	// PointStateRead fires once a run's state has been read, before State
+	// returns it.
+	PointStateRead = "the state read"
+	// PointEventsRead fires once a run's events have been read and the rows
+	// released, before Read returns them.
+	PointEventsRead = "the events read"
+)
+
 // Read returns every durable event of the run after sequence after, in
 // sequence order (REQ-STRM-020). A cursor at or above the last sequence returns
 // no events (REQ-STRM-021). The tenant comes from ctx and never from an
@@ -50,6 +61,14 @@ func (l *Log) Read(ctx context.Context, runID string, after uint64) ([]Event, er
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// Release the connection before the read seam: a test that pauses here may
+	// write the same run through another call.
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := l.fire(PointEventsRead); err != nil {
+		return nil, err
+	}
 	return events, nil
 }
 
@@ -67,6 +86,9 @@ func (l *Log) State(ctx context.Context, runID string) (string, error) {
 		`SELECT state FROM eventlog_runs WHERE tenant_id = ? AND run_id = ?`,
 		string(tenant), runID).Scan(&state); err != nil {
 		return "", mapNoRun(err)
+	}
+	if err := l.fire(PointStateRead); err != nil {
+		return "", err
 	}
 	return state, nil
 }

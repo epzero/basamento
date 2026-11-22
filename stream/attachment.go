@@ -83,35 +83,50 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 	run.mu.Lock()
 	defer run.mu.Unlock()
 
-	// Do not trust only the in-memory flag: another writer may have finished
-	// the run in the log since this liveRun was created.
-	if terminalState(state) {
-		run.markTerminalLocked(state)
+	// The state and replay above were read without the lock, so another writer
+	// may have moved the run on in the log since. A run only moves from
+	// running to a terminal state, so a terminal state read before the replay
+	// still holds; a running one must be re-read under the lock. Run the same
+	// teardown writable uses: a run that is already terminal must not take a
+	// new attachment (REQ-STRM-002).
+	if !terminalState(state) {
+		state, err = b.log.State(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	for i := range events {
 		a.buf = append(a.buf, Frame{Durable: &events[i]})
 		a.seq = int64(events[i].Seq)
 	}
 	run.noteEvents(events)
-	// A durable append may have been delivered live between the read above and
-	// this lock: AppendChange records lastSeq under mu before it broadcasts, so
-	// an event above the last one replayed was missed. Fetch that tail (usually
-	// nothing) instead of leaving a gap (REQ-STRM-002, REQ-STRM-007).
-	if run.lastSeq > uint64(a.seq) {
-		tail, err := b.log.Read(ctx, runID, uint64(a.seq))
-		if err != nil {
-			return nil, err
-		}
-		if len(a.buf)+len(tail) > maxBufferedFrames {
-			return nil, core.NewError(core.CodeUnavailable,
-				"stream: replay is larger than the attachment buffer",
-				map[string]any{"events": len(a.buf) + len(tail), "limit": maxBufferedFrames})
-		}
-		for i := range tail {
-			a.buf = append(a.buf, Frame{Durable: &tail[i]})
-			a.seq = int64(tail[i].Seq)
-		}
-		run.noteEvents(tail)
+	// The replay above stopped at the log's head when it was read, not at the
+	// last sequence this process appended: an external writer may have added
+	// events since, and its terminal change never reached this liveRun. Read
+	// the durable tail to the log's current head under the lock, so nothing
+	// falls between the replay and the subscription (REQ-STRM-002,
+	// REQ-STRM-007). The large replay read itself stays outside the lock
+	// (REQ-STRM-005).
+	tail, err := b.log.Read(ctx, runID, uint64(a.seq))
+	if err != nil {
+		return nil, err
+	}
+	if len(a.buf)+len(tail) > maxBufferedFrames {
+		return nil, core.NewError(core.CodeUnavailable,
+			"stream: replay is larger than the attachment buffer",
+			map[string]any{"events": len(a.buf) + len(tail), "limit": maxBufferedFrames})
+	}
+	for i := range tail {
+		a.buf = append(a.buf, Frame{Durable: &tail[i]})
+		a.seq = int64(tail[i].Seq)
+	}
+	run.noteEvents(tail)
+	// The state read above may have committed after the replay: settle the run
+	// now that every event up to that state is buffered, so the attachment
+	// replays the end of the stream and then detaches instead of waiting on a
+	// run that can produce no more frames (REQ-STRM-002).
+	if terminalState(state) {
+		run.settleTerminalLocked(state)
 	}
 	// A cursor that claims deltas the live message does not hold would make the
 	// snapshot skip the text and leave a gap; reject it instead of replaying
@@ -137,10 +152,15 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 		}
 	}
 	a.buf = append(a.buf, run.snapshotFrames(a.open)...)
-	if !run.finished {
-		run.subs[a] = struct{}{}
-		run.detachedAt = time.Time{}
+	if run.finished {
+		// The run is over: deliver the replay and snapshots buffered above,
+		// then report the detach instead of leaving Next blocked on frames
+		// that can never come (REQ-STRM-002).
+		a.release()
+		return a, nil
 	}
+	run.subs[a] = struct{}{}
+	run.detachedAt = time.Time{}
 	return a, nil
 }
 

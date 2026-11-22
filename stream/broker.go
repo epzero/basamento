@@ -76,7 +76,6 @@ type liveRun struct {
 	// from the log; Open upgrades it and sets this. A second Open conflicts.
 	opened bool
 
-	lastSeq  uint64
 	messages map[string]*liveMessage
 	subs     map[*Attachment]struct{}
 }
@@ -282,7 +281,6 @@ func (b *Broker) AppendChange(ctx context.Context, runID, state string, events [
 	if err != nil {
 		return nil, err
 	}
-	run.lastSeq = out[len(out)-1].Seq
 	for i := range out {
 		run.noteEvent(&out[i])
 		run.broadcast(Frame{Durable: &out[i]})
@@ -439,7 +437,6 @@ func (b *Broker) CompleteMessage(ctx context.Context, runID, messageID string, i
 	if err != nil {
 		return err
 	}
-	run.lastSeq = events[len(events)-1].Seq
 	msg.completed = true
 	for i := range events {
 		run.noteEvent(&events[i])
@@ -527,7 +524,6 @@ func (b *Broker) cancelLocked(ctx context.Context, run *liveRun) error {
 		return err
 	}
 	run.cancelOnce.Do(func() { close(run.canceled) })
-	run.lastSeq = out[len(out)-1].Seq
 	for i := range out {
 		run.noteEvent(&out[i])
 		run.broadcast(Frame{Durable: &out[i]})
