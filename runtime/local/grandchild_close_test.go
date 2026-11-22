@@ -35,6 +35,7 @@ func TestParentCloseTerminatesGrandchild(t *testing.T) {
 			f.start(t, "acme", "p1", "parent", `{}`)
 			waitOn(t, "child tree ready", treeReady)
 			f.waitState(t, "acme", "gc1", stateRunning)
+			f.waitGate(t, "acme", "p1", "parent-hold")
 			if err := f.rt.Resolve(tenantCtx("acme"), runtime.RunRef{RunID: "p1"}, "parent-hold", json.RawMessage(`{}`)); err != nil {
 				t.Fatal(err)
 			}
@@ -64,6 +65,7 @@ func TestAbandonChildLeavesGrandchildRunning(t *testing.T) {
 	f.start(t, "acme", "p1", "parent", `{}`)
 	waitOn(t, "child tree ready", treeReady)
 	f.waitState(t, "acme", "gc1", stateRunning)
+	f.waitGate(t, "acme", "p1", "parent-hold")
 	if err := f.rt.Resolve(tenantCtx("acme"), runtime.RunRef{RunID: "p1"}, "parent-hold", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
