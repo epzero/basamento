@@ -21,8 +21,7 @@ type registeredStep struct {
 }
 
 // Runtime registers the Temporal flow-host workflow and step activities and
-// implements the durable execution control plane (Start, Resolve, Cancel,
-// Describe, List, Capabilities). Serve is implemented separately (WP-L5-02).
+// implements runtime.Runtime (control plane and worker Serve).
 type Runtime struct {
 	mu                  sync.Mutex
 	host                runtime.FlowHost
@@ -39,6 +38,10 @@ type Runtime struct {
 	closed     bool
 	dial       func(client.Options) (client.Client, error)
 	newRunID   func() (string, error)
+	newWorker  func(client.Client, string, worker.Options) worker.Worker
+
+	serveMu sync.Mutex
+	served  bool
 }
 
 // New returns a Temporal runtime shell. The shared data converter performs blob
@@ -99,6 +102,7 @@ func New(opts Options) (*Runtime, error) {
 		clientOpts:          clientOpts,
 		dial:                client.Dial,
 		newRunID:            defaultNewRunID,
+		newWorker:           worker.New,
 	}, nil
 }
 

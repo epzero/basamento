@@ -39,7 +39,7 @@ func (r *Runtime) tenant(ctx context.Context, field core.TenantID) (core.TenantI
 // Temporal visibility queries (quotes break the STARTS_WITH literal).
 func rejectTemporalUnsafeTenant(id core.TenantID) error {
 	for _, r := range string(id) {
-		if unsafeVisibilityRune(r, false) {
+		if unsafeVisibilityRune(r) {
 			return core.NewError(core.CodeInvalidArgument, "temporal: this tenant id is not supported by the Temporal runtime", nil)
 		}
 	}

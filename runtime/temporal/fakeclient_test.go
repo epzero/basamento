@@ -63,6 +63,10 @@ type fakeClient struct {
 	updateHandle client.WorkflowUpdateHandle
 	updateErr    error
 	closeCount   int
+
+	wfSvc    *fakeWorkflowService
+	opSvc    *fakeOperatorService
+	serveOps []string
 }
 
 func (f *fakeClient) Calls() []fakeClientCall {
