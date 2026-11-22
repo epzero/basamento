@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -146,14 +147,23 @@ type recordingTurns struct {
 	cancels  int
 	cancelRe []runtime.RunRef
 	partial  []ModelMessage
+	// steerErr and cancelErr make a delivery fail as a control plane can.
+	steerErr  error
+	cancelErr error
 }
 
 func (r *recordingTurns) Steer(_ context.Context, ref runtime.RunRef, text string) error {
+	if r.steerErr != nil {
+		return r.steerErr
+	}
 	r.steers = append(r.steers, text)
 	r.steerRef = append(r.steerRef, ref)
 	return nil
 }
 func (r *recordingTurns) Cancel(_ context.Context, ref runtime.RunRef, _ string) error {
+	if r.cancelErr != nil {
+		return r.cancelErr
+	}
 	r.cancels++
 	r.cancelRe = append(r.cancelRe, ref)
 	return nil
@@ -273,6 +283,57 @@ func TestRunSteersAndCancelsTheRunningChild(t *testing.T) {
 	turn, _ := out.Record.LastTurn()
 	if turn.State != TurnCancelled {
 		t.Fatalf("turn = %+v, want cancelled", turn)
+	}
+}
+
+// TestRunReportsAnUndeliveredControlDecision pins the outcome of a steering or
+// cancel decision the coordinator journaled but could not deliver to the
+// running child. The child may still run, so the run must not report a
+// stopped or cancelled conversation: it fails with the delivery's own code,
+// cause and retry semantics so the caller learns about the control-plane
+// failure (REQ-CONV-007, REQ-CONV-008).
+func TestRunReportsAnUndeliveredControlDecision(t *testing.T) {
+	cause := &core.Error{Code: core.CodeUnavailable, Message: "the child's input channel is closed", Retryable: true}
+	cases := []struct {
+		name   string
+		mode   Mode
+		turns  *recordingTurns
+		action string
+	}{
+		{"steering", ModeSteer, &recordingTurns{steerErr: cause}, "steering message"},
+		{"cancel", ModeCancel, &recordingTurns{cancelErr: cause}, "cancel decision"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := newTestDC(
+				msgEvent("m1", "Write"),
+				coordEvent{msg: &Message{ID: "m2", Tenant: "acme", User: "ana", Text: "Change it", Mode: tc.mode}},
+			)
+			out, err := New(Options{Turns: tc.turns}).Run(dc, newInput())
+			if err == nil {
+				t.Fatal("an undelivered control decision ended the run without an error")
+			}
+			if out.State != "" || out.Record.Cancelled || len(out.Record.Turns) != 0 {
+				t.Fatalf("run reported state %q and record %+v, want no result", out.State, out.Record)
+			}
+			if core.CodeOf(err) != cause.Code {
+				t.Fatalf("code = %q, want the delivery's code %q", core.CodeOf(err), cause.Code)
+			}
+			if !core.IsRetryable(err) {
+				t.Fatal("the delivery failure lost its retry semantics")
+			}
+			if !errors.Is(err, cause) || !strings.Contains(err.Error(), tc.action) {
+				t.Fatalf("error = %q, want the %s delivery failure and its cause", err, tc.action)
+			}
+			var pe *core.Error
+			if !errors.As(err, &pe) {
+				t.Fatalf("error = %T, want *core.Error", err)
+			}
+			if pe.Details["conversation"] != "c1" || pe.Details["turn"] != 1 ||
+				pe.Details["message"] != "m2" || pe.Details["child"] != dc.children[0].id {
+				t.Fatalf("details = %v, want the conversation, turn, message and child", pe.Details)
+			}
+		})
 	}
 }
 

@@ -180,7 +180,7 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 				}
 				if c.opts.Turns != nil {
 					if err := c.opts.Turns.Steer(dc.Context(), childRef, msg.Text); err != nil {
-						return c.stopped(dc, rec, childRef)
+						return c.undelivered(dc, rec, childRef, "steering message", msg, err)
 					}
 				}
 			case DecisionCancelTurn:
@@ -189,7 +189,7 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 				}
 				if c.opts.Turns != nil {
 					if err := c.opts.Turns.Cancel(dc.Context(), childRef, "user cancelled the turn"); err != nil {
-						return c.stopped(dc, rec, childRef)
+						return c.undelivered(dc, rec, childRef, "cancel decision", msg, err)
 					}
 				}
 			}
@@ -286,6 +286,37 @@ func (c *Coordinator) stopped(dc runtime.DurableContext, rec Record, child runti
 		return Output{State: TurnCancelled, Record: rec}, nil
 	}
 	return Output{Record: rec}, core.NewError(core.CodeUnavailable, "conversation: the runtime stopped waiting", nil)
+}
+
+// undelivered ends the run when a steering or cancel decision the coordinator
+// journaled did not reach the running child. The child may still be running,
+// so this is not a stopped conversation: reporting one would be false and the
+// caller would learn nothing about the control-plane failure. The run fails
+// with the delivery's code, cause and retry semantics (REQ-CONV-007,
+// REQ-CONV-008); a cancelled context is a conversation cancel (REQ-CONV-011)
+// and keeps its path through stopped.
+func (c *Coordinator) undelivered(dc runtime.DurableContext, rec Record, child runtime.RunRef, action string, msg Message, cause error) (Output, error) {
+	if dc.Context().Err() != nil {
+		return c.stopped(dc, rec, child)
+	}
+	code := core.CodeOf(cause)
+	if code == core.CodeCancelled {
+		// The delivery's cancellation is not the conversation's: a caller
+		// must not read this failure as the conversation being cancelled.
+		code = core.CodeUnavailable
+	}
+	return Output{}, &core.Error{
+		Code:      code,
+		Message:   fmt.Sprintf("conversation: the running turn did not receive the %s: %v", action, cause),
+		Retryable: core.IsRetryable(cause),
+		Details: map[string]any{
+			"conversation": rec.ID,
+			"turn":         rec.Running,
+			"message":      msg.ID,
+			"child":        child.RunID,
+		},
+		Cause: cause,
+	}
 }
 
 // RecordStep is the step function of the coordinator's record steps. The
