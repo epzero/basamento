@@ -155,7 +155,7 @@ func TestClientConverterReturnsTransientCodecErrors(t *testing.T) {
 		inner:  testBlobStore(t),
 		putErr: core.NewError(core.CodeUnavailable, "SECRET", nil),
 	}
-	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: fb})
+	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: fb, Outbox: newTestOutbox()})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,7 +34,8 @@ func testEnv(t *testing.T) (*Runtime, *testsuite.TestWorkflowEnvironment) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.SetTestTimeout(time.Hour)
-	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t)})
+	env.SetWorkflowRunTimeout(0)
+	rt, err := New(testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +351,7 @@ func TestCapabilitiesReportOnlyWhatExists(t *testing.T) {
 	rt, env := testEnv(t)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
 		c := dc.Capabilities()
-		if !c.Durable || !c.PolyglotQueues || c.SyncGateUpdates || c.ContinueAsNew {
+		if !c.Durable || !c.PolyglotQueues || !c.SyncGateUpdates || !c.ContinueAsNew {
 			return nil, core.NewError(core.CodeInternal, "wrong caps", nil)
 		}
 		return json.RawMessage(`"ok"`), nil
@@ -365,11 +366,46 @@ func TestCapabilitiesReportOnlyWhatExists(t *testing.T) {
 	}
 }
 
+func TestGateResolveReturnsPayloadWorkflow(t *testing.T) {
+	rt, env := testEnv(t)
+	_ = rt.RegisterStep("s", func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`null`), nil
+	}, runtime.StepDefaults{})
+	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
+		var approved json.RawMessage
+		if err := dc.Await(runtime.GateSpec{Name: "approve"}).Get(&approved); err != nil {
+			return nil, err
+		}
+		return approved, nil
+	})
+	if err := rt.Register(env); err != nil {
+		t.Fatal(err)
+	}
+	setTestTenantHeader(env, "acme")
+	payload := json.RawMessage(`{"approved":true}`)
+	env.RegisterDelayedCallback(func() {
+		env.UpdateWorkflow(ResolveGateUpdate, "u1", &testsuite.TestUpdateCallback{
+			OnAccept: func() {}, OnComplete: func(any, error) {}, OnReject: func(error) { t.Fatal("rejected") },
+		}, GateResolution{Gate: "approve", Payload: payload})
+	}, time.Millisecond)
+	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "g"}, RunID: "r1"})
+	if !env.IsWorkflowCompleted() {
+		t.Fatal("expected completed after resolve")
+	}
+	var got json.RawMessage
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("got %s want %s", got, payload)
+	}
+}
+
 func TestNewRejectsNilDependencies(t *testing.T) {
-	if _, err := New(Options{Blobs: testBlobStore(t)}); err == nil {
+	if _, err := New(Options{Blobs: testBlobStore(t), Outbox: newTestOutbox()}); err == nil {
 		t.Fatal("expected error without codec")
 	}
-	if _, err := New(Options{Payloads: testSecretsCodec(t)}); err == nil {
+	if _, err := New(Options{Payloads: testSecretsCodec(t), Outbox: newTestOutbox()}); err == nil {
 		t.Fatal("expected error without blobs")
 	}
 }

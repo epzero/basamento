@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	commonpb "go.temporal.io/api/common/v1"
+	"go.temporal.io/sdk/converter"
+	sdkworkflow "go.temporal.io/sdk/workflow"
 
 	"github.com/epzero/basamento/core"
 )
@@ -53,3 +55,30 @@ func (h testHeaderReader) Get(key string) (*commonpb.Payload, bool) {
 	return v, ok
 }
 func (h testHeaderReader) ForEachKey(func(string, *commonpb.Payload) error) error { return nil }
+
+func TestTenantPropagatorRejectsInvalidTenant(t *testing.T) {
+	var p TenantPropagator
+	invalid := core.TenantID("acme/eu")
+	wfCtx := sdkworkflow.WithValue(nil, tenantWorkflowKey{}, invalid)
+	if got := tenantFromWorkflow(wfCtx); got != "" {
+		t.Fatalf("tenantFromWorkflow(%q) = %q want none", invalid, got)
+	}
+	w := &testHeaderWriter{}
+	if err := p.InjectFromWorkflow(wfCtx, w); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w.fields[tenantHeaderKey]; ok {
+		t.Fatal("invalid tenant injected into activity header")
+	}
+	raw, err := converter.GetDefaultDataConverter().ToPayload(string(invalid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := p.ExtractToWorkflow(nil, testHeaderReader{map[string]*commonpb.Payload{tenantHeaderKey: raw}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != nil {
+		t.Fatalf("invalid tenant stored in workflow context: %q", tenantFromWorkflow(out))
+	}
+}

@@ -22,6 +22,9 @@ func registerTemporal(sc *godog.ScenarioContext) {
 		}
 		return ctx, nil
 	})
+	registerTemporalFlows(sc)
+	registerTemporalGates(sc)
+	registerTemporalChecks(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Temporal; w != nil {
 			w.close()

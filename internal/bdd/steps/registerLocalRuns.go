@@ -91,6 +91,13 @@ func registerLocalRuns(sc *godog.ScenarioContext) {
 	sc.Step(`^the run is still "([^"]*)"$`, localRunState)
 	sc.Step(`^the run is described as "([^"]*)"$`, localRunState)
 	sc.Step(`^run "([^"]*)" is "([^"]*)"$`, func(ctx context.Context, runID, want string) error {
+		if tw := world(ctx).Temporal; tw != nil && tw.rt != nil {
+			tw.waitDone()
+			if got := tw.runState(); got != want {
+				return fmt.Errorf("run %q is %q, want %q", runID, got, want)
+			}
+			return nil
+		}
 		w := localStepWorld(ctx)
 		state, err := w.stateOf(ctx, "acme", runID)
 		if localCode(err) == "not_found" {

@@ -13,7 +13,7 @@ import (
 )
 
 func TestDataConverterWrappedWithoutDeadlock(t *testing.T) {
-	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t)})
+	rt, err := New(testOptions(t))
 	if err != nil {
 		t.Fatal(err)
 	}

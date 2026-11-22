@@ -1,8 +1,11 @@
 package temporal
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,8 +97,13 @@ func TestWorkflowCodecPolicyNonCoreError(t *testing.T) {
 				}()
 			}
 			got := workflowCodecPolicy(true, nil, tc.ioCtx, plain)
-			if !tc.wantPan && !errors.Is(got, plain) {
-				t.Fatalf("got %v want %v", got, plain)
+			if !tc.wantPan {
+				if core.CodeOf(got) != core.CodeInternal {
+					t.Fatalf("got code %v want internal", core.CodeOf(got))
+				}
+				if strings.Contains(got.Error(), plain.Error()) {
+					t.Fatalf("sanitized error %q leaks original text", got)
+				}
 			}
 		})
 	}
@@ -129,5 +137,49 @@ func TestWorkflowCodecPolicyClientPathKeepsCancelledPermanent(t *testing.T) {
 func TestCodecTransientCancelled(t *testing.T) {
 	if !codecTransient(core.NewError(core.CodeCancelled, "x", nil)) {
 		t.Fatal("cancelled is transient on workflow path")
+	}
+}
+
+func TestWorkflowCodecPolicyNonCoreErrorLogsBoundedText(t *testing.T) {
+	const secret = "SECRET-STORE-TEXT"
+	var logged string
+	got := workflowCodecPolicy(true, func(pe *core.Error) { logged = pe.Message },
+		context.Background(), errors.New(secret))
+	if !strings.Contains(logged, secret) {
+		t.Fatalf("log %q missing original text", logged)
+	}
+	if core.CodeOf(got) != core.CodeInternal {
+		t.Fatalf("code %v want internal", core.CodeOf(got))
+	}
+	if strings.Contains(got.Error(), secret) {
+		t.Fatalf("error %q leaks original text", got)
+	}
+}
+
+func TestWorkflowCodecPolicyPermanentCoreErrorReturnsItself(t *testing.T) {
+	pe := core.NewError(core.CodePermissionDenied, "denied", nil)
+	got := workflowCodecPolicy(true, nil, context.Background(), pe)
+	var gotErr *core.Error
+	if !errors.As(got, &gotErr) || gotErr != pe {
+		t.Fatalf("got %v want the same core error", got)
+	}
+}
+
+func TestErrorFromPanicSanitizesNonErrorValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	const secret = "SECRET-PANIC-VALUE"
+	got := errorFromPanic(secret, logger)
+	if got == nil {
+		t.Fatal("no error")
+	}
+	if strings.Contains(got.Error(), secret) {
+		t.Fatalf("error %q leaks panic text", got)
+	}
+	if core.CodeOf(got) != core.CodeInternal {
+		t.Fatalf("code %v want internal", core.CodeOf(got))
+	}
+	if !strings.Contains(buf.String(), secret) {
+		t.Fatalf("log %q missing panic text", buf.String())
 	}
 }

@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -14,27 +15,70 @@ import (
 )
 
 // durableContext implements runtime.DurableContext over a Temporal workflow.
+// Order-based journal entries (timers, selects, nows) assume the flow
+// re-executes the same calls in the same order (every DurableContext method is
+// replay-safe). Ready() on a replayed future may report true for results
+// recorded before ContinueAsNew; flow code must not branch on Ready() across
+// a Checkpoint (use Select).
 type durableContext struct {
-	wfCtx       workflow.Context
-	rt          *Runtime
-	runID       string
-	tenant      core.TenantID
-	stepFutures map[string]runtime.Future
-	randoms     map[string]*rand.Rand
-	// idSeq and randoms change during the run; PR (b) must carry them across ContinueAsNew.
-	idSeq map[string]int
+	wfCtx     workflow.Context
+	rt        *Runtime
+	runID     string
+	tenant    core.TenantID
+	threshold int
+	hostInput HostInput
+	cont      *Continuation
+
+	stepFutures  map[string]runtime.Future
+	childFutures map[string]runtime.Future
+	childFlows   map[string]runtime.FlowRef
+	gates        map[string]*gateState
+
+	timerIdx, selectIdx, nowIdx             int
+	replayTimers, replaySelects, replayNows int
+	checkpointCalls, emitCalls              uint64
+
+	idSeq        map[string]int
+	randoms      map[string]*rand.Rand
+	timerFutures []workflow.Future
+
+	inFlight    []runtime.Future
+	continuing  bool
+	continueErr error
 }
 
-func newDurableContext(wfCtx workflow.Context, rt *Runtime, runID string, tenant core.TenantID) *durableContext {
-	return &durableContext{
-		wfCtx:       wfCtx,
-		rt:          rt,
-		runID:       runID,
-		tenant:      tenant,
-		stepFutures: map[string]runtime.Future{},
-		randoms:     map[string]*rand.Rand{},
-		idSeq:       map[string]int{},
+func newDurableContext(wfCtx workflow.Context, rt *Runtime, in HostInput, tenant core.TenantID) *durableContext {
+	runID := in.RunID
+	if runID == "" {
+		runID = runIDFromWorkflowID(tenant, workflow.GetInfo(wfCtx).WorkflowExecution.ID)
 	}
+	cont := in.Continuation
+	if cont == nil {
+		cont = &Continuation{}
+	}
+	cont.ensure()
+	threshold := rt.checkpointThreshold
+	dc := &durableContext{
+		wfCtx:         wfCtx,
+		rt:            rt,
+		runID:         runID,
+		tenant:        tenant,
+		threshold:     threshold,
+		hostInput:     in,
+		cont:          cont,
+		stepFutures:   map[string]runtime.Future{},
+		childFutures:  map[string]runtime.Future{},
+		childFlows:    map[string]runtime.FlowRef{},
+		gates:         map[string]*gateState{},
+		idSeq:         map[string]int{},
+		randoms:       map[string]*rand.Rand{},
+		replayNows:    len(cont.Nows),
+		replayTimers:  len(cont.Timers),
+		replaySelects: len(cont.Selects),
+		timerFutures:  make([]workflow.Future, len(cont.Timers)),
+	}
+	dc.startGateCancelWatcher()
+	return dc
 }
 
 func (dc *durableContext) Context() context.Context {
@@ -45,15 +89,35 @@ func (dc *durableContext) Context() context.Context {
 	return ctx
 }
 
-func (dc *durableContext) Now() time.Time { return workflow.Now(dc.wfCtx) }
-
-func (dc *durableContext) Capabilities() runtime.Caps {
-	return runtime.Caps{Durable: true, PolyglotQueues: true}
+func (dc *durableContext) Now() time.Time {
+	if dc.nowIdx < dc.replayNows {
+		t := dc.cont.Nows[dc.nowIdx]
+		dc.nowIdx++
+		return t
+	}
+	now := workflow.Now(dc.wfCtx)
+	dc.cont.Nows = append(dc.cont.Nows, now)
+	return now
 }
 
+func (dc *durableContext) Capabilities() runtime.Caps {
+	return runtime.Caps{Durable: true, SyncGateUpdates: true, ContinueAsNew: true, PolyglotQueues: true}
+}
+
+// NewID and Rand counters are not carried across ContinueAsNew: the flow
+// re-executes from the start and calls them in the same order, so per-execution
+// counters starting at zero reproduce the same ids and draws (seeds from run id
+// and key), then continue naturally past the replayed calls.
 func (dc *durableContext) NewID(kind string) string {
 	dc.idSeq[kind]++
 	return fmt.Sprintf("%s_%d", kind, dc.idSeq[kind])
+}
+
+func seededRand(runID, key string) *rand.Rand {
+	h := fnv64(runID)
+	h ^= fnv64(key)
+	h *= 1099511628211
+	return rand.New(rand.NewPCG(h, h^0x9e3779b97f4a7c15))
 }
 
 func (dc *durableContext) Rand(key string) *rand.Rand {
@@ -65,14 +129,14 @@ func (dc *durableContext) Rand(key string) *rand.Rand {
 	return src
 }
 
-func seededRand(runID, key string) *rand.Rand {
-	h := fnv64(runID)
-	h ^= fnv64(key)
-	h *= 1099511628211
-	return rand.New(rand.NewPCG(h, h^0x9e3779b97f4a7c15))
-}
-
 func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runtime.Future {
+	if dc.continuing {
+		return newImmediate(cancelledContinuing())
+	}
+	key := stepKey(name)
+	if out, ok := dc.cont.Steps[key]; ok {
+		return journalStepFuture(out)
+	}
 	if existing := dc.stepFutures[name]; existing != nil {
 		return existing
 	}
@@ -117,11 +181,8 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 				if _, ok := recovered.(taskFailure); ok {
 					panic(recovered)
 				}
-				// Permanent encode failures: SDK panics the converter's *core.Error before any
-				// activity command exists (spec: fail the step, not the run). Transient errors
-				// become taskFailure in the workflow-bound converter and never reach here.
 				var pe *core.Error
-				if errors.As(errorFromPanic(recovered), &pe) {
+				if errors.As(errorFromPanic(recovered, dc.rt.logger), &pe) {
 					early = newImmediate(pe)
 					dc.stepFutures[name] = early
 					return
@@ -129,33 +190,151 @@ func (dc *durableContext) Step(name string, in any, o runtime.StepOptions) runti
 				panic(recovered)
 			}
 		}()
-		fut = workflow.ExecuteActivity(actCtx, stepActivityName, stepActivityInput{
+		fut = workflow.ExecuteActivity(actCtx, stepActivityName, StepActivityInput{
 			Name: name,
 			In:   raw,
 		})
 	}()
 	if early != nil {
+		dc.trackInFlight(early)
 		return early
 	}
-	wrapped := &stepFuture{ctx: actCtx, f: fut}
+	wrapped := &stepFuture{ctx: actCtx, f: fut, done: func(res json.RawMessage, err error) {
+		if err != nil {
+			dc.recordStep(key, nil, activityToCore(err))
+			return
+		}
+		dc.recordStep(key, res, nil)
+	}}
 	dc.stepFutures[name] = wrapped
+	dc.trackInFlight(wrapped)
 	return wrapped
 }
 
 func (dc *durableContext) Sleep(d time.Duration) runtime.Future {
+	if dc.continuing {
+		return newImmediate(cancelledContinuing())
+	}
 	if d <= 0 {
 		return newImmediate(nil)
 	}
+	if dc.timerIdx < dc.replayTimers {
+		idx := dc.timerIdx
+		j := dc.cont.Timers[idx]
+		dc.timerIdx++
+		if j.Fired {
+			return newImmediate(nil)
+		}
+		remaining := j.Deadline.Sub(workflow.Now(dc.wfCtx))
+		if remaining <= 0 {
+			dc.cont.Timers[idx].Fired = true
+			return newImmediate(nil)
+		}
+		fut := workflow.NewTimer(dc.wfCtx, remaining)
+		dc.timerFutures[idx] = fut
+		return &timerFuture{ctx: dc.wfCtx, f: fut}
+	}
+	now := workflow.Now(dc.wfCtx)
+	deadline := now.Add(d)
+	dc.cont.Timers = append(dc.cont.Timers, TimerJournal{Deadline: deadline, Fired: false})
 	fut := workflow.NewTimer(dc.wfCtx, d)
+	dc.timerFutures = append(dc.timerFutures, fut)
 	return &timerFuture{ctx: dc.wfCtx, f: fut}
 }
 
+func (dc *durableContext) Child(flow runtime.FlowRef, in any, o runtime.ChildOptions) runtime.Future {
+	if dc.continuing {
+		return newImmediate(cancelledContinuing())
+	}
+	policy, err := parentClosePolicy(o.ParentClose)
+	childID := o.ID
+	if err != nil {
+		return newImmediate(err)
+	}
+	if childID == "" {
+		childID = dc.NewID("child")
+	}
+	if out, ok := dc.cont.Children[childID]; ok {
+		if out.Flow != flow {
+			return newImmediate(childFlowConflict(childID))
+		}
+		return journalChildFuture(out)
+	}
+	if existing := dc.childFutures[childID]; existing != nil {
+		if dc.childFlows[childID] != flow {
+			return newImmediate(childFlowConflict(childID))
+		}
+		return existing
+	}
+	raw, err := rawInput(in)
+	if err != nil {
+		return newImmediate(err)
+	}
+	childWfID := workflowID(dc.tenant, childID)
+	if childWfID == "" {
+		return newImmediate(core.NewError(core.CodeInvalidArgument,
+			"temporal: child id cannot contain \"/\"", map[string]any{"child": childID}))
+	}
+	cwo := workflow.ChildWorkflowOptions{
+		WorkflowID:        childWfID,
+		ParentClosePolicy: policy,
+		TaskQueue:         dc.rt.taskQueue,
+	}
+	ctx := workflow.WithChildOptions(dc.wfCtx, cwo)
+	childIn := HostInput{Flow: flow, Input: raw, RunID: childID}
+	var fut workflow.ChildWorkflowFuture
+	var early runtime.Future
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				if _, ok := recovered.(taskFailure); ok {
+					panic(recovered)
+				}
+				var pe *core.Error
+				if errors.As(errorFromPanic(recovered, dc.rt.logger), &pe) {
+					early = newImmediate(pe)
+					return
+				}
+				panic(recovered)
+			}
+		}()
+		fut = workflow.ExecuteChildWorkflow(ctx, HostWorkflowName, childIn)
+	}()
+	if early != nil {
+		dc.trackInFlight(early)
+		return early
+	}
+	wrapped := &childFuture{ctx: dc.wfCtx, f: fut, done: func(res json.RawMessage, err error) {
+		dc.recordChild(childID, flow, res, err)
+	}}
+	dc.childFutures[childID] = wrapped
+	dc.childFlows[childID] = flow
+	dc.trackInFlight(wrapped)
+	return wrapped
+}
+
+func childFlowConflict(id string) error {
+	return core.NewError(core.CodeConflict, "temporal: child id already names a different flow", map[string]any{"child": id})
+}
+
 func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
+	if dc.continuing {
+		return 0, cancelledContinuing()
+	}
 	if len(fs) == 0 {
 		return 0, core.NewError(core.CodeInvalidArgument, "temporal: Select needs at least one future", nil)
 	}
+	if dc.selectIdx < dc.replaySelects {
+		idx := dc.cont.Selects[dc.selectIdx]
+		dc.selectIdx++
+		if idx >= 0 && idx < len(fs) {
+			return idx, nil
+		}
+		return 0, core.NewError(core.CodeInternal, "temporal: replayed select does not match the flow", nil)
+	}
 	for i, f := range fs {
 		if f.Ready() {
+			dc.appendSelect(i)
 			return i, nil
 		}
 	}
@@ -168,40 +347,88 @@ func (dc *durableContext) Select(fs ...runtime.Future) (int, error) {
 			sel.AddFuture(tf.f, func(workflow.Future) { chosen = idx })
 		case *timerFuture:
 			sel.AddFuture(tf.f, func(workflow.Future) { chosen = idx })
+		case *gateFuture:
+			sel.AddFuture(tf.g.wfFut, func(workflow.Future) { chosen = idx })
+		case *childFuture:
+			sel.AddFuture(tf.f, func(workflow.Future) { chosen = idx })
 		case *immediateFuture:
 			if tf.Ready() {
+				dc.appendSelect(idx)
 				return idx, nil
 			}
+		default:
+			return 0, core.NewError(core.CodeInternal, "temporal: unknown future kind in Select", nil)
 		}
 	}
 	sel.Select(dc.wfCtx)
 	if chosen < 0 {
 		for i, f := range fs {
 			if f.Ready() {
+				dc.appendSelect(i)
 				return i, nil
 			}
 		}
 		return 0, core.NewError(core.CodeInternal, "temporal: select finished with no ready future", nil)
 	}
+	dc.appendSelect(chosen)
 	return chosen, nil
 }
 
-// Child is unimplemented until WP-L5-02 pull request (b) (EP0-31).
-func (dc *durableContext) Child(runtime.FlowRef, any, runtime.ChildOptions) runtime.Future {
-	return newImmediate(unsupportedOp("Child"))
+func (dc *durableContext) appendSelect(i int) {
+	dc.cont.Selects = append(dc.cont.Selects, i)
 }
 
-// Await is unimplemented until WP-L5-02 pull request (b) (EP0-31).
-func (dc *durableContext) Await(runtime.GateSpec) runtime.Future {
-	return newImmediate(unsupportedOp("Await"))
+func (dc *durableContext) trackInFlight(f runtime.Future) {
+	dc.inFlight = append(dc.inFlight, f)
 }
 
-// Emit is unimplemented until WP-L5-02 pull request (b) (EP0-31).
-func (dc *durableContext) Emit(runtime.ProgressEvent) error {
-	return unsupportedOp("Emit")
+func (dc *durableContext) compactInFlight() {
+	alive := dc.inFlight[:0]
+	for _, f := range dc.inFlight {
+		if f != nil && !f.Ready() {
+			alive = append(alive, f)
+		}
+	}
+	dc.inFlight = alive
 }
 
-// Checkpoint is unimplemented until WP-L5-02 pull request (b) (EP0-31).
-func (dc *durableContext) Checkpoint(runtime.SnapshotRef) error {
-	return unsupportedOp("Checkpoint")
+func (dc *durableContext) materializeReadyOutcomes() {
+	for _, f := range dc.stepFutures {
+		if sf, ok := f.(*stepFuture); ok {
+			sf.materialize()
+		}
+	}
+	for _, f := range dc.childFutures {
+		if cf, ok := f.(*childFuture); ok {
+			cf.materialize()
+		}
+	}
+}
+
+func (dc *durableContext) recordStep(key string, res json.RawMessage, err error) {
+	dc.cont.ensure()
+	dc.cont.Steps[key] = StepOutcome{Result: append(json.RawMessage(nil), res...), Err: errToJournal(err)}
+}
+
+func (dc *durableContext) recordChild(id string, flow runtime.FlowRef, res json.RawMessage, err error) {
+	dc.cont.ensure()
+	dc.cont.Children[id] = ChildOutcome{
+		Flow:   flow,
+		Result: append(json.RawMessage(nil), res...),
+		Err:    errToJournal(err),
+	}
+}
+
+func journalStepFuture(out StepOutcome) runtime.Future {
+	if out.Err != nil {
+		return newImmediate(journalToErr(out.Err))
+	}
+	return newImmediateResult(out.Result)
+}
+
+func journalChildFuture(out ChildOutcome) runtime.Future {
+	if out.Err != nil {
+		return newImmediate(journalToErr(out.Err))
+	}
+	return newImmediateResult(out.Result)
 }

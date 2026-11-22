@@ -111,7 +111,7 @@ func testLogger(buf *bytes.Buffer) *slog.Logger {
 
 func testEnvWithBlobs(t *testing.T, blobs platform.Blob, logger *slog.Logger) (*Runtime, *testsuite.TestWorkflowEnvironment) {
 	t.Helper()
-	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: blobs, Logger: logger})
+	rt, err := New(Options{Payloads: testSecretsCodec(t), Blobs: blobs, Logger: logger, Outbox: newTestOutbox()})
 	if err != nil {
 		t.Fatal(err)
 	}

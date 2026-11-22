@@ -24,12 +24,16 @@ type contextAwareConverter interface {
 // recordingConverter decorates the production data converter for BDD: it models
 // a tenant-aware client when the SDK encodes without a Go context, records history
 // payloads, and injects the RT-032/033 faults on activity results (activity.IsActivity
-// is true in WithContext for activity encodes). Production WithWorkflowContext is
-// preserved when inWorkflow is set so claim-check runs on the workflow-bound path.
+// is true in WithContext for activity encodes). base is the unbound converter from
+// construction; WithContext/WithWorkflowContext rebind from base so activity encodes
+// never inherit the workflow deadlock detector (SDK lock inversion in test env only).
 type recordingConverter struct {
+	base          converter.DataConverter
 	inner         converter.DataConverter
 	enc           *secrets.Codec
 	tenant        core.TenantID
+	ctxTenant     core.TenantID
+	hasCtxTenant  bool
 	recorded      *[]recordedPayload
 	faultMode     func() string
 	faultKey      func() string
@@ -39,40 +43,66 @@ type recordingConverter struct {
 	inWorkflow    bool
 }
 
-func (d *recordingConverter) aware() contextAwareConverter {
-	ca, _ := d.inner.(contextAwareConverter)
+func (d *recordingConverter) baseConverter() converter.DataConverter {
+	if d.base != nil {
+		return d.base
+	}
+	return d.inner
+}
+
+func (d *recordingConverter) awareOf(dc converter.DataConverter) contextAwareConverter {
+	ca, _ := dc.(contextAwareConverter)
 	return ca
 }
 
+func (d *recordingConverter) aware() contextAwareConverter {
+	return d.awareOf(d.inner)
+}
+
 func (d *recordingConverter) WithContext(ctx context.Context) converter.DataConverter {
+	base := d.baseConverter()
+	t, ok := core.TenantFrom(ctx)
 	c := recordingConverter{
-		inner: d.inner, enc: d.enc, tenant: d.tenant, recorded: d.recorded,
+		base: base, enc: d.enc, tenant: d.tenant, ctxTenant: t, hasCtxTenant: ok,
+		recorded:  d.recorded,
 		faultMode: d.faultMode, faultKey: d.faultKey, faultInjected: d.faultInjected,
 		inActivity: activity.IsActivity(ctx), inWorkflow: d.inWorkflow,
 	}
-	if ca := d.aware(); ca != nil {
+	if ca := d.awareOf(base); ca != nil {
 		c.inner = ca.WithContext(ctx)
+	} else {
+		c.inner = base
 	}
 	return &c
 }
 
 func (d *recordingConverter) WithWorkflowContext(ctx workflow.Context) converter.DataConverter {
+	base := d.baseConverter()
 	c := recordingConverter{
-		inner: d.inner, enc: d.enc, tenant: d.tenant, recorded: d.recorded,
+		base: base, enc: d.enc, tenant: d.tenant, ctxTenant: d.ctxTenant, hasCtxTenant: d.hasCtxTenant,
+		recorded:  d.recorded,
 		faultMode: d.faultMode, faultKey: d.faultKey, faultInjected: d.faultInjected,
 		inActivity: d.inActivity, inWorkflow: true,
 	}
-	if ca := d.aware(); ca != nil {
+	if ca := d.awareOf(base); ca != nil {
 		c.inner = ca.WithWorkflowContext(ctx)
+	} else {
+		c.inner = base
 	}
 	return &c
 }
 
 func (d *recordingConverter) delegate() converter.DataConverter {
-	if ca := d.aware(); ca != nil && d.tenant != "" && !d.inWorkflow {
-		// The SDK test environment encodes workflow input and GetWorkflowResult without
-		// a Go context; a real client always calls with the tenant in ctx.
-		return ca.WithContext(core.WithTenant(context.Background(), d.tenant))
+	if ca := d.aware(); ca != nil && !d.inWorkflow {
+		// Prefer the tenant the SDK supplied in ctx; fall back to the double's
+		// tenant only when the call has no tenant, as the SDK test environment
+		// encodes workflow input and GetWorkflowResult without a Go context.
+		if d.hasCtxTenant {
+			return ca.WithContext(core.WithTenant(context.Background(), d.ctxTenant))
+		}
+		if d.tenant != "" {
+			return ca.WithContext(core.WithTenant(context.Background(), d.tenant))
+		}
 	}
 	return d.inner
 }

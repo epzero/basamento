@@ -14,8 +14,8 @@ import (
 )
 
 func TestRunStepActivityUnregisteredIsCodedNonRetryable(t *testing.T) {
-	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t)})
-	_, err := rt.runStepActivity(context.Background(), stepActivityInput{Name: "nope"})
+	rt, _ := New(testOptions(t))
+	_, err := rt.runStepActivity(context.Background(), StepActivityInput{Name: "nope"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -34,11 +34,12 @@ func TestRunStepActivityLogsPlainError(t *testing.T) {
 		Payloads: testSecretsCodec(t),
 		Blobs:    testBlobStore(t),
 		Logger:   slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})),
+		Outbox:   newTestOutbox(),
 	})
 	_ = rt.RegisterStep("x", func(context.Context, json.RawMessage) (json.RawMessage, error) {
 		return nil, errors.New("plain-secret")
 	}, runtime.StepDefaults{})
-	_, err := rt.runStepActivity(context.Background(), stepActivityInput{Name: "x"})
+	_, err := rt.runStepActivity(context.Background(), StepActivityInput{Name: "x"})
 	if err == nil {
 		t.Fatal(err)
 	}

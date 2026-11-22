@@ -42,18 +42,6 @@ func finishWorkflowInt64(t *testing.T, env *testsuite.TestWorkflowEnvironment) i
 	return out
 }
 
-func finishWorkflowStrings(t *testing.T, env *testsuite.TestWorkflowEnvironment) []string {
-	t.Helper()
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow error: %v", err)
-	}
-	var out []string
-	if err := env.GetWorkflowResult(&out); err != nil {
-		t.Fatalf("workflow result: %v", err)
-	}
-	return out
-}
-
 func TestSelectRejectsEmpty(t *testing.T) {
 	rt, env := testEnv(t)
 	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
@@ -366,35 +354,6 @@ func TestIdempotencyKeyOverridesDefaultActivityID(t *testing.T) {
 	}
 }
 
-func TestUnsupportedDurableOps(t *testing.T) {
-	rt, env := testEnv(t)
-	_ = rt.RegisterFlowHost(func(dc runtime.DurableContext, _ runtime.FlowRef, _ json.RawMessage) (json.RawMessage, error) {
-		var scratch any
-		childErr := dc.Child(runtime.FlowRef{}, nil, runtime.ChildOptions{}).Get(&scratch)
-		awaitErr := dc.Await(runtime.GateSpec{}).Get(&scratch)
-		codes := []string{
-			string(core.CodeOf(dc.Emit(runtime.ProgressEvent{}))),
-			string(core.CodeOf(dc.Checkpoint(runtime.SnapshotRef{}))),
-			string(core.CodeOf(childErr)),
-			string(core.CodeOf(awaitErr)),
-		}
-		return json.Marshal(codes)
-	})
-	_ = rt.Register(env)
-	setTestTenantHeader(env, "acme")
-	env.ExecuteWorkflow(HostWorkflowName, HostInput{Flow: runtime.FlowRef{Name: "u"}, RunID: "r1"})
-	got := finishWorkflowStrings(t, env)
-	want := []string{"unsupported", "unsupported", "unsupported", "unsupported"}
-	if len(got) != len(want) {
-		t.Fatalf("codes %v", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("codes[%d]=%q want %q", i, got[i], want[i])
-		}
-	}
-}
-
 func TestFlowHostPanicFailsWithFixedMessage(t *testing.T) {
 	var buf bytes.Buffer
 	rt, env := testEnv(t)
@@ -421,7 +380,7 @@ func TestFlowHostPanicFailsWithFixedMessage(t *testing.T) {
 }
 
 func TestRegisterRequiresFlowHost(t *testing.T) {
-	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t)})
+	rt, _ := New(testOptions(t))
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	if err := rt.Register(env); core.CodeOf(err) != core.CodeUnavailable {

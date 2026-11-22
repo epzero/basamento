@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/runtime"
@@ -63,9 +62,4 @@ func flowPanicErr() error {
 
 func stepPanicErr(step string) error {
 	return core.NewError(core.CodeInternal, "temporal: step panicked", map[string]any{"step": step})
-}
-
-func unsupportedOp(name string) error {
-	return core.NewError(core.CodeUnsupported,
-		fmt.Sprintf("temporal: %s arrives with the next change of WP-L5-02 (EP0-31)", name), nil)
 }

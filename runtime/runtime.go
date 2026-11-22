@@ -8,7 +8,7 @@
 // docs/architecture/runtime.md.
 //
 // Status: contract implemented; runtime/local implemented (WP-L5-01); the
-// Temporal runtime is planned (WP-L5-02).
+// Temporal runtime is in progress (WP-L5-02).
 package runtime
 
 import (
