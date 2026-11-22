@@ -59,6 +59,16 @@ type convState struct {
 	refused string
 	next    convScript
 	seq     int
+
+	// The durable-call premise of REQ-CONV-014: premise says each turn costs
+	// the coordinator its own Await, Select, Step and Child calls, and
+	// premiseChildCalls how many durable calls the child makes inside itself.
+	// The harness checks the coordinator's journaled count against the calls
+	// it saw the coordinator make at every turn end, so a coordinator that
+	// also counted the child's calls fails.
+	premise           bool
+	premiseChildCalls int
+	premiseErr        error
 }
 
 type convRun struct {
@@ -347,8 +357,22 @@ func (d *convDC) Step(name string, in any, _ runtime.StepOptions) runtime.Future
 		d.state.refused = refused.Code
 		d.state.mu.Unlock()
 	} else if rec, ok := in.(conversation.Record); ok {
+		own := d.callsMade()
 		d.state.mu.Lock()
 		d.state.record = rec
+		if d.state.premise && strings.HasSuffix(name, "-end") {
+			// The record passed to a step is the snapshot before the step's
+			// own DurableCall, so the step itself is the difference. The
+			// child's durable calls happen in the child's run and never reach
+			// this context, so its journaled count must equal the calls the
+			// harness saw the coordinator make. A coordinator that counted
+			// the child's calls would journal more.
+			if rec.Calls+1 != own {
+				d.state.premiseErr = fmt.Errorf(
+					"the coordinator journalled %d durable calls but made %d itself at turn %d (the child made %d): child calls were counted",
+					rec.Calls+1, own, len(rec.Turns), d.state.premiseChildCalls)
+			}
+		}
 		d.state.mu.Unlock()
 	}
 	return readyFuture{}
@@ -445,6 +469,9 @@ type continueAsNew struct{}
 func (continueAsNew) Error() string { return "conversation harness: continue as new" }
 
 func (d *convDC) Checkpoint(runtime.SnapshotRef) error {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
 	d.state.mu.Lock()
 	turns := len(d.state.record.Turns)
 	d.state.run.checks = append(d.state.run.checks, turns)
@@ -1205,20 +1232,27 @@ func registerConversation(sc *godog.ScenarioContext) {
 		world(ctx).Conversation = newConvWorld()
 		return ctx, nil
 	})
-	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, scenarioErr error) (context.Context, error) {
 		w := world(ctx).Conversation
 		if w == nil {
 			return ctx, nil
 		}
+		var premiseErr error
 		for _, byID := range w.convs {
 			for _, c := range byID {
 				c.mu.Lock()
 				gens := append([]*convDC(nil), c.gens...)
+				if c.premiseErr != nil {
+					premiseErr = c.premiseErr
+				}
 				c.mu.Unlock()
 				for _, dc := range gens {
 					dc.stop()
 				}
 			}
+		}
+		if scenarioErr == nil {
+			return ctx, premiseErr
 		}
 		return ctx, nil
 	})
@@ -1874,11 +1908,24 @@ func registerConversation(sc *godog.ScenarioContext) {
 		c.threshold = n
 		return nil
 	})
-	// The premise is structural: only Await, Select, Step and Child reach the
-	// durable context; the scripted child's model calls never do, so they can
-	// never be counted as the coordinator's own durable calls.
+	// The premise of REQ-CONV-014: a turn costs the coordinator its own Await,
+	// Select, Step and Child calls, and the child makes childCalls durable
+	// calls inside itself. convDC.Step checks at every turn end that the
+	// coordinator's journaled count is exactly the calls this context saw it
+	// make, so a record that also counted the child's calls fails the
+	// scenario.
 	sc.Step(`^each turn of conversation "([^"]*)" is the coordinator's Await, Select, Step and Child(?:, and (\d+) durable calls in the child run)?$`, func(ctx context.Context, id, childCalls string) error {
-		_ = world(ctx).Conversation.currentOrNew()
+		c := world(ctx).Conversation.currentOrNew()
+		n := 0
+		if childCalls != "" {
+			if _, err := fmt.Sscanf(childCalls, "%d", &n); err != nil {
+				return err
+			}
+		}
+		c.mu.Lock()
+		c.premise = true
+		c.premiseChildCalls = n
+		c.mu.Unlock()
 		return nil
 	})
 	sc.Step(`^(\d+) turns of conversation "([^"]*)" have completed$`, func(ctx context.Context, n int, id string) error {
