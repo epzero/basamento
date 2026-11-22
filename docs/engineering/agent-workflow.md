@@ -44,19 +44,36 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   inside the working issue worktree.
 - **`-branch`** names are validated in pure Go before any `git` call: letters,
   digits, `-` and `_` only, not starting with `-`, and not `HEAD` (no `/`,
-  spaces, refspecs, or path components).
+  spaces, refspecs, or path components). A branch is checked out in at most
+  one worktree at a time. Before listing worktrees, `gate agent new` prunes
+  registrations whose directory is already gone, so a deleted worktree never
+  blocks a retry. If it is already checked out in a linked worktree,
+  `gate agent new -branch` refuses with that worktree's path and tells you to
+  work there or `gate agent release` that worktree first. If it is checked out
+  in the main checkout, the refusal names that path and tells you to switch
+  that checkout to another branch (for example `git switch main`), then retry, or
+  work there. If the branch is not on `origin` yet, the refusal tells you to
+  push it from the clone that started it, then run `gate agent new -branch`
+  again.
+- **Squash-merged branches.** `gate agent list` and release also treat a branch
+  as merged when `squashed()` applies: `branch.<name>.remote` is set (only
+  `git push -u origin <branch>` does that; a plain `git push origin <branch>`
+  does not), and after `git fetch --prune` the remote-tracking branch is gone.
+  Without that upstream config, `squashed()` never applies; `agent list` does
+  not show the branch as merged and release refuses until merge or `-force`.
 - **Leads stay in the main checkout**, as do sessions started with
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
   committed file. The command prints the hand-off the previous session left.
   The file is replaced atomically, so a crash never leaves half a hand-off.
-- **Calls to `gate agent new` for one work item are serialised** by a lock in
-  the repository's common git directory: two sessions for the same issue
-  cannot both create its worktree and overwrite each other's hand-off. The lock
-  covers `gate agent new` only; `gate agent status` and `gate agent release`
-  take no lock. A second `agent new` waits up to 80 seconds (two bounded
-  remote calls plus local work), then reports that the first call may still be
-  running.
+- **Session writers are serialised** by one lock file in the repository's
+  common git directory (`basamento-locks/clone.lock`): `gate agent new`,
+  `gate agent status` and `gate agent release` each take it for the whole
+  read-modify-write of `basamento-agent.json` (and worktree creation on
+  `agent new`). Read-only commands such as `agent list` and `agent whoami` do
+  not. A second writer waits up to 80 seconds (two sequential bounded remote
+  git calls on the slowest `agent new` path, plus local work), then reports
+  that another `gate agent` command in this clone may still be running.
 - **Remote git calls are bounded.** A `fetch` or `ls-remote` gives up after 30
   seconds and says what to check (the remote, the network, the credentials). git
   is killed at the deadline, and the call is force-closed a few seconds later
