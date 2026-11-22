@@ -26,6 +26,13 @@ type LayeringRules struct {
 	TestOnlyOK []string `yaml:"test_only_allowed_from"`
 	// DenyExternal maps a layer to import path prefixes it must not use.
 	DenyExternal map[string][]string `yaml:"deny_external"`
+	// known is the set of package paths in this module, filled by Layering
+	// from go list. nested holds the module-prefixed import path of each
+	// nested module root (for example presets/codegen), filled from
+	// ModuleRoots. A module-path import outside every layer and not in known
+	// is external only when it belongs to a nested module.
+	known  map[string]bool
+	nested []string
 }
 
 type goPkg struct {
@@ -91,6 +98,22 @@ func Layering(root string) ([]string, error) {
 	pkgs, err := goListPackages(root)
 	if err != nil {
 		return nil, err
+	}
+	known := make(map[string]bool, len(pkgs))
+	for _, p := range pkgs {
+		known[p.ImportPath] = true
+	}
+	r.known = known
+	roots, err := ModuleRoots(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, mr := range roots {
+		rel := filepath.ToSlash(mr)
+		if rel == "." || relPathSkipped(rel) {
+			continue
+		}
+		r.nested = append(r.nested, r.Module+"/"+rel)
 	}
 	attributed, err := attributedGoFiles(pkgs)
 	if err != nil {
@@ -172,30 +195,46 @@ func goListPackages(root string) ([]goPkg, error) {
 	return pkgs, nil
 }
 
+// nestedModule reports whether imp names a package under a nested module root.
+func (r LayeringRules) nestedModule(imp string) bool {
+	for _, root := range r.nested {
+		if imp == root || strings.HasPrefix(imp, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // checkImport returns a violation message for one import, or "" if allowed.
 func checkImport(r LayeringRules, rel, layer, imp string, ctx importCheck) string {
 	if strings.HasPrefix(imp, r.Module+"/") {
 		dep := strings.TrimPrefix(imp, r.Module+"/")
-		testOnly := matchLayer(dep, r.TestOnly) != ""
-		if testOnly && !ctx.testRules() && matchLayer(rel, r.TestOnlyOK) == "" {
+		// An import under a layer stays in this module's graph even when it
+		// is a nested module (runtime/temporal/embedded) or a typo: the
+		// layer rule judges it. Outside every layer only a nested module
+		// (presets/codegen) is external like any other dependency.
+		depLayer := matchLayer(dep, keys(r.Layers))
+		if depLayer != "" || r.known[imp] || !r.nestedModule(imp) {
+			testOnly := matchLayer(dep, r.TestOnly) != ""
+			if testOnly && !ctx.testRules() && matchLayer(rel, r.TestOnlyOK) == "" {
+				sfx := ctx.suffix()
+				if sfx == "" {
+					return fmt.Sprintf("%s imports test-only package %s", rel, dep)
+				}
+				return fmt.Sprintf("%s (layer %s%s) imports test-only package %s", rel, layer, sfx, dep)
+			}
+			if testOnly && ctx.testRules() {
+				return ""
+			}
+			if depLayer == layer || matchLayer(dep, r.Layers[layer]) != "" {
+				return ""
+			}
 			sfx := ctx.suffix()
 			if sfx == "" {
-				return fmt.Sprintf("%s imports test-only package %s", rel, dep)
+				return fmt.Sprintf("%s (layer %s) may not import %s (layer %s)", rel, layer, dep, depLayer)
 			}
-			return fmt.Sprintf("%s (layer %s%s) imports test-only package %s", rel, layer, sfx, dep)
+			return fmt.Sprintf("%s (layer %s%s) may not import %s (layer %s)", rel, layer, sfx, dep, depLayer)
 		}
-		if testOnly && ctx.testRules() {
-			return ""
-		}
-		depLayer := matchLayer(dep, keys(r.Layers))
-		if depLayer == layer || matchLayer(dep, r.Layers[layer]) != "" {
-			return ""
-		}
-		sfx := ctx.suffix()
-		if sfx == "" {
-			return fmt.Sprintf("%s (layer %s) may not import %s (layer %s)", rel, layer, dep, depLayer)
-		}
-		return fmt.Sprintf("%s (layer %s%s) may not import %s (layer %s)", rel, layer, sfx, dep, depLayer)
 	}
 	for _, deny := range r.DenyExternal[layer] {
 		if strings.HasPrefix(imp, deny) {

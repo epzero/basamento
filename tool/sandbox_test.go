@@ -296,7 +296,7 @@ func TestRunSandboxWithoutCredentialStoreIsUnauthenticated(t *testing.T) {
 }
 
 func TestRunSandboxRejectsUnsafeFiles(t *testing.T) {
-	for _, name := range []string{"", "../escape", "/abs", "a/../../b", `a\b`} {
+	for _, name := range []string{"", "../escape", "/abs", "a/../../b", "a/../b", "a//b", "a/", ".", `a\b`, "a\x00b"} {
 		t.Run(name, func(t *testing.T) {
 			sb := &scriptedSandbox{}
 			_, err := layerWith(fixedClock(), newMemBlob(), nil).RunSandbox(context.Background(), sb,

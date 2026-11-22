@@ -1,6 +1,6 @@
 # Presets: code generation as flows
 
-Status: **Planned** (WP-L10-01). Roadmap: `docs/roadmap/L10-presets.md`. Design: ADR-0003, ADR-0011, `design.md`.
+Status: **Implemented** (WP-L10-01). Roadmap: `docs/roadmap/L10-presets.md`. Design: ADR-0003, ADR-0011, `design.md`.
 
 The code generator is a preset: its own Go module and binary, importing
 Basamento as a library, not compiled into `kit`.

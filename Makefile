@@ -88,11 +88,17 @@ spec: ## G2
 	$(GATE) spec lock
 	$(GATE) docs
 
-# Packages excluding internal/bdd (BDD runs separately so the skip summary runs after it).
-GATE_TEST_PKGS := $(shell $(GO) list ./... | grep -v '/internal/bdd$$')
-
+# One go test per module root, excluding internal/bdd (BDD runs separately so
+# the skip summary runs after it).
 test: ## G3 (includes the BDD suite)
-	$(GO) test -race -count=1 $(GATE_TEST_PKGS)
+	@set -e; roots="$$($(GATE) module-roots)" || exit 1; [ -n "$$roots" ] || { echo "gate: no module roots"; exit 1; }; \
+	for dir in $$roots; do \
+		pkgs="$$(cd "$$dir" && $(GO) list ./...)" || exit 1; \
+		pkgs="$$(printf '%s\n' "$$pkgs" | grep -v '/internal/bdd$$' || true)"; \
+		[ -n "$$pkgs" ] || continue; \
+		echo "gate: test $$dir"; \
+		(cd "$$dir" && $(GO) test -race -count=1 $$pkgs) || exit 1; \
+	done
 	$(MAKE) --no-print-directory bdd
 
 bdd:

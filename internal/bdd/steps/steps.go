@@ -20,6 +20,7 @@ type World struct {
 	Blob        *blobWorld
 	Bus         *busWorld
 	Catalog     *catalogWorld
+	Codegen     *codegenWorld
 	Config      *configWorld
 	Core        *coreWorld
 	Credentials *credentialsWorld
@@ -65,6 +66,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerBlobUploads(sc)
 	registerBus(sc)
 	registerCatalog(sc)
+	registerCodegen(sc)
 	registerConfig(sc)
 	registerConfigServe(sc)
 	registerCore(sc)

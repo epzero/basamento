@@ -94,7 +94,7 @@ Only these tags are allowed (lint rejects others):
 | `@smoke` | Part of the binary smoke run (gate G6). |
 | `@slow` | Excluded from the PR gate; nightly. |
 | `@live` | Needs real vendor credentials; nightly only. |
-| `@eval` | Statistical LLM-quality check with a threshold; nightly against live models, PR gate against recordings. |
+| `@eval` | Statistical LLM-quality check with a threshold; the nightly eval lane replays the recordings in `presets/codegen/evals` (`CODEGEN_EVAL_DIR`). The PR gate excludes it. |
 | `@journey` | A UI scenario, executed by the browser runner. |
 | `@quarantine` + `@issue:<key>` + `@until:<YYYY-MM-DD>` | Temporarily excluded; expires (lint fails after the date). |
 
@@ -126,8 +126,12 @@ registers a shared text itself; `World` fields and the `register*` calls in
 
 | Lane | Where AI acts | Determinism in the PR gate |
 | --- | --- | --- |
-| `@eval` | An LLM judge scores outputs over N runs against a threshold (nightly). | The gate replays recorded judge outputs; re-recording is a reviewed change. |
+| `@eval` | An LLM judge scores outputs over N runs against a threshold; the nightly eval lane replays the recorded case scores. | Re-recording is a reviewed change; `CODEGEN_EVAL_DIR` names the recordings. |
 | `@journey` | The browser runner resolves a declarative step into UI actions **once**, then records them (with rrweb). | The gate replays recorded actions. When the UI changes, a nightly job re-resolves and opens a change, reviewed like a spec change, so a real bug is never "healed" into a pass. |
+
+The `@eval` lane runs with `BDD_TAGS='@eval && ~@planned && ~@quarantine'` and
+`CODEGEN_EVAL_DIR=<repo>/presets/codegen/evals`. The scenarios read their
+thresholds from `eval.feature`; the suite only collects the recorded values.
 
 ## 6. Approval and change control
 

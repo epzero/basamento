@@ -33,7 +33,23 @@ func layeringModule(t *testing.T, extra map[string]string) string {
 	for k, v := range extra {
 		files[k] = v
 	}
-	return writeTree(t, files)
+	root := writeTree(t, files)
+	// ModuleRoots reads tracked go.mod files; the fixture needs a git index.
+	mustGit(t, root, "init", "-q")
+	mustGit(t, root, "add", "-A")
+	return root
+}
+
+// fakeGoList installs a `go` that prints lines for every invocation, including
+// the `go list -m` probe nestedModuleLoads makes inside a nested module.
+func fakeGoList(t *testing.T, lines ...string) {
+	t.Helper()
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncat <<'EOF'\n" + strings.Join(lines, "\n") + "\nEOF\n"
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestLayeringProductionViolation(t *testing.T) {
@@ -49,6 +65,70 @@ func TestLayeringProductionViolation(t *testing.T) {
 	want := []string{"low/c (layer low) may not import high/b (layer high)"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// TestLayeringModulePathImports pins S1: a module-path import under a layer is
+// judged by that layer's rule even when it names a nested module or a typo,
+// while a nested module outside every layer stays external (presets/codegen).
+func TestLayeringModulePathImports(t *testing.T) {
+	const rules = `module: m
+layers:
+  flow: []
+  runtime: []
+  runtime/temporal: [runtime]
+  internal/bdd: []
+`
+	cases := []struct {
+		name   string
+		files  map[string]string
+		goList string
+		want   []string
+	}{
+		{
+			name: "nested module under a layer follows the layer rule",
+			files: map[string]string{
+				"layering.yaml":                         rules,
+				"runtime/temporal/embedded/go.mod":      "module m/runtime/temporal/embedded\n\ngo 1.22.0\n",
+				"runtime/temporal/embedded/embedded.go": "package embedded\n",
+				"flow/f.go":                             "package flow\n\nimport _ \"m/runtime/temporal/embedded\"\n",
+			},
+			goList: `{"ImportPath":"m/flow","Dir":"$ROOT/flow","GoFiles":["f.go"],"Imports":["m/runtime/temporal/embedded"]}`,
+			want:   []string{"flow (layer flow) may not import runtime/temporal/embedded (layer runtime/temporal)"},
+		},
+		{
+			name: "typo import inside a layer",
+			files: map[string]string{
+				"layering.yaml": rules,
+				"flow/f.go":     "package flow\n\nimport _ \"m/runtime/temporl\"\n",
+			},
+			goList: `{"ImportPath":"m/flow","Dir":"$ROOT/flow","GoFiles":["f.go"],"Imports":["m/runtime/temporl"]}`,
+			want:   []string{"flow (layer flow) may not import runtime/temporl (layer runtime)"},
+		},
+		{
+			name: "nested module outside every layer is external",
+			files: map[string]string{
+				"layering.yaml":               rules,
+				"presets/codegen/go.mod":      "module m/presets/codegen\n\ngo 1.22.0\n",
+				"presets/codegen/codegen.go":  "package codegen\n",
+				"internal/bdd/steps/steps.go": "package steps\n\nimport _ \"m/presets/codegen\"\n",
+			},
+			goList: `{"ImportPath":"m/internal/bdd/steps","Dir":"$ROOT/internal/bdd/steps","GoFiles":["steps.go"],"Imports":["m/presets/codegen"]}`,
+			want:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := layeringModule(t, tc.files)
+			fakeGoList(t, strings.ReplaceAll(tc.goList, "$ROOT", filepath.ToSlash(root)))
+			got, err := Layering(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

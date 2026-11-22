@@ -174,11 +174,19 @@ func scriptedFinishes(ctx context.Context) error {
 }
 
 func runCompletes(ctx context.Context) error {
-	w, err := streamWorldOrError(ctx)
-	if err != nil {
-		return err
+	if w := world(ctx).Stream; w != nil && w.live != nil {
+		return w.finish(ctx)
 	}
-	return w.finish(ctx)
+	// The codegen preset's scenarios use the same phrase. Its world exists
+	// for every scenario, so the stream world is what tells the two apart.
+	w := world(ctx).Codegen
+	if w.err != nil {
+		return w.err
+	}
+	if w.state == nil || w.state.Failed || !w.state.Done {
+		return fmt.Errorf("the run did not complete")
+	}
+	return nil
 }
 
 func userCancels(ctx context.Context, user string) error {
