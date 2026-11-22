@@ -72,22 +72,6 @@ new one and replacing the stored record. Every rejection is
   `platform/sql` connector; production uses `bas_app` on `sql.url` with an
   open-time check that the role is not superuser and does not bypass RLS; the
   gate fixture creates `bas_app` and opens the store on a real application URL.
-
-### Postgres RLS operator setup (cloud)
-
-Before the first migrate against an empty database (once per cluster):
-
-1. Create role `bas_app` with `LOGIN`, not `SUPERUSER`, not `BYPASSRLS`; grant
-   `CONNECT` on the application database.
-2. On PostgreSQL 14 and earlier, also run
-   `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` so only the migration login
-   can create objects.
-3. Store `sql.migrate_url` (migration login) and `sql.url` (`bas_app`) in the
-   secrets port; migrations never create roles or embed passwords (ADR D2).
-
-The migration login owns tenant tables; postgres-only goose fragments grant DML
-to `bas_app` and attach policies (ADR D3–D5). Backups need a separate role with
-`BYPASSRLS` or superuser (ADR D7).
 - **Worker tokens**: scoped to one session's resources with a fixed expiry,
   for the browser runner and other external services (REQ-AUTH-005).
 - **Pool tokens**: let a `kit worker` join one pool, and nothing else.
@@ -102,3 +86,22 @@ to `bas_app` and attach policies (ADR D3–D5). Backups need a separate role wit
   walk out of the tenant's entries (REQ-CRED-006, REQ-CRED-007).
 - The `Authorizer` port leaves room for OpenFGA if sharing ever becomes
   graph-shaped.
+
+### Postgres RLS operator setup (cloud)
+
+Before the first migrate against an empty database (once per cluster):
+
+1. Create role `bas_app` with `LOGIN`, not `SUPERUSER`, not `BYPASSRLS`; grant
+   `CONNECT` on the application database.
+2. Provision a **separate migration login** for `sql.migrate_url` (must not be
+   the same role as `bas_app`; it owns tables after migrate).
+3. On PostgreSQL 14 and earlier, run
+   `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` so only the migration login
+   can create objects.
+4. Store both URLs in the secrets port; migrations never create roles or embed
+   passwords (ADR D2).
+
+Postgres-only goose fragments grant `bas_app`: full DML on tenant tables;
+`SELECT`, `UPDATE` on `audit_seq`; nothing on the goose table. Fragments attach
+RLS policies (ADR D3–D5). Backups use a superuser or `BYPASSRLS` role, not
+`bas_app` (ADR D7).

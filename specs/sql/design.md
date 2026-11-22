@@ -77,17 +77,24 @@ decisions are [ADR-0022](../../docs/adr/0022-postgres-row-level-security.md)
 number.
 
 **Open (ADR D2, D3).** `Open` gains an explicit **RLS mode** option the cloud
-profile sets; without it Postgres behaviour stays as today. In RLS mode:
-`OpenOptions` carries `MigrateURL` (`sql.migrate_url`) and uses `rawURL`
-(`sql.url`, `bas_app`) for the application pool. One shared migration `fs.FS`
-per open; files `NNNNN_<name>.postgres.sql` are goose-excluded on SQLite and
-omitted from `maxMigrationVersion` / `checkSchemaVersion` (D3). Migrate runs on
-`MigrateURL`, then the pool opens on `sql.url`. On RLS mode startup the app pool
-runs the role self-check (D2). Merging migration FS from several packages is a
-host concern—see ADR D3 follow-up.
+profile sets; without it Postgres behaviour stays as today. RLS mode refuses
+`invalid_argument` when: URL is not Postgres; `MigrateURL` is missing; migrate
+and application URLs resolve to the same `current_user`; or the application
+role is superuser or has `BYPASSRLS`. In RLS mode `OpenOptions` carries
+`MigrateURL` (`sql.migrate_url`, **EP0-217**) and uses `rawURL` (`sql.url`,
+`bas_app`) for the application pool. Migrate runs on `MigrateURL`, then the
+pool opens on `sql.url`. **Role self-check** runs on a short-lived plain
+connection to `sql.url` before the tenant wrapper is registered (D2); then that
+handle is closed.
+
+One shared migration `fs.FS` per open; `platform/sql` walks the FS and passes
+**exact** basenames ending in `.postgres.sql` to `goose.WithExcludeNames` on
+SQLite (not a glob pattern). `maxMigrationVersion` and `checkSchemaVersion`
+skip the same names (D3). Multi-package merge: **EP0-216**.
 
 **Wrapper (ADR D1, D5, D6).** Postgres application pools in RLS mode register
-the tenant connector wrapper (pgx stdlib). Invariants: per-statement
+the tenant connector wrapper (pgx stdlib). A `sql.Tx` does not pin the tenant;
+each statement uses its own context's tenant. Invariants: per-statement
 `set_config` when cached tenant or system scope differs; cache unknown after
 errors, `Rollback`, failed `Commit`; no unconditional `RESET` on reuse;
 `ResetSession` forwards to pgx; every driver statement path intercepted;
