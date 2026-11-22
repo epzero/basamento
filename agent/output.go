@@ -48,17 +48,27 @@ type carried struct {
 }
 
 // parseHandoff reads an agent node's input. It returns nil when the input is
-// not a handoff, so the node starts its own run.
+// not a handoff, so the node starts its own run with a user message from it
+// (REQ-AGENT-031): only a JSON object whose state is "handoff" carries one, so
+// any other JSON — including an object whose keys clash with the envelope's
+// types — is plain input rather than an invalid handoff. Only a malformed real
+// handoff fails.
 func parseHandoff(input json.RawMessage) (*carried, error) {
-	if len(bytes.TrimSpace(input)) == 0 {
+	trimmed := bytes.TrimSpace(input)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, nil
+	}
+	// The discriminator decides before the envelope is decoded: decoding every
+	// object into Output would reject plain input whose keys have other types.
+	var disc struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(trimmed, &disc); err != nil || disc.State != StateHandoff {
 		return nil, nil
 	}
 	var out Output
-	if err := json.Unmarshal(input, &out); err != nil {
+	if err := json.Unmarshal(trimmed, &out); err != nil {
 		return nil, invalid("agent: invalid handoff input: "+err.Error(), nil)
-	}
-	if out.State != StateHandoff {
-		return nil, nil
 	}
 	c := &carried{turns: out.Turns, timeCap: out.TimeCap}
 	if out.StartedAt != nil {

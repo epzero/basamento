@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/eino-contrib/jsonschema"
@@ -121,6 +122,16 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 	if err != nil {
 		return nil, err
 	}
+	// A run that starts without a handoff seeds its history with one user
+	// message from the node input (REQ-AGENT-031). A handoff target is not
+	// seeded again: its history is exactly the carried turns (REQ-AGENT-017).
+	var seed *schema.Message
+	if carry == nil {
+		seed, err = userMessage(input)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	ctx := dc.Context()
 	startedAt := dc.Now()
@@ -153,9 +164,16 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 			return finish(StateStepCap, turns, "")
 		}
 		// 4. The memory policy and input token limit (REQ-AGENT-023…027).
-		messages, dropped, err := buildMessages(spec.System, turns, spec.InputTokens)
+		messages, dropped, err := buildMessages(spec.System, seed, turns, spec.InputTokens)
 		if err != nil {
 			return nil, err
+		}
+		// REQ-AGENT-032: a request with no non-system message is never sent.
+		// The backstop runs after the memory policy (so a system message over
+		// the limit is reported as such) and before any reservation or
+		// invocation.
+		if !hasNonSystem(messages) {
+			return nil, invalid(fmt.Sprintf("agent %q: the run has no user message", node.Name), nil)
 		}
 		if h.opts.Observer != nil && dropped > 0 {
 			h.opts.Observer.Dropped(own, dropped)
@@ -286,6 +304,43 @@ func (h *Handler) handle(dc runtime.DurableContext, node Node, input json.RawMes
 			turns[len(turns)-1].Results = append(turns[len(turns)-1].Results, toolMessage(call, outcome))
 		}
 	}
+}
+
+// userMessage builds a run's seed user message from the node input
+// (REQ-AGENT-031): a JSON string contributes its decoded text, any other
+// non-empty JSON its compact bytes, and empty or whitespace-only input no
+// message at all. The seed is the run's first turn for the memory policy, so it
+// is never dropped and is weighted by its content estimate.
+func userMessage(input json.RawMessage) (*schema.Message, error) {
+	trimmed := bytes.TrimSpace(input)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	// A JSON string decodes to text; JSON null decodes to a nil pointer and is
+	// not a string, so it and every other non-string JSON seed their bytes.
+	var text *string
+	if err := json.Unmarshal(trimmed, &text); err == nil && text != nil {
+		if strings.TrimSpace(*text) == "" {
+			return nil, nil
+		}
+		return &schema.Message{Role: schema.User, Content: *text}, nil
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, trimmed); err != nil {
+		return nil, invalid("agent: node input is not JSON: "+err.Error(), nil)
+	}
+	return &schema.Message{Role: schema.User, Content: compact.String()}, nil
+}
+
+// hasNonSystem reports whether the assembled request carries a message the
+// model can answer: a user message or a model turn, not only system ones.
+func hasNonSystem(messages []*schema.Message) bool {
+	for _, m := range messages {
+		if m.Role != schema.System {
+			return true
+		}
+	}
+	return false
 }
 
 func finish(state string, turns []Turn, answer string) (json.RawMessage, error) {

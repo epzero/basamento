@@ -7,21 +7,28 @@ import (
 )
 
 // buildMessages builds the messages of a model turn: the agent's system
-// messages, then each kept model turn with the tool results that followed it
-// (specs/agents/design.md §5). When the history exceeds limit, it keeps the
-// system messages and the first model turn whole, then the most recent whole
-// turns that fit in the remainder, latest first, dropping whole turns
-// (REQ-AGENT-023, REQ-AGENT-024, REQ-AGENT-025). A weight that was not
-// declared or reported is estimated from its content, so an unweighed message
-// is never free; the kept set is measured once the messages are assembled, and
-// one that exceeds limit fails the run (REQ-AGENT-027). The second result is
-// the number of messages dropped; limit <= 0 means no limit.
-func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema.Message, int, error) {
+// messages, the run's seed user message when it has one, then each kept model
+// turn with the tool results that followed it (specs/agents/design.md §5).
+// When the history exceeds limit, it keeps the system messages, the seed and
+// the first model turn whole, then the most recent whole turns that fit in the
+// remainder, latest first, dropping whole turns (REQ-AGENT-023, REQ-AGENT-024,
+// REQ-AGENT-025). A weight that was not declared or reported is estimated from
+// its content, so an unweighed message is never free; the seed is weighted the
+// same way and never dropped (REQ-AGENT-031), and the kept set is measured once
+// the messages are assembled, so one that exceeds limit fails the run
+// (REQ-AGENT-027). The second result is the number of messages dropped;
+// limit <= 0 means no limit.
+func buildMessages(system []SystemMessage, seed *schema.Message, turns []Turn, limit int64) ([]*schema.Message, int, error) {
 	sysTokens := int64(0)
 	for _, m := range system {
 		sysTokens += systemTokens(m)
 	}
-	total := sysTokens
+	seedTokens := int64(0)
+	if seed != nil {
+		seedTokens = contentTokens(seed.Content)
+	}
+	fixed := sysTokens + seedTokens
+	total := fixed
 	for _, t := range turns {
 		total += turnTokens(t)
 	}
@@ -35,17 +42,17 @@ func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema
 		for i := range kept {
 			kept[i] = false
 		}
-		if sysTokens > limit {
-			return nil, 0, invalid("agent: system messages exceed the input token limit", map[string]any{
-				"input_tokens": limit, "used": sysTokens,
+		if fixed > limit {
+			return nil, 0, invalid("agent: the messages before the first model turn exceed the input token limit", map[string]any{
+				"input_tokens": limit, "used": fixed,
 			})
 		}
-		remainder := limit - sysTokens
+		remainder := limit - fixed
 		start := 0
 		if len(turns) > 0 {
 			if turnTokens(turns[0]) > remainder {
 				return nil, 0, invalid("agent: the first model turn exceeds the input token limit", map[string]any{
-					"input_tokens": limit, "used": sysTokens + turnTokens(turns[0]),
+					"input_tokens": limit, "used": fixed + turnTokens(turns[0]),
 				})
 			}
 			kept[0] = true
@@ -67,9 +74,12 @@ func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema
 		}
 	}
 
-	msgs := make([]*schema.Message, 0, len(system)+len(turns))
+	msgs := make([]*schema.Message, 0, len(system)+1+len(turns))
 	for _, m := range system {
 		msgs = append(msgs, &schema.Message{Role: schema.System, Content: m.Content})
+	}
+	if seed != nil {
+		msgs = append(msgs, seed)
 	}
 	for i, turn := range turns {
 		if !kept[i] {
@@ -93,7 +103,7 @@ func buildMessages(system []SystemMessage, turns []Turn, limit int64) ([]*schema
 	// model is not invoked (REQ-AGENT-027). The policy's drop decision above
 	// starts from recorded usage; this check measures the assembled set.
 	if limit > 0 {
-		keptTokens := sysTokens
+		keptTokens := fixed
 		for i, turn := range turns {
 			if kept[i] {
 				keptTokens += turnTokens(turn)

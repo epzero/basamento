@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strings"
@@ -301,8 +302,19 @@ func runNode(t *testing.T, h *agent.Handler, dc *fakeDC, name string, nodeSpec m
 	return out, err
 }
 
+// runInput is the user input a test run starts from when it does not name
+// one: a run with no user message fails (REQ-AGENT-032), so every test that is
+// not about the seed or the backstop passes this instead of nil.
+var runInput = json.RawMessage(`"question"`)
+
+// noInput is input that contributes no user message (REQ-AGENT-031).
+var noInput = json.RawMessage(" \n")
+
 func runNodeResult(t *testing.T, h *agent.Handler, dc *fakeDC, name string, nodeSpec map[string]any, input json.RawMessage) (agent.Output, agent.Result, error) {
 	t.Helper()
+	if input == nil {
+		input = runInput
+	}
 	res, err := h.Handle(dc, agent.Node{Name: name, Spec: spec(t, nodeSpec)}, input)
 	if len(res.Output) == 0 {
 		return agent.Output{}, res, err
@@ -730,7 +742,7 @@ func TestMemoryPolicyKeepsStartAndLatestTurns(t *testing.T) {
 		{Message: msg("turn-3"), Tokens: 400, Results: []json.RawMessage{result("r3")}},
 	}
 	system := []agent.SystemMessage{{Content: "sys", Tokens: 100}}
-	msgs, dropped, err := agent.BuildMessagesForTest(system, turns, 1000)
+	msgs, dropped, err := agent.BuildMessagesForTest(system, nil, turns, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,7 +757,7 @@ func TestMemoryPolicyKeepsStartAndLatestTurns(t *testing.T) {
 
 func TestMemoryPolicyFailsWhenTheKeptSetIsOverTheLimit(t *testing.T) {
 	system := []agent.SystemMessage{{Content: "sys", Tokens: 1200}}
-	_, _, err := agent.BuildMessagesForTest(system, nil, 1000)
+	_, _, err := agent.BuildMessagesForTest(system, nil, nil, 1000)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument", err)
 	}
@@ -753,7 +765,7 @@ func TestMemoryPolicyFailsWhenTheKeptSetIsOverTheLimit(t *testing.T) {
 
 func TestMemoryPolicyWithinTheLimitKeepsWholeTurns(t *testing.T) {
 	turns := []agent.Turn{{Message: msg("turn-1"), Tokens: 400}, {Message: msg("turn-2"), Tokens: 500}}
-	msgs, dropped, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	msgs, dropped, err := agent.BuildMessagesForTest(nil, nil, turns, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +778,7 @@ func TestMemoryPolicyWithinTheLimitKeepsWholeTurns(t *testing.T) {
 // not treated as free, when the run has an input token limit.
 func TestMemoryPolicyWeighsSystemMessagesWithoutTokens(t *testing.T) {
 	system := []agent.SystemMessage{{Content: strings.Repeat("x", 4000)}}
-	_, _, err := agent.BuildMessagesForTest(system, nil, 1000)
+	_, _, err := agent.BuildMessagesForTest(system, nil, nil, 1000)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument; the system message was free", err)
 	}
@@ -777,11 +789,11 @@ func TestMemoryPolicyWeighsSystemMessagesWithoutTokens(t *testing.T) {
 func TestMemoryPolicyWeighsTurnsWithoutUsage(t *testing.T) {
 	raw, _ := json.Marshal(&schema.Message{Role: schema.Assistant, Content: strings.Repeat("x", 4000)})
 	turns := []agent.Turn{{Message: raw}}
-	_, _, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	_, _, err := agent.BuildMessagesForTest(nil, nil, turns, 1000)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument; the turn was free", err)
 	}
-	if _, _, err := agent.BuildMessagesForTest(nil, turns, 0); err != nil {
+	if _, _, err := agent.BuildMessagesForTest(nil, nil, turns, 0); err != nil {
 		t.Fatalf("no limit: %v", err)
 	}
 }
@@ -818,10 +830,10 @@ func TestMemoryPolicyWeighsAssistantOutputParts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			turns := []agent.Turn{{Message: tc.raw}}
-			if _, _, err := agent.BuildMessagesForTest(nil, turns, 1000); core.CodeOf(err) != core.CodeInvalidArgument {
+			if _, _, err := agent.BuildMessagesForTest(nil, nil, turns, 1000); core.CodeOf(err) != core.CodeInvalidArgument {
 				t.Fatalf("err = %v, want invalid_argument; the %s was free", err, tc.name)
 			}
-			if _, _, err := agent.BuildMessagesForTest(nil, turns, 0); err != nil {
+			if _, _, err := agent.BuildMessagesForTest(nil, nil, turns, 0); err != nil {
 				t.Fatalf("no limit: %v", err)
 			}
 		})
@@ -837,7 +849,7 @@ func TestMemoryPolicyCountsOneEnvelopePerTurn(t *testing.T) {
 		parts[i] = `{"type":"text","text":"x"}`
 	}
 	raw := json.RawMessage(`{"role":"assistant","multi_content":[` + strings.Join(parts, ",") + `]}`)
-	if _, _, err := agent.BuildMessagesForTest(nil, []agent.Turn{{Message: raw}}, 100); err != nil {
+	if _, _, err := agent.BuildMessagesForTest(nil, nil, []agent.Turn{{Message: raw}}, 100); err != nil {
 		t.Fatalf("err = %v; 200 one-byte parts must weigh their bytes, not one envelope each", err)
 	}
 }
@@ -859,7 +871,7 @@ func TestMemoryPolicyProperty(t *testing.T) {
 		sys := int64(r.IntN(100))
 		limit := sys + 1 + r.Int64N(total+1)
 		system := []agent.SystemMessage{{Content: "sys", Tokens: sys}}
-		msgs, _, err := agent.BuildMessagesForTest(system, turns, limit)
+		msgs, _, err := agent.BuildMessagesForTest(system, nil, turns, limit)
 		if err != nil {
 			continue // the kept set legitimately does not fit
 		}
@@ -895,7 +907,7 @@ func TestMemoryPolicyCountsToolResults(t *testing.T) {
 		{Message: msg("turn-1"), Tokens: 300, Results: []json.RawMessage{result(big)}},
 		{Message: msg("turn-2"), Tokens: 300},
 	}
-	_, _, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	_, _, err := agent.BuildMessagesForTest(nil, nil, turns, 1000)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument; the tool result was not counted", err)
 	}
@@ -911,7 +923,7 @@ func TestMemoryPolicyDropsATurnWhoseResultsDoNotFit(t *testing.T) {
 		{Message: msg("turn-2"), Tokens: 300, Results: []json.RawMessage{result(big)}},
 		{Message: msg("turn-3"), Tokens: 300, Results: []json.RawMessage{result("ok")}},
 	}
-	msgs, dropped, err := agent.BuildMessagesForTest(nil, turns, 1000)
+	msgs, dropped, err := agent.BuildMessagesForTest(nil, nil, turns, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,7 +973,7 @@ func TestHandoffToolIsOfferedToTheModel(t *testing.T) {
 		Register: dc.Register,
 	})
 	node := agent.Node{Name: "triage", Spec: spec(t, map[string]any{"model": "script"}), Handoffs: []string{"fixer"}}
-	if _, err := h.Handle(dc, node, nil); err != nil {
+	if _, err := h.Handle(dc, node, runInput); err != nil {
 		t.Fatal(err)
 	}
 	if len(m.requests) != 1 {
@@ -1183,5 +1195,165 @@ func TestToolSetResolutionSeesTheTenant(t *testing.T) {
 	}
 	if got := run("tenant-b"); len(got) != 1 || got[0] != "fetch" {
 		t.Fatalf("tenant-b tools = %v, want [fetch]", got)
+	}
+}
+
+// --- the input seed and the no-user-message backstop (REQ-AGENT-031/032) ---
+
+// AGENT-031-01: a run that starts without a handoff seeds the history with one
+// user message from its input, and that seed is not a model turn.
+func TestRunSeedsTheFirstUserMessage(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+	h := newHandler(dc, m, newTools(dc), nil)
+	out, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage(`"What is 2+2?"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != agent.StateCompleted || out.Answer != "Done." || len(out.Turns) != 1 {
+		t.Fatalf("output = %+v", out)
+	}
+	var msgs []*schema.Message
+	if err := json.Unmarshal(m.requests[0].Messages, &msgs); err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Role != schema.User || msgs[0].Content != "What is 2+2?" {
+		t.Fatalf("turn 1 messages = %s, want one user message", m.requests[0].Messages)
+	}
+	turns := 0
+	for _, name := range dc.stepCalls() {
+		if strings.Contains(name, "/turn-") {
+			turns++
+		}
+	}
+	if turns != 1 {
+		t.Fatalf("made %d model turn steps, want 1; the seed must not be a step", turns)
+	}
+}
+
+// AGENT-031-01: any other non-empty JSON seeds the user message with its
+// compact bytes, so an object input reaches the model unchanged but for its
+// whitespace. Only an object whose state is "handoff" is an envelope: keys
+// that clash with the envelope's types are plain input, and JSON null is not a
+// string.
+func TestRunSeedFromNonStringInputIsCompactJSON(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"object", `{ "q": "x" }`, `{"q":"x"}`},
+		{"object with an envelope key", `{"output":{"text":"hi"}}`, `{"output":{"text":"hi"}}`},
+		{"object with another envelope key", `{"turns":5}`, `{"turns":5}`},
+		{"null", ` null `, `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+			m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+			h := newHandler(dc, m, newTools(dc), nil)
+			if _, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage(tc.input)); err != nil {
+				t.Fatal(err)
+			}
+			var msgs []*schema.Message
+			if err := json.Unmarshal(m.requests[0].Messages, &msgs); err != nil {
+				t.Fatal(err)
+			}
+			if len(msgs) != 1 || msgs[0].Role != schema.User || msgs[0].Content != tc.want {
+				t.Fatalf("turn 1 messages = %s, want the compact %s", m.requests[0].Messages, tc.want)
+			}
+		})
+	}
+}
+
+// A real handoff whose envelope does not decode still fails (REQ-AGENT-017,
+// REQ-AGENT-031), so a malformed handoff is never silently seeded.
+func TestMalformedHandoffFails(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+	h := newHandler(dc, m, newTools(dc), nil)
+	_, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, json.RawMessage(`{"state":"handoff","turns":5}`))
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument", err)
+	}
+	if m.invoked != 0 {
+		t.Fatalf("model invoked %d times, want 0", m.invoked)
+	}
+}
+
+// AGENT-032-01: a run whose assembled request has no non-system message fails
+// with that message before reserving cost or invoking the model.
+func TestRunWithoutAUserMessageFailsBeforeReserving(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	m := &scriptedModel{dc: dc, node: "worker", turns: []scriptTurn{{Text: "Done."}}}
+	obs := &recorder{res: map[int]int64{}, settle: map[int]int64{}}
+	h := newHandler(dc, m, newTools(dc), obs)
+	_, err := runNode(t, h, dc, "worker", map[string]any{"model": "script"}, noInput)
+	if core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument", err)
+	}
+	want := `agent "worker": the run has no user message`
+	var ce *core.Error
+	if !errors.As(err, &ce) || ce.Message != want {
+		t.Fatalf("err = %q, want message %q", err.Error(), want)
+	}
+	if m.invoked != 0 {
+		t.Fatalf("model invoked %d times, want 0", m.invoked)
+	}
+	if len(obs.res) != 0 {
+		t.Fatalf("reserved %v, want no reservation", obs.res)
+	}
+}
+
+// AGENT-031-02: a handoff target is not seeded again; its history is exactly
+// the carried model turns and holds no user message.
+func TestHandoffTargetIsNotSeeded(t *testing.T) {
+	dc := newDC(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC))
+	triage := &scriptedModel{dc: dc, node: "triage", turns: []scriptTurn{{Handoffs: []string{"fixer"}}}}
+	h := newHandler(dc, triage, newTools(dc), nil)
+	out, err := runNode(t, h, dc, "triage", map[string]any{"model": "script"}, json.RawMessage(`"What is 2+2?"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(out)
+	fixer := &scriptedModel{dc: dc, node: "fixer", turns: []scriptTurn{{Text: "Fixed."}}}
+	fh := newHandler(dc, fixer, newTools(dc), nil)
+	if _, err := runNode(t, fh, dc, "fixer", map[string]any{"model": "script"}, raw); err != nil {
+		t.Fatal(err)
+	}
+	var msgs []*schema.Message
+	if err := json.Unmarshal(fixer.requests[0].Messages, &msgs); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range msgs {
+		if m.Role == schema.User {
+			t.Fatalf("fixer turn 1 has a user message: %s", fixer.requests[0].Messages)
+		}
+	}
+	if !contains(messageNames(msgs), "triage/turn-1") {
+		t.Fatalf("fixer turn 1 lacks the carried turn: %s", fixer.requests[0].Messages)
+	}
+}
+
+// REQ-AGENT-031: the seed is weighed by its content estimate and kept whole,
+// so a history over the limit still carries it while old turns are dropped.
+func TestMemoryPolicyWeighsAndKeepsTheSeed(t *testing.T) {
+	seed := &schema.Message{Role: schema.User, Content: strings.Repeat("q", 800)}
+	turns := []agent.Turn{
+		{Message: msg("turn-1"), Tokens: 300},
+		{Message: msg("turn-2"), Tokens: 400},
+		{Message: msg("turn-3"), Tokens: 400},
+	}
+	msgs, dropped, err := agent.BuildMessagesForTest(nil, seed, turns, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := messageNames(msgs)
+	if contains(names, "turn-2") || !contains(names, "turn-1") || !contains(names, "turn-3") {
+		t.Fatalf("kept %v, want turns 1 and 3", names)
+	}
+	if got := msgs[0].Content; got != seed.Content {
+		t.Fatalf("first message = %q, want the seed", got)
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped %d, want 1", dropped)
+	}
+	if _, _, err := agent.BuildMessagesForTest(nil, &schema.Message{Role: schema.User, Content: strings.Repeat("q", 4000)}, nil, 10); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("err = %v, want invalid_argument for a seed over the limit", err)
 	}
 }

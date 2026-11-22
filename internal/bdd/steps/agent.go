@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sort"
@@ -32,6 +33,7 @@ type agentWorld struct {
 	current *agentRun
 	runs    map[string]*agentRun
 	handoff json.RawMessage
+	inputs  map[string]json.RawMessage
 }
 
 type agentDef struct {
@@ -45,6 +47,7 @@ type agentDef struct {
 	model         *agentScriptedModel
 	journal       map[string]json.RawMessage
 	toolDurations map[int]time.Duration
+	checks        int
 }
 
 type scriptedTurn struct {
@@ -56,6 +59,7 @@ type scriptedTurn struct {
 	cost     int64
 	estimate agent.Estimate
 	duration time.Duration
+	noUsage  bool
 }
 
 type agentTool struct {
@@ -89,10 +93,11 @@ func (o *agentObserver) Dropped(turn int, messages int)  { o.dropped[turn] = mes
 
 func newAgentWorld() *agentWorld {
 	return &agentWorld{
-		clock: coretest.NewFakeClock(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)),
-		defs:  map[string]*agentDef{},
-		tools: map[string]*agentTool{},
-		runs:  map[string]*agentRun{},
+		clock:  coretest.NewFakeClock(time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)),
+		defs:   map[string]*agentDef{},
+		tools:  map[string]*agentTool{},
+		runs:   map[string]*agentRun{},
+		inputs: map[string]json.RawMessage{},
 	}
 }
 
@@ -111,6 +116,19 @@ func (w *agentWorld) def(name string) *agentDef {
 	return d
 }
 
+// defaultAgentInput is the user input a scenario leaves unstated. A run with no
+// user message fails (REQ-AGENT-032), so every scenario that is not about the
+// seed starts from this short question.
+var defaultAgentInput = json.RawMessage(`"go"`)
+
+// input is the node input a scenario set for name, or the default.
+func (w *agentWorld) input(name string) json.RawMessage {
+	if v, ok := w.inputs[name]; ok {
+		return v
+	}
+	return defaultAgentInput
+}
+
 func (w *agentWorld) tool(name string) *agentTool {
 	t := w.tools[name]
 	if t == nil {
@@ -124,6 +142,9 @@ func (w *agentWorld) tool(name string) *agentTool {
 // as an interrupted execution would; blockAfter parks the run after that step
 // completes so a scenario can cancel it between turns.
 func (w *agentWorld) run(name string, input json.RawMessage, blockAfter, stopAfter string) *agentRun {
+	if input == nil {
+		input = w.input(name)
+	}
 	d := w.def(name)
 	ctx, cancel := context.WithCancel(context.Background())
 	dc := &agentDC{
@@ -219,6 +240,9 @@ func (d *agentDef) specJSON() json.RawMessage {
 	if len(d.caps) > 0 {
 		spec["caps"] = d.caps
 	}
+	if d.checks > 0 {
+		spec["checks"] = d.checks
+	}
 	if len(d.tools) > 0 {
 		spec["tools"] = d.tools
 	}
@@ -279,13 +303,11 @@ func (m *agentScriptedModel) Result(context.Context, model.Handle) (model.Result
 		})
 	}
 	raw, _ := json.Marshal(msg)
-	usage := model.Usage{InputTokens: turn.input, OutputTokens: turn.output}
-	return model.Result{
-		State:    model.StateSucceeded,
-		Message:  raw,
-		Usage:    &usage,
-		CostMpts: turn.cost,
-	}, nil
+	res := model.Result{State: model.StateSucceeded, Message: raw, CostMpts: turn.cost}
+	if !turn.noUsage {
+		res.Usage = &model.Usage{InputTokens: turn.input, OutputTokens: turn.output}
+	}
+	return res, nil
 }
 
 func (m *agentScriptedModel) Cancel(context.Context, model.Handle) error { return nil }
@@ -480,6 +502,10 @@ func registerAgent(sc *godog.ScenarioContext) {
 		delete(world(ctx).Agent.def(name).caps, "time")
 		return nil
 	})
+	sc.Step(`^agent "([^"]*)" checks its caps every (\d+) turns?$`, func(ctx context.Context, name string, turns int) error {
+		world(ctx).Agent.def(name).checks = turns
+		return nil
+	})
 	sc.Step(`^agent "([^"]*)" has a system message "([^"]*)" of (\d+) tokens and an input token limit of (\d+) tokens$`, func(ctx context.Context, name, message string, tokens, limit int) error {
 		d := world(ctx).Agent.def(name)
 		d.system = []agent.SystemMessage{{Content: message, Tokens: int64(tokens)}}
@@ -492,6 +518,16 @@ func registerAgent(sc *godog.ScenarioContext) {
 		d.inputTokens = int64(limit)
 		return nil
 	})
+	sc.Step(`^agent "([^"]*)" has a system message "([^"]*)" with no declared token count and an input token limit of (\d+) tokens$`, func(ctx context.Context, name, message string, limit int) error {
+		d := world(ctx).Agent.def(name)
+		d.system = []agent.SystemMessage{{Content: message}}
+		d.inputTokens = int64(limit)
+		return nil
+	})
+	sc.Step(`^agent "([^"]*)" has no system message$`, func(ctx context.Context, name string) error {
+		world(ctx).Agent.def(name).system = nil
+		return nil
+	})
 
 	// Scripted model scripts.
 	sc.Step(`^the scripted model of "([^"]*)" answers "([^"]*)" in (\d+) turns?$`, func(ctx context.Context, name, text string, turns int) error {
@@ -501,6 +537,13 @@ func registerAgent(sc *godog.ScenarioContext) {
 		return world(ctx).Agent.turn(name, scriptedTurn{
 			text: text, cost: int64(cost), estimate: agent.Estimate{CostMpts: int64(estimate)},
 		})
+	})
+	sc.Step(`^the scripted model of "([^"]*)" answers "([^"]*)" and requests tool "([^"]*)", then answers "([^"]*)" in (\d+) turns, reporting no usage$`, func(ctx context.Context, name, first, toolName, answer string, turns int) error {
+		w := world(ctx).Agent
+		if err := w.turn(name, scriptedTurn{text: first, tools: []string{toolName}, noUsage: true}); err != nil {
+			return err
+		}
+		return w.turn(name, scriptedTurn{text: answer, noUsage: true})
 	})
 	sc.Step(`^the scripted model of "([^"]*)" answers "([^"]*)" and requests tool "([^"]*)", then answers "([^"]*)" in (\d+) turns?$`, func(ctx context.Context, name, first, toolName, answer string, turns int) error {
 		w := world(ctx).Agent
@@ -700,6 +743,20 @@ func registerAgent(sc *godog.ScenarioContext) {
 		return nil
 	})
 
+	// Node input.
+	sc.Step(`^the input to agent node "([^"]*)" is the string "([^"]*)"$`, func(ctx context.Context, name, text string) error {
+		raw, err := json.Marshal(text)
+		if err != nil {
+			return err
+		}
+		world(ctx).Agent.inputs[name] = raw
+		return nil
+	})
+	sc.Step(`^the input to agent node "([^"]*)" is empty$`, func(ctx context.Context, name string) error {
+		world(ctx).Agent.inputs[name] = json.RawMessage("")
+		return nil
+	})
+
 	// Running.
 	sc.Step(`^an agent run of "([^"]*)" runs$`, func(ctx context.Context, name string) error {
 		world(ctx).Agent.runSync(name, nil)
@@ -866,7 +923,28 @@ func registerAgent(sc *godog.ScenarioContext) {
 		return ownTurns(world(ctx).Agent.runs[name], first, second)
 	})
 
+	sc.Step(`^the agent run fails with message:$`, func(ctx context.Context, doc *godog.DocString) error {
+		r := world(ctx).Agent.current
+		if r == nil || r.err == nil {
+			return fmt.Errorf("run did not fail, want message %q", strings.TrimSpace(doc.Content))
+		}
+		var ce *core.Error
+		if !errors.As(r.err, &ce) {
+			return fmt.Errorf("run failed with %w, want message %q", r.err, strings.TrimSpace(doc.Content))
+		}
+		if want := strings.TrimSpace(doc.Content); ce.Message != want {
+			return fmt.Errorf("run failed with message %q, want %q", ce.Message, want)
+		}
+		return nil
+	})
+
 	// Budget observation.
+	sc.Step(`^no cost was reserved$`, func(ctx context.Context) error {
+		if got := len(world(ctx).Agent.current.obs.reserved); got != 0 {
+			return fmt.Errorf("%d turns reserved cost, want none", got)
+		}
+		return nil
+	})
 	sc.Step(`^(\d+) milli-points were reserved before the start of model turn (\d+)$`, func(ctx context.Context, mpts, turn int) error {
 		r := world(ctx).Agent.current
 		if got := r.obs.reserved[turn]; got != int64(mpts) {
@@ -883,6 +961,12 @@ func registerAgent(sc *godog.ScenarioContext) {
 	})
 
 	// Messages.
+	sc.Step(`^the messages of model turn (\d+) contain exactly one user message with text "([^"]*)"$`, func(ctx context.Context, turn int, text string) error {
+		return messageHasOneUserMessage(world(ctx).Agent, world(ctx).Agent.current.agent, turn, text)
+	})
+	sc.Step(`^the messages of model turn (\d+) of "([^"]*)" contain no user message$`, func(ctx context.Context, turn int, name string) error {
+		return messageHasNoUserMessage(world(ctx).Agent, name, turn)
+	})
 	sc.Step(`^the messages of model turn (\d+) contain the system message "([^"]*)"$`, func(ctx context.Context, turn int, text string) error {
 		return messageHasSystem(world(ctx).Agent.current, turn, text)
 	})
@@ -1258,4 +1342,34 @@ func messageHasRequestOf(w *agentWorld, name string, turn int, otherAgent string
 		}
 	}
 	return fmt.Errorf("model turn %d of %s does not contain the %s request from %s", turn, name, toolName, want)
+}
+
+func messageHasOneUserMessage(w *agentWorld, name string, turn int, text string) error {
+	msgs, err := messagesOf(w, name, turn)
+	if err != nil {
+		return err
+	}
+	var found []string
+	for _, m := range msgs {
+		if m.Role == schema.User {
+			found = append(found, m.Content)
+		}
+	}
+	if len(found) != 1 || found[0] != text {
+		return fmt.Errorf("model turn %d of %s has user messages %q, want exactly one %q", turn, name, found, text)
+	}
+	return nil
+}
+
+func messageHasNoUserMessage(w *agentWorld, name string, turn int) error {
+	msgs, err := messagesOf(w, name, turn)
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if m.Role == schema.User {
+			return fmt.Errorf("model turn %d of %s contains a user message: %q", turn, name, m.Content)
+		}
+	}
+	return nil
 }
