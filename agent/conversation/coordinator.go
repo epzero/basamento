@@ -18,6 +18,10 @@ type Turns interface {
 	Steer(ctx context.Context, child runtime.RunRef, text string) error
 	// Cancel cancels the running child run.
 	Cancel(ctx context.Context, child runtime.RunRef, reason string) error
+	// Partial returns the model messages the running turn has published so
+	// far. The coordinator records them, marked interrupted, when the child
+	// ends without an output (REQ-CONV-009, REQ-CONV-013).
+	Partial(ctx context.Context, child runtime.RunRef) ([]ModelMessage, error)
 }
 
 // Options are the coordinator's dependencies. Turns may be nil when the
@@ -29,12 +33,15 @@ type Options struct {
 }
 
 // Input starts a coordinator run. Record is nil for a new conversation and
-// carries the same record across a continuation (REQ-CONV-014).
+// carries the same record across a continuation (REQ-CONV-014). Flow is the
+// conversation's flow; TurnFlow is the flow of one turn (WP-L7-01), which every
+// child run of the conversation uses.
 type Input struct {
 	Tenant    core.TenantID   `json:"tenant"`
 	User      string          `json:"user"`
 	ID        string          `json:"id"`
 	Flow      runtime.FlowRef `json:"flow"`
+	TurnFlow  runtime.FlowRef `json:"turn_flow"`
 	Threshold int             `json:"threshold,omitempty"`
 	Record    *Record         `json:"record,omitempty"`
 }
@@ -66,7 +73,17 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 	if in.Record != nil {
 		rec = *in.Record
 	}
-	gates := 0
+	// The count is the durable calls this run of the coordinator made itself
+	// (REQ-CONV-014). A run starts it at zero, whether it is a new conversation
+	// or a continuation; a replay recounts the same calls in the same order.
+	rec.Calls = 0
+	if rec.TurnFlow.Name == "" {
+		rec.TurnFlow = in.TurnFlow
+	}
+	if rec.TurnFlow.Name == "" {
+		return Output{}, core.NewError(core.CodeInvalidArgument, "conversation: no turn flow", map[string]any{"conversation": rec.ID})
+	}
+	gates, refused := 0, 0
 	var child runtime.Future
 	var childRef runtime.RunRef
 
@@ -79,12 +96,14 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 				gates++
 				msg, err := c.await(dc, &rec, gates)
 				if err != nil {
-					return c.stopped(dc, rec)
+					return c.stopped(dc, rec, childRef)
 				}
 				decision, err := rec.Accept(msg)
 				if err != nil {
-					// The edge validates synchronously (design §1); a message
-					// that got this far is folded into the record only.
+					refused++
+					if err := c.refuse(dc, &rec, refused, msg, err); err != nil {
+						return c.stopped(dc, rec, childRef)
+					}
 					continue
 				}
 				if decision.Kind == DecisionDuplicate {
@@ -95,15 +114,16 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 			if !ok {
 				continue
 			}
-			if err := c.step(dc, &rec, fmt.Sprintf("record-turn-%d", start.Index), start.Input); err != nil {
-				return c.stopped(dc, rec)
-			}
 			childRef = runtime.RunRef{
-				RunID:    fmt.Sprintf("%s/turn-%d", RunID(rec.ID), start.Index),
+				RunID:    fmt.Sprintf("%s-turn-%d", RunID(rec.ID), start.Index),
 				TenantID: rec.Tenant,
 			}
+			rec.Turns[start.Index-1].Child = childRef.RunID
+			if err := c.step(dc, &rec, fmt.Sprintf("record-turn-%d-start", start.Index), rec); err != nil {
+				return c.stopped(dc, rec, childRef)
+			}
 			rec.DurableCall()
-			child = dc.Child(rec.Flow, start.Input, runtime.ChildOptions{ID: childRef.RunID, ParentClose: "request_cancel"})
+			child = dc.Child(rec.TurnFlow, turnFlowInput(start.Input), runtime.ChildOptions{ID: childRef.RunID, ParentClose: "request_cancel"})
 			continue
 		}
 
@@ -113,29 +133,46 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 		rec.DurableCall()
 		idx, err := dc.Select(inbox, child)
 		if err != nil {
-			return c.stopped(dc, rec)
+			return c.stopped(dc, rec, childRef)
 		}
 		if idx == 0 {
 			var msg Message
 			if err := inbox.Get(&msg); err != nil {
-				return c.stopped(dc, rec)
+				return c.stopped(dc, rec, childRef)
 			}
 			decision, err := rec.Accept(msg)
-			if err != nil || decision.Kind == DecisionDuplicate {
+			if err != nil {
+				refused++
+				if err := c.refuse(dc, &rec, refused, msg, err); err != nil {
+					return c.stopped(dc, rec, childRef)
+				}
+				continue
+			}
+			if decision.Kind == DecisionDuplicate {
 				continue
 			}
 			switch decision.Kind {
+			case DecisionQueued:
+				if err := c.step(dc, &rec, fmt.Sprintf("record-message-%d-%s", rec.Running, msg.ID), rec); err != nil {
+					return c.stopped(dc, rec, childRef)
+				}
 			case DecisionSteer:
 				rec.Steer(msg.ID, msg.Text)
+				if err := c.step(dc, &rec, fmt.Sprintf("record-steer-%d-%s", rec.Running, msg.ID), rec); err != nil {
+					return c.stopped(dc, rec, childRef)
+				}
 				if c.opts.Turns != nil {
 					if err := c.opts.Turns.Steer(dc.Context(), childRef, msg.Text); err != nil {
-						return c.stopped(dc, rec)
+						return c.stopped(dc, rec, childRef)
 					}
 				}
 			case DecisionCancelTurn:
+				if err := c.step(dc, &rec, fmt.Sprintf("record-cancel-turn-%d-%s", rec.Running, msg.ID), rec); err != nil {
+					return c.stopped(dc, rec, childRef)
+				}
 				if c.opts.Turns != nil {
 					if err := c.opts.Turns.Cancel(dc.Context(), childRef, "user cancelled the turn"); err != nil {
-						return c.stopped(dc, rec)
+						return c.stopped(dc, rec, childRef)
 					}
 				}
 			}
@@ -150,18 +187,29 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 			if core.CodeOf(endErr) == core.CodeCancelled {
 				out.State = TurnCancelled
 			}
+			if c.opts.Turns != nil {
+				if messages, err := c.opts.Turns.Partial(dc.Context(), childRef); err == nil {
+					out.Messages = messages
+				}
+			}
 		}
+		ended := rec.Turns[len(rec.Turns)-1].Index
 		rec.EndTurn(out)
-		if err := c.step(dc, &rec, fmt.Sprintf("record-turn-%d", rec.Turns[len(rec.Turns)-1].Index), rec.Turns[len(rec.Turns)-1]); err != nil {
-			return c.stopped(dc, rec)
+		if err := c.step(dc, &rec, fmt.Sprintf("record-turn-%d-end", ended), rec); err != nil {
+			return c.stopped(dc, rec, childRef)
 		}
 		child = nil
 		if rec.CheckpointDue(in.Threshold, dc.Capabilities()) {
 			rec.DurableCall()
-			if err := dc.Checkpoint(runtime.SnapshotRef{Seq: int64(rec.Continued)}); err != nil {
-				return c.stopped(dc, rec)
+			// The runtime decides: a nil result is "did not continue", so the
+			// count keeps growing; the ContinueAsNew error means this run
+			// ended and the new one starts its own count (REQ-CONV-014).
+			if err := dc.Checkpoint(runtime.SnapshotRef{Seq: int64(len(rec.Turns))}); err != nil {
+				if dc.Context().Err() != nil {
+					return c.stopped(dc, rec, childRef)
+				}
+				return Output{Record: rec}, err
 			}
-			rec.Checkpointed()
 		}
 	}
 }
@@ -177,8 +225,9 @@ func (c *Coordinator) await(dc runtime.DurableContext, rec *Record, n int) (Mess
 	return msg, nil
 }
 
-// step records a turn state change as a durable step. The record itself lives
-// in the run's state; the step makes the change replay-safe.
+// step records a state change of the conversation record as a durable step.
+// The record itself lives in the run's state; journaling it makes the change
+// replay-safe and leaves the record's history to the runtime.
 func (c *Coordinator) step(dc runtime.DurableContext, rec *Record, name string, in any) error {
 	if c.opts.Register != nil {
 		if err := c.opts.Register(name, RecordStep); err != nil && core.CodeOf(err) != core.CodeConflict {
@@ -189,21 +238,78 @@ func (c *Coordinator) step(dc runtime.DurableContext, rec *Record, name string, 
 	return dc.Step(name, in, runtime.StepOptions{IdempotencyKey: name}).Get(nil)
 }
 
+// refuse journals a message the coordinator refused. The gate resolution has
+// already succeeded at the runtime, so the refusal is surfaced as a durable
+// record of the edge's answer instead of being dropped (REQ-CONV-017 to
+// REQ-CONV-021).
+func (c *Coordinator) refuse(dc runtime.DurableContext, rec *Record, n int, msg Message, cause error) error {
+	return c.step(dc, rec, fmt.Sprintf("refuse-%d", n), refusal{MessageID: msg.ID, Code: string(core.CodeOf(cause))})
+}
+
 // stopped ends Run when the runtime has cancelled the conversation or failed a
 // wait. A cancelled context is the conversation's run being cancelled
-// (REQ-CONV-011); anything else is a runtime failure.
-func (c *Coordinator) stopped(dc runtime.DurableContext, rec Record) (Output, error) {
+// (REQ-CONV-011): the running turn is cancelled and its partial recorded, the
+// queue is dropped, and the run reports cancelled. Anything else is a runtime
+// failure.
+func (c *Coordinator) stopped(dc runtime.DurableContext, rec Record, child runtime.RunRef) (Output, error) {
 	if err := dc.Context().Err(); err != nil {
-		rec.Cancelled = true
-		rec.Queue = nil
+		if rec.Running != 0 && c.opts.Turns != nil {
+			_ = c.opts.Turns.Cancel(dc.Context(), child, "conversation cancelled")
+			out := TurnOutput{State: TurnCancelled, Code: string(core.CodeCancelled)}
+			if messages, err := c.opts.Turns.Partial(dc.Context(), child); err == nil {
+				out.Messages = messages
+			}
+			rec.EndTurn(out)
+		}
+		rec.CancelConversation()
 		return Output{State: TurnCancelled, Record: rec}, nil
 	}
 	return Output{Record: rec}, core.NewError(core.CodeUnavailable, "conversation: the runtime stopped waiting", nil)
 }
 
-// RecordStep is the step function of the coordinator's record-turn step. The
+// RecordStep is the step function of the coordinator's record steps. The
 // record is part of the run's state; the step echoes its input so a replay
 // returns the same journal value.
 func RecordStep(_ context.Context, in json.RawMessage) (json.RawMessage, error) {
 	return in, nil
+}
+
+// refusal is the durable record of a refused gate resolution.
+type refusal struct {
+	MessageID string `json:"message_id"`
+	Code      string `json:"code"`
+}
+
+// turnFlowInput translates the history a turn sees into the input of the turn
+// flow (design §1, §3). The turn flow is an agent run (WP-L7-01), whose input
+// carries its history as a handoff: one model message per recorded message, in
+// order. The starting user message is the last of them.
+func turnFlowInput(in TurnInput) json.RawMessage {
+	turns := make([]turnFlowTurn, 0, len(in.Messages))
+	for _, m := range in.Messages {
+		role := "user"
+		if m.Role == RoleModel {
+			role = "assistant"
+		}
+		turns = append(turns, turnFlowTurn{Message: turnFlowMessage{Role: role, Content: m.Text}})
+	}
+	raw, err := json.Marshal(turnFlowEnvelope{State: "handoff", Turns: turns})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+type turnFlowEnvelope struct {
+	State string         `json:"state"`
+	Turns []turnFlowTurn `json:"turns,omitempty"`
+}
+
+type turnFlowTurn struct {
+	Message turnFlowMessage `json:"message"`
+}
+
+type turnFlowMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }

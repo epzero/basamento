@@ -45,3 +45,11 @@ func (t RuntimeTurns) Cancel(ctx context.Context, child runtime.RunRef, reason s
 	}
 	return t.Runtime.Cancel(ctx, child, reason)
 }
+
+// Partial reports the model messages a running turn has published so far.
+// The runtime control plane exposes no turn output, so the composition root
+// that owns the turn flow (WP-L7-01) supplies this through Turns.Partial; the
+// default implementation has nothing to report.
+func (t RuntimeTurns) Partial(context.Context, runtime.RunRef) ([]ModelMessage, error) {
+	return nil, core.NewError(core.CodeUnsupported, "conversation: the runtime exposes no turn partial", nil)
+}
