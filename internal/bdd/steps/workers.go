@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing/fstest"
 	"time"
 
@@ -100,16 +103,101 @@ func newWorkerWorld() *workerWorld {
 	}
 }
 
+// workerMigrations is the placeholder migration set the worker BDD store
+// opens with; the worker schema itself comes from worker.Open.
+var workerMigrations = fstest.MapFS{"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\nSELECT 1;\n")}}
+
+// The worker schema is the same for every scenario, so it is migrated once per
+// process into a template database; each scenario starts from a copy instead of
+// paying the migration cost ~48 times per suite (WP-L3-07 gate timeout).
+var (
+	workerTemplateOnce sync.Once
+	workerTemplatePath string
+	workerTemplateErr  error
+)
+
+func workerDBTemplate() (string, error) {
+	workerTemplateOnce.Do(func() {
+		ctx := context.Background()
+		dir, err := os.MkdirTemp("", "worker-bdd-template-*")
+		if err != nil {
+			workerTemplateErr = err
+			return
+		}
+		dbPath := filepath.Join(dir, "worker.db")
+		store, err := psql.Open(ctx, "sqlite:///"+dbPath, workerMigrations)
+		if err != nil {
+			workerTemplateErr = err
+			return
+		}
+		if _, err := worker.Open(ctx, store, worker.Options{}); err != nil {
+			_ = store.Close()
+			workerTemplateErr = err
+			return
+		}
+		// Closing checkpoints the WAL, so the main file is a complete copy
+		// source; any surviving sidecar is copied with it just in case.
+		if err := store.Close(); err != nil {
+			workerTemplateErr = err
+			return
+		}
+		workerTemplatePath = dbPath
+	})
+	return workerTemplatePath, workerTemplateErr
+}
+
+// copyWorkerDB copies the migrated template to dst, with the WAL sidecar when
+// one survived the template's close, so a scenario still gets a real on-disk
+// database of its own.
+func copyWorkerDB(src, dst string) error {
+	for _, suffix := range []string{"", "-wal"} {
+		if err := copyFileIfExists(src+suffix, dst+suffix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFileIfExists(src, dst string) error {
+	in, err := os.Open(src)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 func (w *workerWorld) open(ctx context.Context) (*worker.Store, error) {
 	if w.store != nil {
 		return w.store, nil
+	}
+	template, err := workerDBTemplate()
+	if err != nil {
+		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "worker-bdd-*")
 	if err != nil {
 		return nil, err
 	}
 	w.dir = dir
-	store, err := psql.Open(ctx, "sqlite:///"+dir+"/worker.db", fstest.MapFS{"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\nSELECT 1;\n")}})
+	dbPath := filepath.Join(dir, "worker.db")
+	if err := copyWorkerDB(template, dbPath); err != nil {
+		_ = os.RemoveAll(dir)
+		w.dir = ""
+		return nil, err
+	}
+	store, err := psql.Open(ctx, "sqlite:///"+dbPath, workerMigrations)
 	if err != nil {
 		return nil, err
 	}
