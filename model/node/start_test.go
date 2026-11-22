@@ -31,6 +31,7 @@ type scriptInvoker struct {
 	// lookupCtxErr records the context error each Lookup saw, so a test can
 	// prove the lookup ran on a detached context.
 	lookupCtxErrs []error
+	cancelCtxErr  error
 	resultCtxErr  error
 }
 
@@ -80,8 +81,9 @@ func (s *scriptInvoker) Result(ctx context.Context, _ model.Handle) (model.Resul
 	return s.result, nil
 }
 
-func (s *scriptInvoker) Cancel(_ context.Context, handle model.Handle) error {
+func (s *scriptInvoker) Cancel(ctx context.Context, handle model.Handle) error {
 	s.cancels++
+	s.cancelCtxErr = ctx.Err()
 	if s.cancel != nil {
 		return s.cancel(handle)
 	}

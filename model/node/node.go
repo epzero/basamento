@@ -536,13 +536,32 @@ func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle
 		return followOutcome{}, err
 	}
 	var out followOutcome
-	if err := dc.Step(name, followIn{Handle: handle, ClientRef: ref}, runtime.StepOptions{
+	err := dc.Step(name, followIn{Handle: handle, ClientRef: ref}, runtime.StepOptions{
 		Heartbeat:      stepHeartbeat,
 		IdempotencyKey: name,
-	}).Get(&out); err != nil {
+	}).Get(&out)
+	if err != nil && runCancelled(dc, err) {
+		// The runtime ends a cancelled run without starting the follow step
+		// when the cancellation lands right after the provider accepted the
+		// invocation. The invocation is running at the provider all the same,
+		// so cancel it and settle by the state it reports (REQ-MODEL-009)
+		// instead of returning before it was ever cancelled.
+		return h.cancelAndResult(dc.Context(), handle)
+	}
+	if err != nil {
 		return followOutcome{}, err
 	}
 	return out, nil
+}
+
+// runCancelled reports whether a failed follow step means the run was
+// cancelled before that step could run. The step error's code is the portable
+// signal: the Temporal runtime hands out a context that stays live after the
+// workflow is cancelled (durable.go Context), so a cancelled activity reaches
+// the node only as core.CodeCancelled. The local runtime's context does
+// cancel, so its error is checked too, but never on its own.
+func runCancelled(dc runtime.DurableContext, err error) bool {
+	return core.CodeOf(err) == core.CodeCancelled || dc.Context().Err() != nil
 }
 
 func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

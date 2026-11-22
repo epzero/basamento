@@ -500,6 +500,12 @@ func (w *nodeWorld) cancelRun() error {
 	go func() {
 		_ = w.rt.Cancel(core.WithTenant(context.Background(), "acme"), w.ref, "")
 	}()
+	return w.awaitCancel(time.After(waitBound))
+}
+
+// awaitCancel waits until the provider received the cancel request or the
+// deadline fires.
+func (w *nodeWorld) awaitCancel(deadline <-chan time.Time) error {
 	select {
 	case <-w.provider.cancelCh:
 		return nil
@@ -514,8 +520,24 @@ func (w *nodeWorld) cancelRun() error {
 		default:
 		}
 		return fmt.Errorf("the run ended before the provider received a cancel request")
-	case <-time.After(waitBound):
+	case <-deadline:
+		// The provider's confirmation can land just as the bound expires, so
+		// cancelCh and the deadline can be ready together and the select may
+		// pick either. Drain the confirmation before reporting a timeout.
+		if w.cancelDelivered() {
+			return nil
+		}
 		return fmt.Errorf("timed out waiting for the cancel request")
+	}
+}
+
+// cancelDelivered drains a cancel confirmation the provider already buffered.
+func (w *nodeWorld) cancelDelivered() bool {
+	select {
+	case <-w.provider.cancelCh:
+		return true
+	default:
+		return false
 	}
 }
 
