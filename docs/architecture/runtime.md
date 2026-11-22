@@ -314,7 +314,12 @@ credentials). `New` rejects a caller that sets `DataConverter` or
 tenant payload converter and `TenantPropagator`. One client is dialled lazily
 (`clientFor`) and shared by control calls and `Serve`. `Serve`'s defer calls
 `shutdown`, which closes the client; later control calls return `unavailable`
-(`temporal: the runtime has shut down`). A dial failure surfaces as
+(`temporal: the runtime has shut down`). A host that only uses the control plane
+calls `Close` when done; that has the same effect and later control calls or
+`Serve` return the same `unavailable` error. `Close` waits for a dial in progress
+but not for control calls still on the wire (they return `cancelled` when the
+client connection closes) and does not stop an active `Serve` (the host cancels
+`Serve`'s context). A dial failure surfaces as
 `unavailable` (`temporal: cannot reach the Temporal server`).
 
 ### Start and idempotency (D2)

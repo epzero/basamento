@@ -26,6 +26,7 @@ func TestClientErrorMappedBranchesTable(t *testing.T) {
 		msg  string
 	}{
 		{"cancelled", context.Canceled, core.CodeCancelled, "temporal: the request was cancelled"},
+		{"service_cancelled", serviceerror.NewCanceled("grpc: the client connection is closing"), core.CodeCancelled, "temporal: the request was cancelled"},
 		{"timeout", context.DeadlineExceeded, core.CodeTimeout, "temporal: the request timed out"},
 		{"not_found", &serviceerror.NotFound{}, core.CodeNotFound, "temporal: run not found"},
 		{"conflict", &serviceerror.WorkflowExecutionAlreadyStarted{}, core.CodeConflict, "temporal: a run with that id already exists"},
@@ -69,6 +70,16 @@ func TestClientErrorLogsBounded(t *testing.T) {
 	_ = rt.clientError("op", errors.New(long))
 	if !strings.Contains(buf.String(), truncateLogTextRunes(long)) {
 		t.Fatal("bounded log")
+	}
+}
+
+func TestClientErrorServiceCanceledNoLog(t *testing.T) {
+	var buf bytes.Buffer
+	h := slog.NewJSONHandler(&buf, nil)
+	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t), Outbox: newTestOutbox(), Logger: slog.New(h)})
+	_ = rt.clientError("list", serviceerror.NewCanceled("grpc: the client connection is closing"))
+	if buf.Len() != 0 {
+		t.Fatalf("expected no log for service canceled, got %q", buf.String())
 	}
 }
 
@@ -120,10 +131,65 @@ func assertWorkflowNotReady(t *testing.T, err error) {
 	}
 }
 
+func TestClientErrorMapsApplicationErrorOpDetail(t *testing.T) {
+	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t), Outbox: newTestOutbox()})
+	const op = "describe"
+	appErr := temporal.NewNonRetryableApplicationError("gone", string(core.CodeNotFound), nil)
+	err := rt.clientError(op, appErr)
+	var pe *core.Error
+	if !errors.As(err, &pe) || pe.Code != core.CodeNotFound || pe.Message != "gone" || pe.Details["op"] != op {
+		t.Fatalf("got %#v err %v", pe, err)
+	}
+}
+
 func TestResolveMapsApplicationError(t *testing.T) {
 	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t), Outbox: newTestOutbox()})
-	err := rt.mapResolveError("resolve", temporal.NewNonRetryableApplicationError("nope", string(core.CodeNotFound), nil))
-	if core.CodeOf(err) != core.CodeNotFound {
+	const op = "resolve"
+	err := rt.mapResolveError(op, temporal.NewNonRetryableApplicationError("nope", string(core.CodeNotFound), nil))
+	var pe *core.Error
+	if !errors.As(err, &pe) || pe.Code != core.CodeNotFound || pe.Details["op"] != op {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestMapApplicationErrorBranches(t *testing.T) {
+	const op = "resolve"
+	cases := []struct {
+		name string
+		typ  string
+		msg  string
+		code core.Code
+	}{
+		{"not_found", string(core.CodeNotFound), "gone", core.CodeNotFound},
+		{"conflict", string(core.CodeConflict), "busy", core.CodeConflict},
+		{"unavailable", string(core.CodeUnavailable), "wait", core.CodeUnavailable},
+		{"internal", "weird", "bad", core.CodeInternal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := temporal.NewNonRetryableApplicationError(tc.msg, tc.typ, nil)
+			var appErr *temporal.ApplicationError
+			if !errors.As(wrapped, &appErr) {
+				t.Fatal("not application error")
+			}
+			err := mapApplicationError(op, appErr)
+			var pe *core.Error
+			if !errors.As(err, &pe) {
+				t.Fatalf("got %T", err)
+			}
+			if pe.Code != tc.code {
+				t.Fatalf("code %v", pe.Code)
+			}
+			wantMsg := tc.msg
+			if tc.code == core.CodeInternal {
+				wantMsg = "temporal: the server call failed"
+			}
+			if pe.Message != wantMsg {
+				t.Fatalf("message %q", pe.Message)
+			}
+			if pe.Details["op"] != op {
+				t.Fatalf("details %#v", pe.Details)
+			}
+		})
 	}
 }

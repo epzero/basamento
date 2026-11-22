@@ -21,14 +21,17 @@ require (
 	github.com/nats-io/nats-server/v2 v2.11.15
 	github.com/nats-io/nats.go v1.49.0
 	github.com/nats-io/nuid v1.0.1
+	github.com/nexus-rpc/sdk-go v0.7.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/stretchr/testify v1.12.1
 	github.com/tink-crypto/tink-go/v2 v2.9.0
 	go.opentelemetry.io/proto/otlp v1.11.1
 	go.temporal.io/api v1.63.5
 	go.temporal.io/sdk v1.47.0
 	gocloud.dev v0.49.0
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0
@@ -54,7 +57,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nexus-rpc/nexus-proto-annotations v0.1.1-0.20260629224650-76486e7cc189 // indirect
-	github.com/nexus-rpc/sdk-go v0.7.0 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -64,7 +66,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
-	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
@@ -187,7 +188,6 @@ require (
 	google.golang.org/genproto v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
-	google.golang.org/grpc v1.84.0 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

@@ -48,7 +48,7 @@ func (r *Runtime) Resolve(ctx context.Context, ref runtime.RunRef, gate string, 
 func (r *Runtime) mapResolveError(op string, err error) error {
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
-		return mapApplicationError(appErr)
+		return mapApplicationError(op, appErr)
 	}
 	return r.clientError(op, err)
 }

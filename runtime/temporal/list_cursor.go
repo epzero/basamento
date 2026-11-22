@@ -11,6 +11,13 @@ import (
 
 const listCursorVersion = 1
 
+// maxListCursorBytes is the longest accepted opaque list cursor before decoding.
+// The largest encodeListCursor output uses a 128-byte tenant id (REQ-CORE-005),
+// a 64-character hex query fingerprint, and a page token of 2048 bytes (standard
+// base64 on P is 2732 characters). The JSON payload is about 2957 bytes and the
+// outer base64url encoding is about 3944 bytes, well under this cap.
+const maxListCursorBytes = 4096
+
 type listCursorPayload struct {
 	V int    `json:"v"`
 	T string `json:"t"`
@@ -41,6 +48,9 @@ func encodeListCursor(tenant core.TenantID, query string, pageToken []byte) (str
 }
 
 func parseListCursor(cursor string, tenant core.TenantID, query string) ([]byte, error) {
+	if len(cursor) > maxListCursorBytes {
+		return nil, core.NewError(core.CodeInvalidArgument, "temporal: unusable paging cursor", nil)
+	}
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
 		return nil, core.NewError(core.CodeInvalidArgument, "temporal: unusable paging cursor", nil)
