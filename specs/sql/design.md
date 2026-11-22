@@ -71,39 +71,37 @@ Every repository method reads the tenant from its `context.Context`. With no
 tenant it fails with `invalid_argument` before touching the database
 (REQ-SQL-010). Every statement filters by the tenant column, and every insert
 sets it from the context, never from the caller's arguments. Row-level
-security in the cloud profile is WP-L8-02's second line of defense; mechanics
-are decided in [ADR-0022](../../docs/adr/0022-postgres-row-level-security.md)
-and summarised here as **D1**–**D5** for implementers of `platform/sql` and
-callers.
+security in the cloud profile is WP-L8-02's second line of defense; normative
+decisions are [ADR-0022](../../docs/adr/0022-postgres-row-level-security.md)
+**D1**–**D8**. This section records only `platform/sql` mechanics by ADR
+number.
 
-- **D1 — Postgres tenant prelude.** On dialect `postgres` only, the
-  application pool uses a pgx stdlib connector wrapper that, before each
-  autocommit `Exec`/`Query`/`QueryRow` on `Execer`, runs
-  `SELECT set_config('app.tenant', $1, false)` when the context tenant differs
-  from the value cached on that physical connection. `Store.InTx` sets
-  `set_config(..., true)` once at transaction begin on the transaction
-  connection. `driver.SessionResetter` runs `RESET app.tenant` when a
-  connection is returned to the pool. SQLite does not use the wrapper.
-- **D2 — Dual URL open (Postgres cloud).** `Open` accepts optional
-  `OpenOptions`: `MigrateURL` (owner role) and `PostgresMigrations` (`fs.FS` of
-  postgres-only goose files). It migrates on `MigrateURL` (or `rawURL` when
-  `MigrateURL` is empty for embedded/BDD), applies the shared migration set,
-  then applies the postgres-only set with goose table `goose_db_version_postgres`,
-  then closes the migrate handle and opens the long-lived pool on `rawURL`
-  (application role). `MigrateURL` and passwords are redacted like `rawURL`.
-- **D3 — Postgres-only migration pass.** Shared SQL files stay valid on both
-  dialects. Files under each package's `migrations/postgres/` directory
-  contain only Postgres DDL (RLS, roles, grants). `Open` skips that pass on
-  SQLite.
-- **D4 — No unscoped statements.** If the connector cannot read a tenant from
-  ctx when a prelude would run, the call returns `invalid_argument` without SQL
-  (same as repositories). A driver or `set_config` failure maps to `unavailable`
-  or `internal` and does not execute the repository query.
-- **D5 — Gate / embedded.** When the admin URL creates a scenario database, the
-  postgres-only migrations create `bas_app`. The BDD driver rewrites the store
-  URL to `bas_app` (password from migration seed) before `sql.Open` for cloud
-  scenarios, so RLS is enforced. Production supplies `sql.url` for `bas_app`
-  directly.
+**Open (ADR D2, D3).** `Open` gains an explicit **RLS mode** option the cloud
+profile sets; without it Postgres behaviour stays as today. In RLS mode:
+`OpenOptions` carries `MigrateURL` (`sql.migrate_url`) and uses `rawURL`
+(`sql.url`, `bas_app`) for the application pool. One shared migration `fs.FS`
+per open; files `NNNNN_<name>.postgres.sql` are goose-excluded on SQLite and
+omitted from `maxMigrationVersion` / `checkSchemaVersion` (D3). Migrate runs on
+`MigrateURL`, then the pool opens on `sql.url`. On RLS mode startup the app pool
+runs the role self-check (D2). Merging migration FS from several packages is a
+host concern—see ADR D3 follow-up.
+
+**Wrapper (ADR D1, D5, D6).** Postgres application pools in RLS mode register
+the tenant connector wrapper (pgx stdlib). Invariants: per-statement
+`set_config` when cached tenant or system scope differs; cache unknown after
+errors, `Rollback`, failed `Commit`; no unconditional `RESET` on reuse;
+`ResetSession` forwards to pgx; every driver statement path intercepted;
+embed-forward pgx optional interfaces; no tenant work at `Connect`. System scope
+API names (e.g. `WithSystemScope`, `ScopeRelayDiscovery`) and allowed call-site
+test: ADR D6. Statements without tenant and without allowed system scope:
+`invalid_argument` before SQL.
+
+**Errors (ADR D7).** SQLSTATE `42501` maps to `core.CodeInternal` with
+`Details["sqlstate"]` and no table, policy, or key in the message; implementation
+pins mapping with a test.
+
+**Topology (ADR D1).** Session-level poolers only; transaction-mode PgBouncer
+unsupported.
 
 Repository tenant filters remain the first line of defence (REQ-SQL-010);
 Postgres RLS does not relax them.

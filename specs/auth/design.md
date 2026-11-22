@@ -248,26 +248,13 @@ returns `permission_denied` — and the failure is logged and counted as a metri
 
 This is the second line of defence behind the tenant filter every
 `platform/sql` repository already applies ([`specs/sql/design.md` §4](../sql/design.md)).
-It is enforced only in the cloud profile. Architecture decisions:
-[ADR-0022](../../docs/adr/0022-postgres-row-level-security.md). Implementer
-rules below use **D1**–**D5** from that ADR.
+It is enforced only in the cloud profile. Normative decisions:
+[ADR-0022](../../docs/adr/0022-postgres-row-level-security.md) **D1**–**D8**.
 
-- **D1 — Tenant variable (not only inside transactions).** `platform/sql`
-  sets `app.tenant` from `core.TenantFrom(ctx)` with a bound parameter, never
-  concatenation. On the pooled `Execer` it uses session `set_config(...,
-  false)` when the connection's applied value differs; inside `Store.InTx` it
-  uses `set_config(..., true)` once at begin. `RESET app.tenant` runs when a
-  connection returns to the pool. `current_setting('app.tenant', true)` is SQL
-  NULL when never set; after `RESET` or a rolled-back session set it is an empty
-  string — both yield no visible rows under the policy (REQ-AUTH-028). Failure
-  to apply the variable fails the statement; unscoped SQL never runs.
-- **D2 — Connection identity (roles).** Postgres-only migrations create or
-  assume roles `bas_owner` (owns tenant tables) and `bas_app` (`LOGIN`, no
-  `BYPASSRLS`, not owner). Production uses two URLs (`sql.migrate_url` for
-  migrate, `sql.url` for the app pool); passwords only through the secrets port.
-  The gate connects as `bas_app` after migrate (ADR-0015 admin creates the
-  database; see `specs/sql/design.md` §4). Superuser sessions do not prove RLS.
-- **D3 — Policy shape**, for every row in D4:
+- **Role (ADR D2).** Application traffic uses `bas_app` only (`sql.url`);
+  migrations use `sql.migrate_url`. Migrations do not create roles or passwords.
+
+- **Policy shape** (every tenant table in ADR D4):
 
   ```sql
   ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
@@ -277,18 +264,26 @@ rules below use **D1**–**D5** from that ADR.
     WITH CHECK (<tenant_col> = current_setting('app.tenant', true));
   ```
 
-  `<tenant_col>` is `tenant` or `tenant_id` as the table defines. `FORCE` and a
-  non-owner application role satisfy REQ-AUTH-027.
-- **D4 — Tables.** Credentials, audit, `authz_bindings` (REQ-AUTH-029), every
-  `stream/eventlog` table with a tenant key, and `telemetry_spans`. Each owning
-  package ships postgres-only goose files; see ADR-0022 D4 and `go tool gate rls`
-  (designer spec).
-- **D5 — Gate proof.** Scenarios tagged `@profile:cloud` run on the Postgres lane
+  `<tenant_col>` is `tenant` or `tenant_id` as defined on the table. No `TO`
+  clause. `eventlog_outbox` additionally carries the permissive read policy in
+  ADR D6. Exemptions and the schema rule (composite tenant keys): ADR D4.
+
+- **Tenant variable (ADR D1, D5).** Set through `platform/sql` before each
+  statement when RLS mode is on; details in ADR and `specs/sql/design.md` §4.
+
+- **Tables (ADR D4).** REQ-AUTH-029 names credentials, audit and authz; REQ-AUTH-027
+  “every tenant table” includes eventlog tables in D4. Not in scope until decided:
+  Postgres `telemetry_spans`.
+
+- **Gate proof (ADR D8).** Scenarios `@profile:cloud` run on the Postgres lane
   ([ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md)): fresh
-  database, store opened as `bas_app`, steps seed two tenants and assert
-  isolation on credentials, audit and `authz_bindings` per REQ-AUTH-027–029.
-  Steps set tenant through the public store API (not raw SQL); a scope with no
-  tenant sees no audit rows. No production test hooks.
+  database, store and migrations as production (`bas_app` URL after fixture
+  creates the role). Steps seed two tenants via the public store API. A
+  **separate** raw `database/sql` pool on the same `bas_app` URL (no wrapper)
+  runs the SQL transactions in AUTH-027-01 and AUTH-028-01 to prove database
+  policies. REQ-AUTH-028 “every transaction” is satisfied because the wrapper
+  sets the variable before every statement (designer interpretation only). No
+  production test hooks.
 
 ## 9. Delivery split
 
