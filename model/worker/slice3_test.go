@@ -169,6 +169,67 @@ func TestSpillStartsBeforeMarkingAndCarriesTheRemoteResult(t *testing.T) {
 	}
 }
 
+// TestSpillCompletionBoundsTheChargedCost proves ADR-0012 §9 on the spill
+// settlement path: a remote that reports more than the reservation it was
+// given or the platform ceiling settles at the ceiling, never at its own
+// report, and the row and audit event carry that charge.
+func TestSpillCompletionBoundsTheChargedCost(t *testing.T) {
+	cases := []struct {
+		name                        string
+		maxCost, estimate, reported int64
+		want                        int64
+	}{
+		{"reservation", DefaultMaxCostMpts, 300, 9_000_000_000_000_000, 300},
+		{"platform ceiling", 200, 300, 9_000_000_000_000_000, 200},
+		{"within both", DefaultMaxCostMpts, 300, 42, 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+			clock := coretest.NewFakeClock(at)
+			audit := &auditRecorder{}
+			s, err := Open(ctx, openTestDB(t), Options{
+				Clock: clock, IDs: &coretest.SeqIds{}, Audit: audit, MaxCostMpts: tc.maxCost,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spillPool(t, s, clock)
+			remote := &scriptedRemote{
+				descriptors: []model.Descriptor{{ID: "chat", Caps: []model.Capability{model.CapChat}}},
+				estimate:    tc.estimate,
+				result: model.Result{
+					State:    model.StateSucceeded,
+					Message:  json.RawMessage(`{"ok":true}`),
+					CostMpts: tc.reported,
+				},
+			}
+			spilled, err := s.Spill(ctx, remote.Remote("cloud"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(spilled) != 1 || spilled[0].Reserved != tc.estimate {
+				t.Fatalf("spilled %v, want one at the %d estimate", spilled, tc.estimate)
+			}
+			inv := state(t, s, "r1")
+			if inv.State != stateRemote || inv.ChargedMpts != tc.want || inv.ReservedMpts != tc.estimate {
+				t.Fatalf("invocation %s reserved %d charged %d, want remote reserved %d charged %d",
+					inv.State, inv.ReservedMpts, inv.ChargedMpts, tc.estimate, tc.want)
+			}
+			var audited bool
+			for _, e := range audit.events {
+				if e.Action == "worker.spill" && e.Resource == "acme-llm" && e.Reason == "cloud" {
+					audited = true
+				}
+			}
+			if !audited {
+				t.Fatalf("audit %v, want a worker.spill event for acme-llm by cloud", audit.events)
+			}
+		})
+	}
+}
+
 func TestSpillFailedStartIsFailedNotSucceeded(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)

@@ -700,7 +700,7 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	if cost < 0 {
 		return core.NewError(core.CodeInvalidArgument, "worker: cost must not be negative", nil)
 	}
-	cost = s.boundCost(inv, cost)
+	cost = s.boundCost(inv.ReservedMpts, cost)
 	if len(result) == 0 {
 		result = json.RawMessage("{}")
 	}
@@ -726,13 +726,17 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	return err
 }
 
-// boundCost bounds the cost a worker reports (ADR-0012 §9): the platform
-// owns the price, so the reported amount may never exceed the reservation the
-// platform made or its configured ceiling.
-func (s *Store) boundCost(inv Invocation, cost int64) int64 {
+// boundCost bounds a cost before it is settled (ADR-0012 §9): the platform
+// owns the price, so the charged amount may never exceed the reservation the
+// platform made for the invocation or its configured ceiling. Every path that
+// writes charged_mpts settles through this one rule.
+func (s *Store) boundCost(reserved, cost int64) int64 {
+	if cost < 0 {
+		return 0
+	}
 	ceiling := s.maxCost
-	if inv.ReservedMpts > 0 && inv.ReservedMpts < ceiling {
-		ceiling = inv.ReservedMpts
+	if reserved > 0 && reserved < ceiling {
+		ceiling = reserved
 	}
 	if cost > ceiling {
 		return ceiling
@@ -1061,21 +1065,21 @@ func (s *Store) sweep(ctx context.Context) error {
 			switch {
 			case inv.State == stateWaiting:
 				if inv.Attempt >= 3 {
-					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
+					if err := s.failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 					continue
 				}
 				if inv.CancelRequested {
-					if err := cancelRowTx(ctx, tx, inv, 0, now); err != nil {
+					if err := s.cancelRowTx(ctx, tx, inv, 0, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 					continue
 				}
 				if inv.QueueTimeout > 0 && !now.Before(inv.QueuedAt.Add(inv.QueueTimeout)) {
-					if err := failRow(ctx, tx, inv, core.CodeUnavailable, 0, now); err != nil {
+					if err := s.failRow(ctx, tx, inv, core.CodeUnavailable, 0, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1087,19 +1091,19 @@ func (s *Store) sweep(ctx context.Context) error {
 				// keeps the reservation, because the provider may have run.
 				switch {
 				case inv.CancelRequested:
-					if err := cancelRowTx(ctx, tx, inv, inv.ReservedMpts, now); err != nil {
+					if err := s.cancelRowTx(ctx, tx, inv, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
-					if err := failRow(ctx, tx, inv, core.CodeUnavailable, inv.ReservedMpts, now); err != nil {
+					if err := s.failRow(ctx, tx, inv, core.CodeUnavailable, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
 				}
 			case inv.InDoubt:
 				if !inv.InDoubtUntil.IsZero() && !now.Before(inv.InDoubtUntil) {
-					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
+					if err := s.failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1111,7 +1115,7 @@ func (s *Store) sweep(ctx context.Context) error {
 							return err
 						}
 					}
-					if err := failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
+					if err := s.failRow(ctx, tx, inv, CodeWorkerLost, inv.ReservedMpts, now); err != nil {
 						return err
 					}
 					touched[inv.Pool] = true
@@ -1135,7 +1139,7 @@ func (s *Store) sweep(ctx context.Context) error {
 				}
 				if d.RestartSafe {
 					if inv.CancelRequested {
-						if err := cancelRowTx(ctx, tx, inv, 0, now); err != nil {
+						if err := s.cancelRowTx(ctx, tx, inv, 0, now); err != nil {
 							return err
 						}
 						touched[inv.Pool] = true
@@ -1248,7 +1252,8 @@ func (s *Store) evictEndedTx(ctx context.Context, tx *psql.Execer, now time.Time
 	return nil
 }
 
-func failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Code, charged int64, now time.Time) error {
+func (s *Store) failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Code, charged int64, now time.Time) error {
+	charged = s.boundCost(inv.ReservedMpts, charged)
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
@@ -1262,9 +1267,10 @@ func failRow(ctx context.Context, tx *psql.Execer, inv Invocation, code core.Cod
 
 // cancelRowTx ends a row the caller asked to cancel, keeping the cost the
 // provider may already have incurred.
-func cancelRowTx(ctx context.Context, tx *psql.Execer, inv Invocation, charged int64, now time.Time) error {
+func (s *Store) cancelRowTx(ctx context.Context, tx *psql.Execer, inv Invocation, charged int64, now time.Time) error {
 	// The state and attempt guard the write: a concurrent report that already
 	// ended or requeued the row wins, and the sweep leaves it alone.
+	charged = s.boundCost(inv.ReservedMpts, charged)
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,

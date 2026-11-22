@@ -249,7 +249,7 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 			}
 			req, err := decodeRequest(inv)
 			if err != nil {
-				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeInvalidArgument, 0); ferr != nil {
+				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeInvalidArgument, inv.ReservedMpts, 0); ferr != nil {
 					return nil, ferr
 				}
 				continue
@@ -279,7 +279,7 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 				if !definitiveFailure(err) {
 					charged = target.Estimate
 				}
-				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeOf(err), charged); ferr != nil {
+				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeOf(err), target.Estimate, charged); ferr != nil {
 					return nil, ferr
 				}
 				continue
@@ -436,8 +436,10 @@ func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote
 }
 
 // failSpill records a spill that never reached a result. The invocation is
-// failed with the provider's code, never reported as a success.
-func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code, charged int64) error {
+// failed with the provider's code, never reported as a success, and the charge
+// is bounded like every other settlement (ADR-0012 §9).
+func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code, reserved, charged int64) error {
+	charged = s.boundCost(reserved, charged)
 	_, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
@@ -449,7 +451,8 @@ func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code,
 
 // finishSpilled writes the remote result onto the claimed row. A remote that
 // failed ends failed with its code; only a success becomes stateRemote. A
-// cancelled spill ends cancelled and keeps the cost the provider reported.
+// cancelled spill ends cancelled and keeps the cost the provider reported,
+// bounded by the same ceiling as every other charge (ADR-0012 §9).
 func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.Result, resErr error, estimate int64, cancelled bool) error {
 	var state string
 	code := core.Code("")
@@ -458,9 +461,6 @@ func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.R
 	case cancelled:
 		state = stateCancelled
 		code = core.CodeCancelled
-		if charged < 0 {
-			charged = 0
-		}
 		if resErr != nil && !definitiveFailure(resErr) && charged < estimate {
 			charged = estimate
 		}
@@ -490,9 +490,9 @@ func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.R
 			charged = estimate
 		}
 	}
-	if charged < 0 {
-		charged = 0
-	}
+	// A remote reports what it likes; the platform charges at most the
+	// reservation it made or its ceiling, as a worker report is bounded.
+	charged = s.boundCost(estimate, charged)
 	result := res.Message
 	if len(result) == 0 {
 		result = json.RawMessage("{}")
