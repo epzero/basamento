@@ -637,6 +637,10 @@ func (s *Store) Events(ctx context.Context, workerID, credential, clientRef stri
 			`SELECT COALESCE(MAX(seq), 0) FROM worker_events WHERE client_ref = ?`, clientRef).Scan(&last); err != nil {
 			return err
 		}
+		if last+int64(len(events)) > MaxEventsPerInvocation {
+			return core.NewError(core.CodeInvalidArgument,
+				fmt.Sprintf("worker: more than %d events for one invocation", MaxEventsPerInvocation), nil)
+		}
 		for _, e := range events {
 			// The sequence is the store's: a worker that restarted, a new
 			// attempt or a reset can never collide with or go behind what a
@@ -677,15 +681,25 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	if cost < 0 {
 		return core.NewError(core.CodeInvalidArgument, "worker: cost must not be negative", nil)
 	}
+	cost = s.boundCost(inv, cost)
 	if len(result) == 0 {
 		result = json.RawMessage("{}")
 	}
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
-		if _, err := tx.Exec(ctx,
+		res, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET state = ?, charged_mpts = ?, code = ?, result = ?,
 				in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0,
-				leased_unix_ms = 0, cancel_requested = 0 WHERE client_ref = ?`,
-			state, cost, string(code), string(result), clientRef); err != nil {
+				leased_unix_ms = 0, cancel_requested = 0, ended_unix_ms = ?
+			 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+			state, cost, string(code), string(result), unixms(s.now()),
+			clientRef, stateLeased, w.ID, attempt)
+		if err != nil {
+			return err
+		}
+		if err := affected(res, clientRef); err != nil {
+			return err
+		}
+		if err := clearCancels(ctx, tx, clientRef); err != nil {
 			return err
 		}
 		return setUnitsInUse(ctx, tx, w.ID)
@@ -693,24 +707,37 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	return err
 }
 
+// boundCost bounds the cost a worker reports (ADR-0012 §9): the platform
+// owns the price, so the reported amount may never exceed the reservation the
+// platform made or its configured ceiling.
+func (s *Store) boundCost(inv Invocation, cost int64) int64 {
+	ceiling := s.maxCost
+	if inv.ReservedMpts > 0 && inv.ReservedMpts < ceiling {
+		ceiling = inv.ReservedMpts
+	}
+	if cost > ceiling {
+		return ceiling
+	}
+	return cost
+}
+
 // Release gives a lease back. Unused says the worker never started the
 // invocation, so it goes back to the queue even for a model that is not
 // restart-safe; otherwise a started, non-restart-safe invocation stays in
 // doubt for its own worker. NotBefore is the vendor's rate limit.
-func (s *Store) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+func (s *Store) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time, attempt int) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
 		return err
 	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
-	}
-	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
-		return errLeaseLost(clientRef)
-	}
-	if err := s.refusePastGrace(inv); err != nil {
-		return err
+	if inv.CancelRequested {
+		// Work the run no longer wants must not be requeued and started.
+		return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
+			if err := cancelLeasedTx(ctx, tx, inv, s.now()); err != nil {
+				return err
+			}
+			return setUnitsInUse(ctx, tx, w.ID)
+		})
 	}
 	restartSafe := false
 	if inv.Started && !unused {

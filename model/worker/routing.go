@@ -303,7 +303,9 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 				return nil, err
 			}
 			out = append(out, SpillResult{ClientRef: inv.ClientRef, Pool: poolID, Remote: target.Name, Reserved: target.Estimate})
-			s.auditEvent(ctx, "worker.spill", poolID, "allowed", target.Name)
+			if aerr := s.auditEventFor(ctx, s.poolTenant(ctx, poolID), "worker.spill", poolID, "allowed", target.Name); aerr != nil {
+				return nil, auditUnavailable(aerr)
+			}
 		}
 	}
 	return out, nil
@@ -429,9 +431,9 @@ func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code,
 	_, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
 			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
-			cancel_requested = 0
+			cancel_requested = 0, ended_unix_ms = ?
 		 WHERE client_ref = ? AND state IN (?, ?)`,
-		stateFailed, string(code), charged, clientRef, stateWaiting, stateSpilling)
+		stateFailed, string(code), charged, unixms(s.now()), clientRef, stateWaiting, stateSpilling)
 	return err
 }
 
@@ -488,9 +490,9 @@ func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.R
 	_, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, charged_mpts = ?, code = ?, result = ?,
 			in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
-			cancel_requested = 0
+			cancel_requested = 0, ended_unix_ms = ?
 		 WHERE client_ref = ? AND state = ?`,
-		state, charged, string(code), string(result), clientRef, stateSpilling)
+		state, charged, string(code), string(result), unixms(s.now()), clientRef, stateSpilling)
 	return err
 }
 

@@ -321,11 +321,15 @@ func (s *Store) poolByToken(ctx context.Context, token string) (PoolSpec, error)
 func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	pool, err := s.poolByToken(ctx, req.PoolToken)
 	if err != nil {
-		s.auditEvent(ctx, "worker.refuse", s.poolIDByToken(ctx, req.PoolToken), "failed", "unauthenticated")
+		if aerr := s.auditEventFor(ctx, "", "worker.refuse", s.poolIDByToken(ctx, req.PoolToken), "failed", "unauthenticated"); aerr != nil {
+			return Worker{}, auditUnavailable(aerr)
+		}
 		return Worker{}, err
 	}
 	if req.ProtocolVersion != "" && req.ProtocolVersion != ProtocolVersion {
-		s.auditEvent(ctx, "worker.refuse", pool.ID, "failed", "protocol")
+		if aerr := s.auditEventFor(ctx, pool.Tenant, "worker.refuse", pool.ID, "failed", "protocol"); aerr != nil {
+			return Worker{}, auditUnavailable(aerr)
+		}
 		return Worker{}, core.NewError(core.CodeInvalidArgument,
 			fmt.Sprintf("worker protocol %q is incompatible; upgrade the side behind %s", req.ProtocolVersion, ProtocolVersion),
 			map[string]any{"protocol_version": req.ProtocolVersion, "want": ProtocolVersion})
@@ -400,11 +404,15 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	})
 	if err != nil {
 		if core.CodeOf(err) == core.CodeConflict {
-			s.auditEvent(ctx, "worker.refuse", pool.ID, "denied", "conflict")
+			if aerr := s.auditEventFor(ctx, pool.Tenant, "worker.refuse", pool.ID, "denied", "conflict"); aerr != nil {
+				return Worker{}, auditUnavailable(aerr)
+			}
 		}
 		return Worker{}, err
 	}
-	s.auditEvent(ctx, "worker.join", pool.ID, "allowed", "")
+	if aerr := s.auditEventFor(ctx, pool.Tenant, "worker.join", pool.ID, "allowed", ""); aerr != nil {
+		return Worker{}, auditUnavailable(aerr)
+	}
 	return Worker{
 		ID:                id,
 		Pool:              pool.ID,
@@ -521,7 +529,9 @@ func (s *Store) Remove(ctx context.Context, workerID string) error {
 	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, workerID); err != nil {
 		return err
 	}
-	s.auditEvent(ctx, "worker.remove", pool, "allowed", "")
+	if err := s.auditEventFor(ctx, s.poolTenant(ctx, pool), "worker.remove", pool, "allowed", ""); err != nil {
+		return auditUnavailable(err)
+	}
 	return nil
 }
 

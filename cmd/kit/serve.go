@@ -17,12 +17,15 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform/blob"
 	"github.com/epzero/basamento/platform/bus"
+	"github.com/epzero/basamento/platform/credentials"
 	"github.com/epzero/basamento/platform/secrets"
 	"github.com/epzero/basamento/platform/sql"
 )
@@ -94,6 +97,11 @@ func runServe(args []string) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// The platform owns queue time: the janitor runs here, not only in a
+	// worker process, so a pool with no worker still times out and expires
+	// (ADR-0012 §11). The worker composition root (providers, routing) is a
+	// separate work package.
+	startWorkerJanitor(ctx, opened)
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
@@ -104,6 +112,30 @@ func runServe(args []string) {
 	code := srv.Serve(ctx)
 	stop()
 	os.Exit(code)
+}
+
+// startWorkerJanitor runs the worker queue's time-driven rules over the
+// platform's SQL port until the process ends.
+func startWorkerJanitor(ctx context.Context, opened []config.Port) {
+	for _, p := range opened {
+		db, ok := p.(*sql.Store)
+		if !ok {
+			continue
+		}
+		store, err := worker.Open(ctx, db, worker.Options{
+			Clock:   core.SystemClock{},
+			Audit:   credentials.NewSQLAudit(db),
+			Recover: true,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "worker store:", err)
+			return
+		}
+		go store.RunJanitor(ctx, time.Second, func(err error) {
+			fmt.Fprintln(os.Stderr, "worker janitor:", err)
+		})
+		return
+	}
 }
 
 // startPorts opens the ports in order and binds the listener, all under ctx.

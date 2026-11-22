@@ -18,6 +18,7 @@ import (
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/providers"
 	"github.com/epzero/basamento/model/worker"
+	"github.com/epzero/basamento/platform/credentials"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -57,12 +58,15 @@ func runWorker(args []string) error {
 		return fmt.Errorf("kit worker: --models loaded no descriptors")
 	}
 
-	db, err := psql.Open(ctx, *sqlURL, migrations)
+	db, err := psql.Open(ctx, url, migrations)
 	if err != nil {
 		return fmt.Errorf("kit worker: sql store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	store, err := worker.Open(ctx, db, worker.Options{Clock: core.SystemClock{}})
+	store, err := worker.Open(ctx, db, worker.Options{
+		Clock: core.SystemClock{},
+		Audit: credentials.NewSQLAudit(db),
+	})
 	if err != nil {
 		return fmt.Errorf("kit worker: worker store: %w", err)
 	}
