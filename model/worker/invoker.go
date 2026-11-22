@@ -161,25 +161,13 @@ func encodeRequest(r model.Request) (json.RawMessage, error) {
 	return raw, nil
 }
 
-// decodeRequest rebuilds the request a worker queued. A request recorded
-// before the whole request was carried held only parameters; such a payload
-// is passed through as parameters. A full request always names its model and
-// its client ref, so a bare params object with a "model" key is not mistaken
-// for one.
+// decodeRequest rebuilds the model.Request Enqueue stored. The row and the
+// request agree on the model and client ref; the stored request is used when
+// it carries them.
 func decodeRequest(inv Invocation) (model.Request, error) {
 	req := model.Request{}
 	if len(inv.Request) > 0 && string(inv.Request) != "{}" {
-		var probe struct {
-			Model     string `json:"model"`
-			ClientRef string `json:"client_ref"`
-		}
-		if err := json.Unmarshal(inv.Request, &probe); err != nil {
-			return model.Request{}, core.NewError(core.CodeInvalidArgument,
-				"worker: invocation request is not a model.Request", map[string]any{"cause": err.Error()})
-		}
-		if probe.Model == "" || probe.ClientRef == "" {
-			req.Params = inv.Request
-		} else if err := json.Unmarshal(inv.Request, &req); err != nil {
+		if err := json.Unmarshal(inv.Request, &req); err != nil {
 			return model.Request{}, core.NewError(core.CodeInvalidArgument,
 				"worker: invocation request is not a model.Request", map[string]any{"cause": err.Error()})
 		}

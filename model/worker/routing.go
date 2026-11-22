@@ -515,7 +515,10 @@ func (s *Store) waiting(ctx context.Context, poolID string) ([]Invocation, error
 
 // ExpectedWait estimates how long a new invocation waits in a pool, from the
 // queue depth and the units present workers can take (ADR-0012 §8: the catalog
-// shows queue depth and expected wait per model).
+// shows queue depth and expected wait per model). It assumes one minute per
+// invocation when a worker is present, and one minute for any depth when no
+// worker is; the constant is the estimate available before per-model run
+// durations are recorded.
 func (s *Store) ExpectedWait(ctx context.Context, poolID, modelID string) (time.Duration, error) {
 	m, err := s.Metrics(ctx, poolID)
 	if err != nil {

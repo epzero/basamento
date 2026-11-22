@@ -33,8 +33,10 @@ import (
 func runWorker(args []string) error {
 	fs := flag.NewFlagSet("kit worker", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	poolToken := fs.String("pool-token", "", "pool token from the platform (required)")
-	sqlURL := fs.String("sql-url", "", "SQL store URL of the embedded platform (required)")
+	poolToken := fs.String("pool-token", "", "pool token from the platform (prefer --pool-token-file or BASAMENTO_POOL_TOKEN)")
+	poolTokenFile := fs.String("pool-token-file", "", "file holding the pool token")
+	sqlURL := fs.String("sql-url", "", "SQL store URL of the embedded platform (prefer --sql-url-file or BASAMENTO_SQL_URL)")
+	sqlURLFile := fs.String("sql-url-file", "", "file holding the SQL store URL")
 	dataDir := fs.String("data-dir", "", "writable directory for the worker journal (required)")
 	capacity := fs.Int("capacity", 1, "capacity in units")
 	modelsFlag := fs.String("models", "", "comma-separated provider manifest files")
@@ -43,8 +45,19 @@ func runWorker(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *poolToken == "" || *sqlURL == "" || *dataDir == "" {
-		return fmt.Errorf("kit worker: --pool-token, --sql-url and --data-dir are required")
+	token, err := secretValue("pool token", *poolToken, *poolTokenFile, "BASAMENTO_POOL_TOKEN")
+	if err != nil {
+		return err
+	}
+	url, err := secretValue("sql url", *sqlURL, *sqlURLFile, "BASAMENTO_SQL_URL")
+	if err != nil {
+		return err
+	}
+	if *poolToken != "" || *sqlURL != "" {
+		_, _ = fmt.Fprintln(os.Stderr, "kit worker: a token or URL in the command line is visible to other users; prefer a file or environment variable")
+	}
+	if token == "" || url == "" || *dataDir == "" {
+		return fmt.Errorf("kit worker: a pool token, a SQL URL and --data-dir are required")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -79,7 +92,7 @@ func runWorker(args []string) error {
 
 	client := worker.NewClient(worker.LocalTransport{Store: store}, journal)
 	joined, err := client.Join(ctx, worker.JoinRequest{
-		PoolToken:       *poolToken,
+		PoolToken:       token,
 		ProtocolVersion: worker.ProtocolVersion,
 		Descriptors:     descriptors,
 		Labels:          parseLabels(*labelsFlag),
@@ -115,8 +128,9 @@ type workerLoop struct {
 	store             *worker.Store
 	remotes           []worker.Remote
 	heartbeatInterval time.Duration
-	// warm is the models this worker has loaded, so the platform prefers
-	// invocations that need nothing new (ADR-0012 §5).
+	// warm lists the models this worker's manifests declared. The worker
+	// cannot tell which are actually resident, so every declared model is
+	// passed as warm (ADR-0012 §5).
 	warm     []string
 	capacity int
 	once     bool
@@ -559,6 +573,23 @@ func loadWorkerProviders(list string) ([]worker.Descriptor, map[string]model.Inv
 		}
 	}
 	return descriptors, invokers, nil
+}
+
+// secretValue reads a secret from the flag, a file or the environment, in
+// that order, so it need never be visible in the process arguments
+// (ADR-0012 §10).
+func secretValue(name, flagValue, fileValue, envName string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	if fileValue != "" {
+		raw, err := os.ReadFile(fileValue)
+		if err != nil {
+			return "", fmt.Errorf("kit worker: read %s file: %w", name, err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	}
+	return strings.TrimSpace(os.Getenv(envName)), nil
 }
 
 func parseLabels(list string) map[string]string {

@@ -89,20 +89,6 @@ func declareDescriptor(t *testing.T, s *Store, poolID, token string, d Descripto
 	}
 }
 
-func TestDecodeRequestKeepsALegacyParamsPayload(t *testing.T) {
-	// Before the whole request was carried, the queue held only params. A
-	// params object may name a model of its own; that must not turn it into a
-	// request.
-	raw := json.RawMessage(`{"steps":4,"model":"user-chosen"}`)
-	req, err := decodeRequest(Invocation{ClientRef: "r1", Model: "m", Request: raw})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(req.Params) != string(raw) || req.Model != "m" || req.ClientRef != "r1" {
-		t.Fatalf("decoded %+v, want the legacy payload as params", req)
-	}
-}
-
 func TestInvokerScopesHandlesToTheStartingTenant(t *testing.T) {
 	ctx := context.Background()
 	s, _ := testStore(t, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))

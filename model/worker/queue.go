@@ -236,13 +236,9 @@ func (s *Store) leaseOnce(ctx context.Context, w Worker, req LeaseRequest) ([]In
 		if err != nil {
 			return err
 		}
-		chosen, err := choose(candidates, pool, now, models, free, req.TimeLeft, warm,
-			leasedCounts, func(t core.TenantID) TenantSettings {
-				ts, err := tenantSettingsTx(ctx, tx, w.Pool, t)
-				if err != nil {
-					return TenantSettings{Weight: 1}
-				}
-				return ts
+		chosen, err := choose(candidates, pool, now, free, req.TimeLeft, warm,
+			leasedCounts, func(t core.TenantID) (TenantSettings, error) {
+				return tenantSettingsTx(ctx, tx, w.Pool, t)
 			})
 		if err != nil {
 			return err
@@ -405,9 +401,9 @@ func tenantSettingsTx(ctx context.Context, exec *psql.Execer, poolID string, ten
 // in-flight counts start from the leased rows and move with every pick, so one
 // call never exceeds a tenant's concurrency limit and the shared pool
 // alternates between tenants.
-func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[string]Descriptor,
+func choose(candidates []Invocation, pool PoolSpec, now time.Time,
 	free int, timeLeft time.Duration, warm map[string]bool, leased map[core.TenantID]int,
-	settings func(core.TenantID) TenantSettings) ([]Invocation, error) {
+	settings func(core.TenantID) (TenantSettings, error)) ([]Invocation, error) {
 
 	type ranked struct {
 		inv         Invocation
@@ -419,7 +415,10 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 	}
 	rankedList := make([]ranked, 0, len(candidates))
 	for _, inv := range candidates {
-		settingsFor := settings(inv.Tenant)
+		settingsFor, err := settings(inv.Tenant)
+		if err != nil {
+			return nil, err
+		}
 		rank := inv.Class.rank()
 		if pool.Ageing > 0 && now.Sub(inv.QueuedAt) >= pool.Ageing && rank > 0 {
 			rank--
@@ -490,87 +489,107 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 	return out, nil
 }
 
+// leaseForReport authenticates a worker and returns the invocation its report
+// names. Every lease-scoped report carries its attempt: a report from an
+// earlier attempt, another worker's row or a terminal invocation is lease_lost
+// (REQ-MODEL-024). The attempt also guards the write, so a report that races a
+// sweep cannot overwrite a newer state.
+func (s *Store) leaseForReport(ctx context.Context, workerID, credential, clientRef string, attempt int) (Worker, Invocation, error) {
+	w, err := s.validWorker(ctx, workerID, credential)
+	if err != nil {
+		return Worker{}, Invocation{}, err
+	}
+	inv, err := s.Invocation(ctx, clientRef)
+	if err != nil {
+		return Worker{}, Invocation{}, err
+	}
+	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID || inv.Attempt != attempt {
+		return Worker{}, Invocation{}, errLeaseLost(clientRef)
+	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return Worker{}, Invocation{}, err
+	}
+	return w, inv, nil
+}
+
+// affected reports whether a guarded write won the row; a zero row count means
+// another report, a sweep or a newer attempt changed it first.
+func affected(res interface{ RowsAffected() (int64, error) }, clientRef string) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errLeaseLost(clientRef)
+	}
+	return nil
+}
+
 // Starting records that a worker is about to call its provider. An invocation
 // whose lease expired is recovered to its own worker only inside the grace
 // period (REQ-MODEL-021, REQ-MODEL-023).
-func (s *Store) Starting(ctx context.Context, workerID, credential, clientRef string) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+func (s *Store) Starting(ctx context.Context, workerID, credential, clientRef string, attempt int) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
-		return err
-	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
-	}
-	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
-		return errLeaseLost(clientRef)
-	}
-	if err := s.refusePastGrace(inv); err != nil {
 		return err
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Execer().Exec(ctx,
+	res, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0,
-			lease_expires_unix_ms = ? WHERE client_ref = ?`,
-		unixms(s.now().Add(pool.Lease)), clientRef)
-	return err
+			lease_expires_unix_ms = ? WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+		unixms(s.now().Add(pool.Lease)), clientRef, stateLeased, w.ID, attempt)
+	if err != nil {
+		return err
+	}
+	return affected(res, clientRef)
 }
 
 // Started records the provider's handle after a start.
-func (s *Store) Started(ctx context.Context, workerID, credential, clientRef, providerHandle string) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+func (s *Store) Started(ctx context.Context, workerID, credential, clientRef, providerHandle string, attempt int) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
-		return err
-	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
-	}
-	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
-		return errLeaseLost(clientRef)
-	}
-	if err := s.refusePastGrace(inv); err != nil {
 		return err
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Execer().Exec(ctx,
+	res, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0,
-			lease_expires_unix_ms = ?, provider_handle = ? WHERE client_ref = ?`,
-		unixms(s.now().Add(pool.Lease)), providerHandle, clientRef)
-	return err
+			lease_expires_unix_ms = ?, provider_handle = ?
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+		unixms(s.now().Add(pool.Lease)), providerHandle, clientRef, stateLeased, w.ID, attempt)
+	if err != nil {
+		return err
+	}
+	return affected(res, clientRef)
 }
 
 // Resume lets a worker take back an in-doubt invocation inside the grace
 // period (REQ-MODEL-023).
-func (s *Store) Resume(ctx context.Context, workerID, credential, clientRef string) error {
-	w, err := s.validWorker(ctx, workerID, credential)
+func (s *Store) Resume(ctx context.Context, workerID, credential, clientRef string, attempt int) error {
+	w, inv, err := s.leaseForReport(ctx, workerID, credential, clientRef, attempt)
 	if err != nil {
 		return err
 	}
-	inv, err := s.Invocation(ctx, clientRef)
-	if err != nil {
-		return err
-	}
-	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID || !inv.InDoubt {
+	if !inv.InDoubt {
 		return errLeaseLost(clientRef)
-	}
-	if err := s.refusePastGrace(inv); err != nil {
-		return err
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Execer().Exec(ctx,
+	res, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = ?
-		 WHERE client_ref = ?`, unixms(s.now().Add(pool.Lease)), clientRef)
-	return err
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND attempt = ?`,
+		unixms(s.now().Add(pool.Lease)), clientRef, stateLeased, w.ID, attempt)
+	if err != nil {
+		return err
+	}
+	return affected(res, clientRef)
 }
 
 // Event is one piece of partial output a worker reports.
@@ -1352,25 +1371,16 @@ func (s *Store) EventsAfter(ctx context.Context, clientRef string, after int64) 
 		if err := rows.Scan(&seq, &kind, &data); err != nil {
 			return nil, err
 		}
-		e := Event{Seq: seq, Kind: kind}
-		var stored Event
-		if err := json.Unmarshal([]byte(data), &stored); err == nil && eventHasPayload(stored) {
-			e = stored
-			e.Seq = seq
-			e.Kind = kind
-		} else {
-			e.Data = json.RawMessage(data)
+		var e Event
+		if err := json.Unmarshal([]byte(data), &e); err != nil {
+			return nil, core.NewError(core.CodeInternal, "worker: stored event is corrupt",
+				map[string]any{"client_ref": clientRef, "seq": seq})
 		}
+		e.Seq = seq
+		e.Kind = kind
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-// eventHasPayload distinguishes a stored full event from a bare data payload
-// written before events carried their text, audio, progress and attempt.
-func eventHasPayload(e Event) bool {
-	return e.Kind != "" || e.Text != "" || len(e.Audio) > 0 || e.Progress != 0 ||
-		e.Attempt != 0 || len(e.Data) > 0
 }
 
 // Waiting counts the invocations waiting in a pool.

@@ -225,9 +225,9 @@ func (s *Store) CreatePool(ctx context.Context, spec PoolSpec) (Pool, error) {
 	return Pool{PoolSpec: spec, Token: token}, nil
 }
 
-// EnsurePool creates the pool when it does not exist. It is the composition
-// convenience for a configuration file that names pools; it returns the token
-// only for a new pool.
+// EnsurePool creates the pool when it does not exist and returns the token
+// only for a new pool. A composition root that names pools at start-up uses it
+// to make its configuration idempotent.
 func (s *Store) EnsurePool(ctx context.Context, spec PoolSpec) (Pool, bool, error) {
 	p, err := s.Pool(ctx, spec.ID)
 	if err == nil {
@@ -546,7 +546,10 @@ func (s *Store) SetState(ctx context.Context, workerID string, state State) erro
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if n == 0 {
 		return core.NewError(core.CodeNotFound, fmt.Sprintf("worker %q does not exist", workerID), map[string]any{"worker": workerID})
 	}

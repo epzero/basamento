@@ -45,12 +45,62 @@ func OpenJournal(dir string) (*Journal, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, core.NewError(core.CodeInternal, "worker: cannot create data directory", map[string]any{"cause": err.Error()})
 	}
+	// A pre-existing directory or file may carry wider permissions; tighten
+	// them so tenant payloads stay private (ADR-0012 §10).
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, core.NewError(core.CodeInternal, "worker: cannot secure data directory", map[string]any{"cause": err.Error()})
+	}
 	path := filepath.Join(dir, "worker.journal")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, core.NewError(core.CodeInternal, "worker: cannot open journal", map[string]any{"cause": err.Error()})
 	}
-	return &Journal{path: path, file: f}, nil
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = f.Close()
+		return nil, core.NewError(core.CodeInternal, "worker: cannot secure journal", map[string]any{"cause": err.Error()})
+	}
+	j := &Journal{path: path, file: f}
+	if err := j.compact(); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return j, nil
+}
+
+// compact rewrites the journal with only the entries a restart still needs,
+// so delivered tenant payloads do not stay on disk and start-up stays small
+// (ADR-0012 §7).
+func (j *Journal) compact() error {
+	pending, err := j.Pending()
+	if err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.file == nil {
+		return nil
+	}
+	var data []byte
+	for _, e := range pending {
+		line, err := json.Marshal(e)
+		if err != nil {
+			return core.NewError(core.CodeInternal, "worker: journal entry is not encodable", nil)
+		}
+		data = append(data, line...)
+		data = append(data, '\n')
+	}
+	if err := j.file.Truncate(0); err != nil {
+		return core.NewError(core.CodeInternal, "worker: cannot compact journal", map[string]any{"cause": err.Error()})
+	}
+	if _, err := j.file.Seek(0, 0); err != nil {
+		return core.NewError(core.CodeInternal, "worker: cannot compact journal", map[string]any{"cause": err.Error()})
+	}
+	if len(data) > 0 {
+		if _, err := j.file.Write(data); err != nil {
+			return core.NewError(core.CodeInternal, "worker: cannot compact journal", map[string]any{"cause": err.Error()})
+		}
+	}
+	return j.file.Sync()
 }
 
 // Path is the journal file path.
