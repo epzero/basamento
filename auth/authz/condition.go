@@ -195,10 +195,6 @@ func scopesToAny(scopes []string) []any {
 }
 
 func worstConditionReason(a, b string) string {
-	return worseConditionReason(a, b)
-}
-
-func worseConditionReason(a, b string) string {
 	ra, rb := conditionReasonRank(a), conditionReasonRank(b)
 	if ra >= rb {
 		return a

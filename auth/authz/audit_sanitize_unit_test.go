@@ -15,6 +15,8 @@ func TestSanitizeAuditPartTable(t *testing.T) {
 		{in: "line\nbreak", want: "[invalid]"},
 		{in: string([]byte{0xff, 0xfe}), want: "[invalid]"},
 		{in: "\x85", want: "[invalid]"},
+		{in: "\u0085", want: "[invalid]"},
+		{in: "\u009f", want: "[invalid]"},
 		{in: "\u202e", want: "[invalid]"},
 		{in: "\u200b", want: "[invalid]"},
 		{in: "\u2028", want: "[invalid]"},
