@@ -37,13 +37,19 @@ type Options struct {
 // conversation's flow; TurnFlow is the flow of one turn (WP-L7-01), which every
 // child run of the conversation uses.
 type Input struct {
-	Tenant    core.TenantID   `json:"tenant"`
-	User      string          `json:"user"`
-	ID        string          `json:"id"`
-	Flow      runtime.FlowRef `json:"flow"`
-	TurnFlow  runtime.FlowRef `json:"turn_flow"`
-	Threshold int             `json:"threshold,omitempty"`
-	Record    *Record         `json:"record,omitempty"`
+	Tenant   core.TenantID   `json:"tenant"`
+	User     string          `json:"user"`
+	ID       string          `json:"id"`
+	Flow     runtime.FlowRef `json:"flow"`
+	TurnFlow runtime.FlowRef `json:"turn_flow"`
+	// TurnOut is the state key under which the turn flow's agent node writes
+	// its output (WP-L7-01). A flow run returns its final state, so the
+	// coordinator reads agent.Output from this key and records the turns the
+	// agent added after the carried history as the turn's messages. Empty
+	// means the turn flow's final state is itself a TurnOutput.
+	TurnOut   string  `json:"turn_out,omitempty"`
+	Threshold int     `json:"threshold,omitempty"`
+	Record    *Record `json:"record,omitempty"`
 }
 
 // Output is a coordinator run's result: the record and, when the conversation
@@ -80,12 +86,19 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 	if rec.TurnFlow.Name == "" {
 		rec.TurnFlow = in.TurnFlow
 	}
+	if rec.TurnOut == "" {
+		rec.TurnOut = in.TurnOut
+	}
 	if rec.TurnFlow.Name == "" {
 		return Output{}, core.NewError(core.CodeInvalidArgument, "conversation: no turn flow", map[string]any{"conversation": rec.ID})
 	}
 	gates, refused := 0, 0
 	var child runtime.Future
 	var childRef runtime.RunRef
+	// carried is how many messages the running child got as history; the
+	// agent's output repeats them in its turns, so only the turns after them
+	// belong to this turn (REQ-CONV-012).
+	carried := 0
 
 	for {
 		if rec.Cancelled {
@@ -114,8 +127,11 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 			if !ok {
 				continue
 			}
+			// The child id lives in its own namespace: a conversation id is
+			// unconstrained, so "<run id>-turn-<n>" could repeat another
+			// conversation's run id, while no RunID ever starts with "turn@".
 			childRef = runtime.RunRef{
-				RunID:    fmt.Sprintf("%s-turn-%d", RunID(rec.ID), start.Index),
+				RunID:    fmt.Sprintf("turn@%s@%d", rec.ID, start.Index),
 				TenantID: rec.Tenant,
 			}
 			rec.Turns[start.Index-1].Child = childRef.RunID
@@ -123,6 +139,7 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 				return c.stopped(dc, rec, childRef)
 			}
 			rec.DurableCall()
+			carried = len(start.Input.Messages)
 			child = dc.Child(rec.TurnFlow, turnFlowInput(start.Input), runtime.ChildOptions{ID: childRef.RunID, ParentClose: "request_cancel"})
 			continue
 		}
@@ -179,8 +196,12 @@ func (c *Coordinator) Run(dc runtime.DurableContext, in Input) (Output, error) {
 			continue
 		}
 
+		var raw json.RawMessage
+		endErr := child.Get(&raw)
 		var out TurnOutput
-		endErr := child.Get(&out)
+		if endErr == nil {
+			out, endErr = decodeTurnResult(raw, rec.TurnOut, carried)
+		}
 		if endErr != nil {
 			out.State = TurnFailed
 			out.Code = string(core.CodeOf(endErr))

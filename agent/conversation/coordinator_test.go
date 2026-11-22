@@ -15,7 +15,10 @@ import (
 type coordEvent struct {
 	msg  *Message
 	turn *TurnOutput
-	err  error
+	// raw is the child's final state as a runtime returns it: a flow run's
+	// state, not a TurnOutput. It takes precedence over turn.
+	raw json.RawMessage
+	err error
 }
 
 type childStart struct {
@@ -122,6 +125,12 @@ func (f testFuture) Get(out any) error {
 			return nil
 		}
 		return json.Unmarshal(raw, out)
+	}
+	if len(ev.raw) > 0 {
+		if out == nil {
+			return nil
+		}
+		return json.Unmarshal(ev.raw, out)
 	}
 	raw, _ := json.Marshal(ev.turn)
 	if out == nil {
@@ -235,8 +244,8 @@ func TestRunSteersAndCancelsTheRunningChild(t *testing.T) {
 	if len(turns.steers) != 1 || turns.steers[0] != "About the sea" {
 		t.Fatalf("steers = %v", turns.steers)
 	}
-	if len(turns.steerRef) != 1 || turns.steerRef[0].RunID != "conv-c1-turn-1" {
-		t.Fatalf("steer refs = %+v", turns.steerRef)
+	if len(turns.steerRef) != 1 || turns.steerRef[0].RunID != dc.children[0].id {
+		t.Fatalf("steer refs = %+v, want the running child %q", turns.steerRef, dc.children[0].id)
 	}
 	found := false
 	for _, m := range out.Record.Messages {

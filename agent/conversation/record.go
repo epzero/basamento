@@ -115,6 +115,7 @@ type Record struct {
 	ID        string          `json:"id"`
 	Flow      runtime.FlowRef `json:"flow"`
 	TurnFlow  runtime.FlowRef `json:"turn_flow"`
+	TurnOut   string          `json:"turn_out,omitempty"`
 	Turns     []Turn          `json:"turns,omitempty"`
 	Messages  []MessageRecord `json:"messages,omitempty"`
 	Queue     []Message       `json:"queue,omitempty"`
