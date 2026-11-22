@@ -1,4 +1,4 @@
-@runtime:temporal @level:component
+@wp:WP-L5-02 @runtime:temporal @level:component
 Feature: The Temporal runtime
 
   The temporal runtime runs the flow host as a Temporal workflow and each step
