@@ -24,6 +24,7 @@ type loopTransport struct {
 	starting  chan string
 	finished  chan string
 	left      chan struct{}
+	lastLease worker.LeaseRequest
 }
 
 type finishCall struct {
@@ -44,9 +45,10 @@ func newLoopTransport() *loopTransport {
 func (t *loopTransport) Join(context.Context, worker.JoinRequest) (worker.Worker, error) {
 	return worker.Worker{ID: "w1", Credential: "c1"}, nil
 }
-func (t *loopTransport) Lease(context.Context, worker.LeaseRequest) ([]worker.Invocation, error) {
+func (t *loopTransport) Lease(_ context.Context, req worker.LeaseRequest) ([]worker.Invocation, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lastLease = req
 	out := t.leased
 	t.leased = nil
 	return out, nil
@@ -74,7 +76,7 @@ func (t *loopTransport) Finish(_ context.Context, _, _, ref, state string, _ jso
 	}
 	return nil
 }
-func (t *loopTransport) Release(_ context.Context, _, _, ref string, _ time.Time) error {
+func (t *loopTransport) Release(_ context.Context, _, _, ref string, _ bool, _ time.Time) error {
 	t.mu.Lock()
 	t.releases = append(t.releases, ref)
 	t.mu.Unlock()
@@ -344,4 +346,58 @@ func TestWorkerLoopOnceLeavesWhenThereIsNoWork(t *testing.T) {
 		t.Fatalf("serve: %v", err)
 	}
 	<-tr.left
+}
+
+func TestWorkerLoopAsksForItsWarmModels(t *testing.T) {
+	tr := newLoopTransport()
+	j, err := worker.OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	client := loopClient(t, tr, j)
+	loop := &workerLoop{
+		client: client, capacity: 1, once: true,
+		warm: []string{"m1", "m2"}, beats: make(chan time.Time),
+	}
+	if err := loop.serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if len(tr.lastLease.WarmModels) != 2 || tr.lastLease.WarmModels[0] != "m1" || tr.lastLease.WarmModels[1] != "m2" {
+		t.Fatalf("lease asked for warm models %v, want m1, m2", tr.lastLease.WarmModels)
+	}
+	if tr.lastLease.Wait != 0 {
+		t.Fatalf("--once waited %s, want no long poll", tr.lastLease.Wait)
+	}
+}
+
+func TestWorkerLoopOnceRunsAtMostOneInvocation(t *testing.T) {
+	tr := newLoopTransport()
+	tr.leased = []worker.Invocation{
+		{ClientRef: "r1", Model: "m", Units: 1, Request: json.RawMessage(`{}`)},
+		{ClientRef: "r2", Model: "m", Units: 1, Request: json.RawMessage(`{}`)},
+	}
+	j, err := worker.OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	client := loopClient(t, tr, j)
+	loop := &workerLoop{
+		client: client, capacity: 2, once: true,
+		runner: &worker.Runner{Client: client, Providers: map[string]model.Invoker{"m": &loopProvider{}}},
+	}
+	if err := loop.serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if len(tr.finishes) != 1 || tr.finishes[0].ref != "r1" {
+		t.Fatalf("finished %+v, want only r1", tr.finishes)
+	}
+	if len(tr.releases) != 1 || tr.releases[0] != "r2" {
+		t.Fatalf("released %v, want r2 handed back unused", tr.releases)
+	}
 }

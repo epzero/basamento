@@ -38,6 +38,20 @@ func labelsMatch(worker, required map[string]string) bool {
 	return true
 }
 
+// descriptorSupports reports whether a descriptor serves op. An empty op means
+// the caller did not name a capability and any model of that id matches.
+func descriptorSupports(d model.Descriptor, op model.Capability) bool {
+	if op == "" {
+		return true
+	}
+	for _, c := range d.Caps {
+		if c == op {
+			return true
+		}
+	}
+	return false
+}
+
 // Remote is another provider of a model: a cloud provider, a machine-local
 // model or a remote invoker. Spill-over starts work on one of these when a
 // tenant allows it (ADR-0012 §8).
@@ -48,17 +62,26 @@ type Remote struct {
 	Invoker model.Invoker
 	// Descriptors are the models the provider serves.
 	Descriptors []model.Descriptor
+	// Labels are matched against the labels a routing decision requires,
+	// just as a worker's labels are.
+	Labels map[string]string
 	// Estimate is the reservation for one invocation, in milli-points.
 	Estimate int64
 }
 
-func (r Remote) serves(modelID string) bool {
+// descriptor returns the descriptor a remote serves for modelID and op.
+func (r Remote) descriptor(modelID string, op model.Capability) (model.Descriptor, bool) {
 	for _, d := range r.Descriptors {
-		if d.ID == modelID {
-			return true
+		if d.ID == modelID && descriptorSupports(d, op) {
+			return d, true
 		}
 	}
-	return false
+	return model.Descriptor{}, false
+}
+
+func (r Remote) serves(modelID string, op model.Capability) bool {
+	_, ok := r.descriptor(modelID, op)
+	return ok
 }
 
 // Destination is where an invocation is started: a pool's queue or another
@@ -72,7 +95,8 @@ type Destination struct {
 }
 
 // Router chooses the tenant's own pool before another provider of the same
-// model (REQ-MODEL-031) and honours required labels.
+// model (REQ-MODEL-031) and honours the capability and labels the call
+// requires.
 type Router struct {
 	store   *Store
 	remotes []Remote
@@ -84,10 +108,17 @@ func NewRouter(store *Store, remotes ...Remote) *Router {
 	return &Router{store: store, remotes: remotes}
 }
 
-// Select routes one invocation. A tenant's own pool wins over a shared pool
-// and either wins over another provider; within the pool, the worker labels
-// the call requires must be served by a present worker.
+// Select routes one invocation without a capability constraint.
 func (r *Router) Select(ctx context.Context, tenant core.TenantID, modelID string) (Destination, error) {
+	return r.SelectFor(ctx, tenant, modelID, "")
+}
+
+// SelectFor routes one invocation. A tenant's own pool wins over a shared pool
+// and either wins over another provider; a pool or remote must serve the
+// requested capability and the worker labels the call requires. This work
+// package has no run-start path: the BDD step exercises it, and kit run and the
+// API that call it are a later work package.
+func (r *Router) SelectFor(ctx context.Context, tenant core.TenantID, modelID string, op model.Capability) (Destination, error) {
 	required := requiredLabels(ctx)
 	pools, err := r.store.ListPools(ctx)
 	if err != nil {
@@ -100,14 +131,18 @@ func (r *Router) Select(ctx context.Context, tenant core.TenantID, modelID strin
 		if err != nil {
 			return Destination{}, err
 		}
-		if _, err := r.store.descriptorFor(ctx, id, modelID); err != nil {
+		d, err := r.store.descriptorFor(ctx, id, modelID)
+		if err != nil {
 			if core.CodeOf(err) == core.CodeNotFound {
 				continue
 			}
 			return Destination{}, err
 		}
+		if !descriptorSupports(d.Descriptor, op) {
+			continue
+		}
 		if len(required) > 0 {
-			ok, err := r.store.poolHasLabels(ctx, id, modelID, required)
+			ok, err := r.store.poolHasLabels(ctx, id, modelID, op, required)
 			if err != nil {
 				return Destination{}, err
 			}
@@ -116,8 +151,7 @@ func (r *Router) Select(ctx context.Context, tenant core.TenantID, modelID strin
 			}
 		}
 		if pool.Tenant != "" && pool.Tenant == tenant {
-			d, err := r.store.descriptorFor(ctx, id, modelID)
-			return Destination{Pool: id, Model: d.Descriptor, Tenant: tenant}, err
+			return Destination{Pool: id, Model: d.Descriptor, Tenant: tenant}, nil
 		}
 		if pool.Tenant == "" && shared == "" {
 			shared = id
@@ -128,16 +162,19 @@ func (r *Router) Select(ctx context.Context, tenant core.TenantID, modelID strin
 		return Destination{Pool: shared, Model: d.Descriptor, Tenant: tenant}, err
 	}
 	for i := range r.remotes {
-		if r.remotes[i].serves(modelID) {
+		if !labelsMatch(r.remotes[i].Labels, required) {
+			continue
+		}
+		if d, ok := r.remotes[i].descriptor(modelID, op); ok {
 			remote := r.remotes[i]
-			return Destination{Remote: &remote, IsRemote: true, Tenant: tenant}, nil
+			return Destination{Remote: &remote, IsRemote: true, Tenant: tenant, Model: d}, nil
 		}
 	}
 	return Destination{}, core.NewError(core.CodeNotFound,
 		fmt.Sprintf("no provider serves model %q", modelID), map[string]any{"model": modelID})
 }
 
-func (s *Store) poolHasLabels(ctx context.Context, poolID, modelID string, labels map[string]string) (bool, error) {
+func (s *Store) poolHasLabels(ctx context.Context, poolID, modelID string, op model.Capability, labels map[string]string) (bool, error) {
 	workers, err := s.ListWorkers(ctx, poolID)
 	if err != nil {
 		return false, err
@@ -147,7 +184,7 @@ func (s *Store) poolHasLabels(ctx context.Context, poolID, modelID string, label
 			continue
 		}
 		for _, d := range w.Descriptors {
-			if d.ID == modelID {
+			if d.ID == modelID && descriptorSupports(d.Descriptor, op) {
 				return true, nil
 			}
 		}
@@ -165,8 +202,9 @@ type SpillResult struct {
 }
 
 // Spill moves queued work of tenants that turned spill-over on to another
-// provider of the model once it has waited their spill-over time. The
-// reservation is made at the other provider's price before its start
+// provider of the model once it has waited their spill-over time. The remote
+// start is made before the row leaves the queue, so a failed start is recorded
+// as a failure rather than a success, and the remote result is carried back
 // (REQ-MODEL-032, REQ-MODEL-033). Off stays off: a tenant with spill-over off
 // never has work moved.
 func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, error) {
@@ -199,9 +237,16 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 			if now.Sub(inv.QueuedAt) < settings.SpillAfter {
 				continue
 			}
+			req, err := decodeRequest(inv)
+			if err != nil {
+				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeInvalidArgument, 0); ferr != nil {
+					return nil, ferr
+				}
+				continue
+			}
 			var target *Remote
 			for i := range remotes {
-				if remotes[i].serves(inv.Model) {
+				if remotes[i].Invoker != nil && remotes[i].serves(inv.Model, req.Op) {
 					target = &remotes[i]
 					break
 				}
@@ -209,27 +254,150 @@ func (s *Store) Spill(ctx context.Context, remotes ...Remote) ([]SpillResult, er
 			if target == nil {
 				continue
 			}
-			if err := s.markSpilled(ctx, inv.ClientRef, target.Name, target.Estimate); err != nil {
+			// Reserve before the paid start so a crash between the two still
+			// leaves the charge visible (REQ-MODEL-033).
+			owned, err := s.reserveSpill(ctx, inv.ClientRef, target.Estimate)
+			if err != nil {
 				return nil, err
 			}
-			result := SpillResult{ClientRef: inv.ClientRef, Pool: poolID, Remote: target.Name, Reserved: target.Estimate}
-			out = append(out, result)
-			req := model.Request{Model: inv.Model, ClientRef: inv.ClientRef}
-			if len(inv.Request) > 0 {
-				var payload map[string]any
-				if err := json.Unmarshal(inv.Request, &payload); err == nil {
-					req.Params = inv.Request
-				}
+			if !owned {
+				continue
 			}
-			if target.Invoker != nil {
-				if _, err := target.Invoker.Start(ctx, req); err != nil {
-					return out, err
+			handle, err := target.Invoker.Start(ctx, req)
+			if err != nil {
+				// The invocation was never accepted remotely. A definitive
+				// refusal costs nothing; an ambiguous one settles the
+				// reservation as spent, because the provider may have run.
+				charged := int64(0)
+				if !definitiveFailure(err) {
+					charged = target.Estimate
 				}
+				if ferr := s.failSpill(ctx, inv.ClientRef, core.CodeOf(err), charged); ferr != nil {
+					return nil, ferr
+				}
+				continue
 			}
+			if err := s.markSpilled(ctx, inv, target.Name, target.Estimate, handle.ID); err != nil {
+				// The row left the queue between the read and the claim; the
+				// remote start we just made must not become a paid orphan.
+				_ = target.Invoker.Cancel(ctx, handle)
+				if core.CodeOf(err) == core.CodeConflict {
+					continue
+				}
+				return nil, err
+			}
+			res, resErr := target.Invoker.Result(ctx, handle)
+			if err := s.finishSpilled(ctx, inv.ClientRef, res, resErr, target.Estimate); err != nil {
+				return nil, err
+			}
+			out = append(out, SpillResult{ClientRef: inv.ClientRef, Pool: poolID, Remote: target.Name, Reserved: target.Estimate})
 			s.auditEvent(ctx, "worker.spill", poolID, "allowed", target.Name)
 		}
 	}
 	return out, nil
+}
+
+// reserveSpill records a remote provider's reservation on a waiting row
+// before the start. It reports whether the row was still waiting: another
+// replica may have leased or spilled it in the meantime.
+func (s *Store) reserveSpill(ctx context.Context, clientRef string, reserved int64) (bool, error) {
+	res, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET reserved_mpts = ? WHERE client_ref = ? AND state = ?`,
+		reserved, clientRef, stateWaiting)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// markSpilled claims a waiting invocation for a remote provider after that
+// provider accepted the start. The row is not terminal yet: finishSpilled
+// records the remote result. The claim deadline keeps a crashed spill from
+// being retried as a second paid start.
+func (s *Store) markSpilled(ctx context.Context, inv Invocation, remote string, reserved int64, handle string) error {
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	res, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, spilled = 1, reserved_mpts = ?, worker_id = ?,
+			provider_handle = ?, lease_expires_unix_ms = ?, leased_unix_ms = ?
+		 WHERE client_ref = ? AND state = ?`,
+		stateSpilling, reserved, remote, handle, unixms(now.Add(pool.Lease)), unixms(now),
+		inv.ClientRef, stateWaiting)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return core.NewError(core.CodeConflict, "invocation is no longer waiting", map[string]any{"client_ref": inv.ClientRef})
+	}
+	return nil
+}
+
+// failSpill records a spill whose remote start was refused. The invocation is
+// failed with the provider's code, never reported as a success.
+func (s *Store) failSpill(ctx context.Context, clientRef string, code core.Code, charged int64) error {
+	_, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
+			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0
+		 WHERE client_ref = ? AND state = ?`,
+		stateFailed, string(code), charged, clientRef, stateWaiting)
+	return err
+}
+
+// finishSpilled writes the remote result onto the claimed row. A remote that
+// failed or was cancelled ends failed or cancelled with its code; only a
+// success becomes stateRemote.
+func (s *Store) finishSpilled(ctx context.Context, clientRef string, res model.Result, resErr error, estimate int64) error {
+	var state string
+	code := core.Code("")
+	charged := res.CostMpts
+	switch {
+	case resErr != nil:
+		code = core.CodeOf(resErr)
+		state = stateFailed
+		if code == core.CodeCancelled {
+			state = stateCancelled
+		}
+		if !definitiveFailure(resErr) && charged < estimate {
+			charged = estimate
+		}
+	case res.State == model.StateFailed:
+		state = stateFailed
+		code = failureCode(res)
+	case res.State == model.StateCancelled:
+		state = stateCancelled
+		code = core.CodeCancelled
+	case res.State == model.StateSucceeded || res.State == "":
+		state = stateRemote
+	default:
+		// The provider is still running: the platform cannot report a
+		// success it does not have. Settle the reservation as spent.
+		state = stateFailed
+		code = core.CodeAmbiguousStart
+		if charged < estimate {
+			charged = estimate
+		}
+	}
+	if charged < 0 {
+		charged = 0
+	}
+	result := res.Message
+	if len(result) == 0 {
+		result = json.RawMessage("{}")
+	}
+	_, err := s.db.Execer().Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, charged_mpts = ?, code = ?, result = ?,
+			in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0
+		 WHERE client_ref = ? AND state = ?`,
+		state, charged, string(code), string(result), clientRef, stateSpilling)
+	return err
 }
 
 func (s *Store) waiting(ctx context.Context, poolID string) ([]Invocation, error) {
@@ -247,21 +415,6 @@ func (s *Store) waiting(ctx context.Context, poolID string) ([]Invocation, error
 		out = append(out, inv)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) markSpilled(ctx context.Context, clientRef, remote string, reserved int64) error {
-	res, err := s.db.Execer().Exec(ctx,
-		`UPDATE worker_invocations SET state = ?, spilled = 1, reserved_mpts = ?, worker_id = ?
-		 WHERE client_ref = ? AND state = ?`,
-		stateRemote, reserved, remote, clientRef, stateWaiting)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return core.NewError(core.CodeConflict, "invocation is no longer waiting", map[string]any{"client_ref": clientRef})
-	}
-	return nil
 }
 
 // ExpectedWait estimates how long a new invocation waits in a pool, from the

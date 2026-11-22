@@ -23,16 +23,20 @@ type Options struct {
 	Clock core.Clock
 	Audit platform.Audit
 	IDs   core.Ids
+	// HeartbeatInterval is the cadence the join answer tells a worker to
+	// use; zero reads as DefaultHeartbeatInterval.
+	HeartbeatInterval time.Duration
 }
 
 // Store is the platform side of the worker layer: pools, workers and the SQL
 // queue. It is safe for concurrent use; one store may serve several platform
 // replicas over the same database.
 type Store struct {
-	db    *psql.Store
-	clock core.Clock
-	audit platform.Audit
-	ids   core.Ids
+	db        *psql.Store
+	clock     core.Clock
+	audit     platform.Audit
+	ids       core.Ids
+	heartbeat time.Duration
 }
 
 // schema is created on first use. The queue is a table and the bus only wakes
@@ -91,6 +95,7 @@ var schema = []string{
 		started INTEGER NOT NULL DEFAULT 0,
 		in_doubt INTEGER NOT NULL DEFAULT 0,
 		queued_unix_ms INTEGER NOT NULL,
+		leased_unix_ms INTEGER NOT NULL DEFAULT 0,
 		not_before_unix_ms INTEGER NOT NULL DEFAULT 0,
 		lease_expires_unix_ms INTEGER NOT NULL DEFAULT 0,
 		in_doubt_until_unix_ms INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +118,14 @@ var schema = []string{
 		data TEXT NOT NULL,
 		PRIMARY KEY (client_ref, seq)
 	)`,
+	// A newer attempt tells the superseded worker to cancel at its provider
+	// (ADR-0012 §7). The row is delivered in that worker's next heartbeat and
+	// deleted then.
+	`CREATE TABLE IF NOT EXISTS worker_cancels (
+		client_ref TEXT NOT NULL,
+		worker_id TEXT NOT NULL,
+		PRIMARY KEY (client_ref, worker_id)
+	)`,
 }
 
 // Open returns a store over db, creating the worker schema.
@@ -126,11 +139,20 @@ func Open(ctx context.Context, db *psql.Store, opts Options) (*Store, error) {
 	if opts.IDs == nil {
 		opts.IDs = core.NewULIDs(opts.Clock, nil)
 	}
-	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs}
+	if opts.HeartbeatInterval <= 0 {
+		opts.HeartbeatInterval = DefaultHeartbeatInterval
+	}
+	s := &Store{db: db, clock: opts.Clock, audit: opts.Audit, ids: opts.IDs, heartbeat: opts.HeartbeatInterval}
 	for _, q := range schema {
 		if _, err := db.Execer().Exec(ctx, q); err != nil {
 			return nil, err
 		}
+	}
+	// The platform extends the leases an outage of its own may have expired
+	// before it serves a single request (REQ-MODEL-027). Recover only ever
+	// lengthens a deadline.
+	if err := s.Recover(ctx); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -343,14 +365,15 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	}
 	s.auditEvent(ctx, "worker.join", pool.ID, "allowed", "")
 	return Worker{
-		ID:          id,
-		Pool:        pool.ID,
-		State:       StateActive,
-		Descriptors: req.Descriptors,
-		Labels:      normalizeLabels(req.Labels),
-		Capacity:    req.Capacity,
-		Present:     true,
-		Credential:  credential,
+		ID:                id,
+		Pool:              pool.ID,
+		State:             StateActive,
+		Descriptors:       req.Descriptors,
+		Labels:            normalizeLabels(req.Labels),
+		Capacity:          req.Capacity,
+		Present:           true,
+		Credential:        credential,
+		HeartbeatInterval: s.heartbeat,
 	}, nil
 }
 
@@ -419,6 +442,9 @@ func (s *Store) Leave(ctx context.Context, workerID, credential string) error {
 		`UPDATE worker_workers SET present = 0, state = ? WHERE worker_id = ?`, string(StateLeft), w.ID); err != nil {
 		return err
 	}
+	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, w.ID); err != nil {
+		return err
+	}
 	s.auditEvent(ctx, "worker.leave", w.Pool, "allowed", "")
 	return nil
 }
@@ -437,6 +463,9 @@ func (s *Store) Remove(ctx context.Context, workerID string) error {
 	}
 	if _, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_workers SET removed = 1, present = 0, state = ? WHERE worker_id = ?`, string(StateLeft), workerID); err != nil {
+		return err
+	}
+	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, workerID); err != nil {
 		return err
 	}
 	s.auditEvent(ctx, "worker.remove", pool, "allowed", "")

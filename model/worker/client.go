@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -21,7 +22,7 @@ type Transport interface {
 	Started(ctx context.Context, workerID, credential, clientRef, providerHandle string) error
 	Events(ctx context.Context, workerID, credential, clientRef string, events []Event) error
 	Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64) error
-	Release(ctx context.Context, workerID, credential, clientRef string, notBefore time.Time) error
+	Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error
 	Resume(ctx context.Context, workerID, credential, clientRef string) error
 	Heartbeat(ctx context.Context, workerID, credential string, freeUnits int) (HeartbeatAnswer, error)
 	Leave(ctx context.Context, workerID, credential string) error
@@ -78,13 +79,14 @@ func (c *Client) Pending() ([]JournalEntry, error) {
 
 // LeaseOnce asks for work with the given free units and records each lease in
 // the journal before the caller starts it.
-func (c *Client) LeaseOnce(ctx context.Context, free int, warm []string, timeLeft time.Duration) ([]Invocation, error) {
+func (c *Client) LeaseOnce(ctx context.Context, free int, warm []string, timeLeft, wait time.Duration) ([]Invocation, error) {
 	leased, err := c.transport.Lease(ctx, LeaseRequest{
 		WorkerID:   c.worker.ID,
 		Credential: c.worker.Credential,
 		FreeUnits:  free,
 		WarmModels: warm,
 		TimeLeft:   timeLeft,
+		Wait:       wait,
 	})
 	if err != nil {
 		return nil, err
@@ -155,9 +157,10 @@ func (c *Client) Finish(ctx context.Context, clientRef, state string, result jso
 	return nil
 }
 
-// Release gives a lease back.
-func (c *Client) Release(ctx context.Context, clientRef string, notBefore time.Time) error {
-	if err := c.transport.Release(ctx, c.worker.ID, c.worker.Credential, clientRef, notBefore); err != nil {
+// Release gives a lease back. Unused says the worker never started the
+// invocation.
+func (c *Client) Release(ctx context.Context, clientRef string, unused bool, notBefore time.Time) error {
+	if err := c.transport.Release(ctx, c.worker.ID, c.worker.Credential, clientRef, unused, notBefore); err != nil {
 		return err
 	}
 	if c.journal != nil {
@@ -198,8 +201,10 @@ type Runner struct {
 }
 
 // Run executes one leased invocation and reports its terminal state to the
-// platform. A provider that cannot start releases the lease for another
-// worker.
+// platform. A provider that refuses the start definitively finishes the
+// invocation as failed with the provider's code; an ambiguous start failure
+// releases the lease, which leaves a non-restart-safe model in doubt for this
+// worker rather than handing it to another.
 func (r *Runner) Run(ctx context.Context, inv Invocation) error {
 	return r.run(ctx, inv, "")
 }
@@ -240,7 +245,7 @@ func (r *Runner) track(clientRef string, cancel context.CancelFunc) func() {
 func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string) error {
 	provider := r.providers()[inv.Model]
 	if provider == nil {
-		_ = r.Client.Release(ctx, inv.ClientRef, time.Time{})
+		_ = r.Client.Release(ctx, inv.ClientRef, true, time.Time{})
 		return core.NewError(core.CodeUnsupported,
 			"worker loaded no provider for the model", map[string]any{"model": inv.Model})
 	}
@@ -258,6 +263,8 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 		if runCtx.Err() != nil {
 			return r.finishCancelled(ctx, inv.ClientRef)
 		}
+		// Nothing was started; hand the lease back unused.
+		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
 		return err
 	}
 	var handle model.Handle
@@ -267,7 +274,14 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 			if runCtx.Err() != nil {
 				return r.finishCancelled(ctx, inv.ClientRef)
 			}
-			_ = r.Client.Release(ctx, inv.ClientRef, time.Time{})
+			if definitiveFailure(err) {
+				// The provider refused the call and is not running it:
+				// report the failure instead of leaving the invocation to
+				// expire as worker_lost.
+				_ = r.Client.Finish(ctx, inv.ClientRef, string(model.StateFailed), nil, core.CodeOf(err), 0)
+			} else {
+				_ = r.Client.Release(ctx, inv.ClientRef, false, time.Time{})
+			}
 			return err
 		}
 	} else {
@@ -277,6 +291,9 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 		if runCtx.Err() != nil {
 			return r.finishCancelled(ctx, inv.ClientRef)
 		}
+		// The provider may be running: leave the lease in doubt rather than
+		// start a second paid attempt.
+		_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{})
 		return err
 	}
 
@@ -303,7 +320,7 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 			// The caller is going away; hand the lease back rather than
 			// leave it in doubt for the whole grace period.
 			_ = provider.Cancel(context.Background(), handle)
-			_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, time.Time{})
+			_ = r.Client.Release(context.WithoutCancel(ctx), inv.ClientRef, false, time.Time{})
 			return ctx.Err()
 		}
 		cancelled = true
@@ -334,18 +351,42 @@ func (r *Runner) run(ctx context.Context, inv Invocation, providerHandle string)
 		return err
 	}
 	if resErr != nil {
-		_ = r.Client.Release(reportCtx, inv.ClientRef, time.Time{})
+		if definitiveFailure(resErr) {
+			// The provider ended the invocation with a failure: report it
+			// with its code and settle the reservation, not worker_lost.
+			state := string(model.StateFailed)
+			if core.CodeOf(resErr) == core.CodeCancelled {
+				state = string(model.StateCancelled)
+			}
+			_ = r.Client.Finish(reportCtx, inv.ClientRef, state, nil, core.CodeOf(resErr), res.CostMpts)
+		} else {
+			_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{})
+		}
 		return resErr
 	}
-	state := string(res.State)
-	if state == "" {
+	var state string
+	code := core.Code("")
+	switch res.State {
+	case model.StateSucceeded, "":
 		state = string(model.StateSucceeded)
+	case model.StateFailed:
+		state = string(model.StateFailed)
+		code = failureCode(res)
+	case model.StateCancelled:
+		state = string(model.StateCancelled)
+		code = core.CodeCancelled
+	default:
+		// The provider has not ended; an in-doubt lease is the honest
+		// answer, so a second paid attempt is never started.
+		_ = r.Client.Release(reportCtx, inv.ClientRef, false, time.Time{})
+		return core.NewError(core.CodeAmbiguousStart,
+			"the provider has not reported a result", map[string]any{"client_ref": inv.ClientRef})
 	}
 	var raw json.RawMessage
 	if len(res.Message) > 0 {
 		raw = res.Message
 	}
-	err = r.Client.Finish(reportCtx, inv.ClientRef, state, raw, "", res.CostMpts)
+	err = r.Client.Finish(reportCtx, inv.ClientRef, state, raw, code, res.CostMpts)
 	if core.CodeOf(err) == CodeLeaseLost {
 		// The platform already has a result; do not leave the provider
 		// running a superseded attempt (ADR-0012 §7).
@@ -395,6 +436,35 @@ func (r *Runner) providers() map[string]model.Invoker {
 	return map[string]model.Invoker{}
 }
 
+// definitiveFailure reports whether err says the invocation ended and is not
+// running, so the platform may finish it rather than leave it in doubt.
+// Timeouts, unavailable providers, rate limits and vendor errors are
+// ambiguous: the provider may still be running and may still charge.
+func definitiveFailure(err error) bool {
+	var pe *core.Error
+	if !errors.As(err, &pe) {
+		return false
+	}
+	if pe.Retryable {
+		return false
+	}
+	switch pe.Code {
+	case core.CodeTimeout, core.CodeUnavailable, core.CodeRateLimited,
+		core.CodeAmbiguousStart, core.CodeVendor, core.CodeInternal:
+		return false
+	}
+	return true
+}
+
+// failureCode reads the platform code a provider recorded in a failed result.
+func failureCode(res model.Result) core.Code {
+	var f model.Failure
+	if len(res.Error) > 0 && json.Unmarshal(res.Error, &f) == nil && f.Code != "" {
+		return f.Code
+	}
+	return core.CodeVendor
+}
+
 // LocalTransport is the in-process Transport over a Store, for the embedded
 // profile and the gate. It adapts the worker contract to the store's methods.
 type LocalTransport struct {
@@ -432,8 +502,8 @@ func (t LocalTransport) Finish(ctx context.Context, workerID, credential, client
 }
 
 // Release implements Transport.
-func (t LocalTransport) Release(ctx context.Context, workerID, credential, clientRef string, notBefore time.Time) error {
-	return t.Store.Release(ctx, workerID, credential, clientRef, notBefore)
+func (t LocalTransport) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error {
+	return t.Store.Release(ctx, workerID, credential, clientRef, unused, notBefore)
 }
 
 // Resume implements Transport.

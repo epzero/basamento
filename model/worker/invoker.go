@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/epzero/basamento/core"
@@ -85,6 +86,11 @@ func (i *Invoker) Start(ctx context.Context, r model.Request) (model.Handle, err
 	desc, err := i.Store.descriptorFor(ctx, i.Pool, r.Model)
 	if err != nil {
 		return model.Handle{}, err
+	}
+	if !descriptorSupports(desc.Descriptor, r.Op) {
+		return model.Handle{}, core.NewError(core.CodeUnsupported,
+			fmt.Sprintf("model %q does not support %s", r.Model, r.Op),
+			map[string]any{"model": r.Model, "op": string(r.Op)})
 	}
 	units := desc.Units
 	if units <= 0 {

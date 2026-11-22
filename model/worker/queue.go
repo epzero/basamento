@@ -17,6 +17,7 @@ import (
 const (
 	stateWaiting   = "waiting"
 	stateLeased    = "leased"
+	stateSpilling  = "spilling"
 	stateSucceeded = "succeeded"
 	stateFailed    = "failed"
 	stateCancelled = "cancelled"
@@ -62,9 +63,9 @@ func (s *Store) Enqueue(ctx context.Context, inv Invocation) (Invocation, error)
 	_, err = s.db.Execer().Exec(ctx,
 		`INSERT INTO worker_invocations
 		 (client_ref, pool_id, tenant, model, class, units, state, worker_id, attempt, started, in_doubt,
-		  queued_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms, max_runtime_ms,
+		  queued_unix_ms, leased_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms, max_runtime_ms,
 		  cancel_requested, reserved_mpts, charged_mpts, code, request, result, provider_handle, spilled, trace_parent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, 0, 0, ?, ?, 0, ?, 0, '', ?, '', '', 0, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, 0, 0, 0, ?, ?, 0, ?, 0, '', ?, '', '', 0, ?)
 		 ON CONFLICT (client_ref) DO NOTHING`,
 		inv.ClientRef, inv.Pool, string(inv.Tenant), inv.Model, string(inv.Class), inv.Units, stateWaiting,
 		unixms(now), inv.QueueTimeout.Milliseconds(), inv.MaxRuntime.Milliseconds(),
@@ -81,7 +82,7 @@ func (s *Store) Invocation(ctx context.Context, clientRef string) (Invocation, e
 }
 
 const selectInvocation = `SELECT client_ref, pool_id, tenant, model, class, units, state, worker_id, attempt,
-	started, in_doubt, queued_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms,
+	started, in_doubt, queued_unix_ms, leased_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms,
 	queue_timeout_ms, max_runtime_ms, cancel_requested, reserved_mpts, charged_mpts, code, request, result,
 	provider_handle, spilled, trace_parent FROM worker_invocations`
 
@@ -91,15 +92,15 @@ type rowScanner interface {
 
 func scanInvocation(row rowScanner) (Invocation, error) {
 	var (
-		inv                                              Invocation
-		tenant, class, state, code                       string
-		started, inDoubt, cancel                         int
-		queued, notBefore, lease, doubt, timeout, maxRun int64
-		request, result                                  string
-		spilled                                          int
+		inv                                                      Invocation
+		tenant, class, state, code                               string
+		started, inDoubt, cancel                                 int
+		queued, leased, notBefore, lease, doubt, timeout, maxRun int64
+		request, result                                          string
+		spilled                                                  int
 	)
 	err := row.Scan(&inv.ClientRef, &inv.Pool, &tenant, &inv.Model, &class, &inv.Units, &state, &inv.WorkerID,
-		&inv.Attempt, &started, &inDoubt, &queued, &notBefore, &lease, &doubt, &timeout, &maxRun, &cancel,
+		&inv.Attempt, &started, &inDoubt, &queued, &leased, &notBefore, &lease, &doubt, &timeout, &maxRun, &cancel,
 		&inv.ReservedMpts, &inv.ChargedMpts, &code, &request, &result, &inv.ProviderHandle, &spilled, &inv.TraceParent)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return Invocation{}, core.NewError(core.CodeNotFound, "invocation does not exist", nil)
@@ -114,6 +115,9 @@ func scanInvocation(row rowScanner) (Invocation, error) {
 	inv.InDoubt = inDoubt != 0
 	inv.CancelRequested = cancel != 0
 	inv.QueuedAt = fromms(queued)
+	if leased != 0 {
+		inv.LeasedAt = fromms(leased)
+	}
 	if notBefore != 0 {
 		inv.NotBefore = fromms(notBefore)
 	}
@@ -137,8 +141,14 @@ func (s *Store) validWorker(ctx context.Context, workerID, credential string) (W
 }
 
 // Lease asks the platform for work. The platform picks the invocations in its
-// own order; the worker only says how much it has free (ADR-0012 §5).
+// own order; the worker only says how much it has free (ADR-0012 §5). A
+// positive Wait makes it a long poll: the call returns as soon as work arrives
+// or, with nothing to hand out, when the wait has elapsed.
 func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, error) {
+	var deadline time.Time
+	if req.Wait > 0 {
+		deadline = s.now().Add(req.Wait)
+	}
 	w, err := s.validWorker(ctx, req.WorkerID, req.Credential)
 	if err != nil {
 		return nil, err
@@ -146,15 +156,59 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 	if err := s.sweep(ctx); err != nil {
 		return nil, err
 	}
-	if w.State != StateActive {
-		return nil, nil
+	for {
+		if w.State != StateActive || req.FreeUnits <= 0 {
+			return nil, nil
+		}
+		leased, err := s.leaseOnce(ctx, w, req)
+		if err != nil {
+			return nil, err
+		}
+		if len(leased) > 0 || req.Wait <= 0 {
+			return leased, nil
+		}
+		remaining := deadline.Sub(s.now())
+		if remaining <= 0 {
+			return nil, nil
+		}
+		// The bus wake is a later work package; until then the long poll
+		// re-reads the queue at a bounded interval.
+		step := 100 * time.Millisecond
+		if remaining < step {
+			step = remaining
+		}
+		select {
+		case <-s.after(step):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		// The worker may have been paused or removed while it waited.
+		w, err = s.validWorker(ctx, req.WorkerID, req.Credential)
+		if err != nil {
+			return nil, err
+		}
 	}
+}
+
+// after waits on the store's clock. The fake clock in tests implements After,
+// so a long poll is deterministic there; the system clock uses time.After.
+func (s *Store) after(d time.Duration) <-chan time.Time {
+	if c, ok := s.clock.(interface {
+		After(time.Duration) <-chan time.Time
+	}); ok {
+		return c.After(d)
+	}
+	return time.After(d)
+}
+
+func (s *Store) leaseOnce(ctx context.Context, w Worker, req LeaseRequest) ([]Invocation, error) {
 	pool, err := s.Pool(ctx, w.Pool)
 	if err != nil {
 		return nil, err
 	}
-	if req.FreeUnits <= 0 {
-		return nil, nil
+	warm := make(map[string]bool, len(req.WarmModels))
+	for _, modelID := range req.WarmModels {
+		warm[modelID] = true
 	}
 	var leased []Invocation
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
@@ -182,7 +236,7 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 		if err != nil {
 			return err
 		}
-		chosen, err := choose(candidates, pool, now, models, free, req.TimeLeft,
+		chosen, err := choose(candidates, pool, now, models, free, req.TimeLeft, warm,
 			leasedCounts, func(t core.TenantID) TenantSettings {
 				ts, err := tenantSettingsTx(ctx, tx, w.Pool, t)
 				if err != nil {
@@ -209,6 +263,7 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 			inv.Attempt++
 			inv.Started = false
 			inv.InDoubt = false
+			inv.LeasedAt = now
 			inv.LeaseExpires = expires
 			leased = append(leased, inv)
 			free -= inv.Units
@@ -231,10 +286,10 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID string, now, expires time.Time) (bool, error) {
 	res, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, worker_id = ?, attempt = attempt + 1,
-			started = 0, in_doubt = 0, lease_expires_unix_ms = ?, in_doubt_until_unix_ms = 0,
-			not_before_unix_ms = 0
+			started = 0, in_doubt = 0, provider_handle = '', leased_unix_ms = ?, lease_expires_unix_ms = ?,
+			in_doubt_until_unix_ms = 0, not_before_unix_ms = 0
 		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND not_before_unix_ms <= ?`,
-		stateLeased, workerID, unixms(expires), inv.ClientRef, stateWaiting, inv.WorkerID, unixms(now))
+		stateLeased, workerID, unixms(now), unixms(expires), inv.ClientRef, stateWaiting, inv.WorkerID, unixms(now))
 	if err != nil {
 		return false, err
 	}
@@ -242,7 +297,25 @@ func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID str
 	if err != nil {
 		return false, err
 	}
-	return n == 1, nil
+	if n != 1 {
+		return false, nil
+	}
+	// A row that still names an earlier worker is a takeover: tell that
+	// worker to cancel at its provider in its next heartbeat (ADR-0012 §7).
+	if inv.WorkerID != "" && inv.WorkerID != workerID {
+		if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// addCancelTx records that workerID must cancel clientRef at its provider.
+func addCancelTx(ctx context.Context, tx *psql.Execer, clientRef, workerID string) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO worker_cancels (client_ref, worker_id) VALUES (?, ?) ON CONFLICT (client_ref, worker_id) DO NOTHING`,
+		clientRef, workerID)
+	return err
 }
 
 // waitingCandidates lists the pool's waiting invocations this worker can serve,
@@ -325,12 +398,13 @@ func tenantSettingsTx(ctx context.Context, exec *psql.Execer, poolID string, ten
 }
 
 // choose orders candidates: effective class (ageing moves one up), then
-// fairness in the shared pool, then age (REQ-MODEL-015 to REQ-MODEL-019).
-// The per-tenant in-flight counts start from the leased rows and move with
-// every pick, so one call never exceeds a tenant's concurrency limit and the
-// shared pool alternates between tenants.
+// fairness in the shared pool, then age, then a model the worker already has
+// loaded (REQ-MODEL-015 to REQ-MODEL-019, ADR-0012 §5). The per-tenant
+// in-flight counts start from the leased rows and move with every pick, so one
+// call never exceeds a tenant's concurrency limit and the shared pool
+// alternates between tenants.
 func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[string]Descriptor,
-	free int, timeLeft time.Duration, leased map[core.TenantID]int,
+	free int, timeLeft time.Duration, warm map[string]bool, leased map[core.TenantID]int,
 	settings func(core.TenantID) TenantSettings) ([]Invocation, error) {
 
 	type ranked struct {
@@ -338,6 +412,7 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 		rank        int
 		weight      int
 		concurrency int
+		warm        bool
 		when        time.Time
 	}
 	rankedList := make([]ranked, 0, len(candidates))
@@ -356,6 +431,7 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 			rank:        rank,
 			weight:      weight,
 			concurrency: settingsFor.Concurrency,
+			warm:        warm[inv.Model],
 			when:        inv.QueuedAt,
 		})
 	}
@@ -380,6 +456,9 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 			}
 			if !a.when.Equal(b.when) {
 				return a.when.Before(b.when)
+			}
+			if a.warm != b.warm {
+				return a.warm
 			}
 			return a.inv.ClientRef < b.inv.ClientRef
 		})
@@ -594,7 +673,8 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		if _, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET state = ?, charged_mpts = ?, code = ?, result = ?,
-				in_doubt = 0, in_doubt_until_unix_ms = 0, cancel_requested = 0 WHERE client_ref = ?`,
+				in_doubt = 0, in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0,
+				leased_unix_ms = 0, cancel_requested = 0 WHERE client_ref = ?`,
 			state, cost, string(code), string(result), clientRef); err != nil {
 			return err
 		}
@@ -603,9 +683,11 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	return err
 }
 
-// Release gives a lease back unused, or not before a time (the vendor's rate
-// limit).
-func (s *Store) Release(ctx context.Context, workerID, credential, clientRef string, notBefore time.Time) error {
+// Release gives a lease back. Unused says the worker never started the
+// invocation, so it goes back to the queue even for a model that is not
+// restart-safe; otherwise a started, non-restart-safe invocation stays in
+// doubt for its own worker. NotBefore is the vendor's rate limit.
+func (s *Store) Release(ctx context.Context, workerID, credential, clientRef string, unused bool, notBefore time.Time) error {
 	w, err := s.validWorker(ctx, workerID, credential)
 	if err != nil {
 		return err
@@ -620,7 +702,8 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 	if err := s.refusePastGrace(inv); err != nil {
 		return err
 	}
-	if inv.Started {
+	restartSafe := false
+	if inv.Started && !unused {
 		// A started, non-restart-safe invocation stays in doubt for its own
 		// worker; a restart-safe one goes back to the queue.
 		d, err := s.descriptorFor(ctx, inv.Pool, inv.Model)
@@ -630,6 +713,7 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 		if !d.RestartSafe {
 			return s.markInDoubt(ctx, inv)
 		}
+		restartSafe = true
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
@@ -652,9 +736,17 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		if _, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, in_doubt = 0,
-				lease_expires_unix_ms = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = ?
+				provider_handle = '', lease_expires_unix_ms = 0, leased_unix_ms = 0,
+				in_doubt_until_unix_ms = 0, not_before_unix_ms = ?
 			 WHERE client_ref = ?`, stateWaiting, notBeforeMS, clientRef); err != nil {
 			return err
+		}
+		if restartSafe {
+			// Followers see a fresh output stream on the next attempt
+			// (REQ-MODEL-021).
+			if err := appendReset(ctx, tx, clientRef); err != nil {
+				return err
+			}
 		}
 		return setUnitsInUse(ctx, tx, w.ID)
 	})
@@ -683,7 +775,16 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 			return err
 		}
 		if freeUnits >= 0 {
-			if _, err := tx.Exec(ctx, `UPDATE worker_workers SET units_used = ? WHERE worker_id = ?`, freeUnits, w.ID); err != nil {
+			// The request carries the units the worker has free; the column
+			// is the units in use (ADR-0012 §6, §11).
+			used := w.Capacity - freeUnits
+			if used < 0 {
+				used = 0
+			}
+			if used > w.Capacity {
+				used = w.Capacity
+			}
+			if _, err := tx.Exec(ctx, `UPDATE worker_workers SET units_used = ? WHERE worker_id = ?`, used, w.ID); err != nil {
 				return err
 			}
 		}
@@ -692,22 +793,57 @@ func (s *Store) Heartbeat(ctx context.Context, workerID, credential string, free
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
+	answer := HeartbeatAnswer{Drain: w.State == StateDraining, LeaseExpires: expires, State: w.State}
+	seen := map[string]bool{}
+	add := func(ref string) {
+		if !seen[ref] {
+			seen[ref] = true
+			answer.Cancel = append(answer.Cancel, ref)
+		}
+	}
 	rows, err := s.db.Execer().Query(ctx,
 		`SELECT client_ref FROM worker_invocations WHERE worker_id = ? AND state = ? AND cancel_requested = 1 ORDER BY client_ref`,
 		w.ID, stateLeased)
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
-	defer func() { _ = rows.Close() }()
-	answer := HeartbeatAnswer{Drain: w.State == StateDraining, LeaseExpires: expires, State: w.State}
 	for rows.Next() {
 		var ref string
 		if err := rows.Scan(&ref); err != nil {
+			_ = rows.Close()
 			return HeartbeatAnswer{}, err
 		}
-		answer.Cancel = append(answer.Cancel, ref)
+		add(ref)
 	}
-	return answer, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return HeartbeatAnswer{}, err
+	}
+	_ = rows.Close()
+	// A superseded attempt is told to cancel at its provider even though the
+	// invocation now belongs to another worker (ADR-0012 §7).
+	cancels, err := s.db.Execer().Query(ctx,
+		`SELECT client_ref FROM worker_cancels WHERE worker_id = ? ORDER BY client_ref`, w.ID)
+	if err != nil {
+		return HeartbeatAnswer{}, err
+	}
+	for cancels.Next() {
+		var ref string
+		if err := cancels.Scan(&ref); err != nil {
+			_ = cancels.Close()
+			return HeartbeatAnswer{}, err
+		}
+		add(ref)
+	}
+	if err := cancels.Err(); err != nil {
+		_ = cancels.Close()
+		return HeartbeatAnswer{}, err
+	}
+	_ = cancels.Close()
+	if _, err := s.db.Execer().Exec(ctx, `DELETE FROM worker_cancels WHERE worker_id = ?`, w.ID); err != nil {
+		return HeartbeatAnswer{}, err
+	}
+	return answer, nil
 }
 
 // Cancel removes a waiting invocation, or reaches a leased one in the next
@@ -732,7 +868,9 @@ func (s *Store) Cancel(ctx context.Context, clientRef string) error {
 }
 
 // Recover extends every lease by one period when the platform starts, so an
-// outage of its own does not turn into lost work (REQ-MODEL-027).
+// outage of its own does not turn into lost work (REQ-MODEL-027). It only ever
+// moves a deadline forward: a lease or in-doubt period that already reaches
+// further than the recovered deadline keeps its value.
 func (s *Store) Recover(ctx context.Context) error {
 	pools, err := s.ListPools(ctx)
 	if err != nil {
@@ -749,19 +887,23 @@ func (s *Store) Recover(ctx context.Context) error {
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		restart := unixms(s.now())
 		for _, pool := range specs {
-			period := pool.Lease.Milliseconds()
 			// Extend from the restart: an outage of the platform must not
-			// turn into lost work, whatever it lasted (REQ-MODEL-027).
+			// turn into lost work, whatever it lasted (REQ-MODEL-027). CASE
+			// keeps a deadline that is already later.
+			lease := restart + pool.Lease.Milliseconds()
 			if _, err := tx.Exec(ctx,
-				`UPDATE worker_invocations SET lease_expires_unix_ms = ?
-				 WHERE pool_id = ? AND state = ? AND lease_expires_unix_ms > 0`,
-				restart+period, pool.ID, stateLeased); err != nil {
+				`UPDATE worker_invocations
+				 SET lease_expires_unix_ms = CASE WHEN lease_expires_unix_ms < ? THEN ? ELSE lease_expires_unix_ms END
+				 WHERE pool_id = ? AND state IN (?, ?) AND lease_expires_unix_ms > 0`,
+				lease, lease, pool.ID, stateLeased, stateSpilling); err != nil {
 				return err
 			}
+			grace := restart + pool.Grace.Milliseconds()
 			if _, err := tx.Exec(ctx,
-				`UPDATE worker_invocations SET in_doubt_until_unix_ms = ?
+				`UPDATE worker_invocations
+				 SET in_doubt_until_unix_ms = CASE WHEN in_doubt_until_unix_ms < ? THEN ? ELSE in_doubt_until_unix_ms END
 				 WHERE pool_id = ? AND state = ? AND in_doubt_until_unix_ms > 0`,
-				restart+period, pool.ID, stateLeased); err != nil {
+				grace, grace, pool.ID, stateLeased); err != nil {
 				return err
 			}
 		}
@@ -776,7 +918,7 @@ func (s *Store) Sweep(ctx context.Context) error { return s.sweep(ctx) }
 func (s *Store) sweep(ctx context.Context) error {
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		now := s.now()
-		rows, err := tx.Query(ctx, selectInvocation+` WHERE state IN (?, ?)`, stateWaiting, stateLeased)
+		rows, err := tx.Query(ctx, selectInvocation+` WHERE state IN (?, ?, ?)`, stateWaiting, stateLeased, stateSpilling)
 		if err != nil {
 			return err
 		}
@@ -804,6 +946,16 @@ func (s *Store) sweep(ctx context.Context) error {
 					}
 					touched[inv.Pool] = true
 				}
+			case inv.State == stateSpilling:
+				// A spilled invocation whose remote start has not reported
+				// back by the claim deadline is failed rather than started a
+				// second time.
+				if !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires) {
+					if err := failRow(ctx, tx, inv.ClientRef, core.CodeUnavailable, inv.ReservedMpts); err != nil {
+						return err
+					}
+					touched[inv.Pool] = true
+				}
 			case inv.InDoubt:
 				if !inv.InDoubtUntil.IsZero() && !now.Before(inv.InDoubtUntil) {
 					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
@@ -813,6 +965,11 @@ func (s *Store) sweep(ctx context.Context) error {
 				}
 			case !inv.LeaseExpires.IsZero() && !now.Before(inv.LeaseExpires):
 				if inv.Attempt >= 3 {
+					if inv.Started && inv.WorkerID != "" {
+						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+							return err
+						}
+					}
 					if err := failRow(ctx, tx, inv.ClientRef, CodeWorkerLost, inv.ReservedMpts); err != nil {
 						return err
 					}
@@ -821,8 +978,9 @@ func (s *Store) sweep(ctx context.Context) error {
 				}
 				if !inv.Started {
 					if _, err := tx.Exec(ctx,
-						`UPDATE worker_invocations SET state = ?, worker_id = '', lease_expires_unix_ms = 0,
-							in_doubt = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
+						`UPDATE worker_invocations SET state = ?, worker_id = '', provider_handle = '',
+							lease_expires_unix_ms = 0, leased_unix_ms = 0, in_doubt = 0,
+							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
 						stateWaiting, inv.ClientRef); err != nil {
 						return err
 					}
@@ -834,9 +992,17 @@ func (s *Store) sweep(ctx context.Context) error {
 					return err
 				}
 				if d.RestartSafe {
+					// The old attempt may still be alive; it is told to
+					// cancel while the new attempt takes the work.
+					if inv.WorkerID != "" {
+						if err := addCancelTx(ctx, tx, inv.ClientRef, inv.WorkerID); err != nil {
+							return err
+						}
+					}
 					if _, err := tx.Exec(ctx,
-						`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, lease_expires_unix_ms = 0,
-							in_doubt = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
+						`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, provider_handle = '',
+							lease_expires_unix_ms = 0, leased_unix_ms = 0, in_doubt = 0,
+							in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
 						stateWaiting, inv.ClientRef); err != nil {
 						return err
 					}
@@ -880,7 +1046,8 @@ func (s *Store) sweep(ctx context.Context) error {
 func failRow(ctx context.Context, tx *psql.Execer, clientRef string, code core.Code, charged int64) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, code = ?, charged_mpts = ?, in_doubt = 0,
-			in_doubt_until_unix_ms = 0, cancel_requested = 0 WHERE client_ref = ?`,
+			in_doubt_until_unix_ms = 0, lease_expires_unix_ms = 0, leased_unix_ms = 0,
+			cancel_requested = 0 WHERE client_ref = ?`,
 		stateFailed, string(code), charged, clientRef)
 	return err
 }
@@ -1014,8 +1181,10 @@ func (s *Store) Metrics(ctx context.Context, poolID string) (QueueMetrics, error
 			m.Leased++
 			m.UnitsInUse += inv.Units
 			m.ByClass[inv.Class]++
-			if age := now.Sub(inv.QueuedAt); age > m.MaxLeaseAge {
-				m.MaxLeaseAge = age
+			if !inv.LeasedAt.IsZero() {
+				if age := now.Sub(inv.LeasedAt); age > m.MaxLeaseAge {
+					m.MaxLeaseAge = age
+				}
 			}
 		}
 	}

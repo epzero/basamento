@@ -297,7 +297,7 @@ func TestReportsPastGraceAreRefused(t *testing.T) {
 		"starting": s.Starting(ctx, w.ID, w.Credential, "v1"),
 		"resume":   s.Resume(ctx, w.ID, w.Credential, "v1"),
 		"events":   s.Events(ctx, w.ID, w.Credential, "v1", []Event{{Seq: 1, Kind: "text", Text: "late"}}),
-		"release":  s.Release(ctx, w.ID, w.Credential, "v1", time.Time{}),
+		"release":  s.Release(ctx, w.ID, w.Credential, "v1", false, time.Time{}),
 		"finish":   s.Finish(ctx, w.ID, w.Credential, "v1", stateSucceeded, json.RawMessage(`{}`), "", 0),
 	} {
 		if core.CodeOf(err) != CodeLeaseLost {
@@ -402,7 +402,7 @@ func TestReleaseKeepsOriginalQueueTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease(t, s, w, 1)
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", at.Add(time.Hour)); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(11 * time.Minute)
@@ -425,7 +425,7 @@ func TestReleaseClampsNotBeforeToLease(t *testing.T) {
 	lease(t, s, w, 1)
 	// A vendor rate limit beyond one lease period is clamped: a worker must
 	// not be able to park work indefinitely.
-	if err := s.Release(ctx, w.ID, w.Credential, "r1", at.Add(time.Hour)); err != nil {
+	if err := s.Release(ctx, w.ID, w.Credential, "r1", false, at.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := lease(t, s, w, 1); len(got) != 0 {

@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -76,38 +76,75 @@ func (j *Journal) Record(e JournalEntry) error {
 	return j.file.Sync()
 }
 
-// Entries reads the journal back in order.
+// Entries reads the journal back in order. A crash can leave the last line
+// torn; that line is dropped and the file is repaired so the next record
+// appends after the last complete entry. A malformed line anywhere else is
+// still corruption.
 func (j *Journal) Entries() ([]JournalEntry, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	f, err := os.Open(j.path)
+	data, err := os.ReadFile(j.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, core.NewError(core.CodeInternal, "worker: cannot read journal", map[string]any{"cause": err.Error()})
 	}
-	defer func() { _ = f.Close() }()
 	var out []JournalEntry
-	scn := bufio.NewScanner(f)
-	// A lease entry carries the whole request (ADR-0012 §7), so one line can
-	// be far larger than a handle or a result; 16 MiB leaves room for a long
-	// chat transcript without turning the journal into a memory hog.
-	scn.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for scn.Scan() {
-		if len(scn.Bytes()) == 0 {
+	offset := 0
+	for offset < len(data) {
+		rest := data[offset:]
+		nl := bytes.IndexByte(rest, '\n')
+		complete := nl >= 0
+		line := rest
+		if complete {
+			line = rest[:nl]
+		}
+		if len(line) == 0 {
+			if !complete {
+				break
+			}
+			offset += nl + 1
 			continue
 		}
 		var e JournalEntry
-		if err := json.Unmarshal(scn.Bytes(), &e); err != nil {
+		if err := json.Unmarshal(line, &e); err != nil {
+			if !complete {
+				// The crash left a torn trailing line. Drop it and cut the
+				// file back to the last complete entry so the next Record
+				// cannot append behind a partial line.
+				j.truncate(offset)
+				break
+			}
 			return nil, core.NewError(core.CodeInternal, "worker: journal is corrupt", map[string]any{"cause": err.Error()})
 		}
 		out = append(out, e)
-	}
-	if err := scn.Err(); err != nil {
-		return nil, core.NewError(core.CodeInternal, "worker: cannot read journal", map[string]any{"cause": err.Error()})
+		if !complete {
+			// A complete entry that lost only its newline is kept, and the
+			// newline is restored so the next record starts on a new line.
+			if j.file != nil {
+				if _, err := j.file.Write([]byte{'\n'}); err != nil {
+					return nil, core.NewError(core.CodeInternal, "worker: cannot repair journal", map[string]any{"cause": err.Error()})
+				}
+				_ = j.file.Sync()
+			}
+			break
+		}
+		offset += nl + 1
 	}
 	return out, nil
+}
+
+// truncate cuts the journal back to size, ignoring a closed or already removed
+// file: the caller has the entries it can trust either way.
+func (j *Journal) truncate(size int) {
+	if j.file == nil {
+		return
+	}
+	if err := j.file.Truncate(int64(size)); err != nil {
+		return
+	}
+	_ = j.file.Sync()
 }
 
 // Pending returns the leases and results that have no done entry yet, keyed by

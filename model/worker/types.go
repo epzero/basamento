@@ -184,6 +184,10 @@ type JoinRequest struct {
 	Capacity        int
 }
 
+// DefaultHeartbeatInterval is how often a worker heartbeats unless its join
+// answer says otherwise (ADR-0012 §4).
+const DefaultHeartbeatInterval = 30 * time.Second
+
 // Worker is the platform's record of one worker.
 type Worker struct {
 	ID          string
@@ -197,6 +201,9 @@ type Worker struct {
 	Removed     bool
 	// Credential is the short-lived credential a successful join yields.
 	Credential string
+	// HeartbeatInterval is the cadence the join answer told the worker to
+	// use; zero reads as DefaultHeartbeatInterval.
+	HeartbeatInterval time.Duration
 }
 
 // Invocation is one queued unit of work.
@@ -220,6 +227,9 @@ type Invocation struct {
 	InDoubt         bool
 	CancelRequested bool
 	QueuedAt        time.Time
+	// LeasedAt is when the current lease began; heartbeats do not move it.
+	// It is what the lease-age metric measures (ADR-0012 §11).
+	LeasedAt time.Time
 	// NotBefore delays the next lease after a release (a vendor rate limit).
 	NotBefore      time.Time
 	LeaseExpires   time.Time

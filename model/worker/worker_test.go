@@ -395,7 +395,7 @@ func TestRouterPrefersTenantPoolAndLabels(t *testing.T) {
 		Descriptors: []Descriptor{descriptor("chat", 1, false)}, Labels: map[string]string{"region": "eu"}, Capacity: 4}); err != nil {
 		t.Fatal(err)
 	}
-	remote := &fakeRemote{}
+	remote := &fakeRemote{labels: map[string]string{"region": "us"}}
 	r := NewRouter(s, remote.Remote("cloud"))
 	dest, err := r.Select(WithLabels(ctx, map[string]string{"region": "eu"}), "acme", "chat")
 	if err != nil {
@@ -410,6 +410,10 @@ func TestRouterPrefersTenantPoolAndLabels(t *testing.T) {
 	}
 	if !dest.IsRemote {
 		t.Fatalf("dest %+v, want the remote provider when no worker matches the labels", dest)
+	}
+	// A remote that does not carry the required label is not a match either.
+	if _, err := r.Select(WithLabels(ctx, map[string]string{"region": "ap"}), "acme", "chat"); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("select with an unmatched remote label: got %v, want not_found", err)
 	}
 }
 
@@ -457,6 +461,7 @@ func (a *auditRecorder) Record(_ context.Context, e platform.AuditEvent) error {
 
 type fakeRemote struct {
 	estimate int64
+	labels   map[string]string
 	accepted int
 	refs     []string
 }
@@ -466,6 +471,7 @@ func (f *fakeRemote) Remote(name string) Remote {
 		Name:        name,
 		Invoker:     f,
 		Descriptors: []model.Descriptor{{ID: "chat"}, {ID: "m"}},
+		Labels:      f.labels,
 		Estimate:    f.estimate,
 	}
 }

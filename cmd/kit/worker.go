@@ -87,30 +87,43 @@ func runWorker(args []string) error {
 	fmt.Printf("kit worker: %s joined pool %s with %d descriptors\n", joined.ID, joined.Pool, len(joined.Descriptors))
 
 	runner := &worker.Runner{Client: client, Providers: invokers}
+	warm := make([]string, 0, len(descriptors))
+	for _, d := range descriptors {
+		warm = append(warm, d.ID)
+	}
 	loop := &workerLoop{
-		client: client, runner: runner, capacity: *capacity, once: *once,
+		client: client, runner: runner, store: store,
+		heartbeatInterval: joined.HeartbeatInterval,
+		warm:              warm,
+		capacity:          *capacity, once: *once,
 		stdout: os.Stdout, stderr: os.Stderr,
 	}
 	return loop.serve(ctx)
 }
 
-// heartbeatInterval is how often the worker tells the platform it is alive.
-// A heartbeat runs beside invocations, so a long job is never declared lost
-// while it is healthy (ADR-0012 §4, §7).
-const heartbeatInterval = 30 * time.Second
-
 // workerLoop is the kit worker's run loop: heartbeat, replay the journal,
 // lease, run, and drain on a signal or the platform's order.
 type workerLoop struct {
-	client   *worker.Client
-	runner   *worker.Runner
+	client *worker.Client
+	runner *worker.Runner
+	// store is the embedded platform's worker store. The loop sweeps and
+	// spills for it: in the embedded profile this process is the platform.
+	store             *worker.Store
+	remotes           []worker.Remote
+	heartbeatInterval time.Duration
+	// warm is the models this worker has loaded, so the platform prefers
+	// invocations that need nothing new (ADR-0012 §5).
+	warm     []string
 	capacity int
 	once     bool
 	stdout   io.Writer
 	stderr   io.Writer
 
-	// beats overrides the heartbeat ticker in tests; nil uses the real one.
-	beats <-chan time.Time
+	// beats and sweeps override the tickers in tests; nil uses the real ones.
+	// swept, when set, receives one value after each janitor pass.
+	beats  <-chan time.Time
+	sweeps <-chan time.Time
+	swept  chan<- struct{}
 
 	mu        sync.Mutex
 	inUse     int
@@ -139,6 +152,12 @@ func (l *workerLoop) serve(ctx context.Context) error {
 		defer close(hbDone)
 		l.heartbeat(runCtx, hbStop)
 	}()
+	sweepStop := make(chan struct{})
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		l.janitor(runCtx, sweepStop)
+	}()
 
 	if err := l.replay(runCtx); err != nil {
 		_, _ = fmt.Fprintln(l.stderr, "kit worker: journal:", err)
@@ -154,6 +173,8 @@ func (l *workerLoop) serve(ctx context.Context) error {
 	wg.Wait()
 	close(hbStop)
 	<-hbDone
+	close(sweepStop)
+	<-sweepDone
 
 	_ = l.client.Leave(context.Background())
 	if l.fatal.Load() {
@@ -165,7 +186,11 @@ func (l *workerLoop) serve(ctx context.Context) error {
 func (l *workerLoop) heartbeat(ctx context.Context, stop <-chan struct{}) {
 	tick := l.beats
 	if tick == nil {
-		ticker := time.NewTicker(heartbeatInterval)
+		interval := l.heartbeatInterval
+		if interval <= 0 {
+			interval = worker.DefaultHeartbeatInterval
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		tick = ticker.C
 	}
@@ -198,6 +223,58 @@ func (l *workerLoop) heartbeat(ctx context.Context, stop <-chan struct{}) {
 	}
 }
 
+// janitorInterval is how often the embedded platform applies the queue's
+// time-driven rules and its tenants' spill-over policy.
+const janitorInterval = time.Second
+
+// janitor sweeps queue timeouts, expired leases, redelivery, worker_lost and
+// spill-over even while no worker asks for work (REQ-MODEL-014, -021, -022,
+// -025, -032, -033).
+func (l *workerLoop) janitor(ctx context.Context, stop <-chan struct{}) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// A spill may be waiting on a remote provider; shutting down cancels it
+	// rather than holding the process open.
+	go func() {
+		select {
+		case <-stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	tick := l.sweeps
+	if tick == nil {
+		ticker := time.NewTicker(janitorInterval)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick:
+			if l.store == nil {
+				continue
+			}
+			if err := l.store.Sweep(ctx); err != nil {
+				_, _ = fmt.Fprintln(l.stderr, "kit worker: sweep:", err)
+			}
+			// The embedded deployment configures remote providers with the
+			// run API (a later work package); with none, there is nothing to
+			// spill and the call is a no-op.
+			if _, err := l.store.Spill(ctx, l.remotes...); err != nil {
+				_, _ = fmt.Fprintln(l.stderr, "kit worker: spill:", err)
+			}
+			if l.swept != nil {
+				select {
+				case l.swept <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+}
+
 func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync.WaitGroup) {
 	for {
 		if ctx.Err() != nil {
@@ -218,7 +295,11 @@ func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync
 			}
 			continue
 		}
-		leased, err := l.client.LeaseOnce(ctx, free, nil, 30*time.Second)
+		wait := 30 * time.Second
+		if l.once {
+			wait = 0
+		}
+		leased, err := l.client.LeaseOnce(ctx, free, l.warm, 30*time.Second, wait)
 		if err != nil {
 			_, _ = fmt.Fprintln(l.stderr, "kit worker: lease:", err)
 			if fatalError(err) {
@@ -251,16 +332,24 @@ func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync
 			}
 			continue
 		}
+		ran := false
 		for _, inv := range leased {
+			if l.once && ran {
+				// --once runs at most one invocation even when the platform
+				// hands back several for the free units.
+				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
+				continue
+			}
 			if ctx.Err() != nil {
 				l.drain()
 			}
 			if l.draining.Load() || l.fatal.Load() {
 				// A signal arrived between the lease and the start: hand the
 				// lease back unused instead of abandoning it.
-				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, time.Time{})
+				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, true, time.Time{})
 				continue
 			}
+			ran = true
 			l.addUnits(inv.Units)
 			wg.Add(1)
 			go func(inv worker.Invocation) {

@@ -26,6 +26,7 @@ type fakeTransport struct {
 	order        []string
 	events       [][]Event
 	finishes     []finishCall
+	releases     []bool
 	resumes      []string
 	started      []string
 	finishErr    error
@@ -74,7 +75,10 @@ func (f *fakeTransport) Finish(_ context.Context, _, _, clientRef, state string,
 	f.record("finish")
 	return err
 }
-func (f *fakeTransport) Release(context.Context, string, string, string, time.Time) error {
+func (f *fakeTransport) Release(_ context.Context, _, _, _ string, unused bool, _ time.Time) error {
+	f.mu.Lock()
+	f.releases = append(f.releases, unused)
+	f.mu.Unlock()
 	f.record("release")
 	return nil
 }
@@ -101,6 +105,7 @@ type fakeProvider struct {
 	got         model.Request
 	handle      model.Handle
 	events      chan model.Event
+	startErr    error
 	result      func(context.Context) (model.Result, error)
 	cancelCalls int
 }
@@ -113,6 +118,9 @@ func (p *fakeProvider) Start(_ context.Context, r model.Request) (model.Handle, 
 	defer p.mu.Unlock()
 	p.startCalls++
 	p.got = r
+	if p.startErr != nil {
+		return model.Handle{}, p.startErr
+	}
 	if p.handle.ID == "" {
 		p.handle = model.Handle{ID: "h1", ClientRef: r.ClientRef}
 	}
@@ -320,5 +328,97 @@ func TestStoreEventsKeepsPayloadAndMonotonicSequence(t *testing.T) {
 		events[1].Progress != 0.25 || string(events[1].Data) != `{"x":1}` ||
 		events[2].Progress != 0.5 || events[3].Kind != "reset" {
 		t.Fatalf("events lost their payload: %+v", events)
+	}
+}
+
+func runOne(t *testing.T, p *fakeProvider) (*fakeTransport, error) {
+	t.Helper()
+	ctx := context.Background()
+	tr := &fakeTransport{}
+	j, err := OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	client := NewClient(tr, j)
+	if _, err := client.Join(ctx, JoinRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := encodeRequest(model.Request{Model: "m", ClientRef: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{Client: client, Providers: map[string]model.Invoker{"m": p}}
+	return tr, runner.Run(ctx, Invocation{ClientRef: "r1", Model: "m", Request: raw})
+}
+
+func TestRunnerFinishesADefinitiveProviderFailure(t *testing.T) {
+	p := &fakeProvider{result: func(context.Context) (model.Result, error) {
+		return model.Result{}, core.NewError(core.CodeInvalidArgument, "bad request", nil)
+	}}
+	tr, err := runOne(t, p)
+	if err == nil {
+		t.Fatal("run succeeded, want the provider failure")
+	}
+	if len(tr.finishes) != 1 {
+		t.Fatalf("finished %d times, want once", len(tr.finishes))
+	}
+	got := tr.finishes[0]
+	if got.state != string(model.StateFailed) || got.code != core.CodeInvalidArgument || got.cost != 0 {
+		t.Fatalf("finish %+v, want failed invalid_argument at no cost", got)
+	}
+	if len(tr.releases) != 0 {
+		t.Fatalf("released %v, want a definitive failure finished instead", tr.releases)
+	}
+}
+
+func TestRunnerReleasesAnAmbiguousProviderFailure(t *testing.T) {
+	p := &fakeProvider{result: func(context.Context) (model.Result, error) {
+		return model.Result{}, &core.Error{Code: core.CodeTimeout, Retryable: true}
+	}}
+	tr, err := runOne(t, p)
+	if err == nil {
+		t.Fatal("run succeeded, want the provider failure")
+	}
+	if len(tr.finishes) != 0 {
+		t.Fatalf("finished %+v, want no terminal report for an ambiguous failure", tr.finishes)
+	}
+	if len(tr.releases) != 1 || tr.releases[0] {
+		t.Fatalf("released %v, want one started (in-doubt) release", tr.releases)
+	}
+}
+
+func TestRunnerFinishesADefinitiveStartFailure(t *testing.T) {
+	p := &fakeProvider{startErr: core.NewError(core.CodeUnsupported, "no", nil)}
+	tr, err := runOne(t, p)
+	if err == nil {
+		t.Fatal("run succeeded, want the start failure")
+	}
+	if len(tr.finishes) != 1 || tr.finishes[0].code != core.CodeUnsupported {
+		t.Fatalf("finish %+v, want failed unsupported", tr.finishes)
+	}
+	if len(tr.releases) != 0 {
+		t.Fatalf("released %v, want the refusal finished", tr.releases)
+	}
+}
+
+func TestRunnerCarriesAFailedResultsCodeAndCost(t *testing.T) {
+	p := &fakeProvider{result: func(context.Context) (model.Result, error) {
+		return model.Result{
+			State:    model.StateFailed,
+			Error:    json.RawMessage(`{"code":"permission_denied","message":"no"}`),
+			CostMpts: 7,
+		}, nil
+	}}
+	tr, err := runOne(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.finishes) != 1 {
+		t.Fatalf("finished %d times, want once", len(tr.finishes))
+	}
+	got := tr.finishes[0]
+	if got.state != string(model.StateFailed) || got.code != core.CodePermissionDenied || got.cost != 7 {
+		t.Fatalf("finish %+v, want failed permission_denied charged 7", got)
 	}
 }
