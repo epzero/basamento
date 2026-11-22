@@ -1105,6 +1105,60 @@ func TestHandleSettlesByTheTerminalStateWhenTheRunIsCancelled(t *testing.T) {
 	}
 }
 
+// endedAfterStartDC mirrors the local runtime's step gate: a step that has not
+// started when the run is cancelled completes cancelled without running.
+type endedAfterStartDC struct{ *fakeDC }
+
+func (d endedAfterStartDC) Step(name string, in any, o runtime.StepOptions) runtime.Future {
+	if d.ctx.Err() != nil {
+		return doneFuture{err: core.NewError(core.CodeCancelled, "step not started: run cancelled", nil)}
+	}
+	return d.fakeDC.Step(name, in, o)
+}
+
+// TestHandleCancelsAnInvocationWhenTheRunEndsBeforeTheFollowStep covers the
+// window between the provider accepting the invocation and the node starting
+// to follow it: the runtime ends the cancelled run without running the follow
+// step, and the invocation, still running at the provider, must be cancelled
+// and settled by the state the provider reports (REQ-MODEL-009).
+func TestHandleCancelsAnInvocationWhenTheRunEndsBeforeTheFollowStep(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		// The run is cancelled as the provider accepts the invocation.
+		cancel()
+		return model.Handle{Provider: "sim", ID: "v1", ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateCancelled, CostMpts: 200}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	dc := endedAfterStartDC{fakeDC: &fakeDC{
+		ctx:   WithBudget(ctx, budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	if inv.cancels != 1 {
+		t.Fatalf("the provider saw %d cancels, want 1: the invocation was left running", inv.cancels)
+	}
+	if inv.cancelCtxErr != nil {
+		t.Fatalf("the cancel ran on a context the cancellation reached: %v", inv.cancelCtxErr)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 200 {
+		t.Fatalf("charged = %d, want the provider's 200", got)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
+
 func TestHandleEstimateDoesNotTrustAnUnderstatedInputCount(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()

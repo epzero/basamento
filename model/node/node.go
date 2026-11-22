@@ -536,10 +536,19 @@ func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle
 		return followOutcome{}, err
 	}
 	var out followOutcome
-	if err := dc.Step(name, followIn{Handle: handle, ClientRef: ref}, runtime.StepOptions{
+	err := dc.Step(name, followIn{Handle: handle, ClientRef: ref}, runtime.StepOptions{
 		Heartbeat:      stepHeartbeat,
 		IdempotencyKey: name,
-	}).Get(&out); err != nil {
+	}).Get(&out)
+	if err != nil && dc.Context().Err() != nil {
+		// The runtime ends a cancelled run without starting the follow step
+		// when the cancellation lands right after the provider accepted the
+		// invocation. The invocation is running at the provider all the same,
+		// so cancel it and settle by the state it reports (REQ-MODEL-009)
+		// instead of returning before it was ever cancelled.
+		return h.cancelAndResult(dc.Context(), handle)
+	}
+	if err != nil {
 		return followOutcome{}, err
 	}
 	return out, nil
