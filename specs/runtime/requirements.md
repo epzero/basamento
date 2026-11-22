@@ -1,6 +1,6 @@
 # Runtime: one contract, several engines
 
-Status: **In progress** (local runtime WP-L5-01 implemented; Temporal, embedded server and conformance WP-L5-02 … WP-L5-04 planned). Design: ADR-0002, `docs/architecture/runtime.md`.
+Status: **Local runtime (WP-L5-01) and Temporal runtime (WP-L5-02, pull requests (a), (b), (c)) implemented**; embedded server and conformance (WP-L5-03, WP-L5-04) planned. Design: ADR-0002, `docs/architecture/runtime.md`.
 
 ### REQ-RT-001 — Conformance
 Each runtime shall produce the same final state and the same durable events for every conformance flow.

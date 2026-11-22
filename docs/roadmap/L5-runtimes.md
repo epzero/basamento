@@ -10,7 +10,7 @@ In-process `Runtime` and `DurableContext`; not durable by design; passes the con
 ### WP-L5-02 — Temporal runtime
 Depends: WP-L4-04, WP-L1-02, WP-L1-04.
 Owns: `runtime/temporal`.
-The workflow that runs the flow host, step activities, payload codec (blob claim-check and encryption), ContinueAsNew; server, API and SDK versions pinned from the matching `temporalio/cli` release.
+The workflow that runs the flow host, step activities, payload codec (blob claim-check and encryption), ContinueAsNew, and the control plane (`Start`, `Resolve`, `Cancel`, `Describe`, `List`, `Serve`; see `docs/architecture/runtime.md` §8); server, API and SDK versions pinned from the matching `temporalio/cli` release.
 
 ### WP-L5-03 — Embedded Temporal server
 Depends: WP-L5-02, WP-L1-05.

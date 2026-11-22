@@ -2,9 +2,9 @@
 
 Status: contract **Implemented** (`runtime/runtime.go`); the flow host
 **Implemented** (`flow/host`, WP-L4-04); `local` **Implemented**
-(`runtime/local`, WP-L5-01); `temporal` **In progress** — data path and workflow features
-(`runtime/temporal`, WP-L5-02 pull requests (a) and (b); control plane still
-planned in pull request (c)).
+(`runtime/local`, WP-L5-01); `temporal` **Implemented** — data path, workflow
+features and control plane (`runtime/temporal`, WP-L5-02 pull requests (a), (b)
+and (c); embedded server packaging remains WP-L5-03).
 Decisions: ADR-0002, ADR-0011.
 
 ## 1. Two ports
@@ -92,8 +92,8 @@ as an activity. This change delivers:
   history ever holds `binary/encrypted`. The converter may perform blob I/O inside
   workflow code; `New` wraps it with `workflow.DataConverterWithoutDeadlockDetection`
   so the SDK worker deadlock detector does not count that I/O (a slow store delays
-  the workflow task subject to server task timeout; pull request (c) will document
-  worker `DeadlockDetectionTimeout`).
+  the workflow task subject to server task timeout; `Serve` keeps the SDK default
+  `DeadlockDetectionTimeout` and pins `WorkflowPanicPolicy` — see section 8).
 - **Payload codec errors:** only the **workflow-bound** data converter (the clone
   from `WithWorkflowContext`) applies the transient policy: `unavailable`,
   `timeout`, `rate_limited`, `cancelled` on this path (bound expiry—the blob layer
@@ -114,7 +114,7 @@ as an activity. This change delivers:
   retry, bounded by the run timeout), never a permanent flow error. Run-level
   cancellation (`REQ-RT-013`) is unrelated. Workers must keep the SDK default
   `WorkflowPanicPolicy` (`BlockWorkflow`); `FailWorkflow` would turn task failures
-  into permanent run failures (pull request (c) pins worker options). User panics
+  into permanent run failures (`Serve` pins worker options; section 8). User panics
   in the flow host still fail the run once with `temporal: the flow host panicked`;
   SDK non-determinism and illegal-state panics are out of scope here.
 - A **host workflow** with `DurableContext` for `Context`, `Now`, `NewID`,
@@ -124,7 +124,8 @@ as an activity. This change delivers:
   1 s initial, ×2, cap 100 s (the local runtime retries immediately). Codes and
   the `Retryable` flag cross the activity boundary on `Future.Get`.
 - **Registration** (`RegisterFlowHost`, `RegisterStep`, `Register`,
-  `DataConverter`) without control-plane `runtime.Runtime` (pull request (c)).
+  `DataConverter`). Control-plane `Start`, `Resolve`, `Cancel`, `Describe`,
+  `List`, `Capabilities` and `Serve` are pull request (c); see section 8.
 
 **Plain text in history:** Temporal stores failure messages and the tenant
 header unencrypted; payload bytes go through the codec only. History carries only
@@ -138,8 +139,8 @@ reclaimed in this phase.
 
 The BDD harness **decorates** `DataConverter` (records payloads, models the
 client tenant context, injects RT-032/033 faults on activity results). Production
-code has no test hooks. Real-server version pinning is pull request (c) and
-WP-L5-03.
+code has no test hooks. Real-server version pinning is section 8; embedded
+packaging is WP-L5-03.
 
 ## 7. Temporal runtime: workflow features (WP-L5-02, pull request (b))
 
@@ -150,14 +151,13 @@ host workflow runs the flow function again from its first line; values from
 earlier executions come from `HostInput.Continuation`, not from re-running side
 effects.
 
-**No Temporal patch markers.** Part (a) ships no way to start a run: its only
-exported surface is `Register`, `HostWorkflowName` and `HostInput`; `Start`,
-`Resolve`, `Cancel`, `Describe`, `List` and `Serve` belong to pull request (c)
-and are not merged. No part-(a) run can be in flight in any deployment, so this
-pull request adds no `workflow.GetVersion` markers. `HostInput` still decodes
-both the `run_id` field and the `RunID` spelling, as cheap insurance for any
-history recorded meanwhile. Revisit this ruling if pull request (c)'s start
-path ships before this branch merges.
+**No Temporal patch markers.** Before pull request (c), part (a) exported no
+way to start a run from the control plane, so no part-(a)-only run could be in
+flight in any deployment; part (b) therefore added no `workflow.GetVersion`
+markers. Pull request (c) now ships `Start` and the rest of the control plane
+(section 8) without retroactive patch markers on histories that predate it.
+`HostInput` still decodes both the `run_id` field and the `RunID` spelling, as
+cheap insurance for any history recorded meanwhile.
 
 ### Continuation journal
 
@@ -298,7 +298,146 @@ Production workers are not affected.
 | Step keyed by name; second call with same name returns first outcome (`stepFutures` or journal `steps`) | spec-silent (`TestStepMemoizedByName`, `TestContinuationDoesNotExecuteFinishedStepsAgain`; same as local REQ-RT-007) |
 | Flow should return ContinueAsNew error from `Checkpoint`; host continues as new even if the flow ignores it; `Checkpoint` at threshold waits for pre-decision in-flight work | spec-silent (`TestCheckpointContinuesWhenHistoryAtThreshold`, `TestCheckpointErrorIgnoredByFlowStillContinuesAsNew`, `TestCheckpointAtThresholdWaitsForInFlightStepAndDoesNotRunItAgain`) |
 
-## 8. Local runtime: behaviours the specs leave open
+## 8. Temporal runtime: control plane (WP-L5-02, pull request (c))
+
+`runtime/temporal.Runtime` implements `runtime.Runtime`: `Start`, `Describe`,
+`Cancel`, `Resolve`, `List`, `Capabilities`, and `Serve`. Every call takes
+the tenant from its context; an empty context tenant → `invalid_argument`
+(`temporal: no tenant in the context`). A `RunRef` or `RunQuery` tenant field
+may be empty or must equal the context tenant.
+
+### Client and options (D1)
+
+`Options.Client` carries the SDK's `client.Options` (host, namespace, TLS,
+credentials). `New` rejects a caller that sets `DataConverter` or
+`ContextPropagators` (`invalid_argument`): the runtime installs the shared
+tenant payload converter and `TenantPropagator`. One client is dialled lazily
+(`clientFor`) and shared by control calls and `Serve`. `Serve`'s defer calls
+`shutdown`, which closes the client; later control calls return `unavailable`
+(`temporal: the runtime has shut down`). A dial failure surfaces as
+`unavailable` (`temporal: cannot reach the Temporal server`).
+
+### Start and idempotency (D2)
+
+`Start` uses workflow id `<tenant>/<run id>` (`workflowID`). Empty `RunID` →
+cryptographic `run_<hex>`. Policies: `RejectDuplicate`, `Fail`,
+`WorkflowExecutionErrorWhenAlreadyStarted`: an existing id (running or closed)
+→ `conflict` (`temporal: a run with that id already exists`). A non-empty
+`IdempotencyKey` with no `RunID` derives the run id deterministically
+(`deriveRunID`); a duplicate start returns that ref instead of `conflict`. Key
+and explicit `RunID` together → `invalid_argument`. Each start sets the
+Keyword search attribute `BasamentoFlow` to the flow name. Keys dedupe within
+namespace retention of closed runs (Temporal server rule). REQ-RT-046…048
+(local-only today) and conformance start idempotency are WP-L5-04.
+
+### Describe (D3)
+
+`DescribeWorkflowExecution` on the workflow id with empty run id (latest
+execution). Running and continued-as-new → `running`; completed → `completed`;
+failed or timed out → `failed`; cancelled → `cancelled`; terminated →
+`terminated`. **`StartedAt` is the start time of the
+current execution** (it moves across ContinueAsNew), not the first run of the
+chain. `ClosedAt` is set only when the execution has a close time and a closed
+status.
+
+### Cancel (D4)
+
+`CancelWorkflow` on the workflow id. The reason argument is ignored: the SDK has
+no cancellation-reason field and history would store it in plaintext.
+
+### Resolve (D5)
+
+Synchronous Update `basamento-resolve-gate` with `{gate, payload}`; waits until
+`WorkflowUpdateStageCompleted`. A validator rejection returns the workflow's
+`core` code (`not_found`, `conflict`, `unavailable` while the run is continuing
+as new); a missing run is `not_found`. No internal retry on `unavailable`; the
+caller retries.
+
+### List, query shapes and cursor (D6)
+
+Visibility query:
+
+`WorkflowId STARTS_WITH "<tenant>/" AND ExecutionStatus != "ContinuedAsNew"`
+
+Optional `BasamentoFlow = "<flow>"` and `ExecutionStatus` clauses for state
+(`Failed` and `TimedOut` both map to state `failed`). Default page size 100,
+max 1000. **Order is the visibility store's default (newest first)**; the SQL
+visibility backend used in tests and the embedded server does not support
+`ORDER BY` in list queries, so order is not the local runtime's start order
+(REQ-RT-051 is local-only). Foreign workflow ids or unmappable statuses on a
+page are dropped and warned in the log.
+
+The cursor is opaque version-1 JSON
+(`v`, `t` tenant, `q` SHA-256 of the query string, `p` base64 page token),
+URL-safe base64 on the wire; any mismatch → `invalid_argument`
+(`temporal: unusable paging cursor`).
+
+### Tenant and flow filters (D10)
+
+The Temporal runtime rejects a tenant id that contains `"`, `'`, a backtick, a
+Unicode quotation mark, a backslash, a control character, or invalid UTF-8
+(`invalid_argument`, message `temporal: this tenant id is not supported by the
+Temporal runtime`, without echoing the id) on **every** control call, because
+the visibility query embeds the tenant in a double-quoted literal with no
+parameter binding. Flow filters use the same `unsafeVisibilityRune` rule
+(`temporal: invalid flow filter`). The local runtime keeps accepting every
+`core`-valid id (REQ-CORE-005 allows quotes). A verified escaping rule per
+visibility store would be a spec item for WP-L5-04.
+
+### Serve (D7, D11)
+
+`Serve` dials, calls `GetSystemInfo`, and refuses with `unsupported`
+(`temporal: the server version is outside the supported range`) unless
+major.minor is **1.32** (`SupportedServerVersion`, REQ-RT-037). It lists custom
+search attributes and adds `BasamentoFlow` as Keyword only when missing (so a
+deployment that already registered it needs no write permission). Wrong type →
+`conflict`; `PermissionDenied` on add → `permission_denied` with a message to
+register the attribute once as Keyword (typical on Temporal Cloud, where an
+operator must register it). **Operational note:** on SQL visibility stores, a
+newly registered attribute can take a few seconds to reach the namespace
+cache; `Start` that sets `BasamentoFlow` may fail until propagation — not
+guaranteed immediate.
+
+`Serve` starts one worker on the configured task queue with
+`WorkflowPanicPolicy` `BlockWorkflow`, SDK default `DeadlockDetectionTimeout`,
+and `WorkerStopTimeout` **30 s**. It blocks until `ctx` ends, then stops the
+worker and returns **nil** (in-flight runs stay running on the server). A
+second `Serve` → `conflict`; missing flow host → `unavailable`. `OnFatalError`:
+when the SDK worker stops itself on a non-retriable poll error, `Serve` returns
+`unavailable` (`temporal: the worker stopped after a fatal error`; cause only
+in the log) so a supervisor can restart the process.
+
+### Capabilities (D8)
+
+`Capabilities()` reports all four caps true (`durable`, `sync_gate_updates`,
+`continue_as_new`, `polyglot_queues`), as REQ-RT-039 requires.
+
+### BDD harness and limits (D9)
+
+Control-plane scenarios run the real SDK client against an in-process gRPC stub
+of `WorkflowService` and `OperatorService` in `internal/bdd/steps` (no
+DataConverter on stub dial; deterministic injected clock). The stub implements
+the query shapes of `list.go`, start policies, search-attribute registration,
+poller long-polls, and Update/cancel/describe/list RPCs. It **does not execute
+workflow code**: a started run stays RUNNING until the test calls `Finish`.
+Phrases such as “waiting at gate” therefore only call `Start` and keep the run
+RUNNING — gate behaviour is covered by part (b) on the SDK test environment and
+by conformance on a real server (WP-L5-04). “The Temporal test server holds no
+run history for that start” requires both no `StartWorkflowExecution` on the
+stub and no payload recorded by the harness converter.
+
+### Behaviours the specs leave open (Temporal, pull request (c))
+
+| Behaviour | Spec coverage |
+| --- | --- |
+| List drops foreign workflow ids and unmappable statuses with a warning log | spec-silent (`TestListDropsForeignAndUnmappableWithWarnLog`) |
+| List limit default 100, cap 1000, negative limit rejected | spec-silent (`TestListLimitRules`, `TestListRequestFiltersAndLimits`) |
+| Serve returns nil when `ctx` is already cancelled before or during startup steps | spec-silent (`TestServeContextCancelledBeforeStart`, `TestServeCancelledBetweenStartupSteps`, …) |
+| Fatal worker error message does not include SDK cause text in the returned error | spec-silent (`TestServeWorkerFatalError`) |
+| `Start` idempotent duplicate returns success with no conflict details | spec-silent (`TestStartIdempotentDuplicateHasNoConflictDetails`) |
+| Tenant rejection on every control op before dial when id is unsafe for visibility | spec-silent (`TestControlTenantRejectsBeforeDial`, `TestTenantRejectsEachQuoteClass`) |
+
+## 9. Local runtime: behaviours the specs leave open
 
 These are implementation choices for `runtime/local` (WP-L5-01). Where a row
 names a requirement or scenario id, the gate exercises it; otherwise the

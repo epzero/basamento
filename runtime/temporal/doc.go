@@ -11,6 +11,13 @@
 // name. DefaultCheckpointEventThreshold is 2000 events. ContinueAsNew carries the
 // journal, not NewID/Rand counters.
 //
+// Pull request (c) implements runtime.Runtime: Start, Describe, Cancel,
+// Resolve, List, Capabilities, and Serve. Options.Client supplies host,
+// namespace, TLS and credentials; the runtime owns DataConverter and
+// ContextPropagators. Tenant ids that are unsafe inside visibility query literals
+// (quotes, backslash, controls, and the like) are rejected on every control call;
+// see docs/architecture/runtime.md §8 (control plane, tenant filters).
+//
 // Failure messages in Temporal history are plaintext: only core error codes and
 // messages cross the boundary (Details maps are dropped). Non-core errors become
 // internal with a fixed message; the original text is logged only, bounded like
@@ -24,11 +31,12 @@
 // expires the workflow task fails (sanitized panic) and the server retries, and the
 // run outcome is unchanged once I/O succeeds. Client and activity converters treat
 // caller-cancelled contexts as permanent errors.
-// Workers must keep SDK default WorkflowPanicPolicy (BlockWorkflow).
+// Workers must keep SDK default WorkflowPanicPolicy (BlockWorkflow); Serve pins
+// that policy and a 30 s worker stop timeout.
 //
 // New requires Outbox at the composition root; production code includes no
 // in-memory outbox.
 //
-// Status: part (b) delivers workflow features; control plane is pull request (c);
+// Status: WP-L5-02 data path, workflow features and control plane implemented;
 // embedded server packaging is WP-L5-03.
 package temporal
