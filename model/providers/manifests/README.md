@@ -51,15 +51,19 @@ http:
 Every mapping is gojq over one input document: `model`, `op`, `client_ref`,
 `id`, `base_url`, `workdir`, `params`, `messages`, `tools`,
 `output_schema`, `text`, `texts`, `assets` and `seed`. `path` may contain
-`{id}`. A status call must map `state` for the poll protocol; the first
-mapped state that is not `running` ends the invocation.
+`{id}`. The poll protocol needs a status call that maps `state` and a start
+call that maps `id`; the first mapped state that is not `running` ends the
+invocation, and a start the vendor answers without an id fails rather than
+leaving a run that can never end.
 
 A `cli` manifest adds `command` (argv prefix), `args` (a gojq expression
 producing the rest of argv), `dir`, `env`, `outputs` (file globs, relative to
-the invocation directory `dir/runs/<client-ref>-<hash>`, which is also the
-command's working directory) and `progress` (a regular expression with one
-number group, matched against stdout lines and reported as the number over
-100).
+the invocation directory, which is also the command's working directory),
+`progress` (a regular expression with one number group, matched against stdout
+lines and reported as the number over 100).
+Each invocation gets `dir/runs/<tenant>-<client-ref>-<hash>`: the tenant is
+part of the key because two tenants may use the same client ref, and the hash
+keeps refs that sanitize alike apart.
 
 The HTTP driver carries `single`, `poll` and `webhook` today. A WebSocket
 vendor needs an adapter until the driver carries `socket`; the protocol is

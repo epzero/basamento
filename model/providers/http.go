@@ -43,7 +43,8 @@ type AssetResolver interface {
 type HTTPOptions struct {
 	// Client is the HTTP client. Nil uses a client with no timeout: the
 	// invocation's context bounds each request, and an invocation outlives the
-	// caller that started it.
+	// caller that started it. Either way the provider never follows a vendor
+	// redirect; a supplied client is copied, not mutated.
 	Client *http.Client
 	// Credentials resolves the manifest's credential reference. Nil refuses a
 	// manifest that names a credential.
@@ -68,6 +69,11 @@ type wakeClock interface {
 	core.Clock
 	After(time.Duration) <-chan time.Time
 }
+
+// noRedirect refuses to follow a vendor redirect. A manifest names one base
+// URL and its credential goes there; following a redirect would send the
+// credential to another host (the same policy as the output-ingest fetch).
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // HTTP is a provider driven by a manifest over an HTTP API: start, status,
 // cancel and lookup endpoints, with gojq mappings from our request to the
@@ -149,7 +155,13 @@ func NewHTTP(m *Manifest, opts HTTPOptions) (*HTTP, error) {
 		runs:        runs,
 	}
 	if h.client == nil {
-		h.client = &http.Client{}
+		h.client = &http.Client{CheckRedirect: noRedirect}
+	} else {
+		// Copy the caller's client so the redirect policy applies without
+		// mutating a client the caller may share.
+		c := *opts.Client
+		c.CheckRedirect = noRedirect
+		h.client = &c
 	}
 	if h.poll == 0 {
 		h.poll = DefaultPollInterval
@@ -209,9 +221,21 @@ func (h *HTTP) Start(ctx context.Context, r model.Request) (model.Handle, error)
 	if err != nil {
 		return model.Handle{}, err
 	}
-	run, _, err := h.runs.Begin(ctx, r.ClientRef)
+	if id == "" && h.manifest.Protocol == model.ProtocolPoll {
+		// The vendor accepted the call but named no invocation, so there is
+		// nothing to poll. Recording the ref would leave a run that can never
+		// end; fail the start instead.
+		return model.Handle{}, core.NewError(core.CodeVendor,
+			"provider start answered without an id", map[string]any{"provider": h.manifest.Name})
+	}
+	run, existed, err := h.runs.Begin(ctx, r.ClientRef)
 	if err != nil {
 		return model.Handle{}, err
+	}
+	if existed {
+		// Another call recorded the ref first; the run it began already owns
+		// its start response and its poll loop.
+		return run.Handle(), nil
 	}
 	run.SetID(id)
 	h.deliver(run, id, doc, h.manifest.Protocol == model.ProtocolSingle)
@@ -253,9 +277,24 @@ func (h *HTTP) Cancel(ctx context.Context, hd model.Handle) error {
 		if err != nil {
 			return err
 		}
-		if _, err := h.do(ctx, h.cancel, input, id); err != nil && core.CodeOf(err) != core.CodeNotFound {
-			return err
+		if _, err := h.do(ctx, h.cancel, input, id); err != nil {
+			switch {
+			case core.CodeOf(err) == core.CodeNotFound:
+				// The vendor has already forgotten it; end the run locally.
+			case ctx.Err() != nil:
+				// The caller gave up mid-cancel. The run must still end, or a
+				// caller that walked away leaves it running forever.
+			default:
+				// A genuine vendor failure keeps the run open: its final state
+				// and actual cost are what the node settles by (REQ-MODEL-009).
+				return err
+			}
 		}
+	}
+	if ctx.Err() != nil {
+		// Cancel the run on a context that keeps the caller's values (the
+		// tenant) but not its cancellation.
+		return h.runs.Cancel(context.WithoutCancel(ctx), hd)
 	}
 	return h.runs.Cancel(ctx, hd)
 }
@@ -265,6 +304,16 @@ func (h *HTTP) Cancel(ctx context.Context, hd model.Handle) error {
 // returns core.CodeUnsupported, which tells the model node to open the
 // ambiguous-start gate instead of starting again (REQ-MODEL-005).
 func (h *HTTP) Lookup(ctx context.Context, clientRef string) (*model.Handle, error) {
+	// The registry keys a run by the tenant of ctx, so a lookup it cannot
+	// record must never reach the vendor: its answer could not be tracked, and
+	// the credential would be spent on an invocation nobody owns.
+	if _, ok := core.TenantFrom(ctx); !ok {
+		return nil, core.NewError(core.CodeInvalidArgument, "tenant required", nil)
+	}
+	// The same lock as Start, so a lookup and a start (or two lookups) cannot
+	// both decide the ref is new and attach two poll loops to one run.
+	h.startMu.Lock()
+	defer h.startMu.Unlock()
 	if hd, ok := h.local(ctx, clientRef); ok {
 		return &hd, nil
 	}
@@ -293,9 +342,14 @@ func (h *HTTP) Lookup(ctx context.Context, clientRef string) (*model.Handle, err
 	if err != nil || foundID.id == "" {
 		return nil, nil
 	}
-	run, _, err := h.runs.Begin(ctx, clientRef)
+	run, existed, err := h.runs.Begin(ctx, clientRef)
 	if err != nil {
 		return nil, err
+	}
+	if existed {
+		// A concurrent call began the run first; it already follows it.
+		hd := run.Handle()
+		return &hd, nil
 	}
 	run.SetID(foundID.id)
 	if h.manifest.Protocol == model.ProtocolPoll {
@@ -517,6 +571,10 @@ func (h *HTTP) deliver(run *model.Run, id string, doc any, final bool) {
 	}
 }
 
+// finish ends the run by the state the vendor reported. A state that is not an
+// end is not a success: a running snapshot leaves the run open for the poll
+// loop or the next callback (REQ-MODEL-009), and a state outside the contract
+// fails closed instead of claiming success.
 func (h *HTTP) finish(run *model.Run, m *mapped) {
 	switch m.state {
 	case model.StateSucceeded:
@@ -525,8 +583,12 @@ func (h *HTTP) finish(run *model.Run, m *mapped) {
 		run.Cancel()
 	case model.StateFailed:
 		run.Fail(m.failure())
+	case model.StateRunning:
+		return
 	default:
-		run.Succeed(m.result())
+		run.Fail(core.NewError(core.CodeVendor,
+			"provider reported a state the contract does not define",
+			map[string]any{"state": string(m.state)}))
 	}
 }
 

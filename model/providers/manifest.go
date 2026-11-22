@@ -231,6 +231,9 @@ func (m *Manifest) Validate() error {
 		if m.HTTP.Status.Response.State == "" {
 			return fmt.Errorf("manifest %q: the poll protocol needs a state mapping", m.Name)
 		}
+		if m.HTTP.Start.Response.ID == "" {
+			return fmt.Errorf("manifest %q: the poll protocol needs a start id mapping", m.Name)
+		}
 	case model.ProtocolWebhook:
 	default:
 		return fmt.Errorf("manifest %q: the generic HTTP driver does not carry protocol %q", m.Name, m.Protocol)

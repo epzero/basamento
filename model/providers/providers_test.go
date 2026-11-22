@@ -352,8 +352,9 @@ models:
 	if res.State != model.StateSucceeded || len(res.Outputs) != 2 {
 		t.Fatalf("result = %+v", res)
 	}
-	// The command runs in its own subdirectory of the provider's directory.
-	if !strings.Contains(res.Outputs[0].Path, "/runs/ref-cli-") ||
+	// The command runs in its own subdirectory of the provider's directory,
+	// keyed by tenant and client ref.
+	if !strings.Contains(res.Outputs[0].Path, "/runs/acme-ref-cli-") ||
 		!strings.HasSuffix(res.Outputs[0].Path, "/out/a.png") || res.Outputs[0].Mime != "image/png" {
 		t.Fatalf("output = %+v", res.Outputs[0])
 	}
@@ -556,6 +557,15 @@ http:
   base_url: https://x.test
   start: {path: /a}
   status: {path: /s/{id}}
+models: [{id: m, caps: [chat]}]
+`,
+		"poll needs start id": `name: x
+locality: cloud
+protocol: poll
+http:
+  base_url: https://x.test
+  start: {path: /a}
+  status: {path: /s/{id}, response: {state: .state}}
 models: [{id: m, caps: [chat]}]
 `,
 		"unknown field": `name: x
@@ -1147,5 +1157,401 @@ models:
 	}
 	if proc.waitedBeforeEOF.Load() {
 		t.Fatal("Wait ran before stdout was drained")
+	}
+}
+
+// parkClock reports each wait it schedules, so a test can tell that a poll
+// loop has reached the poll interval.
+type parkClock struct {
+	*coretest.FakeClock
+	parked chan struct{}
+}
+
+func (c *parkClock) After(d time.Duration) <-chan time.Time {
+	ch := c.FakeClock.After(d)
+	c.parked <- struct{}{}
+	return ch
+}
+
+func newParkClock() *parkClock {
+	return &parkClock{
+		FakeClock: coretest.NewFakeClock(time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)),
+		parked:    make(chan struct{}, 4),
+	}
+}
+
+// R1-01: one run carries one poll loop. Two lookups of the same ref resolve to
+// one run, so only the lookup that began it may follow it.
+func TestHTTPOnePollLoopPerRun(t *testing.T) {
+	t.Parallel()
+	var statuses atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/lookup":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses.Add(1)
+			_, _ = fmt.Fprint(w, `{"state":"running","progress":0.5}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	clock := newParkClock()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: clock, PollInterval: time.Hour})
+
+	ctx := testCtx(t)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.Lookup(ctx, "ref-1"); err != nil {
+				t.Errorf("lookup: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// The run's one loop polls once, then parks on the poll interval.
+	guard, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	select {
+	case <-clock.parked:
+	case <-guard.Done():
+		t.Fatal("no poll loop parked")
+	}
+	// A second loop would issue its first status call and park at once.
+	settle, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	select {
+	case <-clock.parked:
+		t.Fatal("a second poll loop follows the run")
+	case <-settle.Done():
+	}
+	if got := statuses.Load(); got != 1 {
+		t.Fatalf("status calls = %d, want 1", got)
+	}
+}
+
+// R1-02: the registry keys a run by (tenant, client ref), so the command-line
+// invocation directory must key on both.
+func TestCLITenantsSharingARefKeepTheirOwnRunDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m := readManifest(t, `name: local-render
+locality: machine_local
+protocol: command
+cli:
+  command: [render]
+  dir: `+dir+`
+  outputs: ["out/*.png"]
+models:
+  - id: local-render
+    caps: [image.generate]
+`)
+	runner := &dirRecorder{}
+	p, err := providers.NewCLI(m, providers.CLIOptions{Clock: core.SystemClock{}, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenants := []string{"acme", "beta"}
+	for _, tenant := range tenants {
+		ctx := core.WithTenant(t.Context(), core.TenantID(tenant))
+		h, err := p.Start(ctx, model.Request{Model: "local-render", Op: model.CapImageGenerate, ClientRef: "shared"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Result(ctx, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dirs := runner.recorded()
+	if len(dirs) != len(tenants) || dirs[0] == dirs[1] {
+		t.Fatalf("run dirs = %v, want one per tenant", dirs)
+	}
+	for i, tenant := range tenants {
+		if !strings.Contains(dirs[i], tenant) {
+			t.Fatalf("dir %q does not carry tenant %q", dirs[i], tenant)
+		}
+	}
+}
+
+type dirRecorder struct {
+	mu   sync.Mutex
+	dirs []string
+}
+
+func (r *dirRecorder) Start(_ context.Context, cmd providers.Command) (providers.Process, error) {
+	r.mu.Lock()
+	r.dirs = append(r.dirs, cmd.Dir)
+	r.mu.Unlock()
+	return &quietProcess{}, nil
+}
+
+func (r *dirRecorder) recorded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.dirs...)
+}
+
+const webhookManifest = `name: hook-image
+locality: cloud
+protocol: webhook
+http:
+  base_url: %s
+  start:
+    method: POST
+    path: /start
+    response:
+      id: .id
+      state: .state
+      state_map: {queued: running, running: running, done: succeeded, failed: failed}
+  status:
+    path: /status/{id}
+    response:
+      state: .state
+      state_map: {queued: running, running: running, done: succeeded, failed: failed}
+models:
+  - id: hook-image
+    caps: [image.generate]
+`
+
+// R1-03: a mapped non-terminal state is not an end. A running webhook snapshot
+// leaves the run open, so a later cancel still ends it.
+func TestHTTPWebhookRunningSnapshotDoesNotEndTheRun(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/start" {
+			_, _ = fmt.Fprint(w, `{"id":"job-1","state":"queued"}`)
+			return
+		}
+		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+	p, err := providers.NewHTTP(readManifest(t, fmt.Sprintf(webhookManifest, srv.URL)),
+		providers.HTTPOptions{Clock: core.SystemClock{}, PollInterval: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testCtx(t)
+	h, err := p.Start(ctx, model.Request{Model: "hook-image", Op: model.CapImageGenerate, ClientRef: "ref-hook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Resolve(ctx, "ref-hook", []byte(`{"state":"running"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Cancel(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	res, err := p.Result(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != model.StateCancelled {
+		t.Fatalf("state = %q, want cancelled", res.State)
+	}
+}
+
+// SSRF-01: the provider never follows a vendor redirect, so a credential
+// cannot be carried to another host.
+func TestHTTPDoesNotFollowAVendorRedirect(t *testing.T) {
+	t.Parallel()
+	var elsewhere atomic.Int64
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, srv.URL+"/elsewhere", http.StatusTemporaryRedirect)
+		case "/elsewhere":
+			elsewhere.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	supplied := &http.Client{}
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}, Client: supplied})
+	if supplied.CheckRedirect != nil {
+		t.Fatal("the provider mutated the caller's client")
+	}
+	if _, err := p.Start(testCtx(t), model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"}); core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("code = %q, want vendor_error", core.CodeOf(err))
+	}
+	if got := elsewhere.Load(); got != 0 {
+		t.Fatalf("the provider followed the redirect (%d calls)", got)
+	}
+}
+
+// POLL-ID: a poll start the vendor answers without an id has nothing to poll,
+// so the start fails instead of recording a run that can never end.
+func TestHTTPPollStartWithoutAVendorIDFails(t *testing.T) {
+	t.Parallel()
+	var statuses atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"job":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			statuses.Add(1)
+			_, _ = fmt.Fprint(w, `{"state":"running"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+	if _, err := p.Start(testCtx(t), model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"}); core.CodeOf(err) != core.CodeVendor {
+		t.Fatalf("code = %q, want vendor_error", core.CodeOf(err))
+	}
+	if got := statuses.Load(); got != 0 {
+		t.Fatalf("status calls = %d, want 0", got)
+	}
+}
+
+// ROUTE-01: a profile name is normalized and an unknown one fails closed, so a
+// typo such as "Cloud" can never select a machine-local model.
+func TestRouterNormalizesProfilesAndFailsClosedOnUnknown(t *testing.T) {
+	t.Parallel()
+	local := stubInvoker{desc: model.Descriptor{ID: "local-image", Caps: []model.Capability{model.CapImageGenerate}, Locality: model.LocalityMachineLocal}}
+	r, err := providers.NewRouter(providers.Route{Invoker: local, Descriptor: local.desc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Pick(providers.Profile("Cloud"), model.CapImageGenerate); core.CodeOf(err) != core.CodeUnsupported {
+		t.Fatalf("Cloud: code = %q, want unsupported", core.CodeOf(err))
+	}
+	if _, err := r.Pick(providers.Profile("cloudy"), model.CapImageGenerate); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("unknown profile: code = %q, want invalid_argument", core.CodeOf(err))
+	}
+	got, err := r.Pick(providers.Profile(" Embedded "), model.CapImageGenerate)
+	if err != nil || got.Descriptor.ID != "local-image" {
+		t.Fatalf("embedded pick = %+v, %v", got, err)
+	}
+}
+
+// EP111-F3: a lookup the registry cannot record must not reach the vendor with
+// its credential.
+func TestHTTPLookupWithoutATenantNeverReachesTheVendor(t *testing.T) {
+	t.Parallel()
+	var lookups atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/lookup" {
+			lookups.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}})
+	if _, err := p.Lookup(context.Background(), "ref-1"); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("code = %q, want invalid_argument", core.CodeOf(err))
+	}
+	if got := lookups.Load(); got != 0 {
+		t.Fatalf("vendor saw %d /lookup calls, want 0", got)
+	}
+}
+
+// EP111-F2: a caller that gives up mid-cancel still ends the run locally, so a
+// caller that walked away cannot leave it running forever.
+func TestHTTPCancelEndsTheRunWhenTheCallerGivesUp(t *testing.T) {
+	t.Parallel()
+	arrived := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/cancel/"):
+			arrived <- struct{}{}
+			<-r.Context().Done()
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			_, _ = fmt.Fprint(w, `{"state":"running"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: core.SystemClock{}, PollInterval: time.Hour})
+	h, err := p.Start(testCtx(t), model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(testCtx(t))
+	go func() {
+		<-arrived
+		cancel()
+	}()
+	if err := p.Cancel(ctx, h); err != nil {
+		t.Fatalf("cancel = %v, want the run ended locally", err)
+	}
+	res, err := p.Result(testCtx(t), h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != model.StateCancelled {
+		t.Fatalf("state = %q, want cancelled", res.State)
+	}
+}
+
+// EP111-F2 (settled): a genuine vendor cancel failure keeps the run open, so
+// the poll loop still reads the vendor's final state and actual cost
+// (REQ-MODEL-009) instead of reporting a cancellation the vendor never took.
+func TestHTTPCancelKeepsTheRunOnAVendorError(t *testing.T) {
+	t.Parallel()
+	var done atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/start":
+			_, _ = fmt.Fprint(w, `{"id":"job-1"}`)
+		case strings.HasPrefix(r.URL.Path, "/cancel/"):
+			if !done.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
+		case strings.HasPrefix(r.URL.Path, "/status/"):
+			if done.Load() {
+				_, _ = fmt.Fprint(w, `{"state":"succeeded","cost_mpts":7}`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"state":"running"}`)
+		default:
+			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	clock := newParkClock()
+	p := httpProvider(t, srv, providers.HTTPOptions{Clock: clock, PollInterval: time.Hour})
+	ctx := testCtx(t)
+	h, err := p.Start(ctx, model.Request{Model: "sim-image", Op: model.CapImageGenerate, ClientRef: "ref-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	select {
+	case <-clock.parked:
+	case <-guard.Done():
+		t.Fatal("the poll loop did not park")
+	}
+	if err := p.Cancel(ctx, h); core.CodeOf(err) != core.CodeUnavailable {
+		t.Fatalf("code = %q, want unavailable", core.CodeOf(err))
+	}
+	done.Store(true)
+	clock.Advance(time.Hour)
+	res, err := p.Result(guard, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != model.StateSucceeded || res.CostMpts != 7 {
+		t.Fatalf("result = %+v, want the vendor's succeeded state and cost", res)
 	}
 }

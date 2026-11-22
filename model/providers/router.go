@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/epzero/basamento/core"
@@ -109,6 +110,10 @@ func (r *Router) Describe(context.Context) ([]model.Descriptor, error) {
 // exists only on models the profile excludes, Pick fails with "unsupported";
 // when no model declares it at all, with "not_found".
 func (r *Router) Pick(profile Profile, capability model.Capability) (Route, error) {
+	p, err := profile.normalize()
+	if err != nil {
+		return Route{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	found := false
@@ -118,7 +123,7 @@ func (r *Router) Pick(profile Profile, capability model.Capability) (Route, erro
 			continue
 		}
 		found = true
-		if profile == ProfileCloud && route.Descriptor.Locality == model.LocalityMachineLocal {
+		if p == ProfileCloud && route.Descriptor.Locality == model.LocalityMachineLocal {
 			continue
 		}
 		if best == -1 || localityRank(route.Descriptor.Locality) < localityRank(r.routes[best].Descriptor.Locality) {
@@ -136,6 +141,19 @@ func (r *Router) Pick(profile Profile, capability model.Capability) (Route, erro
 	return Route{}, core.NewError(core.CodeNotFound,
 		fmt.Sprintf("no model serves capability %s", capability),
 		map[string]any{"op": string(capability)})
+}
+
+// normalize reads a profile name in its canonical form. A name the platform
+// does not define is an error, never a fall-through to the embedded rules: a
+// typo such as "Cloud" must not select a machine-local model (REQ-MODEL-011).
+func (p Profile) normalize() (Profile, error) {
+	switch named := Profile(strings.ToLower(strings.TrimSpace(string(p)))); named {
+	case ProfileCloud, ProfileEmbedded, ProfileLibrary:
+		return named, nil
+	default:
+		return "", core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("unknown profile %q", p), map[string]any{"profile": string(p)})
+	}
 }
 
 // localityRank prefers cloud capacity over a worker and a worker over the

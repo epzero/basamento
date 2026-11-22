@@ -192,7 +192,7 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 	}
 	// Each invocation runs in its own subdirectory of the provider's
 	// directory, so its output globs never pick up another invocation's files.
-	dir := c.runDir(r.ClientRef)
+	dir := c.runDir(ctx, r.ClientRef)
 	input, err := inputFor(r, "", dir)
 	if err != nil {
 		return model.Handle{}, err
@@ -236,12 +236,23 @@ func (c *CLI) Start(ctx context.Context, r model.Request) (model.Handle, error) 
 }
 
 // runDir is one invocation's working directory: a subdirectory of the
-// provider's directory named after the client ref, with a short digest of the
-// ref so two refs that sanitize alike stay apart.
-func (c *CLI) runDir(clientRef string) string {
-	sum := sha256.Sum256([]byte(clientRef))
+// provider's directory named after the tenant and the client ref, with a short
+// digest of both so two values that sanitize alike stay apart. The registry
+// keys a run by (tenant, client ref), so the directory must too: two tenants
+// that share a ref must never see each other's files.
+func (c *CLI) runDir(ctx context.Context, clientRef string) string {
+	tenant, _ := core.TenantFrom(ctx)
+	key := string(tenant) + "\x00" + clientRef
+	sum := sha256.Sum256([]byte(key))
+	name := sanitizeName(string(tenant) + "-" + clientRef)
+	return filepath.Join(c.dir, "runs", fmt.Sprintf("%s-%x", name, sum[:4]))
+}
+
+// sanitizeName keeps a path segment readable: letters, digits, '-', '_' and
+// '.' pass, everything else becomes '_', and the result is cut at 48 bytes.
+func sanitizeName(s string) string {
 	var name strings.Builder
-	for _, r := range clientRef {
+	for _, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
 			name.WriteRune(r)
@@ -252,7 +263,7 @@ func (c *CLI) runDir(clientRef string) string {
 			break
 		}
 	}
-	return filepath.Join(c.dir, "runs", fmt.Sprintf("%s-%x", name.String(), sum[:4]))
+	return name.String()
 }
 
 // Events follows the command's progress events with Seq > after.

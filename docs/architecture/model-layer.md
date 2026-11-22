@@ -87,13 +87,16 @@ manifests are documented there), or an adapter package when a manifest cannot
 express its protocol. Every provider has a simulator in
 `model/providers/sim` and the same contract tests. The router chooses a model
 by capability and locality; in the cloud profile it never selects a
-machine-local model (REQ-MODEL-011, WP-L3-04).
+machine-local model (REQ-MODEL-011, WP-L3-04). A profile name is normalized
+and an unknown one is `invalid_argument`: a typo never falls through to a
+profile that may route to the machine. The HTTP driver sends a manifest's
+credential to its one base URL and never follows a vendor redirect.
 
 | Provider | Notes |
 | --- | --- |
 | Chat and embeddings (OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Ark/Doubao, Qianfan, Ollama, OpenRouter) | `eino-ext` adapters and official SDKs behind `Invoker`. MiniMax and GLM use OpenAI-compatible mode. |
-| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling or webhook, with a vendor state the manifest does not map failing the run (`vendor_error`) rather than running forever. Covers most cloud media vendors and local generation servers; a WebSocket vendor gets an adapter until the driver carries it. |
-| **Generic CLI provider** | Configured by a manifest: command template, argument mapping, a working directory with one subdirectory per invocation (so output globs never see another run's files), output file globs, progress parsing from stdout; `machine_local`. |
+| **Generic HTTP API provider** | Configured by a manifest, not code: endpoints for start, status, cancel and lookup; auth by credential reference; request and response mappings (gojq) to our params, inputs and outputs; progress by polling or webhook, with a vendor state the manifest does not map failing the run (`vendor_error`) rather than running forever; the poll protocol needs a start id mapping, and a start the vendor answers without one fails instead of leaving a run that can never end. Covers most cloud media vendors and local generation servers; a WebSocket vendor gets an adapter until the driver carries it. |
+| **Generic CLI provider** | Configured by a manifest: command template, argument mapping, a working directory with one subdirectory per (tenant, client ref) invocation (so output globs never see another run's files), output file globs, progress parsing from stdout; `machine_local`. |
 | Workers | Models and tools that the workers of a pool declared (§6). |
 | Remote invokers | Any service implementing `basamento.invoke.v1.InvocationService` over connect (for example the browser runner, ADR-0009). |
 | Vendor-specific adapters | Only where a manifest cannot express the protocol. |
