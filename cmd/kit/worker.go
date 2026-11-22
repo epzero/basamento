@@ -449,7 +449,7 @@ func (l *workerLoop) free() int {
 }
 
 func (l *workerLoop) addUnits(units int) {
-	if units <= 0 {
+	if units == 0 {
 		units = 1
 	}
 	l.mu.Lock()

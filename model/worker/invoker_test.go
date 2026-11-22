@@ -102,3 +102,35 @@ func TestDecodeRequestKeepsALegacyParamsPayload(t *testing.T) {
 		t.Fatalf("decoded %+v, want the legacy payload as params", req)
 	}
 }
+
+func TestInvokerScopesHandlesToTheStartingTenant(t *testing.T) {
+	ctx := context.Background()
+	s, _ := testStore(t, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
+	pool := mustPool(t, s, PoolSpec{ID: "shared"})
+	declareDescriptor(t, s, "shared", pool.Token, descriptor("m", 1, false))
+	inv := &Invoker{Store: s, Pool: "shared"}
+	acme := core.WithTenant(ctx, "acme")
+	h, err := inv.Start(acme, model.Request{Model: "m", ClientRef: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	globex := core.WithTenant(ctx, "globex")
+	if got, err := inv.Lookup(globex, "r1"); err != nil || got != nil {
+		t.Fatalf("globex lookup = %+v, %v; want not found", got, err)
+	}
+	if _, err := inv.Result(globex, h); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("globex result = %v, want not_found", err)
+	}
+	if _, err := inv.Events(globex, h, 0); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("globex events = %v, want not_found", err)
+	}
+	if err := inv.Cancel(globex, h); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("globex cancel = %v, want not_found", err)
+	}
+	if _, err := inv.Start(globex, model.Request{Model: "m", ClientRef: "r1"}); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("globex start reusing acme's ref = %v, want not_found", err)
+	}
+	if err := inv.Cancel(acme, h); err != nil {
+		t.Fatalf("acme cancel: %v", err)
+	}
+}

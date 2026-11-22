@@ -117,7 +117,37 @@ func (i *Invoker) Start(ctx context.Context, r model.Request) (model.Handle, err
 	if err != nil {
 		return model.Handle{}, err
 	}
+	// A client ref is scoped to the tenant that started it. A shared pool's
+	// queue has one row per ref, so a second tenant reusing a ref would
+	// otherwise get the first tenant's row and a handle to it.
+	if got, ok := core.TenantFrom(ctx); ok && inv.Tenant != got {
+		return model.Handle{}, notFoundInvocation(inv.ClientRef)
+	}
 	return model.Handle{Provider: i.Provider(), ID: inv.ClientRef, ClientRef: inv.ClientRef}, nil
+}
+
+// load reads an invocation a handle names and checks that it belongs to the
+// caller's tenant and to this provider. A mismatch is not_found, never a
+// permission error: the caller must not learn that another tenant's ref
+// exists (model.Invoker: handles are valid only for their tenant).
+func (i *Invoker) load(ctx context.Context, h model.Handle) (Invocation, error) {
+	if h.Provider != "" && h.Provider != i.Provider() {
+		return Invocation{}, notFoundInvocation(h.ClientRef)
+	}
+	inv, err := i.Store.Invocation(ctx, h.ClientRef)
+	if err != nil {
+		return Invocation{}, err
+	}
+	tenant, ok := core.TenantFrom(ctx)
+	if !ok || inv.Tenant != tenant {
+		return Invocation{}, notFoundInvocation(h.ClientRef)
+	}
+	return inv, nil
+}
+
+func notFoundInvocation(clientRef string) error {
+	return core.NewError(core.CodeNotFound, "invocation does not exist",
+		map[string]any{"client_ref": clientRef})
 }
 
 // encodeRequest stores the whole request, not only its parameters: the worker
@@ -166,7 +196,7 @@ func decodeRequest(inv Invocation) (model.Request, error) {
 // Events delivers the partial output the queue holds and closes when the
 // invocation ends.
 func (i *Invoker) Events(ctx context.Context, h model.Handle, after int64) (<-chan model.Event, error) {
-	if _, err := i.Store.Invocation(ctx, h.ClientRef); err != nil {
+	if _, err := i.load(ctx, h); err != nil {
 		return nil, err
 	}
 	out := make(chan model.Event, 16)
@@ -206,6 +236,9 @@ func (i *Invoker) Events(ctx context.Context, h model.Handle, after int64) (<-ch
 
 // Result waits for the queue's terminal state and maps it to the contract.
 func (i *Invoker) Result(ctx context.Context, h model.Handle) (model.Result, error) {
+	if _, err := i.load(ctx, h); err != nil {
+		return model.Result{}, err
+	}
 	for {
 		inv, err := i.Store.Invocation(ctx, h.ClientRef)
 		if err != nil {
@@ -248,16 +281,24 @@ func resultOf(inv Invocation) (model.Result, error) {
 
 // Cancel removes a waiting invocation or asks the worker to cancel a lease.
 func (i *Invoker) Cancel(ctx context.Context, h model.Handle) error {
+	if _, err := i.load(ctx, h); err != nil {
+		return err
+	}
 	return i.Store.Cancel(ctx, h.ClientRef)
 }
 
 // Lookup answers from the queue: one row per client ref.
 func (i *Invoker) Lookup(ctx context.Context, clientRef string) (*model.Handle, error) {
-	if _, err := i.Store.Invocation(ctx, clientRef); err != nil {
+	inv, err := i.Store.Invocation(ctx, clientRef)
+	if err != nil {
 		if core.CodeOf(err) == core.CodeNotFound {
 			return nil, nil
 		}
 		return nil, err
+	}
+	tenant, ok := core.TenantFrom(ctx)
+	if !ok || inv.Tenant != tenant {
+		return nil, nil
 	}
 	return &model.Handle{Provider: i.Provider(), ID: clientRef, ClientRef: clientRef}, nil
 }

@@ -25,6 +25,7 @@ type loopTransport struct {
 	finished  chan string
 	left      chan struct{}
 	lastLease worker.LeaseRequest
+	leases    int
 }
 
 type finishCall struct {
@@ -49,6 +50,7 @@ func (t *loopTransport) Lease(_ context.Context, req worker.LeaseRequest) ([]wor
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.lastLease = req
+	t.leases++
 	out := t.leased
 	t.leased = nil
 	return out, nil
@@ -399,5 +401,53 @@ func TestWorkerLoopOnceRunsAtMostOneInvocation(t *testing.T) {
 	}
 	if len(tr.releases) != 1 || tr.releases[0] != "r2" {
 		t.Fatalf("released %v, want r2 handed back unused", tr.releases)
+	}
+}
+
+func TestWorkerLoopFreesUnitsAfterAnInvocationFinishes(t *testing.T) {
+	tr := newLoopTransport()
+	tr.leased = []worker.Invocation{{ClientRef: "r1", Model: "m", Units: 1, Request: json.RawMessage(`{}`)}}
+	j, err := worker.OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	finished := make(chan string, 4)
+	p := &loopProvider{}
+	tr.finished = finished
+	client := loopClient(t, tr, j)
+	beats := make(chan time.Time)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loop := &workerLoop{
+		client: client, runner: &worker.Runner{Client: client, Providers: map[string]model.Invoker{"m": p}},
+		capacity: 1, beats: beats,
+	}
+	done := make(chan error, 1)
+	go func() { done <- loop.serve(ctx) }()
+
+	if got := <-finished; got != "r1" {
+		t.Fatalf("finished %q, want r1", got)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		tr.mu.Lock()
+		n := tr.leases
+		tr.mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the worker asked for work %d times after finishing with capacity 1, want at least 2", n)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if free := loop.free(); free != 1 {
+		t.Fatalf("free units %d after a finished invocation, want 1", free)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("serve: %v", err)
 	}
 }
