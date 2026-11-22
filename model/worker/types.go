@@ -220,12 +220,14 @@ type Invocation struct {
 	InDoubt         bool
 	CancelRequested bool
 	QueuedAt        time.Time
-	LeaseExpires    time.Time
-	InDoubtUntil    time.Time
-	ChargedMpts     int64
-	Code            core.Code
-	Result          json.RawMessage
-	ProviderHandle  string
+	// NotBefore delays the next lease after a release (a vendor rate limit).
+	NotBefore      time.Time
+	LeaseExpires   time.Time
+	InDoubtUntil   time.Time
+	ChargedMpts    int64
+	Code           core.Code
+	Result         json.RawMessage
+	ProviderHandle string
 }
 
 // LeaseRequest says what a worker can take right now.

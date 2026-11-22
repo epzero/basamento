@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -490,3 +491,65 @@ func (f *fakeRemote) Result(context.Context, model.Handle) (model.Result, error)
 func (f *fakeRemote) Cancel(context.Context, model.Handle) error { return nil }
 
 func (f *fakeRemote) Lookup(context.Context, string) (*model.Handle, error) { return nil, nil }
+
+func TestConcurrentJoinsWithConflictingDescriptorsLeaveOneWorker(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s, _ := testStore(t, at)
+	pool := mustPool(t, s, PoolSpec{ID: "p", Tenant: "acme"})
+	const n = 6
+	type result struct {
+		w   Worker
+		err error
+	}
+	start := make(chan struct{})
+	results := make(chan result, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		units := i + 1
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			w, err := s.Join(ctx, JoinRequest{
+				PoolToken:       pool.Token,
+				ProtocolVersion: ProtocolVersion,
+				Descriptors:     []Descriptor{descriptor("m", units, false)},
+				Capacity:        8,
+			})
+			results <- result{w, err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var winners []Worker
+	conflicts := 0
+	for r := range results {
+		switch {
+		case r.err == nil:
+			winners = append(winners, r.w)
+		case core.CodeOf(r.err) == core.CodeConflict:
+			conflicts++
+		default:
+			t.Fatalf("join: %v", r.err)
+		}
+	}
+	if len(winners) != 1 || conflicts != n-1 {
+		t.Fatalf("%d joins won and %d conflicted, want 1 and %d", len(winners), conflicts, n-1)
+	}
+	workers, err := s.ListWorkers(ctx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 1 || !workers[0].Present {
+		t.Fatalf("pool has %d workers, want one present winner", len(workers))
+	}
+	descriptors, err := s.Descriptors(ctx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptors) != 1 || descriptors[0].Units != winners[0].Descriptors[0].Units {
+		t.Fatalf("pool descriptor %+v, want the winner's %+v", descriptors, winners[0].Descriptors)
+	}
+}

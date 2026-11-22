@@ -52,11 +52,6 @@ func (s *Store) Enqueue(ctx context.Context, inv Invocation) (Invocation, error)
 	if inv.QueueTimeout < 0 {
 		return Invocation{}, core.NewError(core.CodeInvalidArgument, "worker: queue timeout must not be negative", nil)
 	}
-	if existing, err := s.Invocation(ctx, inv.ClientRef); err == nil {
-		return existing, nil
-	} else if core.CodeOf(err) != core.CodeNotFound {
-		return Invocation{}, err
-	}
 	now := s.now()
 	inv.QueuedAt = now
 	inv.State = stateWaiting
@@ -67,9 +62,10 @@ func (s *Store) Enqueue(ctx context.Context, inv Invocation) (Invocation, error)
 	_, err = s.db.Execer().Exec(ctx,
 		`INSERT INTO worker_invocations
 		 (client_ref, pool_id, tenant, model, class, units, state, worker_id, attempt, started, in_doubt,
-		  queued_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms, max_runtime_ms,
+		  queued_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms, max_runtime_ms,
 		  cancel_requested, reserved_mpts, charged_mpts, code, request, result, provider_handle, spilled, trace_parent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, 0, ?, ?, 0, ?, 0, '', ?, '', '', 0, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, 0, ?, 0, 0, 0, ?, ?, 0, ?, 0, '', ?, '', '', 0, ?)
+		 ON CONFLICT (client_ref) DO NOTHING`,
 		inv.ClientRef, inv.Pool, string(inv.Tenant), inv.Model, string(inv.Class), inv.Units, stateWaiting,
 		unixms(now), inv.QueueTimeout.Milliseconds(), inv.MaxRuntime.Milliseconds(),
 		inv.ReservedMpts, string(req), inv.TraceParent)
@@ -85,9 +81,9 @@ func (s *Store) Invocation(ctx context.Context, clientRef string) (Invocation, e
 }
 
 const selectInvocation = `SELECT client_ref, pool_id, tenant, model, class, units, state, worker_id, attempt,
-	started, in_doubt, queued_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms, queue_timeout_ms,
-	max_runtime_ms, cancel_requested, reserved_mpts, charged_mpts, code, request, result, provider_handle,
-	spilled, trace_parent FROM worker_invocations`
+	started, in_doubt, queued_unix_ms, not_before_unix_ms, lease_expires_unix_ms, in_doubt_until_unix_ms,
+	queue_timeout_ms, max_runtime_ms, cancel_requested, reserved_mpts, charged_mpts, code, request, result,
+	provider_handle, spilled, trace_parent FROM worker_invocations`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -95,15 +91,15 @@ type rowScanner interface {
 
 func scanInvocation(row rowScanner) (Invocation, error) {
 	var (
-		inv                                   Invocation
-		tenant, class, state, code            string
-		started, inDoubt, cancel              int
-		queued, lease, doubt, timeout, maxRun int64
-		request, result                       string
-		spilled                               int
+		inv                                              Invocation
+		tenant, class, state, code                       string
+		started, inDoubt, cancel                         int
+		queued, notBefore, lease, doubt, timeout, maxRun int64
+		request, result                                  string
+		spilled                                          int
 	)
 	err := row.Scan(&inv.ClientRef, &inv.Pool, &tenant, &inv.Model, &class, &inv.Units, &state, &inv.WorkerID,
-		&inv.Attempt, &started, &inDoubt, &queued, &lease, &doubt, &timeout, &maxRun, &cancel,
+		&inv.Attempt, &started, &inDoubt, &queued, &notBefore, &lease, &doubt, &timeout, &maxRun, &cancel,
 		&inv.ReservedMpts, &inv.ChargedMpts, &code, &request, &result, &inv.ProviderHandle, &spilled, &inv.TraceParent)
 	if core.CodeOf(err) == core.CodeNotFound {
 		return Invocation{}, core.NewError(core.CodeNotFound, "invocation does not exist", nil)
@@ -118,6 +114,9 @@ func scanInvocation(row rowScanner) (Invocation, error) {
 	inv.InDoubt = inDoubt != 0
 	inv.CancelRequested = cancel != 0
 	inv.QueuedAt = fromms(queued)
+	if notBefore != 0 {
+		inv.NotBefore = fromms(notBefore)
+	}
 	inv.LeaseExpires = fromms(lease)
 	inv.InDoubtUntil = fromms(doubt)
 	inv.QueueTimeout = time.Duration(timeout) * time.Millisecond
@@ -174,7 +173,8 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 		for _, d := range w.Descriptors {
 			models[d.ID] = d
 		}
-		candidates, err := s.waitingCandidates(ctx, tx, w.Pool, models)
+		now := s.now()
+		candidates, err := s.waitingCandidates(ctx, tx, w.Pool, models, now)
 		if err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 		if err != nil {
 			return err
 		}
-		chosen, err := choose(candidates, pool, s.now(), models, free, req.TimeLeft,
+		chosen, err := choose(candidates, pool, now, models, free, req.TimeLeft,
 			leasedCounts, func(t core.TenantID) TenantSettings {
 				ts, err := tenantSettingsTx(ctx, tx, w.Pool, t)
 				if err != nil {
@@ -194,13 +194,15 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 			return err
 		}
 		for _, inv := range chosen {
-			expires := s.now().Add(pool.Lease)
-			if _, err := tx.Exec(ctx,
-				`UPDATE worker_invocations SET state = ?, worker_id = ?, attempt = attempt + 1,
-					started = 0, in_doubt = 0, lease_expires_unix_ms = ?, in_doubt_until_unix_ms = 0
-				 WHERE client_ref = ? AND state = ?`,
-				stateLeased, w.ID, unixms(expires), inv.ClientRef, stateWaiting); err != nil {
+			expires := now.Add(pool.Lease)
+			taken, err := leaseRow(ctx, tx, inv, w.ID, now, expires)
+			if err != nil {
 				return err
+			}
+			if !taken {
+				// Another replica took the row between the read and the
+				// update; leave it to that replica.
+				continue
 			}
 			inv.State = stateLeased
 			inv.WorkerID = w.ID
@@ -222,10 +224,32 @@ func (s *Store) Lease(ctx context.Context, req LeaseRequest) ([]Invocation, erro
 	return leased, nil
 }
 
+// leaseRow moves one waiting invocation to workerID. It reports whether this
+// call won the row: another replica may have leased it, or given it a
+// not-before time, between the candidate read and this update, and a lease
+// must never return a row it did not take (REQ-MODEL-012, REQ-MODEL-018).
+func leaseRow(ctx context.Context, tx *psql.Execer, inv Invocation, workerID string, now, expires time.Time) (bool, error) {
+	res, err := tx.Exec(ctx,
+		`UPDATE worker_invocations SET state = ?, worker_id = ?, attempt = attempt + 1,
+			started = 0, in_doubt = 0, lease_expires_unix_ms = ?, in_doubt_until_unix_ms = 0,
+			not_before_unix_ms = 0
+		 WHERE client_ref = ? AND state = ? AND worker_id = ? AND not_before_unix_ms <= ?`,
+		stateLeased, workerID, unixms(expires), inv.ClientRef, stateWaiting, inv.WorkerID, unixms(now))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 // waitingCandidates lists the pool's waiting invocations this worker can serve,
 // oldest first, before ordering.
-func (s *Store) waitingCandidates(ctx context.Context, exec *psql.Execer, poolID string, models map[string]Descriptor) ([]Invocation, error) {
-	rows, err := exec.Query(ctx, selectInvocation+` WHERE pool_id = ? AND state = ? ORDER BY queued_unix_ms, client_ref`, poolID, stateWaiting)
+func (s *Store) waitingCandidates(ctx context.Context, exec *psql.Execer, poolID string, models map[string]Descriptor, now time.Time) ([]Invocation, error) {
+	rows, err := exec.Query(ctx, selectInvocation+` WHERE pool_id = ? AND state = ? AND not_before_unix_ms <= ?
+		ORDER BY queued_unix_ms, client_ref`, poolID, stateWaiting, unixms(now))
 	if err != nil {
 		return nil, err
 	}
@@ -302,22 +326,23 @@ func tenantSettingsTx(ctx context.Context, exec *psql.Execer, poolID string, ten
 
 // choose orders candidates: effective class (ageing moves one up), then
 // fairness in the shared pool, then age (REQ-MODEL-015 to REQ-MODEL-019).
+// The per-tenant in-flight counts start from the leased rows and move with
+// every pick, so one call never exceeds a tenant's concurrency limit and the
+// shared pool alternates between tenants.
 func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[string]Descriptor,
 	free int, timeLeft time.Duration, leased map[core.TenantID]int,
 	settings func(core.TenantID) TenantSettings) ([]Invocation, error) {
 
 	type ranked struct {
-		inv   Invocation
-		rank  int
-		ratio float64
-		when  time.Time
+		inv         Invocation
+		rank        int
+		weight      int
+		concurrency int
+		when        time.Time
 	}
 	rankedList := make([]ranked, 0, len(candidates))
 	for _, inv := range candidates {
 		settingsFor := settings(inv.Tenant)
-		if pool.Tenant == "" && settingsFor.Concurrency > 0 && leased[inv.Tenant] >= settingsFor.Concurrency {
-			continue
-		}
 		rank := inv.Class.rank()
 		if pool.Ageing > 0 && now.Sub(inv.QueuedAt) >= pool.Ageing && rank > 0 {
 			rank--
@@ -327,39 +352,59 @@ func choose(candidates []Invocation, pool PoolSpec, now time.Time, models map[st
 			weight = 1
 		}
 		rankedList = append(rankedList, ranked{
-			inv:   inv,
-			rank:  rank,
-			ratio: float64(leased[inv.Tenant]) / float64(weight),
-			when:  inv.QueuedAt,
+			inv:         inv,
+			rank:        rank,
+			weight:      weight,
+			concurrency: settingsFor.Concurrency,
+			when:        inv.QueuedAt,
 		})
 	}
-	sort.SliceStable(rankedList, func(i, j int) bool {
-		a, b := rankedList[i], rankedList[j]
-		if a.rank != b.rank {
-			return a.rank < b.rank
-		}
-		if pool.Tenant == "" && a.ratio != b.ratio {
-			return a.ratio < b.ratio
-		}
-		if !a.when.Equal(b.when) {
-			return a.when.Before(b.when)
-		}
-		return a.inv.ClientRef < b.inv.ClientRef
-	})
+	counts := map[core.TenantID]int{}
+	for tenant, n := range leased {
+		counts[tenant] = n
+	}
 	var out []Invocation
 	remaining := free
-	for _, r := range rankedList {
-		if r.inv.Units > remaining {
-			continue
-		}
-		if r.inv.MaxRuntime > 0 && timeLeft > 0 && r.inv.MaxRuntime > timeLeft {
-			continue
-		}
-		out = append(out, r.inv)
-		remaining -= r.inv.Units
-		if remaining <= 0 {
+	for remaining > 0 && len(rankedList) > 0 {
+		sort.SliceStable(rankedList, func(i, j int) bool {
+			a, b := rankedList[i], rankedList[j]
+			if a.rank != b.rank {
+				return a.rank < b.rank
+			}
+			if pool.Tenant == "" {
+				ar := float64(counts[a.inv.Tenant]) / float64(a.weight)
+				br := float64(counts[b.inv.Tenant]) / float64(b.weight)
+				if ar != br {
+					return ar < br
+				}
+			}
+			if !a.when.Equal(b.when) {
+				return a.when.Before(b.when)
+			}
+			return a.inv.ClientRef < b.inv.ClientRef
+		})
+		picked := -1
+		for i, r := range rankedList {
+			if pool.Tenant == "" && r.concurrency > 0 && counts[r.inv.Tenant] >= r.concurrency {
+				continue
+			}
+			if r.inv.Units > remaining {
+				continue
+			}
+			if r.inv.MaxRuntime > 0 && timeLeft > 0 && r.inv.MaxRuntime > timeLeft {
+				continue
+			}
+			picked = i
 			break
 		}
+		if picked < 0 {
+			break
+		}
+		r := rankedList[picked]
+		out = append(out, r.inv)
+		counts[r.inv.Tenant]++
+		remaining -= r.inv.Units
+		rankedList = append(rankedList[:picked], rankedList[picked+1:]...)
 	}
 	return out, nil
 }
@@ -379,9 +424,17 @@ func (s *Store) Starting(ctx context.Context, workerID, credential, clientRef st
 	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
 		return errLeaseLost(clientRef)
 	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
+	}
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.Execer().Exec(ctx,
-		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0 WHERE client_ref = ?`,
-		clientRef)
+		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0,
+			lease_expires_unix_ms = ? WHERE client_ref = ?`,
+		unixms(s.now().Add(pool.Lease)), clientRef)
 	return err
 }
 
@@ -398,9 +451,17 @@ func (s *Store) Started(ctx context.Context, workerID, credential, clientRef, pr
 	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
 		return errLeaseLost(clientRef)
 	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
+	}
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.Execer().Exec(ctx,
-		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0, provider_handle = ?
-		 WHERE client_ref = ?`, providerHandle, clientRef)
+		`UPDATE worker_invocations SET started = 1, in_doubt = 0, in_doubt_until_unix_ms = 0,
+			lease_expires_unix_ms = ?, provider_handle = ? WHERE client_ref = ?`,
+		unixms(s.now().Add(pool.Lease)), providerHandle, clientRef)
 	return err
 }
 
@@ -417,6 +478,9 @@ func (s *Store) Resume(ctx context.Context, workerID, credential, clientRef stri
 	}
 	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID || !inv.InDoubt {
 		return errLeaseLost(clientRef)
+	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
 	}
 	pool, err := s.Pool(ctx, inv.Pool)
 	if err != nil {
@@ -452,11 +516,19 @@ func (s *Store) Events(ctx context.Context, workerID, credential, clientRef stri
 	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
 		return errLeaseLost(clientRef)
 	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
+	}
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return err
+	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		if inv.InDoubt {
 			if _, err := tx.Exec(ctx,
-				`UPDATE worker_invocations SET in_doubt = 0, in_doubt_until_unix_ms = 0 WHERE client_ref = ?`,
-				clientRef); err != nil {
+				`UPDATE worker_invocations SET in_doubt = 0, in_doubt_until_unix_ms = 0,
+					lease_expires_unix_ms = ? WHERE client_ref = ?`,
+				unixms(s.now().Add(pool.Lease)), clientRef); err != nil {
 				return err
 			}
 		}
@@ -493,10 +565,16 @@ func (s *Store) Finish(ctx context.Context, workerID, credential, clientRef, sta
 	if inv.State != stateLeased || inv.WorkerID != w.ID {
 		return errLeaseLost(clientRef)
 	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
+	}
 	switch state {
 	case stateSucceeded, stateFailed, stateCancelled:
 	default:
 		return core.NewError(core.CodeInvalidArgument, fmt.Sprintf("unknown result state %q", state), nil)
+	}
+	if cost < 0 {
+		return core.NewError(core.CodeInvalidArgument, "worker: cost must not be negative", nil)
 	}
 	if len(result) == 0 {
 		result = json.RawMessage("{}")
@@ -527,6 +605,9 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 	if isTerminal(inv.State) || inv.State != stateLeased || inv.WorkerID != w.ID {
 		return errLeaseLost(clientRef)
 	}
+	if err := s.refusePastGrace(inv); err != nil {
+		return err
+	}
 	if inv.Started {
 		// A started, non-restart-safe invocation stays in doubt for its own
 		// worker; a restart-safe one goes back to the queue.
@@ -538,15 +619,29 @@ func (s *Store) Release(ctx context.Context, workerID, credential, clientRef str
 			return s.markInDoubt(ctx, inv)
 		}
 	}
-	queued := s.now()
+	pool, err := s.Pool(ctx, inv.Pool)
+	if err != nil {
+		return err
+	}
+	// A release must not restart the queue timeout or the ageing clock: the
+	// row keeps its original queued time. "Not before" is the vendor's rate
+	// limit and only delays the next lease, so it gets its own column; a
+	// worker cannot park work past one lease period.
+	now := s.now()
+	var notBeforeMS int64
 	if !notBefore.IsZero() {
-		queued = notBefore.UTC()
+		if limit := now.Add(pool.Lease); notBefore.After(limit) {
+			notBefore = limit
+		}
+		if notBefore.After(now) {
+			notBeforeMS = unixms(notBefore.UTC())
+		}
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
 		if _, err := tx.Exec(ctx,
 			`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, in_doubt = 0,
-				lease_expires_unix_ms = 0, in_doubt_until_unix_ms = 0, queued_unix_ms = ?
-			 WHERE client_ref = ?`, stateWaiting, unixms(queued), clientRef); err != nil {
+				lease_expires_unix_ms = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = ?
+			 WHERE client_ref = ?`, stateWaiting, notBeforeMS, clientRef); err != nil {
 			return err
 		}
 		return setUnitsInUse(ctx, tx, w.ID)
@@ -715,7 +810,7 @@ func (s *Store) sweep(ctx context.Context) error {
 				if !inv.Started {
 					if _, err := tx.Exec(ctx,
 						`UPDATE worker_invocations SET state = ?, worker_id = '', lease_expires_unix_ms = 0,
-							in_doubt = 0, in_doubt_until_unix_ms = 0 WHERE client_ref = ?`,
+							in_doubt = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
 						stateWaiting, inv.ClientRef); err != nil {
 						return err
 					}
@@ -729,7 +824,7 @@ func (s *Store) sweep(ctx context.Context) error {
 				if d.RestartSafe {
 					if _, err := tx.Exec(ctx,
 						`UPDATE worker_invocations SET state = ?, worker_id = '', started = 0, lease_expires_unix_ms = 0,
-							in_doubt = 0, in_doubt_until_unix_ms = 0 WHERE client_ref = ?`,
+							in_doubt = 0, in_doubt_until_unix_ms = 0, not_before_unix_ms = 0 WHERE client_ref = ?`,
 						stateWaiting, inv.ClientRef); err != nil {
 						return err
 					}
@@ -910,6 +1005,16 @@ func (s *Store) Metrics(ctx context.Context, poolID string) (QueueMetrics, error
 		m.Workers[w.State]++
 	}
 	return m, nil
+}
+
+// refusePastGrace refuses a report from a worker whose in-doubt grace period
+// has run out; the invocation is no longer that worker's to report
+// (REQ-MODEL-023).
+func (s *Store) refusePastGrace(inv Invocation) error {
+	if inv.InDoubt && !inv.InDoubtUntil.IsZero() && !s.now().Before(inv.InDoubtUntil) {
+		return errLeaseLost(inv.ClientRef)
+	}
+	return nil
 }
 
 func isTerminal(state string) bool {

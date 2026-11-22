@@ -91,6 +91,7 @@ var schema = []string{
 		started INTEGER NOT NULL DEFAULT 0,
 		in_doubt INTEGER NOT NULL DEFAULT 0,
 		queued_unix_ms INTEGER NOT NULL,
+		not_before_unix_ms INTEGER NOT NULL DEFAULT 0,
 		lease_expires_unix_ms INTEGER NOT NULL DEFAULT 0,
 		in_doubt_until_unix_ms INTEGER NOT NULL DEFAULT 0,
 		queue_timeout_ms INTEGER NOT NULL,
@@ -279,10 +280,6 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 			return Worker{}, core.NewError(core.CodeInvalidArgument, "worker: descriptor has no model id", nil)
 		}
 	}
-	if err := s.checkConflict(ctx, pool.ID, req.Descriptors); err != nil {
-		s.auditEvent(ctx, "worker.refuse", pool.ID, "denied", "conflict")
-		return Worker{}, err
-	}
 	id, err := s.ids.New("worker")
 	if err != nil {
 		return Worker{}, err
@@ -293,38 +290,56 @@ func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	}
 	descJSON, _ := json.Marshal(req.Descriptors)
 	labelsJSON, _ := json.Marshal(normalizeLabels(req.Labels))
-	_, err = s.db.Execer().Exec(ctx,
-		`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, credential_hash, joined_unix_ms, heartbeat_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, 0)`,
-		id, pool.ID, string(StateActive), string(descJSON), string(labelsJSON), req.Capacity,
-		hashToken(credential), unixms(s.now()))
-	if err != nil {
-		return Worker{}, err
-	}
-	for _, d := range req.Descriptors {
-		c := d.canonical()
-		var existing string
-		err := s.db.Execer().QueryRow(ctx,
-			`SELECT descriptor FROM worker_pool_models WHERE pool_id = ? AND model = ?`, pool.ID, d.ID).Scan(&existing)
-		switch {
-		case core.CodeOf(err) == core.CodeNotFound:
-			if _, err := s.db.Execer().Exec(ctx,
-				`INSERT INTO worker_pool_models (pool_id, model, descriptor) VALUES (?, ?, ?)`,
-				pool.ID, d.ID, c); err != nil {
-				return Worker{}, err
-			}
-		case err != nil:
-			return Worker{}, err
-		case existing != c:
-			// A descriptor in the pool with no present worker behind it (a
-			// rollout that drained the old workers) is replaced by the new
-			// declaration.
-			if _, err := s.db.Execer().Exec(ctx,
-				`UPDATE worker_pool_models SET descriptor = ? WHERE pool_id = ? AND model = ?`,
-				c, pool.ID, d.ID); err != nil {
-				return Worker{}, err
+	err = s.db.InTx(ctx, func(ctx context.Context, tx *psql.Execer) error {
+		// Lock the pool row so concurrent joins check and write one at a
+		// time; a refused join then rolls back its worker row too
+		// (REQ-MODEL-028).
+		if _, err := tx.Exec(ctx,
+			`UPDATE worker_pools SET created_unix_ms = created_unix_ms WHERE pool_id = ?`, pool.ID); err != nil {
+			return err
+		}
+		if err := checkConflictTx(ctx, tx, pool.ID, req.Descriptors); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO worker_workers (worker_id, pool_id, state, descriptors, labels, capacity, units_used, present, removed, credential_hash, joined_unix_ms, heartbeat_ms)
+			 VALUES (?, ?, ?, ?, ?, ?, 0, 1, 0, ?, ?, 0)`,
+			id, pool.ID, string(StateActive), string(descJSON), string(labelsJSON), req.Capacity,
+			hashToken(credential), unixms(s.now())); err != nil {
+			return err
+		}
+		for _, d := range req.Descriptors {
+			c := d.canonical()
+			var existing string
+			err := tx.QueryRow(ctx,
+				`SELECT descriptor FROM worker_pool_models WHERE pool_id = ? AND model = ?`, pool.ID, d.ID).Scan(&existing)
+			switch {
+			case core.CodeOf(err) == core.CodeNotFound:
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO worker_pool_models (pool_id, model, descriptor) VALUES (?, ?, ?)`,
+					pool.ID, d.ID, c); err != nil {
+					return err
+				}
+			case err != nil:
+				return err
+			case existing != c:
+				// A descriptor in the pool with no present worker behind it (a
+				// rollout that drained the old workers) is replaced by the new
+				// declaration.
+				if _, err := tx.Exec(ctx,
+					`UPDATE worker_pool_models SET descriptor = ? WHERE pool_id = ? AND model = ?`,
+					c, pool.ID, d.ID); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		if core.CodeOf(err) == core.CodeConflict {
+			s.auditEvent(ctx, "worker.refuse", pool.ID, "denied", "conflict")
+		}
+		return Worker{}, err
 	}
 	s.auditEvent(ctx, "worker.join", pool.ID, "allowed", "")
 	return Worker{
@@ -362,8 +377,8 @@ func normalizeLabels(labels map[string]string) map[string]string {
 	return out
 }
 
-func (s *Store) checkConflict(ctx context.Context, poolID string, descriptors []Descriptor) error {
-	rows, err := s.db.Execer().Query(ctx,
+func checkConflictTx(ctx context.Context, exec *psql.Execer, poolID string, descriptors []Descriptor) error {
+	rows, err := exec.Query(ctx,
 		`SELECT worker_id, descriptors FROM worker_workers WHERE pool_id = ? AND present = 1 AND removed = 0`, poolID)
 	if err != nil {
 		return err
