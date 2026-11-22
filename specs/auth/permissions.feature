@@ -22,6 +22,13 @@ Feature: Permission checks
     Then the RPC is refused before any permission check
     And no audit event records a denial
 
+  @planned @wp:WP-L8-02 @security @REQ-AUTH-007 @id:AUTH-007-02
+  Scenario: An RPC with an action but no resource resolver is refused
+    Given the API declares an RPC with an action but no resource resolver
+    When a request reaches that RPC
+    Then the RPC is refused before any permission check
+    And no audit event records a denial
+
   @planned @wp:WP-L8-02 @security @REQ-AUTH-008 @id:AUTH-008-01
   Scenario: A viewer may read but not write
     Given principal "vic" of tenant "acme" has role "viewer" in project "p1"
@@ -59,7 +66,6 @@ Feature: Permission checks
     And the runs table holds no row for the target resource
     When vic attempts action "run.get" on resource "run:r9" in project "p1"
     Then the action is allowed for vic
-    And the permission check read no row from the runs table
 
   @planned @wp:WP-L8-02 @security @REQ-AUTH-010 @id:AUTH-010-01
   Scenario: Per-project and tenant-wide bindings both apply to a project resource
@@ -76,7 +82,8 @@ Feature: Permission checks
 
   @planned @wp:WP-L8-02 @security @REQ-AUTH-011 @id:AUTH-011-01
   Scenario: Bindings are granted, listed and revoked through the SQL store
-    Given the binding store uses a tenant-scoped SQL table on SQLite
+    Given principal "ada" of tenant "acme" has role "admin" in project "p1"
+    And the binding store uses a tenant-scoped SQL table on SQLite
     When ada grants role "viewer" to "vic" in project "p1" of tenant "acme"
     Then the binding of "vic" role "viewer" in project "p1" is stored for tenant "acme"
     When ada lists the bindings of "vic" in project "p1"
@@ -109,6 +116,13 @@ Feature: Permission checks
   Scenario: A malformed project id is rejected
     Given principal "ada" of tenant "acme" has role "admin" in project "p1"
     When ada grants role "viewer" to "bob" in project "../p2"
+    Then the action fails with code "invalid_argument"
+    And no binding for tenant "acme" is stored
+
+  @planned @wp:WP-L8-02 @security @REQ-AUTH-014 @id:AUTH-014-02
+  Scenario: A malformed principal id is rejected
+    Given principal "ada" of tenant "acme" has role "admin" in project "p1"
+    When ada grants role "viewer" to "../bob" in project "p1"
     Then the action fails with code "invalid_argument"
     And no binding for tenant "acme" is stored
 

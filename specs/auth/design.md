@@ -1,6 +1,6 @@
 # Authorization: design notes for the implementer
 
-Work package WP-L8-02 (EP0-115), owned directory `auth/authz`. Requirements:
+Work package WP-L8-02 (EP0-206), owned directory `auth/authz`. Requirements:
 [`requirements.md`](requirements.md) (REQ-AUTH-006 … REQ-AUTH-029). Scenarios:
 [`permissions.feature`](permissions.feature). Decisions: [ADR-0008](../../docs/adr/0008-auth-modes-and-in-app-authorization.md)
 (in-app RBAC, per-project role bindings in SQL, one check in a connect
