@@ -1,4 +1,4 @@
-@planned @wp:WP-L3-04 @runtime:any @level:component
+@wp:WP-L3-04 @runtime:any @level:component
 Feature: Invocation outputs and model routing
 
   @REQ-MODEL-008 @id:MODEL-008-01

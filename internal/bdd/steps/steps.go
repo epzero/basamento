@@ -33,6 +33,7 @@ type World struct {
 	Model       *modelWorld
 	Node        *nodeWorld
 	Prompt      *promptWorld
+	Providers   *providerWorld
 	Schema      *schemaWorld
 	Secrets     *secretsWorld
 	SQL         *sqlWorld
@@ -81,6 +82,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	registerModelRetention(sc)
 	registerNode(sc)
 	registerPrompt(sc)
+	registerProviders(sc)
 	registerSchema(sc)
 	registerSecrets(sc)
 	registerSharedSteps(sc)

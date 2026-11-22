@@ -29,7 +29,7 @@ Capabilities:
 | [`flow-engine`](flow-engine/requirements.md) | In progress (IR and compiler, WP-L4-01); machine, builder and host planned (WP-L4-02, 03, 04). |
 | [`runtime`](runtime/requirements.md) | In progress (local runtime, WP-L5-01; Temporal parts a/b, WP-L5-02); embedded and conformance planned (WP-L5-03, WP-L5-04). |
 | [`streaming`](streaming/requirements.md) | Partly implemented (WP-L6-01, `stream/eventlog`; WP-L6-02 … WP-L6-04 planned). |
-| [`models`](models/requirements.md) | Partly implemented (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-06); planned (WP-L3-04, workers). |
+| [`models`](models/requirements.md) | Partly implemented (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-04, WP-L3-06); planned (workers). |
 | [`auth`](auth/requirements.md) | Planned (WP-L8-*). |
 | [`browser`](browser/requirements.md) | Planned (WP-L9-01). |
 | [`secrets`](secrets/requirements.md) | Implemented (WP-L1-04). |

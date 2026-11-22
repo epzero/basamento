@@ -348,7 +348,21 @@ type Run struct {
 }
 
 // Handle identifies the invocation.
-func (r *Run) Handle() Handle { return r.handle }
+func (r *Run) Handle() Handle {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.handle
+}
+
+// SetID records the adapter's identifier for the invocation, so a handle from
+// Lookup carries the vendor id rather than the client ref and a caller can
+// address the vendor through it. An adapter calls it once, after the vendor
+// accepts the start; the registry keeps no separate id table.
+func (r *Run) SetID(id string) {
+	r.mu.Lock()
+	r.handle.ID = id
+	r.mu.Unlock()
+}
 
 // Context is the vendor call's context. It is cancelled when the invocation
 // is cancelled or ends.
