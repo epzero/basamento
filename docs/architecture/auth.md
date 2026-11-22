@@ -1,10 +1,11 @@
 # Auth
 
 Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
-records (WP-L8-01, `auth/authn`). **Implemented (core)**: in-app authorization library (`auth/authz`, WP-L8-02
-part (a)). **Planned**: Gherkin scenarios for authorization, local accounts
-(argon2id passwords, passkeys, cookie sessions), request wiring in the API, and
-row-level security (WP-L8-02 part (b)). Decision: ADR-0008. Specs: `specs/auth`.
+records (WP-L8-01, `auth/authn`). **Implemented (core)**: in-app authorization
+library (`auth/authz`, WP-L8-02 part (a)), including active permission scenarios
+with real SQL stores. **Planned**: local accounts (argon2id passwords, passkeys,
+cookie sessions), request wiring in the API (WP-L6-03), and row-level security
+(WP-L8-02 part (b)). Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
 
@@ -77,6 +78,11 @@ Package `auth/authz` implements the design in `specs/auth/design.md` §1–§7.
 - **RPC guard.** `Guard` refuses undeclared procedures at wiring time; declared
   procedures resolve the resource then call `Check` without touching audit on
   wiring errors.
+
+To wire an RPC, declare each procedure with a catalog action and a resolver
+that builds `authz.Resource` from the request (project, kind, id). Set
+`Resource.Session` in the resolver when the call uses a worker token scoped to
+a session; the authorizer matches `session:` scopes against that field.
 
 - Permissions are declared in Go. Roles are bound per project and stored in SQL.
 - A single `authz.Check(principal, action, resource)` runs in a connect

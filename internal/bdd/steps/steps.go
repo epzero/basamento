@@ -17,6 +17,7 @@ type worldKey struct{}
 type World struct {
 	Agent        *agentWorld
 	Auth         *authWorld
+	Authz        *authzWorld
 	Blob         *blobWorld
 	Bus          *busWorld
 	Catalog      *catalogWorld
@@ -68,6 +69,7 @@ func Initialize(sc *godog.ScenarioContext) {
 	// Sorted alphabetically, one register per line.
 	registerAgent(sc)
 	registerAuth(sc)
+	registerAuthz(sc)
 	registerBlob(sc)
 	registerBlobUploads(sc)
 	registerBus(sc)
