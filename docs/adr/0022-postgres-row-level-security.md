@@ -11,8 +11,9 @@ second line of defence behind repository tenant filters. Almost every
 repository statement—including `auth/authz.SQLStore.BindingsForCheck`—runs
 autocommit on the pooled `Execer`. Shared goose migrations must stay valid on
 SQLite. Column names differ (`tenant` vs `tenant_id`). Multi-package migration
-composition is unset in the tree today (`cmd/kit` ships a baseline migration
-only; BDD merges with ad hoc renumbering). This ADR closes implementer choices
+composition was unset when this ADR was drafted (`cmd/kit` ships a baseline
+migration only; BDD merges with ad hoc renumbering); **ADR-0023** (EP0-216)
+now decides it. This ADR closes implementer choices
 for the cloud profile.
 
 ## Decision
@@ -122,7 +123,7 @@ wrongly trip “database schema newer than binary” otherwise. One
 `goose_db_version` table, one advisory lock. `Down` fragments drop policies and
 `NO FORCE` / `DISABLE`.
 
-Multi-package merge order and stable version bands: **EP0-216** (ADR follow-up).
+Multi-package merge order and stable version bands: **ADR-0023** (EP0-216).
 
 ### D4 — Tables, exemptions, schema rule
 
@@ -254,8 +255,9 @@ Part (b) implementation slices (ticketed after this ADR is accepted):
 - **(C)** auth postgres fragments + AUTH-027–029 steps.
 - **(D)** eventlog fragments + relay D6.
 
-Follow-ups: **EP0-216** (migration composition ADR), **EP0-218** (`gate rls`),
-**EP0-219** (Postgres span store), **EP0-220** (kit cloud wiring).
+Follow-ups: **ADR-0023**/EP0-216 and EP0-221 (migration composition),
+**EP0-218** (`gate rls`), **EP0-219** (Postgres span store), **EP0-220**
+(kit cloud wiring).
 
 Embedded profile unchanged (SQLite). Wrapper stays in `platform/sql`.
 
