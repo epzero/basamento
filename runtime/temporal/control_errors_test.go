@@ -14,32 +14,48 @@ import (
 	"github.com/epzero/basamento/core"
 )
 
-func TestClientErrorTable(t *testing.T) {
+func TestClientErrorMappedBranchesTable(t *testing.T) {
 	rt, _ := New(Options{Payloads: testSecretsCodec(t), Blobs: testBlobStore(t), Outbox: newTestOutbox()})
 	marker := "XYZZY_SECRET_MARKER_47"
+	const op = "test_op"
 	cases := []struct {
+		name string
 		err  error
 		code core.Code
+		msg  string
 	}{
-		{context.Canceled, core.CodeCancelled},
-		{context.DeadlineExceeded, core.CodeTimeout},
-		{&serviceerror.NotFound{}, core.CodeNotFound},
-		{&serviceerror.WorkflowExecutionAlreadyStarted{}, core.CodeConflict},
-		{&serviceerror.InvalidArgument{}, core.CodeInvalidArgument},
-		{&serviceerror.PermissionDenied{}, core.CodePermissionDenied},
-		{&serviceerror.Unavailable{}, core.CodeUnavailable},
-		{&serviceerror.ResourceExhausted{}, core.CodeRateLimited},
-		{&serviceerror.NamespaceNotFound{}, core.CodeUnavailable},
-		{errors.New(marker), core.CodeInternal},
+		{"cancelled", context.Canceled, core.CodeCancelled, "temporal: the request was cancelled"},
+		{"timeout", context.DeadlineExceeded, core.CodeTimeout, "temporal: the request timed out"},
+		{"not_found", &serviceerror.NotFound{}, core.CodeNotFound, "temporal: run not found"},
+		{"conflict", &serviceerror.WorkflowExecutionAlreadyStarted{}, core.CodeConflict, "temporal: a run with that id already exists"},
+		{"invalid_argument", &serviceerror.InvalidArgument{}, core.CodeInvalidArgument, "temporal: invalid request"},
+		{"permission_denied", &serviceerror.PermissionDenied{}, core.CodePermissionDenied, "temporal: permission denied"},
+		{"unavailable", &serviceerror.Unavailable{}, core.CodeUnavailable, "temporal: the service is unavailable"},
+		{"deadline_exceeded", &serviceerror.DeadlineExceeded{}, core.CodeUnavailable, "temporal: the service is unavailable"},
+		{"rate_limited", &serviceerror.ResourceExhausted{}, core.CodeRateLimited, "temporal: rate limited"},
+		{"namespace_not_found", &serviceerror.NamespaceNotFound{}, core.CodeUnavailable, "temporal: the namespace does not exist"},
+		{"internal", errors.New(marker), core.CodeInternal, "temporal: the server call failed"},
 	}
 	for _, tc := range cases {
-		out := rt.clientError("op", tc.err)
-		if core.CodeOf(out) != tc.code {
-			t.Fatalf("%v -> %v", tc.err, out)
-		}
-		if strings.Contains(out.Error(), marker) {
-			t.Fatalf("leaked marker")
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			out := rt.clientError(op, tc.err)
+			var pe *core.Error
+			if !errors.As(out, &pe) {
+				t.Fatalf("got %T", out)
+			}
+			if pe.Code != tc.code {
+				t.Fatalf("code: %v", pe.Code)
+			}
+			if pe.Message != tc.msg {
+				t.Fatalf("message: %q", pe.Message)
+			}
+			if pe.Details["op"] != op {
+				t.Fatalf("details: %#v", pe.Details)
+			}
+			if strings.Contains(pe.Message, marker) {
+				t.Fatal("cause leaked into message")
+			}
+		})
 	}
 }
 

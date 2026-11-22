@@ -46,7 +46,7 @@ func validateFlowFilter(flow string) error {
 		return core.NewError(core.CodeInvalidArgument, "temporal: invalid flow filter", nil)
 	}
 	for _, r := range flow {
-		if unsafeVisibilityRune(r, true) {
+		if unsafeVisibilityRune(r) {
 			return core.NewError(core.CodeInvalidArgument, "temporal: invalid flow filter", nil)
 		}
 	}
@@ -54,10 +54,9 @@ func validateFlowFilter(flow string) error {
 }
 
 // unsafeVisibilityRune reports whether r cannot appear inside a double-quoted
-// visibility literal. allowBackslash is true for flow filters (reject \); tenant
-// ids cannot contain backslash per core.TenantFrom.
-func unsafeVisibilityRune(r rune, allowBackslash bool) bool {
-	if allowBackslash && r == '\\' {
+// visibility literal (including backslash, which breaks escape sequences).
+func unsafeVisibilityRune(r rune) bool {
+	if r == '\\' {
 		return true
 	}
 	if r == '"' || r == '\'' || r == '`' {

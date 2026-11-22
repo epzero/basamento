@@ -88,6 +88,22 @@ func TestStartExplicitRunIDConflict(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Code != core.CodeConflict {
 		t.Fatalf("expected conflict, got %v", err)
 	}
+	if pe.Details == nil || pe.Details["run"] != "r1" {
+		t.Fatalf("conflict details: got %#v want run=r1", pe.Details)
+	}
+}
+
+func TestStartIdempotentDuplicateHasNoConflictDetails(t *testing.T) {
+	ctx := core.WithTenant(context.Background(), "acme")
+	fc := &fakeClient{executeErr: &serviceerror.WorkflowExecutionAlreadyStarted{}}
+	rt := testControlRuntime(t, fc)
+	ref, err := rt.Start(ctx, runtime.StartRequest{Flow: runtime.FlowRef{Name: "f"}, IdempotencyKey: "k1"})
+	if err != nil {
+		t.Fatalf("expected success for derived duplicate, got %v", err)
+	}
+	if ref.RunID == "" {
+		t.Fatal("empty ref")
+	}
 }
 
 func TestStartRejectsKeyAndRunIDTogether(t *testing.T) {
