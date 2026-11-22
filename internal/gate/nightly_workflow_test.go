@@ -109,7 +109,7 @@ func locateNightlySteps(job nightlyWorkflowJob, expect nightlyJobExpect) (prefet
 		if strings.Contains(step.Run, "make pg-prefetch") {
 			prefetch = i
 		}
-		if step.Uses == "actions/cache@v4" {
+		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			cache = i
 		}
 		if step.Run != "" && strings.Contains(step.Run, "go test") && expect.testRunMatch(step.Run) {
@@ -121,7 +121,7 @@ func locateNightlySteps(job nightlyWorkflowJob, expect nightlyJobExpect) (prefet
 
 func checkNightlyCache(jobName string, job nightlyWorkflowJob, cacheIdx int) []string {
 	if cacheIdx < 0 {
-		return []string{fmt.Sprintf("%s: missing actions/cache@v4 Postgres bundle cache step", jobName)}
+		return []string{fmt.Sprintf("%s: missing actions/cache Postgres bundle cache step", jobName)}
 	}
 	var missing []string
 	key, _ := job.Steps[cacheIdx].With["key"].(string)
@@ -247,10 +247,10 @@ func TestNightlyWorkflowPostgresGuardsMutations(t *testing.T) {
 		}, "make pg-prefetch"},
 		{"flake-hunt", "no cache", func(d *nightlyWorkflowDoc) {
 			j := dropNightlySteps(d.Jobs["flake-hunt"], func(s nightlyWorkflowStep) bool {
-				return s.Uses == "actions/cache@v4"
+				return strings.HasPrefix(s.Uses, "actions/cache@")
 			})
 			d.Jobs["flake-hunt"] = j
-		}, "actions/cache@v4"},
+		}, "actions/cache"},
 		{"flake-hunt", "prefetch after test", func(d *nightlyWorkflowDoc) {
 			d.Jobs["flake-hunt"] = reorderPrefetchAfterTest(d.Jobs["flake-hunt"])
 		}, "make pg-prefetch must run before go test"},
@@ -276,10 +276,10 @@ func TestNightlyWorkflowPostgresGuardsMutations(t *testing.T) {
 		}, "make pg-prefetch"},
 		{"slow-lanes", "no cache", func(d *nightlyWorkflowDoc) {
 			j := dropNightlySteps(d.Jobs["slow-lanes"], func(s nightlyWorkflowStep) bool {
-				return s.Uses == "actions/cache@v4"
+				return strings.HasPrefix(s.Uses, "actions/cache@")
 			})
 			d.Jobs["slow-lanes"] = j
-		}, "actions/cache@v4"},
+		}, "actions/cache"},
 		{"slow-lanes", "no test timeout", func(d *nightlyWorkflowDoc) {
 			d.Jobs["slow-lanes"] = stripNightlyTestTimeout(d.Jobs["slow-lanes"], expects["slow-lanes"])
 		}, "-timeout 30m"},
