@@ -24,11 +24,15 @@ dc.Await("inbox")            validate the user message, fold it into "inbox"
   `n+1` before the child run of turn `n` has ended. Child runs run on the
   same task queue and use the turn flow of WP-L7-01.
 - **Gate resolutions.** A user message reaches the coordinator as one gate
-  resolution carrying `{tenant, user, message_id, text, mode}`; the coordinator
-  is always waiting at an open gate, so a resolution validates synchronously
-  and is refused with `not_found` / `permission_denied` / `conflict` /
-  `invalid_argument` at the edge (REQ-CONV-017 to REQ-CONV-021, and gate
-  validation as in `flow-engine` REQ-FLOW-006).
+  resolution carrying `{tenant, user, message_id, text, mode}`. Today the
+  coordinator refuses an unusable resolution itself: `Record.Accept`
+  authorises tenant and user before the duplicate check, and journals every
+  refusal with its code without running a turn (`not_found` /
+  `permission_denied` / `conflict`, REQ-CONV-017 to REQ-CONV-021). Synchronous
+  validation and refusal at the edge — rejecting a bad payload with
+  `invalid_argument` while the gate stays open — is a future gate-level
+  capability (`flow-engine` REQ-FLOW-006, `FLOW-006-01`), not today's
+  behaviour; a gate-level refusal waits on it.
 - **Transport.** Steps speak of user messages only. The gate/update mechanics
   of the runtime never appear in scenarios.
 
