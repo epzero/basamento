@@ -118,7 +118,7 @@ Feature: Compiling flows
     When the flow is compiled
     Then compilation fails with code "invalid_argument" naming the edge from "START" to "plan"
 
-  @REQ-FLOW-067 @id:FLOW-067-01 @planned @wp:WP-L4-01
+  @REQ-FLOW-067 @id:FLOW-067-01 @wp:WP-L4-01
   Scenario Outline: A map with no over expression is rejected
     Given a flow with a map node "fanout" whose spec is <spec>
     When the flow is compiled

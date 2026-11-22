@@ -48,6 +48,17 @@ func (w *flowWorld) addMapFlow(mapNode, stateKey, child string) error {
 	return w.addMap(mapNode, stateKey, child, false)
 }
 
+// addMapWithRawSpec builds the same shape as addMapFlow but sets the map node's
+// spec verbatim from JSON text instead of a generated over/node pair.
+func (w *flowWorld) addMapWithRawSpec(mapNode, specJSON string) error {
+	specJSON = strings.TrimSpace(specJSON)
+	if !json.Valid([]byte(specJSON)) {
+		return fmt.Errorf("map node %q spec is not valid JSON: %s", mapNode, specJSON)
+	}
+	w.ir = newIR("maps")
+	return w.setMapSpec(mapNode, json.RawMessage(specJSON), "", false)
+}
+
 // addMapNode turns an existing node into a map node, or declares one. A second
 // map node (FLOW-064-01) is reached by an edge the scenario declares, and
 // declares its child so the scenario exercises the shared-child check rather
@@ -56,18 +67,11 @@ func (w *flowWorld) addMapNode(mapNode, stateKey, child string) error {
 	return w.addMap(mapNode, stateKey, child, true)
 }
 
-// addMap sets the node's map spec and adds its route out to FAIL. The flow's
-// single START edge is added only when the flow has none.
-func (w *flowWorld) addMap(mapNode, stateKey, child string, declareChild bool) error {
+// setMapSpec applies a map node's spec and wires the flow: START in when the
+// flow has none, optional child declaration, and a route out to FAIL.
+func (w *flowWorld) setMapSpec(mapNode string, spec json.RawMessage, child string, declareChild bool) error {
 	if w.ir == nil {
 		return fmt.Errorf("no flow declared")
-	}
-	spec, err := json.Marshal(map[string]any{
-		"over": "state." + stateKey,
-		"node": child,
-	})
-	if err != nil {
-		return err
 	}
 	node := w.ir.Nodes[mapNode]
 	node.Kind = "map"
@@ -88,6 +92,21 @@ func (w *flowWorld) addMap(mapNode, stateKey, child string, declareChild bool) e
 	}
 	w.addEdge(mapNode, ir.Fail, "")
 	return nil
+}
+
+// addMap builds the standard over/node map spec and applies it via setMapSpec.
+func (w *flowWorld) addMap(mapNode, stateKey, child string, declareChild bool) error {
+	if w.ir == nil {
+		return fmt.Errorf("no flow declared")
+	}
+	spec, err := json.Marshal(map[string]any{
+		"over": "state." + stateKey,
+		"node": child,
+	})
+	if err != nil {
+		return err
+	}
+	return w.setMapSpec(mapNode, spec, child, declareChild)
 }
 
 func (w *flowWorld) addNode(name string) {
@@ -159,6 +178,24 @@ func assertMapChildFailure(w *flowWorld, code, mapNode, child string) error {
 	return nil
 }
 
+// assertMapFieldFailure checks a map-spec field rejection: the code, the map
+// node and the non-empty field wording in the message.
+func assertMapFieldFailure(w *flowWorld, code, mapNode, field string) error {
+	platform, err := w.failure(code)
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{
+		fmt.Sprintf("map node %q", mapNode),
+		fmt.Sprintf(`non-empty "%s"`, field),
+	} {
+		if !strings.Contains(platform.Message, want) {
+			return fmt.Errorf("message %q does not contain %q", platform.Message, want)
+		}
+	}
+	return nil
+}
+
 func registerFlowCompile(sc *godog.ScenarioContext) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		world(ctx).Flow = newFlowWorld()
@@ -213,6 +250,11 @@ func registerFlowCompile(sc *godog.ScenarioContext) {
 	sc.Step(`^a flow with a map node "([^"]*)" that fans out over "state\.([^"]*)" to node "([^"]*)"$`,
 		func(ctx context.Context, mapNode, stateKey, child string) error {
 			return world(ctx).Flow.addMapFlow(mapNode, stateKey, child)
+		})
+
+	sc.Step(`^a flow with a map node "([^"]*)" whose spec is (.+)$`,
+		func(ctx context.Context, mapNode, specJSON string) error {
+			return world(ctx).Flow.addMapWithRawSpec(mapNode, specJSON)
 		})
 
 	sc.Step(`^a map node "([^"]*)" that fans out over "state\.([^"]*)" to node "([^"]*)"$`,
@@ -456,6 +498,11 @@ func registerFlowCompile(sc *godog.ScenarioContext) {
 	sc.Step(`^compilation fails with code "([^"]*)" naming the map node "([^"]*)" and the child node "([^"]*)"$`,
 		func(ctx context.Context, code, mapNode, child string) error {
 			return assertMapChildFailure(world(ctx).Flow, code, mapNode, child)
+		})
+
+	sc.Step(`^compilation fails with code "([^"]*)" naming the map node "([^"]*)" and the field "([^"]*)"$`,
+		func(ctx context.Context, code, mapNode, field string) error {
+			return assertMapFieldFailure(world(ctx).Flow, code, mapNode, field)
 		})
 
 	sc.Step(`^compilation fails naming the map node "([^"]*)" and the child node "([^"]*)"$`,

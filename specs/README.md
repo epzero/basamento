@@ -26,7 +26,7 @@ Capabilities:
 | Capability | Status |
 | --- | --- |
 | [`core`](core/requirements.md) | Implemented (ids). |
-| [`flow-engine`](flow-engine/requirements.md) | In progress (IR and compiler, WP-L4-01); machine, builder and host planned (WP-L4-02, 03, 04). |
+| [`flow-engine`](flow-engine/requirements.md) | Partly implemented (IR and compiler, machine, builder and host, WP-L4-01 to WP-L4-04); runs on a runtime planned (WP-L5-04). |
 | [`runtime`](runtime/requirements.md) | In progress (local runtime, WP-L5-01); Temporal, embedded and conformance planned (WP-L5-02, 03, 04). |
 | [`streaming`](streaming/requirements.md) | Partly implemented (WP-L6-01 `stream/eventlog`, WP-L6-02 `stream`; WP-L6-03 … WP-L6-04 planned). |
 | [`models`](models/requirements.md) | Partly implemented (WP-L3-01, WP-L3-02, WP-L3-03, WP-L3-06); planned (WP-L3-04, workers). |
