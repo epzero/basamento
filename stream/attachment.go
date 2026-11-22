@@ -50,6 +50,25 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 	if err := checkCursor(cursor); err != nil {
 		return nil, err
 	}
+
+	// The durable read is the expensive part of an attach (up to
+	// maxBufferedFrames rows). It runs without the run's lock: Cancel and
+	// Heartbeat must not wait for it past the heartbeat interval
+	// (REQ-STRM-005).
+	state, err := b.log.State(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	events, err := b.log.Read(ctx, runID, uint64(cursor.Seq))
+	if err != nil {
+		return nil, err
+	}
+	if len(events) > maxBufferedFrames {
+		return nil, core.NewError(core.CodeUnavailable,
+			"stream: replay is larger than the attachment buffer",
+			map[string]any{"events": len(events), "limit": maxBufferedFrames})
+	}
+
 	a := &Attachment{
 		broker: b,
 		run:    run,
@@ -66,35 +85,52 @@ func (b *Broker) Attach(ctx context.Context, runID string, cursor Cursor) (*Atta
 
 	// Do not trust only the in-memory flag: another writer may have finished
 	// the run in the log since this liveRun was created.
-	if state, err := b.log.State(ctx, runID); err != nil {
-		return nil, err
-	} else if terminalState(state) {
+	if terminalState(state) {
 		run.markTerminalLocked(state)
-	}
-
-	events, err := b.log.Read(ctx, runID, uint64(cursor.Seq))
-	if err != nil {
-		return nil, err
-	}
-	if len(events) > maxBufferedFrames {
-		return nil, core.NewError(core.CodeUnavailable,
-			"stream: replay is larger than the attachment buffer",
-			map[string]any{"events": len(events), "limit": maxBufferedFrames})
 	}
 	for i := range events {
 		a.buf = append(a.buf, Frame{Durable: &events[i]})
 		a.seq = int64(events[i].Seq)
 	}
 	run.noteEvents(events)
-	// A cursor that claims more deltas than the live message holds would make
-	// the snapshot skip the text and leave a gap; reject it instead of
-	// replaying silently from a later point.
+	// A durable append may have been delivered live between the read above and
+	// this lock: AppendChange records lastSeq under mu before it broadcasts, so
+	// an event above the last one replayed was missed. Fetch that tail (usually
+	// nothing) instead of leaving a gap (REQ-STRM-002, REQ-STRM-007).
+	if run.lastSeq > uint64(a.seq) {
+		tail, err := b.log.Read(ctx, runID, uint64(a.seq))
+		if err != nil {
+			return nil, err
+		}
+		if len(a.buf)+len(tail) > maxBufferedFrames {
+			return nil, core.NewError(core.CodeUnavailable,
+				"stream: replay is larger than the attachment buffer",
+				map[string]any{"events": len(a.buf) + len(tail), "limit": maxBufferedFrames})
+		}
+		for i := range tail {
+			a.buf = append(a.buf, Frame{Durable: &tail[i]})
+			a.seq = int64(tail[i].Seq)
+		}
+		run.noteEvents(tail)
+	}
+	// A cursor that claims deltas the live message does not hold would make the
+	// snapshot skip the text and leave a gap; reject it instead of replaying
+	// silently from a later point. A finished run keeps no in-flight message
+	// but can produce no delta either, so its cursor is safe (STRM-002).
 	for id, dseq := range a.open {
 		msg, ok := run.messages[id]
+		if !ok {
+			if dseq > 0 && !run.finished {
+				return nil, core.NewError(core.CodeInvalidArgument,
+					"stream: cursor is ahead of the message",
+					map[string]any{"message_id": id, "dseq": dseq, "have": 0})
+			}
+			continue
+		}
 		// A completed message needs no snapshot: its durable event carries the
 		// text, so a cursor past the live dseq is not a gap. An in-flight one
 		// would silently lose the missing deltas.
-		if ok && !msg.completed && dseq > msg.dseq {
+		if !msg.completed && dseq > msg.dseq {
 			return nil, core.NewError(core.CodeInvalidArgument,
 				"stream: cursor is ahead of the message",
 				map[string]any{"message_id": id, "dseq": dseq, "have": msg.dseq})
@@ -138,13 +174,7 @@ func (b *Broker) ensureRun(ctx context.Context, runID string) (*liveRun, error) 
 	if _, err := b.log.State(ctx, runID); err != nil {
 		return nil, err
 	}
-	run = &liveRun{
-		tenant:   tenant,
-		id:       runID,
-		canceled: make(chan struct{}),
-		messages: map[string]*liveMessage{},
-		subs:     map[*Attachment]struct{}{},
-	}
+	run = newPlaceholder(b.clock, tenant, runID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if existing, ok := b.runs[key]; ok {

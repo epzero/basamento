@@ -72,6 +72,9 @@ type liveRun struct {
 	canceled   chan struct{}
 	cancelOnce sync.Once
 	finished   bool
+	// opened is false for a placeholder ensureRun created to rehydrate a run
+	// from the log; Open upgrades it and sets this. A second Open conflicts.
+	opened bool
 
 	lastSeq  uint64
 	messages map[string]*liveMessage
@@ -94,6 +97,7 @@ func newLiveRun(clock core.Clock, tenant core.TenantID, id string, detachAfter t
 		detachAfter: detachAfter,
 		canceled:    make(chan struct{}),
 		finished:    finished,
+		opened:      true,
 		messages:    map[string]*liveMessage{},
 		subs:        map[*Attachment]struct{}{},
 	}
@@ -102,6 +106,15 @@ func newLiveRun(clock core.Clock, tenant core.TenantID, id string, detachAfter t
 		// detach policy counts from creation (REQ-STRM-006).
 		run.detachedAt = clock.Now()
 	}
+	return run
+}
+
+// newPlaceholder is the live state an attach creates for a run it rehydrated
+// from the log: enough to replay, snapshot and fan out, but not yet open. Open
+// upgrades it, so a restart does not leave the run without its detach policy.
+func newPlaceholder(clock core.Clock, tenant core.TenantID, id string) *liveRun {
+	run := newLiveRun(clock, tenant, id, 0, false)
+	run.opened = false
 	return run
 }
 
@@ -182,14 +195,36 @@ func (b *Broker) Open(ctx context.Context, runID string, opts RunOptions) error 
 	if terminalState(state) {
 		return core.NewError(core.CodeConflict, "stream: run has finished", map[string]any{"run_id": runID})
 	}
-	run := newLiveRun(b.clock, tenant, runID, opts.DetachAfter, false)
 	key := runKey(tenant, runID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, ok := b.runs[key]; ok {
-		return core.NewError(core.CodeConflict, "stream: run is already open", map[string]any{"run_id": runID})
+	if run, ok := b.runs[key]; ok {
+		return b.upgradeLocked(run, opts)
 	}
-	b.runs[key] = run
+	b.runs[key] = newLiveRun(b.clock, tenant, runID, opts.DetachAfter, false)
+	return nil
+}
+
+// upgradeLocked turns the placeholder an attach created for a rehydrated run
+// into an open one. The attach has already replayed the log and learned the
+// run's in-flight messages, so that state is kept and only the options Open
+// owns are applied; a run that is already open is a conflict. The caller holds
+// b.mu and takes run.mu after it: no path takes run.mu before b.mu.
+func (b *Broker) upgradeLocked(run *liveRun, opts RunOptions) error {
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	if run.opened {
+		return core.NewError(core.CodeConflict, "stream: run is already open", map[string]any{"run_id": run.id})
+	}
+	run.opened = true
+	run.clock = b.clock
+	run.detachAfter = opts.DetachAfter
+	if opts.DetachAfter > 0 && !run.finished && len(run.subs) == 0 {
+		// Unattended from the moment it is opened (REQ-STRM-006).
+		run.detachedAt = b.clock.Now()
+	} else {
+		run.detachedAt = time.Time{}
+	}
 	return nil
 }
 
@@ -429,6 +464,34 @@ func (b *Broker) Cancel(ctx context.Context, runID string) error {
 func (b *Broker) cancel(ctx context.Context, run *liveRun) error {
 	run.mu.Lock()
 	defer run.mu.Unlock()
+	return b.cancelLocked(ctx, run)
+}
+
+// cancelIfExpired cancels run only if its detach deadline has still passed with
+// no client attached. The deadline is re-checked here because an attach may
+// have cleared it since the policy scan: the same lock that registers an
+// attachment guards the decision (REQ-STRM-006).
+func (b *Broker) cancelIfExpired(ctx context.Context, run *liveRun, now time.Time) (bool, error) {
+	run.mu.Lock()
+	defer run.mu.Unlock()
+	if !run.expiredLocked(now) {
+		return false, nil
+	}
+	if err := b.cancelLocked(ctx, run); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// expiredLocked reports whether the run's detach policy has fired. The caller
+// holds mu.
+func (r *liveRun) expiredLocked(now time.Time) bool {
+	return r.detachAfter > 0 && !r.finished && len(r.subs) == 0 &&
+		!r.detachedAt.IsZero() && !now.Before(r.detachedAt.Add(r.detachAfter))
+}
+
+// cancelLocked is cancel's body; the caller holds mu.
+func (b *Broker) cancelLocked(ctx context.Context, run *liveRun) error {
 	if run.finished {
 		return nil
 	}
@@ -502,17 +565,21 @@ func (b *Broker) EnforceDetachPolicies(_ context.Context) ([]string, error) {
 	var canceled []string
 	for _, run := range runs {
 		run.mu.Lock()
-		expired := run.detachAfter > 0 && !run.finished && len(run.subs) == 0 &&
-			!run.detachedAt.IsZero() && !now.Before(run.detachedAt.Add(run.detachAfter))
+		expired := run.expiredLocked(now)
 		run.mu.Unlock()
 		if !expired {
 			continue
 		}
 		ctx := core.WithTenant(context.Background(), run.tenant)
-		if err := b.cancel(ctx, run); err != nil {
+		// The scan's verdict can be stale: a client may have reattached since.
+		// cancelIfExpired re-checks it under the lock it cancels with.
+		done, err := b.cancelIfExpired(ctx, run, now)
+		if err != nil {
 			return canceled, err
 		}
-		canceled = append(canceled, run.id)
+		if done {
+			canceled = append(canceled, run.id)
+		}
 	}
 	return canceled, nil
 }
@@ -583,13 +650,22 @@ func (b *Broker) writable(ctx context.Context, run *liveRun) error {
 	}
 	switch state {
 	case "cancelled":
-		run.markTerminalLocked(state)
+		run.settleTerminalLocked(state)
 		return core.NewError(core.CodeCancelled, "stream: run is cancelled", map[string]any{"run_id": run.id})
 	case "completed", "failed":
-		run.markTerminalLocked(state)
+		run.settleTerminalLocked(state)
 		return core.NewError(core.CodeConflict, "stream: run has finished", map[string]any{"run_id": run.id})
 	}
 	return nil
+}
+
+// settleTerminalLocked applies a terminal state read from the log: it records
+// the state, closes the cancellation signal when the run was cancelled, and
+// runs the same teardown as settleLocked, so a stale liveRun's subscribers are
+// released instead of waiting forever in Next. The caller holds mu.
+func (r *liveRun) settleTerminalLocked(state string) {
+	r.markTerminalLocked(state)
+	r.settleLocked()
 }
 
 // markTerminalLocked records a terminal state read from the log. A cancelled
