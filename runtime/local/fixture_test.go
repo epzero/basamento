@@ -106,6 +106,22 @@ func recvWithin[T any](t *testing.T, ch <-chan T, what string) T {
 	}
 }
 
+// waitGate waits until a run has registered the named gate. A flow may start
+// a child before it awaits its own gate, so the child being ready does not
+// mean the parent's gate exists yet.
+func (f *fixture) waitGate(t *testing.T, tenant, runID, name string) {
+	t.Helper()
+	target := f.rt.lookup(core.TenantID(tenant), runID)
+	if target == nil {
+		t.Fatalf("run %s not found", runID)
+	}
+	pollUntil(t, fmt.Sprintf("run %s to register gate %s", runID, name), func() bool {
+		target.mu.Lock()
+		defer target.mu.Unlock()
+		return target.gates[name] != nil
+	})
+}
+
 func waitGateTimeouts(t *testing.T, r *run, want int32) {
 	t.Helper()
 	pollUntil(t, fmt.Sprintf("gate timeout helpers = %d", want), func() bool {
