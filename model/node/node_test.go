@@ -1159,6 +1159,96 @@ func TestHandleCancelsAnInvocationWhenTheRunEndsBeforeTheFollowStep(t *testing.T
 	}
 }
 
+// cancelledFollowDC mirrors the Temporal runtime's cancellation shape: its
+// Context() stays live after the workflow is cancelled
+// (runtime/temporal/durable.go returns context.Background() plus the tenant),
+// so a run that ends before the follow step surfaces only as that step's
+// cancelled error.
+type cancelledFollowDC struct{ *fakeDC }
+
+func (d cancelledFollowDC) Step(name string, in any, o runtime.StepOptions) runtime.Future {
+	if _, ok := in.(followIn); ok {
+		return doneFuture{err: core.NewError(core.CodeCancelled, "temporal: activity cancelled", nil)}
+	}
+	return d.fakeDC.Step(name, in, o)
+}
+
+// TestHandleCancelsAnInvocationWhenTheStepSaysTheRunWasCancelled covers the
+// same window as the local test above on a runtime whose context stays live
+// after the run is cancelled: the step's cancelled code is the only signal,
+// and the invocation must still be cancelled and settled by the state the
+// provider reports (REQ-MODEL-009).
+func TestHandleCancelsAnInvocationWhenTheStepSaysTheRunWasCancelled(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{Provider: "sim", ID: "v1", ClientRef: req.ClientRef}, nil
+	}
+	inv.result = model.Result{State: model.StateCancelled, CostMpts: 200}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	// The context stays live, as on Temporal: there is no cancel bit to read.
+	dc := cancelledFollowDC{fakeDC: &fakeDC{
+		ctx:   WithBudget(context.Background(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeCancelled {
+		t.Fatalf("err = %v, want cancelled", err)
+	}
+	if inv.cancels != 1 {
+		t.Fatalf("the provider saw %d cancels, want 1: the invocation was left running", inv.cancels)
+	}
+	ref := inv.refs[0]
+	if got := budget.Charged(ref); got != 200 {
+		t.Fatalf("charged = %d, want the provider's 200", got)
+	}
+	if !budget.Settled(ref) || budget.HeldTotal() != 0 {
+		t.Fatalf("budget = held %d settled %v, want closed", budget.HeldTotal(), budget.Settled(ref))
+	}
+}
+
+// failedFollowDC fails the follow step with an unrelated error while the
+// context stays live, as a provider or runtime failure would.
+type failedFollowDC struct{ *fakeDC }
+
+func (d failedFollowDC) Step(name string, in any, o runtime.StepOptions) runtime.Future {
+	if _, ok := in.(followIn); ok {
+		return doneFuture{err: core.NewError(core.CodeUnavailable, "the provider dropped the stream", nil)}
+	}
+	return d.fakeDC.Step(name, in, o)
+}
+
+// TestHandleDoesNotCancelOnAnUnrelatedFollowError guards the cancel gate: only
+// a cancelled run cancels the invocation, and any other follow failure is
+// reported as it is.
+func TestHandleDoesNotCancelOnAnUnrelatedFollowError(t *testing.T) {
+	t.Parallel()
+	inv := newScriptInvoker()
+	inv.start = func(_ int, req model.Request) (model.Handle, error) {
+		return model.Handle{Provider: "sim", ID: "v1", ClientRef: req.ClientRef}, nil
+	}
+	reg := newFakeRegistrar()
+	h := testHandler(t, Deps{Invoker: inv, Catalog: videoCatalog(t), Steps: reg})
+	budget := NewMemory(5000)
+	dc := failedFollowDC{fakeDC: &fakeDC{
+		ctx:   WithBudget(context.Background(), budget),
+		now:   time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC),
+		steps: reg.fns,
+	}}
+
+	_, err := h.Handle(dc, Config{Name: "generate", Model: "sim-video", Op: model.CapVideoGenerate}, json.RawMessage(`{"params":{"duration_s":5}}`))
+	if core.CodeOf(err) != core.CodeUnavailable {
+		t.Fatalf("err = %v, want the follow error", err)
+	}
+	if inv.cancels != 0 {
+		t.Fatalf("the provider saw %d cancels, want none: the run was not cancelled", inv.cancels)
+	}
+}
+
 func TestHandleEstimateDoesNotTrustAnUnderstatedInputCount(t *testing.T) {
 	t.Parallel()
 	inv := newScriptInvoker()

@@ -540,7 +540,7 @@ func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle
 		Heartbeat:      stepHeartbeat,
 		IdempotencyKey: name,
 	}).Get(&out)
-	if err != nil && dc.Context().Err() != nil {
+	if err != nil && runCancelled(dc, err) {
 		// The runtime ends a cancelled run without starting the follow step
 		// when the cancellation lands right after the provider accepted the
 		// invocation. The invocation is running at the provider all the same,
@@ -552,6 +552,16 @@ func (h *Handler) followInvocation(dc runtime.DurableContext, cfg Config, handle
 		return followOutcome{}, err
 	}
 	return out, nil
+}
+
+// runCancelled reports whether a failed follow step means the run was
+// cancelled before that step could run. The step error's code is the portable
+// signal: the Temporal runtime hands out a context that stays live after the
+// workflow is cancelled (durable.go Context), so a cancelled activity reaches
+// the node only as core.CodeCancelled. The local runtime's context does
+// cancel, so its error is checked too, but never on its own.
+func runCancelled(dc runtime.DurableContext, err error) bool {
+	return core.CodeOf(err) == core.CodeCancelled || dc.Context().Err() != nil
 }
 
 func (h *Handler) followStep(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
