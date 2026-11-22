@@ -1165,3 +1165,110 @@ func TestContinueABranchFromAnotherClone(t *testing.T) {
 		t.Fatalf("a code reviewer gets a detached snapshot: %+v, %v", cr, err)
 	}
 }
+
+func TestPrunedWorktreeDoesNotBlockContinueBranch(t *testing.T) {
+	repo := gitRepo(t)
+	branch := "WP-L6-12-continue"
+	mustGit(t, repo, "branch", branch, "main")
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	mustGit(t, repo, "worktree", "add", "-q", wt, branch)
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewSession(repo, NewSessionRequest{
+		Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L6-12", Branch: branch,
+	})
+	if err != nil {
+		t.Fatalf("a pruned stale worktree must not block -branch: %v", err)
+	}
+}
+
+func TestContinueBranchMainCheckoutMessage(t *testing.T) {
+	repo := gitRepo(t)
+	branch := "WP-L6-13-main"
+	mustGit(t, repo, "checkout", "-q", "-B", branch)
+	_, err := NewSession(repo, NewSessionRequest{
+		Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-13", Branch: branch,
+	})
+	if err == nil {
+		t.Fatal("must refuse when the branch is on the main checkout")
+	}
+	if strings.Contains(err.Error(), "release that worktree") {
+		t.Fatalf("main checkout refusal must not tell you to release: %v", err)
+	}
+	if !strings.Contains(err.Error(), "git switch main") {
+		t.Fatalf("main checkout refusal must say how to switch: %v", err)
+	}
+}
+
+func TestContinueBranchMainCheckoutMessageFromLinkedWorktree(t *testing.T) {
+	repo := gitRepo(t)
+	branch := "WP-L6-15-main"
+	mustGit(t, repo, "checkout", "-q", "-B", branch)
+	linked := filepath.Join(filepath.Dir(repo), "repo-worktrees", "linked-caller")
+	mustGit(t, repo, "worktree", "add", "-q", linked, "main")
+	_, err := NewSession(linked, NewSessionRequest{
+		Harness: "cursor", Role: RoleSpecReviewer, Issue: "WP-L6-15", Branch: branch,
+	})
+	if err == nil {
+		t.Fatal("must refuse when the branch is on the main checkout")
+	}
+	if strings.Contains(err.Error(), "release that worktree") {
+		t.Fatalf("main checkout refusal must not tell you to release: %v", err)
+	}
+	if !strings.Contains(err.Error(), "git switch main") {
+		t.Fatalf("main checkout refusal must name switch, not release: %v", err)
+	}
+	if !strings.Contains(err.Error(), repo) {
+		t.Fatalf("main checkout refusal must name the main checkout path: %v", err)
+	}
+}
+
+func installPostCheckoutHook(t *testing.T, repo string) {
+	t.Helper()
+	gitDir, err := git(repo, "rev-parse", "--git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(repo, gitDir)
+	}
+	hooks := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `#!/bin/sh
+if [ "$1" = "0000000000000000000000000000000000000000" ]; then
+  exit 0
+fi
+exit 1
+`
+	path := filepath.Join(hooks, "post-checkout")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContinueBranchCleansUpFailedCheckout(t *testing.T) {
+	repo := gitRepo(t)
+	installPostCheckoutHook(t, repo)
+	branch := "WP-L6-14-cleanup"
+	mustGit(t, repo, "branch", branch, "main")
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	_, err := NewSession(repo, NewSessionRequest{
+		Harness: "cursor", Role: RoleImplementer, Issue: "WP-L6-14", Branch: branch,
+	})
+	if err == nil {
+		t.Fatal("checkout hook failure must return an error")
+	}
+	if _, statErr := os.Stat(wt); !os.IsNotExist(statErr) {
+		t.Fatalf("failed checkout must remove the new worktree directory: stat %v", statErr)
+	}
+	list, err := git(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(list, wt) {
+		t.Fatalf("worktree list must not contain %s after cleanup:\n%s", wt, list)
+	}
+}

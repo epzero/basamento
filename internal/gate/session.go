@@ -240,24 +240,35 @@ func headOnBranch(dir, branch string) (bool, error) {
 	return ref == headBranchRef(branch), nil
 }
 
-// checkedOutWorktree returns the worktree that has branch checked out, or "".
-func checkedOutWorktree(dir, branch string) (string, error) {
+// checkedOutWorktree reports which worktree has branch checked out and whether
+// that worktree is the repository's main checkout (the first porcelain block).
+func checkedOutWorktree(dir, branch string) (path string, mainWorktree bool, err error) {
+	// Prune drops git's record of worktrees whose directory is gone; it never
+	// touches working files (locked worktrees are kept by git).
+	if _, err := git(dir, "worktree", "prune"); err != nil {
+		return "", false, err
+	}
 	out, err := git(dir, "worktree", "list", "--porcelain")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	want := "branch " + headBranchRef(branch)
-	path := ""
+	var mainPath, wt string
+	first := true
 	for _, line := range strings.Split(out, "\n") {
 		if p, ok := strings.CutPrefix(line, "worktree "); ok {
-			path = p
+			if first {
+				mainPath = p
+				first = false
+			}
+			wt = p
 			continue
 		}
 		if line == want {
-			return path, nil
+			return wt, filepath.Clean(wt) == filepath.Clean(mainPath), nil
 		}
 	}
-	return "", nil
+	return "", false, nil
 }
 
 func ensureCheckedOutBranch(dir, branch string) error {
@@ -528,6 +539,19 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		return reviewSnapshot(top, linked, s, branch, id.Instance)
 	}
 	s.Branch = branch
+	elsewhere, atMain, err := checkedOutWorktree(top, branch)
+	if err != nil {
+		return Session{}, err
+	}
+	if elsewhere != "" {
+		if atMain {
+			if filepath.Clean(elsewhere) != filepath.Clean(top) || !linked {
+				return Session{}, fmt.Errorf("branch %s is checked out in the main checkout %s; switch that checkout to another branch (for example `git switch main`), then retry, or work there", branch, elsewhere)
+			}
+		} else if filepath.Clean(elsewhere) != filepath.Clean(top) {
+			return Session{}, fmt.Errorf("branch %s is already checked out in worktree %s; work there, or release that worktree first", branch, elsewhere)
+		}
+	}
 	if linked {
 		status, err := git(top, "status", "--porcelain")
 		if err != nil {
@@ -573,11 +597,6 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 	}
 	// worktree add below detaches, and checkout -B then refuses on Git 2.44+ a
 	// branch checked out elsewhere, leaving an orphaned worktree behind.
-	if elsewhere, err := checkedOutWorktree(top, branch); err != nil {
-		return Session{}, err
-	} else if elsewhere != "" {
-		return Session{}, fmt.Errorf("branch %s is already checked out in worktree %s; work there, or release that worktree first", branch, elsewhere)
-	}
 	if _, err := git(top, "worktree", "add", s.Worktree, headBranchRef(branch)); err != nil {
 		return Session{}, err
 	}

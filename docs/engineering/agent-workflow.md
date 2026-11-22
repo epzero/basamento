@@ -44,7 +44,23 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   inside the working issue worktree.
 - **`-branch`** names are validated in pure Go before any `git` call: letters,
   digits, `-` and `_` only, not starting with `-`, and not `HEAD` (no `/`,
-  spaces, refspecs, or path components).
+  spaces, refspecs, or path components). A branch is checked out in at most
+  one worktree at a time. Before listing worktrees, `gate agent new` prunes
+  registrations whose directory is already gone, so a deleted worktree never
+  blocks a retry. If it is already checked out in a linked worktree,
+  `gate agent new -branch` refuses with that worktree's path and tells you to
+  work there or `gate agent release` that worktree first. If it is checked out
+  in the main checkout, the refusal names that path and tells you to switch
+  that checkout to another branch (for example `git switch main`), then retry, or
+  work there. If the branch is not on `origin` yet, the refusal tells you to
+  push it from the clone that started it, then run `gate agent new -branch`
+  again.
+- **Squash-merged branches.** `gate agent list` and release also treat a branch
+  as merged when `squashed()` applies: `branch.<name>.remote` is set (only
+  `git push -u origin <branch>` does that; a plain `git push origin <branch>`
+  does not), and after `git fetch --prune` the remote-tracking branch is gone.
+  Without that upstream config, `squashed()` never applies; `agent list` does
+  not show the branch as merged and release refuses until merge or `-force`.
 - **Leads stay in the main checkout**, as do sessions started with
   `-no-worktree` (a harness that gives each agent its own clone).
 - **The session is recorded** in the worktree's git directory, never in a
