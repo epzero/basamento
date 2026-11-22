@@ -575,16 +575,8 @@ func registerCodegen(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the run completes$`, func(ctx context.Context) error {
-		w := world(ctx).Codegen
-		if w.err != nil {
-			return w.err
-		}
-		if w.state == nil || w.state.Failed || !w.state.Done {
-			return fmt.Errorf("the run did not complete")
-		}
-		return nil
-	})
+	// "the run completes" is shared with the streaming scenarios and is
+	// registered once in registerStreamLive, which dispatches on the world.
 	sc.Step(`^the model made (\d+) plan and implement requests, (\d+) self-review request and (\d+) repair requests in both attempts together$`,
 		func(ctx context.Context, planImpl, review, repair int) error {
 			w := world(ctx).Codegen
