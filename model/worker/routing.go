@@ -328,7 +328,9 @@ func pickRemote(remotes []Remote, modelID string, op model.Capability, required 
 // claimSpill moves a waiting invocation to spilling for a remote provider
 // before its paid start. The update is the claim: only one caller can take
 // the row, and while it is spilling no worker lease can reach it. The claim
-// deadline is the pool lease; the sweep fails the row if the remote has not
+// deadline bounds the run, not the worker's heartbeat lease: a remote run may
+// legitimately outlive one pool lease, so a declared MaxRuntime above it wins
+// (plus the pool's grace). The sweep fails the row if the remote has not
 // reported by then, so a crash never turns into a second paid start.
 func (s *Store) claimSpill(ctx context.Context, inv Invocation, remote string, reserved int64) (time.Time, bool, error) {
 	pool, err := s.Pool(ctx, inv.Pool)
@@ -336,7 +338,11 @@ func (s *Store) claimSpill(ctx context.Context, inv Invocation, remote string, r
 		return time.Time{}, false, err
 	}
 	now := s.now()
-	deadline := now.Add(pool.Lease)
+	limit := pool.Lease
+	if inv.MaxRuntime > limit {
+		limit = inv.MaxRuntime + pool.Grace
+	}
+	deadline := now.Add(limit)
 	res, err := s.db.Execer().Exec(ctx,
 		`UPDATE worker_invocations SET state = ?, spilled = 1, reserved_mpts = ?, worker_id = ?,
 			provider_handle = '', lease_expires_unix_ms = ?, leased_unix_ms = ?
@@ -373,8 +379,8 @@ func (s *Store) attachSpillHandle(ctx context.Context, clientRef, handle string)
 // awaitSpill waits for the remote result while the row is claimed. A cancel
 // on the row reaches the remote provider and the invocation ends cancelled
 // with what the provider reports, never as a charge for work nobody wanted
-// (REQ-MODEL-026). The wait ends at the claim deadline, which leaves the row
-// spilling for the sweep to settle.
+// (REQ-MODEL-026). The wait ends at the claim deadline, cancelling the remote
+// handle and leaving the row spilling for the sweep to settle.
 func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote, handle model.Handle, deadline time.Time) (model.Result, error, bool) {
 	type outcome struct {
 		res model.Result
@@ -416,6 +422,10 @@ func (s *Store) awaitSpill(ctx context.Context, clientRef string, target *Remote
 				}
 			}
 			if !s.now().Before(deadline) {
+				// The run outlived its declared runtime: stop paying for it.
+				// The claim stays for the sweep to settle, but the provider is
+				// cancelled rather than left running as a paid orphan.
+				_ = target.Invoker.Cancel(context.WithoutCancel(ctx), handle)
 				return model.Result{}, core.NewError(core.CodeAmbiguousStart,
 					"the remote provider did not report before the claim deadline", nil), cancelled
 			}

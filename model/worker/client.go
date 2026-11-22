@@ -33,8 +33,12 @@ type Transport interface {
 type Client struct {
 	transport Transport
 	journal   *Journal
-	worker    Worker
-	state     State
+
+	// mu guards worker and state: a heartbeat rotates the credential while
+	// lease and run goroutines read it (ADR-0012 §10).
+	mu     sync.RWMutex
+	worker Worker
+	state  State
 }
 
 // NewClient returns a client over transport and journal. journal may be nil
@@ -54,16 +58,34 @@ func (c *Client) Join(ctx context.Context, req JoinRequest) (Worker, error) {
 	if err != nil {
 		return Worker{}, err
 	}
+	c.mu.Lock()
 	c.worker = w
 	c.state = StateActive
+	c.mu.Unlock()
 	return w, nil
 }
 
 // Worker returns the joined worker.
-func (c *Client) Worker() Worker { return c.worker }
+func (c *Client) Worker() Worker {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.worker
+}
 
 // State returns the worker's state as the platform last reported it.
-func (c *Client) State() State { return c.state }
+func (c *Client) State() State {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.state
+}
+
+// identity snapshots the worker id and the credential the next call must
+// present, so a heartbeat's rotation is never torn.
+func (c *Client) identity() (string, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.worker.ID, c.worker.Credential
+}
 
 // Journal returns the client's journal.
 func (c *Client) Journal() *Journal { return c.journal }
@@ -80,9 +102,10 @@ func (c *Client) Pending() ([]JournalEntry, error) {
 // LeaseOnce asks for work with the given free units and records each lease in
 // the journal before the caller starts it.
 func (c *Client) LeaseOnce(ctx context.Context, free int, warm []string, timeLeft, wait time.Duration) ([]Invocation, error) {
+	id, credential := c.identity()
 	leased, err := c.transport.Lease(ctx, LeaseRequest{
-		WorkerID:   c.worker.ID,
-		Credential: c.worker.Credential,
+		WorkerID:   id,
+		Credential: credential,
 		FreeUnits:  free,
 		WarmModels: warm,
 		TimeLeft:   timeLeft,
@@ -107,7 +130,8 @@ func (c *Client) LeaseOnce(ctx context.Context, free int, warm []string, timeLef
 
 // Starting tells the platform the worker is about to call its provider.
 func (c *Client) Starting(ctx context.Context, clientRef string, attempt int) error {
-	return c.transport.Starting(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt)
+	id, credential := c.identity()
+	return c.transport.Starting(ctx, id, credential, clientRef, attempt)
 }
 
 // Started reports the provider's handle.
@@ -117,7 +141,8 @@ func (c *Client) Started(ctx context.Context, clientRef, handle string, attempt 
 			return err
 		}
 	}
-	return c.transport.Started(ctx, c.worker.ID, c.worker.Credential, clientRef, handle, attempt)
+	id, credential := c.identity()
+	return c.transport.Started(ctx, id, credential, clientRef, handle, attempt)
 }
 
 // Events reports partial output for a lease.
@@ -125,13 +150,15 @@ func (c *Client) Events(ctx context.Context, clientRef string, attempt int, even
 	if len(events) == 0 {
 		return nil
 	}
-	return c.transport.Events(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt, events)
+	id, credential := c.identity()
+	return c.transport.Events(ctx, id, credential, clientRef, attempt, events)
 }
 
 // Resume takes back an in-doubt invocation inside its grace period
 // (REQ-MODEL-023).
 func (c *Client) Resume(ctx context.Context, clientRef string, attempt int) error {
-	return c.transport.Resume(ctx, c.worker.ID, c.worker.Credential, clientRef, attempt)
+	id, credential := c.identity()
+	return c.transport.Resume(ctx, id, credential, clientRef, attempt)
 }
 
 // Finish reports a result and marks the journal entry delivered. The outcome
@@ -146,7 +173,8 @@ func (c *Client) Finish(ctx context.Context, clientRef, state string, result jso
 			return err
 		}
 	}
-	if err := c.transport.Finish(ctx, c.worker.ID, c.worker.Credential, clientRef, state, result, code, cost, attempt); err != nil {
+	id, credential := c.identity()
+	if err := c.transport.Finish(ctx, id, credential, clientRef, state, result, code, cost, attempt); err != nil {
 		return err
 	}
 	if c.journal != nil {
@@ -160,7 +188,8 @@ func (c *Client) Finish(ctx context.Context, clientRef, state string, result jso
 // Release gives a lease back. Unused says the worker never started the
 // invocation.
 func (c *Client) Release(ctx context.Context, clientRef string, unused bool, notBefore time.Time, attempt int) error {
-	if err := c.transport.Release(ctx, c.worker.ID, c.worker.Credential, clientRef, unused, notBefore, attempt); err != nil {
+	id, credential := c.identity()
+	if err := c.transport.Release(ctx, id, credential, clientRef, unused, notBefore, attempt); err != nil {
 		return err
 	}
 	if c.journal != nil {
@@ -171,25 +200,31 @@ func (c *Client) Release(ctx context.Context, clientRef string, unused bool, not
 
 // Heartbeat keeps the worker present and its leases alive.
 func (c *Client) Heartbeat(ctx context.Context, free int) (HeartbeatAnswer, error) {
-	answer, err := c.transport.Heartbeat(ctx, c.worker.ID, c.worker.Credential, free)
+	id, credential := c.identity()
+	answer, err := c.transport.Heartbeat(ctx, id, credential, free)
 	if err != nil {
 		return HeartbeatAnswer{}, err
 	}
+	c.mu.Lock()
 	if answer.Credential != "" {
 		// The platform rotates the credential on every heartbeat; the next
 		// call must present the new one (ADR-0012 §10).
 		c.worker.Credential = answer.Credential
 	}
 	c.state = answer.State
+	c.mu.Unlock()
 	return answer, nil
 }
 
 // Leave is a clean exit.
 func (c *Client) Leave(ctx context.Context) error {
-	if err := c.transport.Leave(ctx, c.worker.ID, c.worker.Credential); err != nil {
+	id, credential := c.identity()
+	if err := c.transport.Leave(ctx, id, credential); err != nil {
 		return err
 	}
+	c.mu.Lock()
 	c.state = StateLeft
+	c.mu.Unlock()
 	return nil
 }
 
@@ -231,7 +266,9 @@ func (r *Runner) RunResumed(ctx context.Context, inv Invocation, providerHandle 
 // invocation is reported cancelled. attempt names the attempt the cancel is
 // for, so a cancel for a superseded attempt never stops the current one. A
 // cancel that arrives before the run is tracked is kept and honoured at its
-// start. It reports whether a local run matched.
+// start; one whose attempt the invocation has moved past is dropped, so a
+// superseded cancel does not outlive the run it named. It reports whether a
+// local run matched.
 func (r *Runner) Cancel(clientRef string, attempt int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -253,7 +290,16 @@ func (r *Runner) takePending(clientRef string, attempt int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	got, ok := r.pending[clientRef]
-	if !ok || got != 0 && got != attempt {
+	if !ok {
+		return false
+	}
+	if got != 0 && got < attempt {
+		// The invocation moved past the attempt this cancel named.
+		delete(r.pending, clientRef)
+		return false
+	}
+	if got != 0 && got != attempt {
+		// A cancel for a newer attempt waits for that attempt.
 		return false
 	}
 	delete(r.pending, clientRef)
@@ -267,14 +313,24 @@ func (r *Runner) track(clientRef string, attempt int, cancel context.CancelFunc)
 	}
 	r.runs[clientRef] = runHandle{cancel: cancel, attempt: attempt}
 	// A cancel may have arrived between the lease and this point.
-	if got, ok := r.pending[clientRef]; ok && (got == 0 || got == attempt) {
-		delete(r.pending, clientRef)
-		cancel()
+	if got, ok := r.pending[clientRef]; ok {
+		switch {
+		case got == 0 || got == attempt:
+			delete(r.pending, clientRef)
+			cancel()
+		case got < attempt:
+			// The cancel named an attempt this run superseded.
+			delete(r.pending, clientRef)
+		}
 	}
 	r.mu.Unlock()
 	return func() {
 		r.mu.Lock()
 		delete(r.runs, clientRef)
+		if got, ok := r.pending[clientRef]; ok && got <= attempt {
+			// A cancel for an attempt that already ended must not linger.
+			delete(r.pending, clientRef)
+		}
 		r.mu.Unlock()
 	}
 }

@@ -51,8 +51,12 @@ type scriptedRemote struct {
 	result      model.Result
 	resultErr   error
 	startHook   func()
-	accepted    int
-	requests    []model.Request
+	// resultWait, when set, makes Result wait for Cancel or the context.
+	resultWait chan struct{}
+	cancelOnce sync.Once
+	cancels    int
+	accepted   int
+	requests   []model.Request
 }
 
 func (r *scriptedRemote) Remote(name string) Remote {
@@ -79,11 +83,25 @@ func (r *scriptedRemote) Events(context.Context, model.Handle, int64) (<-chan mo
 	return nil, nil
 }
 
-func (r *scriptedRemote) Result(context.Context, model.Handle) (model.Result, error) {
-	return r.result, r.resultErr
+func (r *scriptedRemote) Result(ctx context.Context, _ model.Handle) (model.Result, error) {
+	if r.resultWait == nil {
+		return r.result, r.resultErr
+	}
+	select {
+	case <-ctx.Done():
+		return model.Result{}, ctx.Err()
+	case <-r.resultWait:
+		return r.result, r.resultErr
+	}
 }
 
-func (r *scriptedRemote) Cancel(context.Context, model.Handle) error { return nil }
+func (r *scriptedRemote) Cancel(context.Context, model.Handle) error {
+	r.cancels++
+	if r.resultWait != nil {
+		r.cancelOnce.Do(func() { close(r.resultWait) })
+	}
+	return nil
+}
 func (r *scriptedRemote) Lookup(context.Context, string) (*model.Handle, error) {
 	return nil, nil
 }

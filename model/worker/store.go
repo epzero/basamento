@@ -891,9 +891,17 @@ func auditUnavailable(cause error) error {
 // producer fails closed: its error is returned so the caller can refuse the
 // operation (auth.md §2). poolTenant reports the tenant a pool belongs to;
 // an unknown or shared pool is deployment-level.
+//
+// The event's tenant is also put in the context: the audit sink takes the
+// effective tenant from the context and rejects a claimed tenant that the
+// context does not carry, so a tenant pool's join, leave, removal and spill
+// would otherwise fail closed on every call.
 func (s *Store) auditEventFor(ctx context.Context, tenant core.TenantID, action, resource, outcome, reason string) error {
 	if s.audit == nil {
 		return nil
+	}
+	if tenant != "" {
+		ctx = core.WithTenant(ctx, tenant)
 	}
 	return s.audit.Record(ctx, platform.AuditEvent{
 		Time:     s.now(),
