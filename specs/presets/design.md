@@ -19,13 +19,20 @@ this.
 This work package owns `presets/codegen` only. Before implementation of
 `presets/codegen` starts:
 
-1. **Sandbox commands** (`REQ-PRESET-005`). A plan's tests are a list of
-   sandbox calls. Each `tool` node passes its command as literal `spec.args`,
-   never built by a CEL expression: `expr` is deterministic and cost-limited,
-   but it is not an expression language for composing untrusted shell text.
-   If the tool node cannot take literal arguments yet, that is a change in
-   `tool` (WP-L7-02's area) landed first in its own pull request with a
-   reviewer from that area.
+1. **Sandbox commands** (`REQ-PRESET-005`). The plan is a runtime model output,
+   so the static IR cannot carry one node per test. The IR declares `verify` as
+   a `map` over `state.plan.tests` with `max_parallel` 0 whose child is a
+   `run-tests` `tool` node; the map delivers each test as the child node's
+   input, and the host passes a `tool` node's input as its call args, so the
+   child carries no static `spec.args`. The runner executes the plan's tests
+   directly. A literal-`spec.args` host (one static node per test) is **out of
+   scope**, not a later change in `tool` (WP-L7-02's area): static IR cannot
+   know a runtime plan's tests and the host already passes node input as call
+   args, so no tool capability change is needed. The safety rule stands: never
+   build untrusted shell text with a CEL expression — `expr` is deterministic
+   and cost-limited, but it is not an expression language for composing
+   untrusted shell text. The command comes from the runtime plan as node
+   input, not a CEL expression.
 
 ## 1. The flows
 
@@ -53,7 +60,7 @@ preset does not use it.
 | --- | --- | --- |
 | `plan` | One `agent` node, `planner` agent, structured output `plan` | 001 |
 | `implement` | `map` over `plan.modules`, `max_parallel` 0 (one at a time), node `implement_module` (`agent` with `output_schema: workspace`) | 004 |
-| `verify` | One `tool` node per plan test, in plan order, on the workspace the last stage returned | 005 |
+| `verify` | `map` over `state.plan.tests` (`max_parallel` 0) whose child `run-tests` `tool` node receives each test as its input/call args; one execution per test in plan order, on the workspace the last stage returned; the runner path executes the plan's tests directly | 005 |
 | `repair` | `agent` node `repair` with `guard: {max_visits: 3, cost_mpts: 5000}`; it receives the failing tests or the self-review findings; an edge back to `verify` | 006, 007, 009 |
 | `self-review` | `agent` node `reviewer` with `output_schema: findings` and its own `guard: {max_visits: 3}`; one edge to `commit`, taken when it raises no findings, one to `repair` | 008, 009, 012, 020 |
 | `commit` | One `tool` node, the only writer the flow calls | 010–013 |
