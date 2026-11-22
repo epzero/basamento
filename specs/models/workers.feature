@@ -225,7 +225,7 @@ Feature: Workers pull invocations from their pool's queue
 
   # Real transport proof: run through WorkerService with a real loopback listener,
   # fake clock, no sleeps and no vendor calls — not the in-process shortcut.
-  @REQ-MODEL-089 @security @id:MODEL-089-01
+  @planned @wp:WP-L3-07 @REQ-MODEL-089 @security @id:MODEL-089-01
   Scenario: A worker behind NAT is served over WorkerService
     Given a platform listening for workers on a loopback listener and worker "w1" has no inbound route
     And worker "w1" joined pool "acme-gpu" with its pool token, declaring model "sdxl"
@@ -236,7 +236,7 @@ Feature: Workers pull invocations from their pool's queue
 
   # Real transport proof: run through the kit serve listener with a real loopback
   # listener, fake clock, no sleeps and no vendor calls — not the in-process shortcut.
-  @REQ-MODEL-090 @level:system @id:MODEL-090-01
+  @planned @wp:WP-L3-07 @REQ-MODEL-090 @level:system @id:MODEL-090-01
   Scenario: kit serve composes the worker side
     Given kit serve started with pool "acme-gpu" declared and worker "w1" configured, listening for workers on a loopback listener
     When worker "w1" dials out to WorkerService and finishes invocation "v1" of "sdxl"
