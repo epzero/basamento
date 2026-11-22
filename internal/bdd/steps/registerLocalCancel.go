@@ -41,9 +41,9 @@ func registerLocalCancel(sc *godog.ScenarioContext) {
 		if wk := world(ctx).Worker; wk != nil && wk.run != nil {
 			return wk.cancelRun(ctx)
 		}
-		if az := world(ctx).Authz; az != nil && az.db != nil {
-			if !az.api.cancel {
-				return fmt.Errorf("run not cancelled")
+		if az := world(ctx).Authz; az != nil && az.api != nil && az.api.runs != nil {
+			if st := az.api.runs["p1"]["r1"]; st != "cancelled" {
+				return fmt.Errorf("run r1 state %q", st)
 			}
 			return nil
 		}

@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -8,15 +9,19 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/epzero/basamento/auth/authz"
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/platform"
 )
 
 func registerAuthz(sc *godog.ScenarioContext) {
-	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		world(ctx).Authz = newAuthzWorld()
-		if world(ctx).Core == nil {
-			world(ctx).Core = newCoreWorld()
+	sc.Before(func(ctx context.Context, scn *godog.Scenario) (context.Context, error) {
+		if !scenarioUsesAuthz(scn) {
+			return ctx, nil
 		}
-		world(ctx).Core.clock = authzW(ctx).clock
+		w := newAuthzWorld()
+		if scenarioPinsSQLite(scn) {
+			w.forceSQLite = true
+		}
+		world(ctx).Authz = w
 		return ctx, nil
 	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
@@ -53,7 +58,11 @@ func registerGivenAuthz(sc *godog.ScenarioContext) {
 	sc.Step(`^principal "([^"]*)" of tenant "([^"]*)" has no role in project "([^"]*)"$`,
 		func(ctx context.Context, pid, tenant, project string) error {
 			w := authzW(ctx)
-			return w.ensureStore(ctx)
+			if err := w.ensureStore(ctx); err != nil {
+				return err
+			}
+			w.setPrincipal(pid, tenant, nil)
+			return nil
 		})
 	sc.Step(`^principal "([^"]*)" of tenant "([^"]*)" has a binding in project "([^"]*)" whose condition exceeds the cost limit$`,
 		func(ctx context.Context, pid, tenant, project string) error {
@@ -87,8 +96,8 @@ func registerGivenAuthz(sc *godog.ScenarioContext) {
 		w.resources[kindID] = res
 		return nil
 	})
-	sc.Step(`^the role "([^"]*)" holds every permission of the role "([^"]*)"$`, func(ctx context.Context, _, _ string) error {
-		return memberContainsViewer()
+	sc.Step(`^the role "([^"]*)" holds every permission of the role "([^"]*)"$`, func(ctx context.Context, holder, contained string) error {
+		return roleHoldsEveryPermissionOf(holder, contained)
 	})
 	sc.Step(`^the runs table holds no row for the target resource$`, func(ctx context.Context) error {
 		w := authzW(ctx)
@@ -141,9 +150,12 @@ func registerGivenAuthz(sc *godog.ScenarioContext) {
 		if err := w.ensureStore(ctx); err != nil {
 			return err
 		}
-		w.dbClosed = true
+		// AUTH-020-01 has no audit assertions; closing the shared SQL store
+		// also disables the audit port for this scenario.
 		_ = w.db.Close()
-		return w.rebuildAuthorizer()
+		w.storeBroken = true
+		w.db = nil
+		return nil
 	})
 	sc.Step(`^the API declares an RPC with no action$`, func(ctx context.Context) error {
 		w := authzW(ctx)
@@ -249,10 +261,15 @@ func registerWhenAuthz(sc *godog.ScenarioContext) {
 		if tenant == "" {
 			tenant = w.tenant
 		}
+		snap, err := w.snapshotBindings(tenant)
+		if err != nil {
+			return err
+		}
+		w.bindingsSnap = snap
 		tctx := w.tenantCtx(tenant)
 		g := w.principal(grantor, tenant)
 		b := authz.Binding{Principal: target, Role: authz.Role(role), Project: project, Condition: cond}
-		err := w.auth.Grant(tctx, g, b)
+		err = w.auth.Grant(tctx, g, b)
 		w.recordErr(err)
 		return nil
 	}
@@ -347,8 +364,8 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 	sc.Step(`^the action is allowed for ([a-z]+)$`, func(ctx context.Context, who string) error {
 		w := authzW(ctx)
 		if w.lastErr != nil {
-				return fmt.Errorf("%s: %w", who, w.lastErr)
-			}
+			return fmt.Errorf("%s: %w", who, w.lastErr)
+		}
 		return nil
 	})
 	sc.Step(`^an audit event records the denied action by ([a-z]+)$`, func(ctx context.Context, who string) error {
@@ -384,37 +401,32 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 		if strings.Contains(msg, name) {
 			return fmt.Errorf("message names %q", name)
 		}
+		for _, action := range authz.Actions() {
+			if strings.Contains(msg, action) {
+				return fmt.Errorf("message names permission %q", action)
+			}
+		}
 		return nil
 	})
 	sc.Step(`^no binding for "([^"]*)" is stored$`, func(ctx context.Context, target string) error {
 		w := authzW(ctx)
-		list, err := w.sqlStore.List(w.tenantCtx(w.tenant), target, "p1")
+		n, err := w.principalBindingCount(w.tenant, target)
 		if err != nil {
 			return err
 		}
-		if len(list) != 0 {
-			return fmt.Errorf("bindings %+v", list)
+		if n != 0 {
+			return fmt.Errorf("principal %q has %d bindings", target, n)
 		}
 		return nil
 	})
 	sc.Step(`^no binding for tenant "([^"]*)" is stored$`, func(ctx context.Context, tenant string) error {
 		w := authzW(ctx)
-		rows, err := w.db.Execer().Query(context.Background(),
-			`SELECT COUNT(*) FROM authz_bindings WHERE tenant = ? AND (principal LIKE '../%' OR project LIKE '../%')`,
-			tenant)
+		after, err := w.snapshotBindings(tenant)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = rows.Close() }()
-		var n int
-		if !rows.Next() {
-			return fmt.Errorf("no count")
-		}
-		if err := rows.Scan(&n); err != nil {
-			return err
-		}
-		if n != 0 {
-			return fmt.Errorf("invalid bindings stored: %d", n)
+		if !bindingsEqual(w.bindingsSnap, after) {
+			return fmt.Errorf("bindings changed from %+v to %+v", w.bindingsSnap, after)
 		}
 		return nil
 	})
@@ -464,25 +476,49 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 			return fmt.Errorf("events %+v", events)
 		})
 	sc.Step(`^the audit event names resource "([^"]*)" with no attributes$`, func(ctx context.Context, want string) error {
-		events, err := authzW(ctx).readAudits(authzW(ctx).tenant)
+		w := authzW(ctx)
+		events, err := w.readAudits(w.tenant)
 		if err != nil {
 			return err
 		}
+		var denials []platform.AuditEvent
 		for _, e := range events {
-			if e.Resource == want {
-				return nil
+			if e.Outcome == "denied" {
+				denials = append(denials, e)
 			}
 		}
-		return fmt.Errorf("events %+v", events)
+		if len(denials) != 1 {
+			return fmt.Errorf("want 1 denial, got %d in %+v", len(denials), events)
+		}
+		if denials[0].Resource != want {
+			return fmt.Errorf("resource %q want %q", denials[0].Resource, want)
+		}
+		return nil
 	})
 	sc.Step(`^the audit event holds no condition text and no token$`, func(ctx context.Context) error {
-		events, err := authzW(ctx).readAudits(authzW(ctx).tenant)
+		w := authzW(ctx)
+		events, err := w.readAudits(w.tenant)
 		if err != nil {
 			return err
 		}
+		cond := w.seededCondition
 		for _, e := range events {
-			if strings.Contains(e.Reason, "resource.attrs") || strings.Contains(e.Resource, "token") {
-				return fmt.Errorf("unsafe audit %+v", e)
+			for _, field := range auditStringFields(e) {
+				if cond != "" && strings.Contains(field, cond) {
+					return fmt.Errorf("leaks condition text in %q", field)
+				}
+				if strings.Contains(field, "resource.attrs") || strings.Contains(field, "principal.id") {
+					return fmt.Errorf("leaks attrs in %q", field)
+				}
+				if strings.Contains(strings.ToLower(field), "token") {
+					return fmt.Errorf("leaks token in %q", field)
+				}
+			}
+			if e.Reason != "" && !safeAuditReasons[e.Reason] {
+				return fmt.Errorf("unsafe reason %q", e.Reason)
+			}
+			if e.Principal != "vic" {
+				return fmt.Errorf("principal %q want vic", e.Principal)
 			}
 		}
 		return nil
@@ -510,30 +546,38 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 		return fmt.Errorf("no error log")
 	})
 	sc.Step(`^the run is started$`, func(ctx context.Context) error {
-		if !authzW(ctx).api.started {
+		w := authzW(ctx)
+		if w.api.startedRunID == "" {
 			return fmt.Errorf("run not started")
+		}
+		if st := w.api.runs["p1"][w.api.startedRunID]; st != "active" {
+			return fmt.Errorf("started run %q state %q", w.api.startedRunID, st)
 		}
 		return nil
 	})
 	sc.Step(`^the gate is resolved$`, func(ctx context.Context) error {
-		if !authzW(ctx).api.gate {
-			return fmt.Errorf("gate not resolved")
+		if authzW(ctx).api.gateProject != "p1" {
+			return fmt.Errorf("gate project %q", authzW(ctx).api.gateProject)
 		}
 		return nil
 	})
 	sc.Step(`^the message is accepted$`, func(ctx context.Context) error {
-		if !authzW(ctx).api.message {
-			return fmt.Errorf("message not accepted")
+		if authzW(ctx).api.messageProject != "p1" {
+			return fmt.Errorf("message project %q", authzW(ctx).api.messageProject)
 		}
 		return nil
 	})
 	sc.Step(`^the list contains the runs of project "([^"]*)"$`, func(ctx context.Context, project string) error {
 		w := authzW(ctx)
-		if len(w.lastList) == 0 {
-			return fmt.Errorf("empty list")
+		want := sortedRunIDs(w.api.runs[project])
+		got := authzSortStrings(w.lastList)
+		if len(got) != len(want) {
+			return fmt.Errorf("list %v want %v", got, want)
 		}
-		if _, ok := w.api.runs[project]; !ok {
-			return fmt.Errorf("no runs for %s", project)
+		for i := range want {
+			if got[i] != want[i] {
+				return fmt.Errorf("list %v want %v", got, want)
+			}
 		}
 		return nil
 	})
@@ -545,8 +589,12 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^no credential value is returned$`, func(ctx context.Context) error {
-		if len(authzW(ctx).credSink) != 0 {
-			return fmt.Errorf("value leaked")
+		w := authzW(ctx)
+		if len(w.credSink) != 0 {
+			return fmt.Errorf("value in sink")
+		}
+		if bytes.Contains(w.lastNamesJSON, w.credSecret) {
+			return fmt.Errorf("names response contains secret")
 		}
 		return nil
 	})
@@ -557,19 +605,32 @@ func registerThenAuthz(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the credential value is used in the step but not returned to ([a-z]+)$`, func(ctx context.Context, _ string) error {
-		if len(authzW(ctx).credSink) == 0 {
-			return fmt.Errorf("credential not used")
+		w := authzW(ctx)
+		if len(w.credSink) == 0 || !bytes.Equal(w.credSink, w.credSecret) {
+			return fmt.Errorf("credential not used in sink")
+		}
+		if bytes.Contains(w.lastResolveBody, w.credSecret) {
+			return fmt.Errorf("resolve response contains secret")
 		}
 		return nil
 	})
 	sc.Step(`^the RPC is refused before any permission check$`, func(ctx context.Context) error {
 		w := authzW(ctx)
-			if w.lastErr == nil {
-				return fmt.Errorf("want unsupported, got success")
-			}
-			if string(core.CodeOf(w.lastErr)) != string(core.CodeUnsupported) {
-				return fmt.Errorf("got %w", w.lastErr)
-			}
+		if w.guardWiringErr == nil {
+			return fmt.Errorf("want wiring error")
+		}
+		if string(core.CodeOf(w.guardWiringErr)) != string(core.CodeInvalidArgument) {
+			return fmt.Errorf("wiring %w", w.guardWiringErr)
+		}
+		if !strings.Contains(w.guardWiringErr.Error(), w.rpcProc) {
+			return fmt.Errorf("wiring error does not name %q: %w", w.rpcProc, w.guardWiringErr)
+		}
+		if w.lastErr == nil {
+			return fmt.Errorf("want unsupported on request")
+		}
+		if string(core.CodeOf(w.lastErr)) != string(core.CodeUnsupported) {
+			return fmt.Errorf("request %w", w.lastErr)
+		}
 		return nil
 	})
 }

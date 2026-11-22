@@ -3,18 +3,24 @@ package steps
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cucumber/godog"
 
 	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/auth/authz"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/core/coretest"
+	"github.com/epzero/basamento/internal/bdd/sqltest"
 	"github.com/epzero/basamento/platform"
 	"github.com/epzero/basamento/platform/credentials"
 	psql "github.com/epzero/basamento/platform/sql"
@@ -22,34 +28,54 @@ import (
 
 const authzCredMasterKey = "authz-mk"
 
+// errBDDGuardNotWired is returned when an RPC call runs while NewGuard failed at
+// wiring time; it is not a production error code.
+var errBDDGuardNotWired = fmt.Errorf("bdd: guard not wired")
+
+type authzBindingSnap struct {
+	Principal string
+	Project   string
+	Role      string
+	Condition string
+}
+
 type authzWorld struct {
-	dir       string
-	db        *psql.Store
-	sqlStore  *authz.SQLStore
-	auditSQL  *credentials.AuditStore
-	auditWrap *authzAuditWrap
-	auth      *authz.Authorizer
-	api       *authzTestAPI
-	guard     *authz.Guard
-	clock     *coretest.FakeClock
-	logBuf    *slogRecordingHandler
-	metric    *authzCountMetric
+	dir        string
+	pgCleanup  func()
+	db         *psql.Store
+	sqlStore   *authz.SQLStore
+	auditSQL   *credentials.AuditStore
+	auditWrap  *authzAuditWrap
+	auth       *authz.Authorizer
+	api        *authzTestAPI
+	guard      *authz.Guard
+	probeGuard *authz.Guard
+	clock      *coretest.FakeClock
+	logBuf     *slogRecordingHandler
+	metric     *authzCountMetric
 
-	tenant      string
-	principals  map[string]authn.Principal
-	resources   map[string]authz.Resource
-	lastErr     error
-	lastDenied  bool
-	lastAllowed bool
-	lastList    []string
-	lastNames   []string
-	credSink    []byte
-	dbClosed    bool
-	costHeavy   bool
-	rpcMode     string // "", "no-action", "no-resolver"
-	rpcProc     string
+	forceSQLite bool
+	storeBroken bool
 
-	seedAdmin map[string]bool // tenant -> seeded tenant-wide admin
+	tenant          string
+	principals      map[string]authn.Principal
+	resources       map[string]authz.Resource
+	lastErr         error
+	lastList        []string
+	lastNames       []string
+	lastNamesJSON   []byte
+	lastResolveBody []byte
+	credSink        []byte
+	credSecret      []byte
+	costHeavy       bool
+	rpcMode         string
+	rpcProc         string
+
+	guardWiringErr  error
+	seededCondition string
+	bindingsSnap    []authzBindingSnap
+
+	seedAdmin map[string]bool
 }
 
 type authzCountMetric struct {
@@ -93,7 +119,6 @@ func (h *slogRecordingHandler) records() []slog.Record {
 	return append([]slog.Record(nil), h.logs...)
 }
 
-// authzAuditWrap counts Record calls and can reject every record (AUTH-025).
 type authzAuditWrap struct {
 	inner  platform.Audit
 	reject bool
@@ -124,6 +149,21 @@ func newAuthzWorld() *authzWorld {
 	}
 }
 
+func scenarioUsesAuthz(scn *godog.Scenario) bool {
+	return filepath.Base(scn.Uri) == "permissions.feature"
+}
+
+// scenarioPinsSQLite forces SQLite when a scenario step text mentions that dialect
+// (AUTH-011-01), even on the cloud BDD profile pass.
+func scenarioPinsSQLite(scn *godog.Scenario) bool {
+	for _, step := range scn.Steps {
+		if strings.Contains(step.Text, "on SQLite") {
+			return true
+		}
+	}
+	return false
+}
+
 func authzW(ctx context.Context) *authzWorld {
 	w := world(ctx)
 	if w.Authz == nil {
@@ -137,13 +177,37 @@ func (w *authzWorld) teardown() {
 		_ = w.db.Close()
 		w.db = nil
 	}
+	if w.pgCleanup != nil {
+		w.pgCleanup()
+		w.pgCleanup = nil
+	}
 	if w.dir != "" {
 		_ = os.RemoveAll(w.dir)
 		w.dir = ""
 	}
 }
 
+func (w *authzWorld) databaseURL(ctx context.Context) (string, error) {
+	if w.forceSQLite || os.Getenv("BDD_SQL_PROFILE") != "cloud" || !sqltest.PostgresAvailable() {
+		dir, err := os.MkdirTemp("", "authz-bdd-*")
+		if err != nil {
+			return "", err
+		}
+		w.dir = dir
+		return "sqlite:///" + filepath.Join(dir, "authz.db"), nil
+	}
+	url, cleanup, err := sqltest.CreateDatabase(ctx)
+	if err != nil {
+		return "", err
+	}
+	w.pgCleanup = cleanup
+	return url, nil
+}
+
 func (w *authzWorld) ensureStore(ctx context.Context) error {
+	if w.storeBroken {
+		return nil
+	}
 	if w.db != nil {
 		return nil
 	}
@@ -151,16 +215,13 @@ func (w *authzWorld) ensureStore(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "authz-bdd-*")
+	raw, err := w.databaseURL(ctx)
 	if err != nil {
 		return err
 	}
-	w.dir = dir
-	path := filepath.Join(dir, "authz.db")
-	db, err := psql.Open(ctx, "sqlite:///"+path, mig)
+	db, err := psql.Open(ctx, raw, mig)
 	if err != nil {
-		_ = os.RemoveAll(dir)
-		w.dir = ""
+		w.teardown()
 		return err
 	}
 	w.db = db
@@ -178,6 +239,9 @@ func (w *authzWorld) ensureStore(ctx context.Context) error {
 }
 
 func (w *authzWorld) rebuildAuthorizer() error {
+	if w.sqlStore == nil {
+		return nil
+	}
 	a, err := authz.New(authz.Options{
 		Store:              w.sqlStore,
 		Audit:              w.auditWrap,
@@ -189,26 +253,27 @@ func (w *authzWorld) rebuildAuthorizer() error {
 		return err
 	}
 	w.auth = a
-	if w.dbClosed && w.db != nil {
-		_ = w.db.Close()
-	}
 	return w.rebuildGuard()
 }
 
 func (w *authzWorld) rebuildGuard() error {
-	if w.auth == nil {
+	if w.auth == nil || w.api == nil {
 		return nil
 	}
-	if w.api == nil {
-		w.api = newAuthzTestAPI(w)
+	good, err := authz.NewGuard(w.auth, w.api.goodDeclarations()...)
+	if err != nil {
+		return err
 	}
+	w.probeGuard = good
 	decls := w.api.declarations()
 	g, err := authz.NewGuard(w.auth, decls...)
 	if err != nil {
 		w.guard = nil
-		return nil // wiring tests expect a refused declaration, not a hard failure.
+		w.guardWiringErr = err
+		return nil
 	}
 	w.guard = g
+	w.guardWiringErr = nil
 	return nil
 }
 
@@ -242,7 +307,6 @@ func (w *authzWorld) seedTenantAdmin(_ context.Context, tenant string) error {
 		return nil
 	}
 	tctx := w.tenantCtx(tenant)
-	// Bootstrap binding via SQL store (no grantor check).
 	if err := w.sqlStore.Grant(tctx, authz.Binding{
 		Principal: "bootstrap",
 		Role:      authz.RoleAdmin,
@@ -276,6 +340,7 @@ func (w *authzWorld) seedCondition(ctx context.Context, tenant, pid, project, co
 	if err := w.seedTenantAdmin(ctx, tenant); err != nil {
 		return err
 	}
+	w.seededCondition = cond
 	return w.sqlStore.Grant(w.tenantCtx(tenant), authz.Binding{
 		Principal: pid,
 		Role:      authz.RoleViewer,
@@ -284,14 +349,53 @@ func (w *authzWorld) seedCondition(ctx context.Context, tenant, pid, project, co
 	})
 }
 
+func (w *authzWorld) snapshotBindings(tenant string) ([]authzBindingSnap, error) {
+	rows, err := w.db.Execer().Query(context.Background(),
+		`SELECT principal, project, role, condition FROM authz_bindings WHERE tenant = ? ORDER BY principal, project, role`,
+		tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []authzBindingSnap
+	for rows.Next() {
+		var s authzBindingSnap
+		var cond sql.NullString
+		if err := rows.Scan(&s.Principal, &s.Project, &s.Role, &cond); err != nil {
+			return nil, err
+		}
+		if cond.Valid {
+			s.Condition = cond.String
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (w *authzWorld) principalBindingCount(tenant, principal string) (int, error) {
+	rows, err := w.db.Execer().Query(context.Background(),
+		`SELECT COUNT(*) FROM authz_bindings WHERE tenant = ? AND principal = ?`,
+		tenant, principal)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return 0, fmt.Errorf("no count row")
+	}
+	var n int
+	if err := rows.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, rows.Err()
+}
+
 func (w *authzWorld) readAudits(tenant string) ([]platform.AuditEvent, error) {
 	return w.auditSQL.Read(w.tenantCtx(tenant))
 }
 
 func (w *authzWorld) recordErr(err error) {
 	w.lastErr = err
-	w.lastDenied = err != nil
-	w.lastAllowed = err == nil
 }
 
 func (w *authzWorld) denialMessage() string {
@@ -309,17 +413,65 @@ func costHeavyAttrs() map[string]any {
 	return map[string]any{"a": list, "b": list}
 }
 
-func memberContainsViewer() error {
-	member := make(map[string]bool)
-	for _, a := range authz.RoleMember.Permissions() {
-		member[a] = true
+func roleHoldsEveryPermissionOf(holder, contained string) error {
+	rHold, holdOk := parseBuiltinRole(holder)
+	rCont, contOk := parseBuiltinRole(contained)
+	if !holdOk || !contOk {
+		return fmt.Errorf("unknown role holder=%q contained=%q", holder, contained)
 	}
-	for _, a := range authz.RoleViewer.Permissions() {
-		if !member[a] {
-			return fmt.Errorf("member missing viewer permission %q", a)
+	have := make(map[string]bool, len(rHold.Permissions()))
+	for _, a := range rHold.Permissions() {
+		have[a] = true
+	}
+	for _, a := range rCont.Permissions() {
+		if !have[a] {
+			return fmt.Errorf("%q missing permission %q of %q", holder, a, contained)
 		}
 	}
 	return nil
+}
+
+func parseBuiltinRole(name string) (authz.Role, bool) {
+	switch authz.Role(name) {
+	case authz.RoleViewer, authz.RoleMember, authz.RoleAdmin:
+		return authz.Role(name), true
+	default:
+		return "", false
+	}
+}
+
+var safeAuditReasons = map[string]bool{
+	authz.ReasonNoBinding:           true,
+	authz.ReasonTenantMismatch:      true,
+	authz.ReasonConditionError:      true,
+	authz.ReasonConditionCostExceed: true,
+	authz.ReasonScopeNarrowed:       true,
+	authz.ReasonUndeclaredAction:    true,
+}
+
+func auditStringFields(e platform.AuditEvent) []string {
+	return []string{e.Principal, e.Action, e.Resource, e.Outcome, e.Reason, e.RunID, e.Step}
+}
+
+func bindingsEqual(a, b []authzBindingSnap) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedRunIDs(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for id := range m {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out
 }
 
 func logRecordHasAttrs(r slog.Record, key string) (string, bool) {
@@ -343,4 +495,10 @@ func recordContainsField(r slog.Record, sub string) bool {
 		return true
 	})
 	return strings.Contains(buf.String(), sub)
+}
+
+func authzSortStrings(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
 }

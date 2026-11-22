@@ -48,46 +48,35 @@ new one and replacing the stored record. Every rejection is
 ## 2. Authorization
 
 Package `auth/authz` implements the design in `specs/auth/design.md` §1–§7.
+Twenty-nine actions sit in a Go catalog; three built-in roles (`viewer`,
+`member`, `admin`) are fixed supersets. Role bindings live in SQL
+(`authz_bindings`) through `platform/sql`; the tenant always comes from the
+context.
 
-- **Catalog and roles.** Twenty-nine actions are declared in Go with three
-  built-in roles (`viewer`, `member`, `admin`) as fixed supersets.
-- **Bindings.** Role bindings live in SQL (`authz_bindings`) through
-  `platform/sql`; the tenant always comes from the context.
-- **Check.** `Authorizer.Check(ctx, principal, action, resource)` follows the
-  design procedure: undeclared action, tenant mismatch, binding union with CEL
-  conditions (10 000 cost units per evaluation, bounded compile cache), scope
-  narrowing, then permission membership. Allowed checks write no audit event.
-  Store failures return `unavailable` with no audit record.
-- **Grant authority.** One `authorize` pass per decision: one store read and one
-  union of binding conditions. `Grant` / `Revoke` / `List` validate grammars
-  first, then require the grant action plus every permission of the target role,
-  then compile conditions (at most 2048 bytes) on grant, then write. Scopes
-  narrow through recognized `session:` forms matched against `Resource.Session`;
-  unrecognized lists fail closed. `scope-narrowed` applies when narrowing removes
-  a permission that bindings would otherwise grant, or when no scope form is recognized.
-- **Denial audit.** One `authz.deny` event per denial via `Record` on a
-  `context.WithoutCancel` derived context (5 s bound). `Principal` and
-  `Resource` are sanitised: a field that is not valid UTF-8, contains a control,
-  format or line-separator character, or is longer than 256 bytes is recorded as
-  `[invalid]` (not truncated).
-  Reason categories are fixed strings. When condition errors compete,
-  `condition-cost-exceeded` wins over `condition-error` over `no-binding`.
-  Audit `Record` failures do not change the denial; they log (sanitised
-  principal, reason category, code only) and optionally increment
-  `AuditFailureCounter`.
-- **RPC guard.** `Guard` refuses undeclared procedures at wiring time; declared
-  procedures resolve the resource then call `Check` without touching audit on
-  wiring errors.
+`Authorizer.Check(ctx, principal, action, resource)` follows the design
+procedure: undeclared action, tenant mismatch, binding union with CEL
+conditions (10 000 cost units per evaluation, bounded compile cache), scope
+narrowing, then permission membership. Allowed checks write no audit event.
+Store failures return `unavailable` with no audit record. `Grant`, `Revoke` and
+`List` validate grammars first, require grant authority (including superset
+rules), compile conditions on grant (at most 2048 bytes), then write. Scopes
+narrow through recognized `session:` forms matched against `Resource.Session`;
+unrecognized lists fail closed.
 
-To wire an RPC, declare each procedure with a catalog action and a resolver
-that builds `authz.Resource` from the request (project, kind, id). Set
+To wire an RPC (WP-L6-03), declare each procedure with a catalog action and a
+resolver that builds `authz.Resource` from the request (project, kind, id). Set
 `Resource.Session` in the resolver when the call uses a worker token scoped to
-a session; the authorizer matches `session:` scopes against that field.
+a session. `Guard` refuses invalid declarations at wiring time; declared
+procedures resolve the resource then call `Check`. Denials return
+`permission_denied` and write one `authz.deny` audit event via `Record` on a
+`context.WithoutCancel` derived context (5 s bound). Principal and resource
+fields are sanitised; reason categories are fixed strings (`condition-cost-exceeded`
+wins over `condition-error` over `no-binding`). Audit `Record` failures do not
+change the denial; they log and optionally increment `AuditFailureCounter`.
 
-- Permissions are declared in Go. Roles are bound per project and stored in SQL.
-- A single `authz.Check(principal, action, resource)` runs in a connect
-  interceptor (WP-L6-03). Denials return `permission_denied` and write an audit event
-  (REQ-AUTH-004).
+A connect interceptor (WP-L6-03) will call `Check` on each RPC once request
+authentication is wired.
+
 - **Audit**: every producer, the credential store and this check among them,
   records through `platform.Audit`. There is one audit store, owned by the
   credential store (WP-L1-06): an append-only table with tenant-scoped reads.

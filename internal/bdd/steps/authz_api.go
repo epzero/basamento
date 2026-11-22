@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -27,19 +28,21 @@ type authzCredResolveReq struct {
 type authzTestAPI struct {
 	w *authzWorld
 
-	runs    map[string]map[string]string // project -> runID -> state
-	started bool
-	cancel  bool
-	gate    bool
-	message bool
+	runs           map[string]map[string]string // project -> runID -> state
+	gateProject    string
+	messageProject string
+	startedRunID   string
 
 	credStore *credentials.Store
 }
 
 func newAuthzTestAPI(w *authzWorld) *authzTestAPI {
 	return &authzTestAPI{
-		w:    w,
-		runs: map[string]map[string]string{"p1": {"r1": "active"}},
+		w: w,
+		runs: map[string]map[string]string{
+			"p1": {"r1": "active"},
+			"p2": {"r2": "active"},
+		},
 	}
 }
 
@@ -53,31 +56,40 @@ func (w *authzWorld) seedCredentialNames(ctx context.Context) error {
 		w.api = newAuthzTestAPI(w)
 	}
 	w.api.credStore = store
+	w.credSecret = []byte("secret-value")
 	tctx := w.tenantCtx(w.tenant)
-	if err := store.Put(tctx, "key", []byte("secret-value")); err != nil {
+	if err := store.Put(tctx, "key", w.credSecret); err != nil {
 		return err
 	}
 	return nil
 }
 
+func (a *authzTestAPI) goodDeclarations() []authz.Declaration {
+	return a.baseDeclarations()
+}
+
 func (a *authzTestAPI) declarations() []authz.Declaration {
 	switch a.w.rpcMode {
 	case "no-action":
-		return []authz.Declaration{{
+		return append(a.baseDeclarations(), authz.Declaration{
 			Procedure: "bad.rpc",
 			Action:    "",
 			Resolve: func(context.Context, any) (authz.Resource, error) {
 				return authz.Resource{}, nil
 			},
-		}}
+		})
 	case "no-resolver":
-		return []authz.Declaration{{
+		return append(a.baseDeclarations(), authz.Declaration{
 			Procedure: "bad.rpc",
 			Action:    "run.get",
 			Resolve:   nil,
-		}}
+		})
 	}
-	decls := []authz.Declaration{
+	return a.baseDeclarations()
+}
+
+func (a *authzTestAPI) baseDeclarations() []authz.Declaration {
+	return []authz.Declaration{
 		{
 			Procedure: "run.list",
 			Action:    "run.list",
@@ -148,18 +160,19 @@ func (a *authzTestAPI) declarations() []authz.Declaration {
 			},
 		},
 	}
-	return decls
 }
 
 func (a *authzTestAPI) invoke(ctx context.Context, who, proc string, req any) error {
-	if a.w.guard == nil && a.w.rpcMode != "" {
-		return core.NewError(core.CodeUnsupported, "procedure is not served", nil)
-	}
-	if a.w.guard == nil {
-		return core.NewError(core.CodeUnsupported, "procedure is not served", nil)
+	g := a.w.guard
+	if g == nil {
+		if a.w.guardWiringErr != nil && a.w.probeGuard != nil {
+			g = a.w.probeGuard
+		} else {
+			return errBDDGuardNotWired
+		}
 	}
 	p := a.w.principal(who, "")
-	return a.w.guard.Authorize(ctx, p, proc, req)
+	return g.Authorize(ctx, p, proc, req)
 }
 
 func (a *authzTestAPI) listRuns(ctx context.Context, who, project string) error {
@@ -168,16 +181,7 @@ func (a *authzTestAPI) listRuns(ctx context.Context, who, project string) error 
 	if err != nil {
 		return nil
 	}
-	runs, ok := a.runs[project]
-	if !ok {
-		a.w.lastList = nil
-		return nil
-	}
-	out := make([]string, 0, len(runs))
-	for id := range runs {
-		out = append(out, id)
-	}
-	a.w.lastList = out
+	a.w.lastList = sortedRunIDs(a.runs[project])
 	return nil
 }
 
@@ -190,8 +194,9 @@ func (a *authzTestAPI) startRun(ctx context.Context, who, project string) error 
 	if a.runs[project] == nil {
 		a.runs[project] = map[string]string{}
 	}
-	a.runs[project]["r-new"] = "active"
-	a.started = true
+	const newID = "r-new"
+	a.runs[project][newID] = "active"
+	a.startedRunID = newID
 	return nil
 }
 
@@ -204,7 +209,10 @@ func (a *authzTestAPI) cancelRun(ctx context.Context, who, project, runID string
 	if err != nil {
 		return nil
 	}
-	a.cancel = true
+	if a.runs[project] == nil {
+		a.runs[project] = map[string]string{}
+	}
+	a.runs[project][runID] = "cancelled"
 	return nil
 }
 
@@ -212,7 +220,7 @@ func (a *authzTestAPI) resolveGate(ctx context.Context, who, project string) err
 	err := a.invoke(ctx, who, "gate.resolve", authzProjectReq{Project: project})
 	a.w.recordErr(err)
 	if err == nil {
-		a.gate = true
+		a.gateProject = project
 	}
 	return nil
 }
@@ -221,7 +229,7 @@ func (a *authzTestAPI) sendMessage(ctx context.Context, who, project string) err
 	err := a.invoke(ctx, who, "conversation.send", authzProjectReq{Project: project})
 	a.w.recordErr(err)
 	if err == nil {
-		a.message = true
+		a.messageProject = project
 	}
 	return nil
 }
@@ -243,6 +251,11 @@ func (a *authzTestAPI) listCredNames(ctx context.Context, who, project string) e
 		names = append(names, r.Name)
 	}
 	a.w.lastNames = names
+	body, err := json.Marshal(names)
+	if err != nil {
+		return err
+	}
+	a.w.lastNamesJSON = body
 	return nil
 }
 
@@ -250,10 +263,12 @@ func (a *authzTestAPI) resolveCred(ctx context.Context, who, project, raw string
 	err := a.invoke(ctx, who, "credential.resolve", authzCredResolveReq{Project: project, Name: raw})
 	if err != nil {
 		a.w.recordErr(err)
+		a.w.lastResolveBody = []byte("null")
 		return nil
 	}
 	tctx := a.w.tenantCtx(a.w.tenant)
 	val, err := a.credStore.Resolve(tctx, raw)
+	a.w.lastResolveBody = []byte("null")
 	if err != nil {
 		a.w.recordErr(err)
 		return nil
