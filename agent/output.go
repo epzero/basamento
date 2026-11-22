@@ -48,13 +48,16 @@ type carried struct {
 }
 
 // parseHandoff reads an agent node's input. It returns nil when the input is
-// not a handoff, so the node starts its own run.
+// not a handoff, so the node starts its own run with a user message from it
+// (REQ-AGENT-031): only a JSON object can carry a handoff, so any other JSON
+// is plain input rather than an invalid handoff.
 func parseHandoff(input json.RawMessage) (*carried, error) {
-	if len(bytes.TrimSpace(input)) == 0 {
+	trimmed := bytes.TrimSpace(input)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, nil
 	}
 	var out Output
-	if err := json.Unmarshal(input, &out); err != nil {
+	if err := json.Unmarshal(trimmed, &out); err != nil {
 		return nil, invalid("agent: invalid handoff input: "+err.Error(), nil)
 	}
 	if out.State != StateHandoff {

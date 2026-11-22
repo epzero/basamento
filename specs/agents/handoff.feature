@@ -158,7 +158,7 @@ Feature: Handoff to another agent
     Then the agent run fails with code "invalid_argument"
     And the agent run has 0 tool-call steps
 
-  @planned @wp:WP-L7-01 @REQ-AGENT-031 @id:AGENT-031-02
+  @wp:WP-L7-01 @REQ-AGENT-031 @id:AGENT-031-02
   Scenario: A handoff target is not seeded with a second user message
     Given the scripted model of "triage" requests a handoff to agent "fixer" in 1 turn
     And an agent run of "triage" completed with a handoff to node "fixer"

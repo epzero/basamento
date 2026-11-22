@@ -52,7 +52,7 @@ Feature: One model turn per step
     Then the agent run is completed with output "Done."
     And the scripted model received 2 invocations
 
-  @planned @wp:WP-L7-01 @REQ-AGENT-031 @id:AGENT-031-01
+  @wp:WP-L7-01 @REQ-AGENT-031 @id:AGENT-031-01
   Scenario: A node input becomes the first user message of the first turn
     Given the scripted model of "worker" answers "Done." in 1 turn
     And the input to agent node "worker" is the string "What is 2+2?"
@@ -61,7 +61,7 @@ Feature: One model turn per step
     And the agent run is completed with output "Done."
     And the agent run has 1 model turn step
 
-  @planned @wp:WP-L7-01 @REQ-AGENT-032 @id:AGENT-032-01
+  @wp:WP-L7-01 @REQ-AGENT-032 @id:AGENT-032-01
   Scenario: A run with no user message fails before reserving or invoking
     Given agent "worker" has no system message
     And the input to agent node "worker" is empty

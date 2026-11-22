@@ -72,7 +72,7 @@ Feature: Caps on steps, cost, tokens and time
     Then the agent run is completed with output "Done."
     And the scripted model received 2 invocations
 
-  @planned @wp:WP-L7-01 @REQ-AGENT-012 @id:AGENT-012-03
+  @wp:WP-L7-01 @REQ-AGENT-012 @id:AGENT-012-03
   Scenario: The time cap is not deferred to an amortized check boundary
     Given agent "worker" has a time cap of 1 minute
     And agent "worker" checks its caps every 3 turns
