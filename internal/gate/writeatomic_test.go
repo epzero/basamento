@@ -22,8 +22,7 @@ func TestDirSyncErr(t *testing.T) {
 	}{
 		{"nil", nil, nil},
 		{"EINVAL", syscall.EINVAL, nil},
-		{"ENOTSUP", syscall.ENOTSUP, nil},
-		{"EOPNOTSUPP", syscall.EOPNOTSUPP, nil},
+		{"ErrUnsupported", errors.ErrUnsupported, nil},
 		{"EIO", syscall.EIO, syscall.EIO},
 		{"wrapped EINVAL", pathErr(syscall.EINVAL), nil},
 		{"wrapped EIO", pathErr(syscall.EIO), syscall.EIO},

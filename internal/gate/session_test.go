@@ -335,10 +335,12 @@ func TestCloneLockSerialisesWriters(t *testing.T) {
 }
 
 func TestCloneLockWaitOutlastsTheWorstCaseHold(t *testing.T) {
-	// The slowest agent new path runs two sequential remote git calls (for
-	// example ls-remote then fetch), each bounded by a remote timeout plus its
-	// wait delay. The waiter's budget must leave room for local work on top.
-	worstHold := 2 * (gitRemoteTimeout + gitWaitDelay)
+	// The slowest agent new -branch path runs four sequential remote git
+	// calls: ls-remote then fetch to bootstrap a branch that is only on
+	// origin, then ls-remote then fetch again in fastForwardBranch or
+	// reviewDetachSHA. Each is bounded by a remote timeout plus its wait
+	// delay. The waiter's budget must leave room for local work on top.
+	worstHold := 4 * (gitRemoteTimeout + gitWaitDelay)
 	if cloneLockWait < worstHold+10*time.Second {
 		t.Fatalf("cloneLockWait = %s; want at least %s (worst-case hold plus margin)", cloneLockWait, worstHold+10*time.Second)
 	}
@@ -1379,11 +1381,16 @@ func installPostCheckoutHook(t *testing.T, repo string) {
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The host's global or system core.hooksPath must not decide whether this
+	// hook runs: pin the scratch repository's own config to the hooks dir we
+	// write. An absolute path survives git running in a linked worktree.
+	mustGit(t, repo, "config", "core.hooksPath", hooks)
 	script := `#!/bin/sh
-if [ "$1" = "0000000000000000000000000000000000000000" ]; then
-  exit 0
-fi
-exit 1
+# Any all-zero object id is the null id: 40 hex zeros on SHA-1, 64 on SHA-256.
+case "$1" in
+  "" | *[!0]*) exit 1 ;;
+  *) exit 0 ;;
+esac
 `
 	path := filepath.Join(hooks, "post-checkout")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

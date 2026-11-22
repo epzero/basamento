@@ -45,16 +45,17 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
 - **`-branch`** names are validated in pure Go before any `git` call: letters,
   digits, `-` and `_` only, not starting with `-`, and not `HEAD` (no `/`,
   spaces, refspecs, or path components). A branch is checked out in at most
-  one worktree at a time. Before listing worktrees, `gate agent new` prunes
-  registrations whose directory is already gone, so a deleted worktree never
-  blocks a retry. If it is already checked out in a linked worktree,
-  `gate agent new -branch` refuses with that worktree's path and tells you to
-  work there or `gate agent release` that worktree first. If it is checked out
-  in the main checkout, the refusal names that path and tells you to switch
-  that checkout to another branch (for example `git switch main`), then retry, or
-  work there. If the branch is not on `origin` yet, the refusal tells you to
-  push it from the clone that started it, then run `gate agent new -branch`
-  again.
+  one worktree at a time. `gate agent new -branch` runs `git worktree prune`
+  before listing worktrees: that drops every registration in this clone whose
+  directory is already gone (it never touches working files), so a deleted
+  worktree never blocks a retry. If it is already checked out in a linked
+  worktree, `gate agent new -branch` refuses with that worktree's path and
+  tells you to work there or `gate agent release` that worktree first. If it is
+  checked out in the main checkout, the refusal names that path and tells you
+  to switch that checkout to another branch (for example `git switch main`),
+  then retry, or work there. If the branch is not on `origin` yet, the refusal
+  tells you to push it from the clone that started it, then run
+  `gate agent new -branch` again.
 - **Squash-merged branches.** `gate agent list` and release also treat a branch
   as merged when `squashed()` applies: `branch.<name>.remote` is set (only
   `git push -u origin <branch>` does that; a plain `git push origin <branch>`
@@ -71,9 +72,17 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
   `gate agent status` and `gate agent release` each take it for the whole
   read-modify-write of `basamento-agent.json` (and worktree creation on
   `agent new`). Read-only commands such as `agent list` and `agent whoami` do
-  not. A second writer waits up to 80 seconds (two sequential bounded remote
-  git calls on the slowest `agent new` path, plus local work), then reports
-  that another `gate agent` command in this clone may still be running.
+  not. A second writer waits up to 150 seconds (four sequential bounded remote
+  git calls on the slowest `agent new -branch` path: `ls-remote` then `fetch`
+  to bootstrap a branch that is only on `origin`, then `ls-remote` then
+  `fetch` again in the fast-forward or reviewer detach, plus local work and a
+  10-second margin), then reports that another `gate agent` command in this
+  clone may still be running.
+- **The budget bounds the wait, not the hold.** Only remote git calls have a
+  deadline. A local `git` call stuck on a hung file system or a slow hook keeps
+  the clone lock until it ends, and every `agent new`, `agent status` and
+  `agent release` waits and fails behind it. The operating system drops the
+  `flock` when the holding process dies, so killing that process recovers.
 - **Remote git calls are bounded.** A `fetch` or `ls-remote` gives up after 30
   seconds and says what to check (the remote, the network, the credentials). git
   is killed at the deadline, and the call is force-closed a few seconds later

@@ -10,15 +10,20 @@ import (
 )
 
 // cloneLockWait bounds how long `gate agent` commands wait for another writer
-// in this clone. The longest healthy hold is a NewSession path that runs two
-// sequential remote git calls (for example fastForwardBranch or
-// reviewDetachSHA: originHasBranch via ls-remote, then fetch), each bounded by
-// gitRemoteTimeout plus gitWaitDelay, plus local work. The budget is that
-// worst-case hold plus 10s so a healthy but slow first call never makes a
-// waiter on the second fail. The budget outlasts one such holder, not a queue:
-// several slow commands in a row can still make a later waiter time out with
-// the usual “another gate agent command may still be running” message.
-const cloneLockWait = 2*(gitRemoteTimeout+gitWaitDelay) + 10*time.Second
+// in this clone. The longest healthy hold is a NewSession -branch path that
+// runs four sequential remote git calls: continueBranch runs ls-remote then
+// fetch to bootstrap a branch that is only on origin, then fastForwardBranch
+// (or reviewDetachSHA for a code reviewer) runs ls-remote then fetch again.
+// Each call is bounded by gitRemoteTimeout plus gitWaitDelay, so the budget is
+// that worst-case hold plus 10s, so a healthy but slow holder never makes a
+// waiter fail. The budget bounds the wait, not the hold: only remote calls
+// have a deadline. A local git call stuck on a hung file system or a slow hook
+// keeps the lock until it ends; the operating system drops the flock when the
+// holder dies, so killing the holder recovers. The budget outlasts one such
+// holder, not a queue: several slow commands in a row can still make a later
+// waiter time out with the usual “another gate agent command may still be
+// running” message.
+const cloneLockWait = 4*(gitRemoteTimeout+gitWaitDelay) + 10*time.Second
 
 // errLockContended reports that the lock is held elsewhere. A lock failure for
 // another reason (permissions, a read-only file system, no flock on this
