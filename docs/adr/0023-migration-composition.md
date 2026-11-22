@@ -247,9 +247,10 @@ applied there, and the binary set does not contain it either.
    later one applied, SQLite ignoring `.postgres.sql` fragments, and a database
    carrying a version the binary does not ship. `specs-needed`; needs a spec
    review and a work package before code.
-2. **EP0-222 — `cmd/kit` runs capability migrations** — compose the capability
-   sets in `openSQL` for the cloud and embedded profiles, with the same ledger
-   bands, and cover it with a `kit serve` scenario. Blocked by EP0-221.
+2. **EP0-220 — `cmd/kit` cloud wiring** — compose the capability sets in
+   `openSQL` with the same ledger bands, beside `sql.migrate_url` (EP0-217) and
+   the RLS `Open` mode; cover it with a `kit serve` scenario. Blocked by
+   EP0-221, and by EP0-217 for the config half.
 
-Both are filed, linked from EP0-216, and assigned to the designer so specs
-precede code.
+Both are filed and linked from EP0-216; EP0-221 is with the designer
+(`specs-needed`), EP0-220 waits on it.
