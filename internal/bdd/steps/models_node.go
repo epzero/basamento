@@ -495,6 +495,15 @@ func (w *nodeWorld) cancelRun() error {
 	case <-w.provider.cancelCh:
 		return nil
 	case <-w.doneCh:
+		// The runtime ends the run while delivering the cancel, so doneCh and
+		// the provider's buffered confirmation can be ready together and the
+		// select may pick either. The provider confirms before the handler
+		// returns, so drain the confirmation before reporting a lost cancel.
+		select {
+		case <-w.provider.cancelCh:
+			return nil
+		default:
+		}
 		return fmt.Errorf("the run ended before the provider received a cancel request")
 	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the cancel request")
