@@ -55,6 +55,22 @@ func TestCompileCrossChecksTheIRAgainstTheRunner(t *testing.T) {
 				def.Nodes[codegenir.VerifyStage] = node
 			},
 		},
+		{
+			name: "empty run-tests args",
+			mutate: func(def *flow.IR) {
+				node := def.Nodes[codegenir.VerifyChild]
+				node.Spec = json.RawMessage(`{"tool":"run-tests","args":[]}`)
+				def.Nodes[codegenir.VerifyChild] = node
+			},
+		},
+		{
+			name: "run-tests outside the plan map",
+			mutate: func(def *flow.IR) {
+				node := def.Nodes[codegenir.CommitStage]
+				node.Spec = json.RawMessage(`{"tool":"run-tests"}`)
+				def.Nodes[codegenir.CommitStage] = node
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -128,7 +128,7 @@ func loop(name string, first string) *flow.IR {
 			VerifyChild: {
 				Kind: "tool",
 				Out:  "tests",
-				Spec: json.RawMessage(`{"tool":"run-tests","args":[]}`),
+				Spec: json.RawMessage(`{"tool":"run-tests"}`),
 			},
 			RepairStage: {
 				Kind:  "agent",
@@ -162,24 +162,67 @@ func loop(name string, first string) *flow.IR {
 	}
 }
 
-// VerifyNodes returns one tool node per plan test, in plan order. Each node
-// carries its command as literal spec.args: the host reads spec.tool and
-// delivers the args, never a "command" field.
-func VerifyNodes(tests []string) map[string]flow.Node {
-	nodes := make(map[string]flow.Node, len(tests))
-	for i, test := range tests {
-		nodes[fmt.Sprintf("%s_%d", VerifyChild, i+1)] = VerifyNode(test)
+// CheckVerify enforces the verify stage's declared shape: a map over
+// state.plan.tests whose child is the run-tests tool node. The plan is a
+// runtime output, so the static IR cannot hold one node per test; the map is
+// how the flow declares one tool execution per test, in plan order. The map
+// delivers each test as the child's input, and the host passes a tool node's
+// input as its call args, so the child must not carry a static spec.args that
+// would claim a different command. A run-tests node outside that map must
+// carry its command as non-empty literal spec.args: nothing else supplies it,
+// and an empty list would run the tool with no command.
+func CheckVerify(def *flow.IR) error {
+	stage, ok := def.Nodes[VerifyStage]
+	if !ok {
+		return fmt.Errorf("codegen ir: flow %q has no stage %q", def.Name, VerifyStage)
 	}
-	return nodes
-}
-
-// VerifyNode returns the tool node that runs one plan test.
-func VerifyNode(test string) flow.Node {
-	spec, err := json.Marshal(map[string]any{"tool": "run-tests", "args": []string{test}})
-	if err != nil {
-		panic("codegen ir: verify node: " + err.Error())
+	if stage.Kind != "map" {
+		return fmt.Errorf("codegen ir: flow %q stage %q is %q, want map", def.Name, VerifyStage, stage.Kind)
 	}
-	return flow.Node{Kind: "tool", Out: "tests", Spec: spec}
+	var spec struct {
+		Over        string `json:"over"`
+		Node        string `json:"node"`
+		MaxParallel *int   `json:"max_parallel"`
+	}
+	if err := json.Unmarshal(stage.Spec, &spec); err != nil {
+		return fmt.Errorf("codegen ir: flow %q stage %q: %s", def.Name, VerifyStage, err.Error())
+	}
+	if spec.Over != "state.plan.tests" || spec.Node != VerifyChild || spec.MaxParallel == nil || *spec.MaxParallel != 0 {
+		return fmt.Errorf("codegen ir: flow %q stage %q must map state.plan.tests over %q with max_parallel 0", def.Name, VerifyStage, VerifyChild)
+	}
+	child, ok := def.Nodes[VerifyChild]
+	if !ok {
+		return fmt.Errorf("codegen ir: flow %q has no verify child %q", def.Name, VerifyChild)
+	}
+	if child.Kind != "tool" {
+		return fmt.Errorf("codegen ir: flow %q verify child %q is %q, want tool", def.Name, VerifyChild, child.Kind)
+	}
+	var childSpec map[string]json.RawMessage
+	if err := json.Unmarshal(child.Spec, &childSpec); err != nil {
+		return fmt.Errorf("codegen ir: flow %q verify child %q: %s", def.Name, VerifyChild, err.Error())
+	}
+	if string(childSpec["tool"]) != `"run-tests"` {
+		return fmt.Errorf("codegen ir: flow %q verify child %q runs %s, want run-tests", def.Name, VerifyChild, childSpec["tool"])
+	}
+	if _, ok := childSpec["args"]; ok {
+		return fmt.Errorf("codegen ir: flow %q verify child %q declares spec.args; the map supplies each test as the node input", def.Name, VerifyChild)
+	}
+	for id, node := range def.Nodes {
+		if id == VerifyChild || node.Kind != "tool" {
+			continue
+		}
+		var nodeSpec struct {
+			Tool string   `json:"tool"`
+			Args []string `json:"args"`
+		}
+		if err := json.Unmarshal(node.Spec, &nodeSpec); err != nil {
+			return fmt.Errorf("codegen ir: flow %q node %q: %s", def.Name, id, err.Error())
+		}
+		if nodeSpec.Tool == "run-tests" && len(nodeSpec.Args) == 0 {
+			return fmt.Errorf("codegen ir: flow %q node %q runs run-tests with empty or missing spec.args", def.Name, id)
+		}
+	}
+	return nil
 }
 
 // ExpectedStages is the stage order the IR declares for both run flows. The
@@ -195,6 +238,9 @@ func ExpectedStages() []string {
 func CheckLoop(def *flow.IR) error {
 	if def == nil {
 		return fmt.Errorf("codegen ir: nil flow")
+	}
+	if err := CheckVerify(def); err != nil {
+		return err
 	}
 	want := []flow.Edge{
 		{From: flowir.Start, To: PlanStages},

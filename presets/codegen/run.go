@@ -6,10 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"path"
 	"strings"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/platform/workspace"
 )
 
 // ErrStop is returned by a Control to pause a run after a named stage. The
@@ -289,7 +289,11 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			if err != nil {
 				return err
 			}
-			st.Workspace = accumulateWorkspace(st.Workspace, ws)
+			merged, err := accumulateWorkspace(st.Workspace, ws)
+			if err != nil {
+				return err
+			}
+			st.Workspace = merged
 		}
 		st.complete(stage)
 		st.Next = StageVerify
@@ -515,7 +519,13 @@ func commitKey(st *State, stage Stage) string {
 	return st.RunID + ":" + string(stage)
 }
 
-func accumulateWorkspace(base, next Workspace) Workspace {
+// accumulateWorkspace merges one model's workspace into the run's. Every key
+// is checked before it is merged, so a path that escapes the work directory
+// never reaches the sandbox or a later stage (REQ-PRESET-005, 011).
+func accumulateWorkspace(base, next Workspace) (Workspace, error) {
+	if err := checkWorkspaceFiles(next, "workspace"); err != nil {
+		return Workspace{}, err
+	}
 	if len(next.Files) > 0 {
 		if base.Files == nil {
 			base.Files = map[string]string{}
@@ -527,7 +537,7 @@ func accumulateWorkspace(base, next Workspace) Workspace {
 	if next.ID != "" {
 		base.ID = next.ID
 	}
-	return base
+	return base, nil
 }
 
 func decodeWorkspace(resp json.RawMessage, who string) (Workspace, error) {
@@ -538,7 +548,22 @@ func decodeWorkspace(resp json.RawMessage, who string) (Workspace, error) {
 	if ws.ID == "" {
 		return Workspace{}, invalid("codegen: %s returned a workspace with no id", who)
 	}
+	if err := checkWorkspaceFiles(ws, who); err != nil {
+		return Workspace{}, err
+	}
 	return ws, nil
+}
+
+// checkWorkspaceFiles rejects a workspace key that is not a clean relative
+// path, before the workspace is tested or merged. The commit repeats the check
+// on what it writes; this one keeps an escaping key out of the sandbox.
+func checkWorkspaceFiles(ws Workspace, who string) error {
+	for name := range ws.Files {
+		if !workspace.ValidPath(name) {
+			return invalid("codegen: %s returned workspace path %q, which is not a clean relative path", who, name)
+		}
+	}
+	return nil
 }
 
 func decodeFindings(resp json.RawMessage) (Findings, error) {
@@ -576,26 +601,11 @@ func validateCommit(c Commit) error {
 		return invalid("codegen: a commit to an existing repository needs a branch")
 	}
 	for name := range c.Workspace.Files {
-		if !validWorkspacePath(name) {
+		if !workspace.ValidPath(name) {
 			return invalid("codegen: commit workspace path %q is not a clean relative path", name)
 		}
 	}
 	return nil
-}
-
-func validWorkspacePath(name string) bool {
-	if name == "" || path.IsAbs(name) || strings.Contains(name, `\`) {
-		return false
-	}
-	if path.Clean(name) != name {
-		return false
-	}
-	for _, segment := range strings.Split(name, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return false
-		}
-	}
-	return true
 }
 
 func validRepo(repo string) bool {

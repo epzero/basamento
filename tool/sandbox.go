@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/platform/workspace"
 )
 
 // DefaultSandboxTimeout bounds a command whose spec declares no time limit.
@@ -198,7 +198,7 @@ func addStream(doc map[string]any, name string, value []byte) {
 // directory or whose environment names would override the driver's own.
 func validateSandboxSpec(spec SandboxSpec) error {
 	for name := range spec.Files {
-		if !sandboxFilePath(name) {
+		if !workspace.ValidPath(name) {
 			return core.NewError(core.CodeInvalidArgument,
 				fmt.Sprintf("sandbox: file %q is not a relative path inside the work directory", name), nil)
 		}
@@ -210,14 +210,6 @@ func validateSandboxSpec(spec SandboxSpec) error {
 		}
 	}
 	return nil
-}
-
-func sandboxFilePath(name string) bool {
-	if name == "" || strings.ContainsRune(name, 0) || strings.Contains(name, `\`) || path.IsAbs(name) {
-		return false
-	}
-	clean := path.Clean(name)
-	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
 // reservedSandboxEnv are the names a command's own loader or shell reads

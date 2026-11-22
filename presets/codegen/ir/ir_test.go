@@ -20,14 +20,15 @@ func TestVerifyRunsOneToolNodePerPlanTest(t *testing.T) {
 			t.Fatalf("verify kind %q, want map", verify.Kind)
 		}
 		var spec struct {
-			Over string `json:"over"`
-			Node string `json:"node"`
+			Over        string `json:"over"`
+			Node        string `json:"node"`
+			MaxParallel *int   `json:"max_parallel"`
 		}
 		if err := json.Unmarshal(verify.Spec, &spec); err != nil {
 			t.Fatal(err)
 		}
-		if spec.Over != "state.plan.tests" || spec.Node != VerifyChild {
-			t.Fatalf("verify map %+v, want one run-tests child per plan test", spec)
+		if spec.Over != "state.plan.tests" || spec.Node != VerifyChild || spec.MaxParallel == nil || *spec.MaxParallel != 0 {
+			t.Fatalf("verify map %+v, want one run-tests child per plan test, sequentially", spec)
 		}
 		child, ok := def.Nodes[VerifyChild]
 		if !ok {
@@ -46,28 +47,58 @@ func TestVerifyRunsOneToolNodePerPlanTest(t *testing.T) {
 		if string(childSpec["tool"]) != `"run-tests"` {
 			t.Fatalf("verify child tool %s, want run-tests", childSpec["tool"])
 		}
+		// EP36-F1: the map item is the test and the host passes a tool
+		// node's input as its call args, so a static args list is wrong.
+		if _, ok := childSpec["args"]; ok {
+			t.Fatal("verify child declares spec.args; the map supplies the test as its input")
+		}
+		if err := CheckVerify(def); err != nil {
+			t.Fatalf("CheckVerify: %v", err)
+		}
 	}
+}
 
-	nodes := VerifyNodes([]string{"go test ./store", "go test ./api"})
-	if len(nodes) != 2 {
-		t.Fatalf("VerifyNodes returned %d nodes, want 2", len(nodes))
+// EP36-F1: a run-tests node outside the plan map, or a map child that claims
+// static args, is rejected instead of running the tool with no command.
+func TestCheckVerifyRejectsARunTestsNodeWithoutAPlanCommand(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		mutate func(*flow.IR)
+	}{
+		{
+			name: "map child with empty args",
+			mutate: func(def *flow.IR) {
+				node := def.Nodes[VerifyChild]
+				node.Spec = json.RawMessage(`{"tool":"run-tests","args":[]}`)
+				def.Nodes[VerifyChild] = node
+			},
+		},
+		{
+			name: "tool outside the map with missing args",
+			mutate: func(def *flow.IR) {
+				node := def.Nodes[CommitStage]
+				node.Spec = json.RawMessage(`{"tool":"run-tests"}`)
+				def.Nodes[CommitStage] = node
+			},
+		},
+		{
+			name: "tool outside the map with empty args",
+			mutate: func(def *flow.IR) {
+				node := def.Nodes[CommitStage]
+				node.Spec = json.RawMessage(`{"tool":"run-tests","args":[]}`)
+				def.Nodes[CommitStage] = node
+			},
+		},
 	}
-	want := []string{"go test ./store", "go test ./api"}
-	for i, id := range []string{"verify_test_1", "verify_test_2"} {
-		node, ok := nodes[id]
-		if !ok {
-			t.Fatalf("no node %q", id)
-		}
-		var spec struct {
-			Tool string   `json:"tool"`
-			Args []string `json:"args"`
-		}
-		if err := json.Unmarshal(node.Spec, &spec); err != nil {
-			t.Fatal(err)
-		}
-		if spec.Tool != "run-tests" || len(spec.Args) != 1 || spec.Args[0] != want[i] {
-			t.Fatalf("node %q spec %+v, want run-tests with %q", id, spec, want[i])
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			def := Bootstrap()
+			tc.mutate(def)
+			if err := CheckVerify(def); err == nil {
+				t.Fatal("CheckVerify accepted a run-tests node with no command")
+			}
+		})
 	}
 }
 

@@ -663,19 +663,51 @@ func TestValidateCommit(t *testing.T) {
 	}
 }
 
-func TestCommitRejectsAnUnsafeWorkspaceBeforeTheHost(t *testing.T) {
+// EP36-F2: an escaping workspace key is rejected when the model returns it,
+// before verify hands the workspace to the sandbox and before the git host.
+func TestUnsafeWorkspaceIsRejectedBeforeTheSandbox(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		ws   Workspace
+	}{
+		{name: "parent path", ws: Workspace{ID: "ws-store", Files: map[string]string{"../etc/passwd": "x"}}},
+		{name: "dirty spelling", ws: Workspace{ID: "ws-store", Files: map[string]string{"foo/../bar": "x"}}},
+		{name: "absolute path", ws: Workspace{ID: "ws-store", Files: map[string]string{"/etc/passwd": "x"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &fakeModel{plan: planOf("store"), moduleWS: map[string]Workspace{"store": tc.ws}}
+			sandbox := &fakeSandbox{}
+			git := &fakeGit{}
+			_, err := bootstrapRunner(model, sandbox, git, DefaultGuards()).Start(context.Background(), Input{Brief: "invoices"}, NoControl{})
+			if core.CodeOf(err) != core.CodeInvalidArgument {
+				t.Fatalf("err = %v, want invalid_argument", err)
+			}
+			if len(sandbox.calls) != 0 {
+				t.Fatalf("the sandbox was called %d times, want 0", len(sandbox.calls))
+			}
+			if len(git.commits) != 0 {
+				t.Fatalf("the git host was called %d times, want 0", len(git.commits))
+			}
+		})
+	}
+}
+
+// EP36-F2: the same check applies to a repair workspace, which replaces the
+// run's workspace and is verified next.
+func TestUnsafeRepairWorkspaceIsRejectedBeforeTheSandbox(t *testing.T) {
 	t.Parallel()
 	model := &fakeModel{
-		plan:     planOf("store"),
-		moduleWS: map[string]Workspace{"store": {ID: "ws-store", Files: map[string]string{"../etc/passwd": "x"}}},
+		plan:    planOf("store"),
+		repairs: []Workspace{{ID: "ws-repair", Files: map[string]string{"foo/../bar": "x"}}},
 	}
-	git := &fakeGit{}
-	_, err := bootstrapRunner(model, &fakeSandbox{}, git, DefaultGuards()).Start(context.Background(), Input{Brief: "invoices"}, NoControl{})
+	sandbox := &fakeSandbox{results: []TestResult{{Failures: []string{"tests fail"}}}}
+	_, err := bootstrapRunner(model, sandbox, &fakeGit{}, DefaultGuards()).Start(context.Background(), Input{Brief: "invoices"}, NoControl{})
 	if core.CodeOf(err) != core.CodeInvalidArgument {
 		t.Fatalf("err = %v, want invalid_argument", err)
 	}
-	if len(git.commits) != 0 {
-		t.Fatalf("the git host was called %d times, want 0", len(git.commits))
+	if len(sandbox.calls) != 1 {
+		t.Fatalf("the sandbox was called %d times, want only the first verify", len(sandbox.calls))
 	}
 }
 
