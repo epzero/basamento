@@ -150,10 +150,19 @@ Feature: Permission checks
   Scenario: Scopes of a worker token narrow but never widen
     Given principal "bot" of tenant "acme" has role "member" in project "p1"
     And the principal "bot" carries scopes "session:s1"
+    And resource "run:r1" has session "s1"
     When bot attempts action "run.cancel" on resource "run:r1" in project "p1"
     Then the action is allowed for bot
     When bot attempts action "run.cancel" on resource "run:r2" in project "p1"
     Then the action fails with code "permission_denied"
+
+  @planned @wp:WP-L8-02 @security @REQ-AUTH-030 @id:AUTH-030-01
+  Scenario: A scope list with no recognized form denies everything
+    Given principal "bot" of tenant "acme" has role "member" in project "p1"
+    And the principal "bot" carries scopes "openid profile"
+    When bot attempts action "run.cancel" on a run in project "p1"
+    Then the action fails with code "permission_denied"
+    And an audit event records the denied action by bot with reason "scope-narrowed"
 
   @planned @wp:WP-L8-02 @security @REQ-AUTH-019 @id:AUTH-019-01
   Scenario: A denial reveals no role or permission detail
@@ -193,7 +202,7 @@ Feature: Permission checks
 
   @planned @wp:WP-L8-02 @security @REQ-AUTH-024 @id:AUTH-024-01
   Scenario: A denial audit event carries only safe fields
-    Given principal "vic" of tenant "acme" has a binding in project "p1" with condition "resource.owner == principal.id"
+    Given principal "vic" of tenant "acme" has a binding in project "p1" with condition "resource.attrs.owner == principal.id"
     When vic cancels a run "r1" in project "p1"
     Then an audit event records action "authz.deny" and outcome "denied" by vic
     And the audit event names resource "run:r1" with no attributes

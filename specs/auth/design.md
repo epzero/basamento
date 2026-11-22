@@ -1,7 +1,7 @@
 # Authorization: design notes for the implementer
 
 Work package WP-L8-02 (EP0-206), owned directory `auth/authz`. Requirements:
-[`requirements.md`](requirements.md) (REQ-AUTH-006 … REQ-AUTH-029). Scenarios:
+[`requirements.md`](requirements.md) (REQ-AUTH-006 … REQ-AUTH-031). Scenarios:
 [`permissions.feature`](permissions.feature). Decisions: [ADR-0008](../../docs/adr/0008-auth-modes-and-in-app-authorization.md)
 (in-app RBAC, per-project role bindings in SQL, one check in a connect
 interceptor, optional CEL conditions, denial audit, Postgres row-level security),
@@ -92,6 +92,10 @@ type Resource struct {
     Kind    string            // tenant-scoped kind from the catalog, e.g. "run"
     ID      string            // id within the tenant and kind, e.g. "r1"
     Attrs   map[string]any    // only for CEL conditions; never audited
+    // Session is filled by the per-RPC resolver, the only party with the
+    // domain store. It identifies the session a scoped worker token is bound
+    // to. It is not audited and is not a CEL attribute.
+    Session string            // optional; empty when the resource is not session-scoped
 }
 ```
 
@@ -171,10 +175,26 @@ func Check(ctx, principal, action, resource) error {
 fixed message `"permission denied"` — no action, role or permission name, and
 no reason category in the message (REQ-AUTH-019). The reason category is only
 in the audit event. `unavailable` also denies; any other internal failure
-follows the same fail-closed path. `Narrow` subtracts permissions outside the
-scopes: a scoped worker token (REQ-AUTH-005) starts from the role union and can
-only lose permissions, so a wider resource id or action than the token carries
-is denied.
+follows the same fail-closed path.
+
+`Narrow` applies `principal.Scopes` to the role union (REQ-AUTH-018,
+REQ-AUTH-030). Scopes only ever subtract permissions; a scoped worker token
+(REQ-AUTH-005) starts from the role union and can only lose permissions. The
+only recognized scope form today is `session:<id>`: a scope of that form keeps
+a granted permission only when `Resource.Session == <id>`. A scope string in
+any other form grants nothing. A non-empty scope list with no recognized form
+denies every action with the reason category `scope-narrowed` (fail closed);
+an empty scope list does not narrow at all. The resolver must populate
+`Resource.Session` for every resource a worker token can address (REQ-AUTH-005);
+`auth/authz` still never reads the runs table (REQ-AUTH-009). Other scope forms
+(action lists, resource lists) may be added later, additively.
+
+`principal.Scopes` holds only authorization scopes minted by the system for
+scoped worker or service tokens (REQ-AUTH-005, REQ-AUTH-031). An identity
+provider's OAuth `scope` claim is never copied into it. This keeps an ordinary
+OIDC user unnarrowed by provider scopes that have no authorization meaning,
+while a token whose scopes were all unrecognized would otherwise be denied
+under the fail-closed rule above.
 
 ## 6. CEL conditions
 
@@ -185,6 +205,9 @@ compiled and type-checked once, with `Grant`, against this environment:
 principal: { id: string, scopes: list<string> }
 resource:  { project: string, kind: string, id: string, attrs: map<string, dyn> }
 ```
+
+Custom resource attributes live under `resource.attrs`, so a grant condition
+uses `resource.attrs.owner` (not `resource.owner`) to type-check (REQ-AUTH-021).
 
 The result must be `bool`. A condition that fails to compile or type-check, or
 that references a clock or random function (`now`, `random`, and the like), is

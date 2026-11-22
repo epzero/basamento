@@ -26,6 +26,13 @@ Feature: Authentication and tenancy
       | issued for audience "other"    |
       | expired one minute ago         |
 
+  @planned @wp:WP-L8-01 @REQ-AUTH-031 @id:AUTH-031-01
+  Scenario: Provider OAuth scopes do not become authorization scopes
+    Given auth mode "oidc" with issuer "https://id.example.test" and audience "kit"
+    When a request carries a valid token with provider scope claim "openid profile email"
+    Then the request is accepted
+    And the principal carries no scopes
+
   @planned @REQ-AUTH-005 @wp:WP-L9-01 @level:system @id:AUTH-005-01
   Scenario: A worker token reaches only its own session
     Given the system issued a worker token for browser session "s1" expiring in 1 hour
