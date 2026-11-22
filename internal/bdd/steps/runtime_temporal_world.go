@@ -18,6 +18,24 @@ import (
 	"github.com/epzero/basamento/runtime/temporal"
 )
 
+// temporalControlState holds the last outcome of control-plane calls (Start,
+// Describe, List, and similar) separate from data-path workflow execution.
+type temporalControlState struct {
+	lastErr            error
+	lastStart          runtime.RunRef
+	lastStatus         runtime.RunStatus
+	lastList           []runtime.RunStatus
+	pendingRef         runtime.RunRef
+	haveListed         bool
+	flowAttrRegistered bool
+}
+
+// temporalServeState owns the Serve goroutine and its cancellation.
+type temporalServeState struct {
+	cancel context.CancelFunc
+	done   chan error
+}
+
 type temporalWorld struct {
 	mu sync.Mutex
 
@@ -61,6 +79,10 @@ type temporalWorld struct {
 	continueFromExec int
 
 	pendingGate pendingGateRun
+
+	stub    *temporalStub
+	control temporalControlState
+	serve   temporalServeState
 }
 
 type temporalStepBehavior struct {
@@ -105,13 +127,39 @@ func temporalW(ctx context.Context) *temporalWorld {
 	return w.Temporal
 }
 
-func (w *temporalWorld) close() {
+func (w *temporalWorld) close() error {
+	serveErr := w.shutdownServe()
+	if w.stub != nil {
+		w.stub.Close()
+		w.stub = nil
+	}
 	if w.blobs != nil {
 		_ = w.blobs.Close()
 	}
 	if w.blobAt != "" {
 		_ = os.RemoveAll(w.blobAt)
 	}
+	return serveErr
+}
+
+func (w *temporalWorld) shutdownServe() error {
+	w.mu.Lock()
+	cancel := w.serve.cancel
+	done := w.serve.done
+	w.serve.cancel = nil
+	w.serve.done = nil
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done == nil {
+		return nil
+	}
+	serveErr := <-done
+	if serveErr != nil {
+		return fmt.Errorf("temporal: Serve returned an error after it was cancelled: %w", serveErr)
+	}
+	return nil
 }
 
 func (w *temporalWorld) prepare() error {
@@ -150,13 +198,18 @@ func (w *temporalWorld) ensureRuntime() error {
 	if w.blobs == nil {
 		return fmt.Errorf("blob store is not prepared")
 	}
+	if w.stub == nil {
+		return fmt.Errorf("temporal test server is not ready")
+	}
 	ob := w.bddOutbox()
+	clientOpts := w.stub.ClientOptions()
 	rt, err := temporal.New(temporal.Options{
 		Payloads:                 w.enc,
 		Blobs:                    w.blobs,
 		ClaimCheckBytes:          w.threshold,
 		Outbox:                   ob,
 		CheckpointEventThreshold: w.ckptThreshold(),
+		Client:                   clientOpts,
 	})
 	if err != nil {
 		return err
