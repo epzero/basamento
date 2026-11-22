@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -48,5 +49,24 @@ func TestCancelRunStillFailsWithoutAConfirmation(t *testing.T) {
 	close(w.doneCh)
 	if err := w.cancelRun(); err == nil {
 		t.Fatal("cancelRun accepted a run that ended with no cancel request")
+	}
+}
+
+// TestEventsSignalsTheRunIsFollowed covers the setup MODEL-009-01 needs before
+// it cancels: the provider must have told the scenario that the run reached
+// the follow step, so the cancel cannot end the run before it is delivered.
+func TestEventsSignalsTheRunIsFollowed(t *testing.T) {
+	w := newNodeWorld()
+	p := newNodeProvider(w, "sim-video", model.CapVideoGenerate)
+	p.runs["ref"] = &providerRun{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := p.Events(ctx, model.Handle{Provider: "sim", ID: "ref", ClientRef: "ref"}, 0); err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	select {
+	case <-p.followedCh:
+	default:
+		t.Fatal("the provider did not signal that the run follows the invocation")
 	}
 }

@@ -110,6 +110,10 @@ func (w *localWorld) execForRun(tenant, runID string) (*localExec, error) {
 
 func localStartWithTenants(ctx context.Context, runID, flow, contextTenant, requestTenant string) error {
 	w := localStepWorld(ctx)
+	// Sample the baseline before Start: Start runs the flow asynchronously, so
+	// a baseline read after it can already include this run's invocation and
+	// the wait below would never be satisfied (EP0-198).
+	before := w.execCount(flow)
 	ref, err := w.runtime(ctx).Start(w.ctx(contextTenant), runtime.StartRequest{
 		Flow:     runtime.FlowRef{Name: flow},
 		RunID:    runID,
@@ -122,7 +126,6 @@ func localStartWithTenants(ctx context.Context, runID, flow, contextTenant, requ
 	w.mu.Lock()
 	w.current = ref
 	w.mu.Unlock()
-	before := w.execCount(flow)
 	return w.spin("the run of "+flow+" to start", func() bool { return w.execCount(flow) > before })
 }
 
