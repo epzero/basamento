@@ -17,11 +17,11 @@ import (
 // from the envelope.
 const DefaultSchemaVersion = 1
 
-// Fault is the deterministic seam tests use to stop the writer or the relay at
-// a named point of its path, as specs/streaming/design.md requires. A point
-// names the step that was reached; returning an error aborts the step (the
-// write transaction rolls back, or the relay pass ends) and a nil result
-// continues. Production passes nil, so no point can fire.
+// Fault is the deterministic seam tests use to stop the writer, the relay or a
+// reader at a named point of its path, as specs/streaming/design.md requires. A
+// point names the step that was reached; returning an error aborts the step
+// (the write transaction rolls back, the relay pass ends, or the read fails)
+// and a nil result continues. Production passes nil, so no point can fire.
 type Fault func(point string) error
 
 // Options configures a Log.

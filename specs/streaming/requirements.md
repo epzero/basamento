@@ -1,6 +1,6 @@
 # Streaming: runs outlive connections
 
-Status: **Partly implemented** (WP-L6-01, `stream/eventlog`; WP-L6-02 is planned). Design: ADR-0005, `docs/architecture/streaming.md`.
+Status: **Partly implemented** (WP-L6-01, `stream/eventlog`; WP-L6-02, `stream`; WP-L6-03 and WP-L6-04 are planned). Design: ADR-0005, `docs/architecture/streaming.md`.
 
 ### REQ-STRM-001 — Runs outlive connections
 When a client detaches from a run stream, the system shall continue the run until it completes, fails, or is cancelled explicitly.

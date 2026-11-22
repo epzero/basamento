@@ -1,4 +1,4 @@
-@planned @wp:WP-L6-02 @runtime:any @level:component
+@wp:WP-L6-02 @runtime:any @level:component
 Feature: Retries and cancellation of streaming steps
 
   @REQ-STRM-004 @id:STRM-004-01
