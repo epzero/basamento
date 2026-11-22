@@ -222,3 +222,24 @@ Feature: Workers pull invocations from their pool's queue
     Then 0 invocations wait in pool "acme-llm"
     And the cloud provider accepted 1 invocation with the same client ref
     And 300 milli-points were reserved before that start
+
+  # Real transport proof: run through WorkerService with a real loopback listener,
+  # fake clock, no sleeps and no vendor calls — not the in-process shortcut.
+  @REQ-MODEL-089 @security @id:MODEL-089-01
+  Scenario: A worker behind NAT is served over WorkerService
+    Given a platform listening for workers on a loopback listener and worker "w1" has no inbound route
+    And worker "w1" joined pool "acme-gpu" with its pool token, declaring model "sdxl"
+    And tenant "acme" queued 1 invocation of "sdxl" for pool "acme-gpu"
+    When worker "w1" dials out to WorkerService and asks for work with 4 free units
+    Then worker "w1" receives 1 invocation, of model "sdxl"
+    And the platform attempted 0 outbound dials to worker "w1"
+
+  # Real transport proof: run through the kit serve listener with a real loopback
+  # listener, fake clock, no sleeps and no vendor calls — not the in-process shortcut.
+  @REQ-MODEL-090 @level:system @id:MODEL-090-01
+  Scenario: kit serve composes the worker side
+    Given kit serve started with pool "acme-gpu" declared and worker "w1" configured, listening for workers on a loopback listener
+    When worker "w1" dials out to WorkerService and finishes invocation "v1" of "sdxl"
+    Then pool "acme-gpu" is registered
+    And the model.Invoker accounted invocation "v1"
+    And remote "cloud-llm" serving "sdxl" is assigned so the router can choose between worker "w1" and remote "cloud-llm"

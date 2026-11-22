@@ -166,6 +166,12 @@ to weigh.
   catalog adds no field to it. `Price` stays the CEL formula over `params`,
   `usage` and `rates`. A worker descriptor and a catalog descriptor with the
   same id must be identical strings (REQ-MODEL-028 compares them).
+- The dial-out path is proved in the gate through WorkerService with a real
+  loopback listener: the in-process transport alone cannot show that a worker
+  behind NAT is served (ADR-0012, MODEL-089-01). `kit serve` owns the worker-side
+  composition root — it opens the store, registers the pool, builds the platform
+  `model.Invoker`, assigns the configured remotes and serves WorkerService for
+  workers that dial in (ADR-0012, MODEL-090-01).
 
 ## C2. The price table
 
