@@ -9,13 +9,14 @@ import (
 	"time"
 )
 
-// issueLockWait bounds how long `gate agent new` waits for another session
-// starting the same work item. The holder keeps the lock while it decides and
-// creates the worktree, which can include remote git calls: a reused worktree
-// may check the remote and then fetch, two calls each bounded by
-// gitRemoteTimeout plus gitWaitDelay. The budget is two such calls plus 10s of
-// local work, so a healthy but slow first call never makes the second fail.
-const issueLockWait = 2*(gitRemoteTimeout+gitWaitDelay) + 10*time.Second
+// cloneLockWait bounds how long `gate agent` commands wait for another writer
+// in this clone. The longest healthy hold is a NewSession path that runs two
+// sequential remote git calls (for example fastForwardBranch or
+// reviewDetachSHA: originHasBranch via ls-remote, then fetch), each bounded by
+// gitRemoteTimeout plus gitWaitDelay, plus local work. The budget is that
+// worst-case hold plus 10s so a healthy but slow first call never makes a
+// waiter on the second fail.
+const cloneLockWait = 2*(gitRemoteTimeout+gitWaitDelay) + 10*time.Second
 
 // errLockContended reports that the lock is held elsewhere. A lock failure for
 // another reason (permissions, a read-only file system, no flock on this
@@ -26,33 +27,29 @@ type fileLock struct {
 	f *os.File
 }
 
-// issueLockPath returns the lock shared by every worktree of the repository.
+// cloneLockPath returns the lock shared by every worktree of the repository.
 // It lives in the common git directory, so main checkout, linked worktrees and
 // their processes contend on the same file.
-func issueLockPath(dir, issue string) (string, error) {
+func cloneLockPath(dir string) (string, error) {
 	common, err := git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(common, "basamento-locks", issue+".lock"), nil
+	return filepath.Join(common, "basamento-locks", "clone.lock"), nil
 }
 
-// acquireIssueLock takes the per-issue lock for the rest of the call. The file
-// is not removed on release: waiters hold its inode, and a third process would
-// otherwise create a second lock at the same path.
-func acquireIssueLock(dir, issue string) (func(), error) {
-	p, err := issueLockPath(dir, issue)
+// acquireCloneLockWithContext takes the per-clone lock, giving up when ctx ends.
+func acquireCloneLockWithContext(ctx context.Context, dir string) (func(), error) {
+	p, err := cloneLockPath(dir)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), issueLockWait)
-	defer cancel()
 	l, err := acquireFileLock(ctx, p)
 	if err != nil {
 		if errors.Is(err, errLockContended) {
-			return nil, fmt.Errorf("another `gate agent new` for %s may still be running (lock %s): %w; wait for it, then retry", issue, p, err)
+			return nil, fmt.Errorf("another `gate agent` command in this clone may still be running (lock %s): %w; wait for it, then retry", p, err)
 		}
-		return nil, fmt.Errorf("cannot lock %s for %s: %w", p, issue, err)
+		return nil, fmt.Errorf("cannot lock %s for this clone: %w", p, err)
 	}
 	return l.release, nil
 }

@@ -295,9 +295,9 @@ func TestSessionFileIsReplacedNotTruncated(t *testing.T) {
 	}
 }
 
-func TestIssueLockSerialisesWriters(t *testing.T) {
+func TestCloneLockSerialisesWriters(t *testing.T) {
 	repo := gitRepo(t)
-	path, err := issueLockPath(repo, "WP-L1-04")
+	path, err := cloneLockPath(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestIssueLockSerialisesWriters(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ok, err := tryLock(second); ok || err != nil {
-		t.Fatalf("two writers must not hold the per-issue lock at once: ok=%v err=%v", ok, err)
+		t.Fatalf("two writers must not hold the per-clone lock at once: ok=%v err=%v", ok, err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	defer cancel()
@@ -334,19 +334,19 @@ func TestIssueLockSerialisesWriters(t *testing.T) {
 	third.release()
 }
 
-func TestIssueLockWaitOutlastsTheWorstCaseHold(t *testing.T) {
-	// A reused worktree may check the remote and then fetch, two calls each
-	// bounded by a remote timeout plus its wait delay. The waiter's budget
-	// must leave room for local work on top, or a healthy slow call fails it.
+func TestCloneLockWaitOutlastsTheWorstCaseHold(t *testing.T) {
+	// The slowest agent new path runs two sequential remote git calls (for
+	// example ls-remote then fetch), each bounded by a remote timeout plus its
+	// wait delay. The waiter's budget must leave room for local work on top.
 	worstHold := 2 * (gitRemoteTimeout + gitWaitDelay)
-	if issueLockWait < worstHold+10*time.Second {
-		t.Fatalf("issueLockWait = %s; want at least %s (worst-case hold plus margin)", issueLockWait, worstHold+10*time.Second)
+	if cloneLockWait < worstHold+10*time.Second {
+		t.Fatalf("cloneLockWait = %s; want at least %s (worst-case hold plus margin)", cloneLockWait, worstHold+10*time.Second)
 	}
 }
 
 func TestLockFailuresThatAreNotContentionAreReportedAsThemselves(t *testing.T) {
 	repo := gitRepo(t)
-	p, err := issueLockPath(repo, "WP-L1-09")
+	p, err := cloneLockPath(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,16 +356,138 @@ func TestLockFailuresThatAreNotContentionAreReportedAsThemselves(t *testing.T) {
 	if err := os.Mkdir(p, 0o755); err != nil { // a directory where the lock file goes
 		t.Fatal(err)
 	}
-	_, err = acquireIssueLock(repo, "WP-L1-09")
+	ctx, cancel := context.WithTimeout(t.Context(), cloneLockWait)
+	defer cancel()
+	_, err = acquireCloneLockWithContext(ctx, repo)
 	if err == nil {
 		t.Fatal("a lock file that cannot be opened must fail")
 	}
-	if strings.Contains(err.Error(), "may still be running") {
+	if strings.Contains(err.Error(), "in this clone may still be running") {
 		t.Fatalf("a non-contention failure was reported as contention: %v", err)
 	}
 	if !strings.Contains(err.Error(), "cannot lock") {
 		t.Fatalf("the error must say the lock could not be taken: %v", err)
 	}
+}
+
+func holdCloneLock(t *testing.T, repo string) *fileLock {
+	t.Helper()
+	path, err := cloneLockPath(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := acquireFileLock(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func cancelledLockWaitCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return ctx
+}
+
+func requireLockWaitEnded(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected lock wait error, got nil")
+	}
+	if !strings.Contains(err.Error(), "lock wait cancelled") || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected lock wait cancelled, got %v", err)
+	}
+}
+
+func TestNewSessionTakesCloneLock(t *testing.T) {
+	repo := gitRepo(t)
+	l := holdCloneLock(t, repo)
+	defer l.release()
+	_, err := newSessionWithContext(cancelledLockWaitCtx(t), repo, NewSessionRequest{Harness: "cursor", Role: RoleDispatcher, NoWorktree: true})
+	requireLockWaitEnded(t, err)
+	l.release()
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleDispatcher, NoWorktree: true}); err != nil {
+		t.Fatalf("new session must succeed when the lock is free: %v", err)
+	}
+}
+
+func TestNewSessionValidatesBeforeCloneLock(t *testing.T) {
+	repo := gitRepo(t)
+	l := holdCloneLock(t, repo)
+	defer l.release()
+	ctx := cancelledLockWaitCtx(t)
+	_, err := newSessionWithContext(ctx, repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "not-a-valid-key"})
+	if err == nil || !strings.Contains(err.Error(), "work package id") {
+		t.Fatalf("invalid issue must fail validation before waiting on the lock: %v", err)
+	}
+	_, err = newSessionWithContext(ctx, repo, NewSessionRequest{Harness: "cursor", Role: "not-a-role", Issue: "WP-L8-99"})
+	if err == nil || !strings.Contains(err.Error(), "unknown role") {
+		t.Fatalf("invalid role must fail validation before waiting on the lock: %v", err)
+	}
+}
+
+func TestSetStatusTakesCloneLock(t *testing.T) {
+	repo := gitRepo(t)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L8-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := holdCloneLock(t, repo)
+	_, err = setStatusWithContext(cancelledLockWaitCtx(t), s.Worktree, "", "spec-review-requested", "n")
+	requireLockWaitEnded(t, err)
+	l.release()
+	if _, err := SetStatus(s.Worktree, "", "spec-review-requested", "n"); err != nil {
+		t.Fatalf("set status must succeed when the lock is free: %v", err)
+	}
+}
+
+func TestReleaseSessionTakesCloneLock(t *testing.T) {
+	repo := gitRepo(t)
+	s, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: "WP-L8-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := ParseIdentity(s.Identity)
+	l := holdCloneLock(t, repo)
+	_, err = releaseSessionWithContext(cancelledLockWaitCtx(t), repo, id.Instance, "main", true)
+	requireLockWaitEnded(t, err)
+	l.release()
+	if _, err := ReleaseSession(repo, id.Instance, "main", true); err != nil {
+		t.Fatalf("release must succeed when the lock is free: %v", err)
+	}
+}
+
+func TestDifferentIssuesContendOnCloneLock(t *testing.T) {
+	repo := gitRepo(t)
+	l := holdCloneLock(t, repo)
+	defer l.release()
+	ctx := cancelledLockWaitCtx(t)
+	for _, issue := range []string{"WP-L8-03", "WP-L8-04"} {
+		_, err := newSessionWithContext(ctx, repo, NewSessionRequest{Harness: "cursor", Role: RoleImplementer, Issue: issue})
+		requireLockWaitEnded(t, err)
+	}
+	_, err := setStatusWithContext(ctx, repo, "WP-L8-03", "spec-review-requested", "n")
+	requireLockWaitEnded(t, err)
+	l.release()
+
+	if _, err := NewSession(repo, NewSessionRequest{Harness: "cursor", Role: RoleSpecAuthor, Issue: "WP-L8-05"}); err != nil {
+		t.Fatalf("new session must release the clone lock: %v", err)
+	}
+	probe, err := acquireFileLock(t.Context(), mustCloneLockPath(t, repo))
+	if err != nil {
+		t.Fatalf("the clone lock must be free after new session returns: %v", err)
+	}
+	probe.release()
+}
+
+func mustCloneLockPath(t *testing.T, repo string) string {
+	t.Helper()
+	p, err := cloneLockPath(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func TestNewSessionsForOneIssueShareOneWorktree(t *testing.T) {

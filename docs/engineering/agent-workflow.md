@@ -66,13 +66,14 @@ go tool gate agent new -harness cursor -role implementer -issue WP-L3-05 -parent
 - **The session is recorded** in the worktree's git directory, never in a
   committed file. The command prints the hand-off the previous session left.
   The file is replaced atomically, so a crash never leaves half a hand-off.
-- **Calls to `gate agent new` for one work item are serialised** by a lock in
-  the repository's common git directory: two sessions for the same issue
-  cannot both create its worktree and overwrite each other's hand-off. The lock
-  covers `gate agent new` only; `gate agent status` and `gate agent release`
-  take no lock. A second `agent new` waits up to 80 seconds (two bounded
-  remote calls plus local work), then reports that the first call may still be
-  running.
+- **Session writers are serialised** by one lock file in the repository's
+  common git directory (`basamento-locks/clone.lock`): `gate agent new`,
+  `gate agent status` and `gate agent release` each take it for the whole
+  read-modify-write of `basamento-agent.json` (and worktree creation on
+  `agent new`). Read-only commands such as `agent list` and `agent whoami` do
+  not. A second writer waits up to 80 seconds (two sequential bounded remote
+  git calls on the slowest `agent new` path, plus local work), then reports
+  that another `gate agent` command in this clone may still be running.
 - **Remote git calls are bounded.** A `fetch` or `ls-remote` gives up after 30
   seconds and says what to check (the remote, the network, the credentials). git
   is killed at the deadline, and the call is force-closed a few seconds later

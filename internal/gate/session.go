@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,6 +58,21 @@ var statuses = []string{"spec-review-requested", "spec-changes-requested", "spec
 // of the worktree at dir; otherwise the working session of that work item,
 // which is how the lead records the outcome of a code review.
 func SetStatus(dir, issue, status, note string) (Session, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cloneLockWait)
+	defer cancel()
+	return setStatusWithContext(ctx, dir, issue, status, note)
+}
+
+func setStatusWithContext(ctx context.Context, dir, issue, status, note string) (Session, error) {
+	unlock, err := acquireCloneLockWithContext(ctx, dir)
+	if err != nil {
+		return Session{}, err
+	}
+	defer unlock()
+	return setStatusLocked(dir, issue, status, note)
+}
+
+func setStatusLocked(dir, issue, status, note string) (Session, error) {
 	if !contains(statuses, status) {
 		return Session{}, fmt.Errorf("status %q is not one of %s", status, strings.Join(statuses, ", "))
 	}
@@ -405,41 +421,54 @@ func issueWorktree(dir, issue, exclude string) (Session, bool, error) {
 // or opts out, NewSession creates one next to the main checkout:
 // <repo>-worktrees/<branch>, branch <issue>-<instance>.
 func NewSession(dir string, r NewSessionRequest) (Session, error) {
-	id, err := NewIdentity(r.Harness, r.Role)
-	if err != nil {
-		return Session{}, err
+	ctx, cancel := context.WithTimeout(context.Background(), cloneLockWait)
+	defer cancel()
+	return newSessionWithContext(ctx, dir, r)
+}
+
+func validateNewSessionRequest(r NewSessionRequest) error {
+	if _, err := NewIdentity(r.Harness, r.Role); err != nil {
+		return err
 	}
 	if r.Issue != "" && !issueKey.MatchString(r.Issue) {
-		return Session{}, fmt.Errorf("issue %q is not a work package id (WP-L3-05) or a tracker key (ABC-12)", r.Issue)
+		return fmt.Errorf("issue %q is not a work package id (WP-L3-05) or a tracker key (ABC-12)", r.Issue)
 	}
 	if r.Parent != "" {
 		if _, err := ParseIdentity(r.Parent); err != nil {
-			return Session{}, fmt.Errorf("parent: %w", err)
+			return fmt.Errorf("parent: %w", err)
 		}
 	}
-	// Neither value may reach git as an option. validateBranchName rejects a
-	// leading dash too; a base ref is resolved to an existing ref before a
-	// worktree is created from it.
 	if err := checkRefNotOption("base ref", r.Base); err != nil {
-		return Session{}, err
+		return err
 	}
 	if r.Branch != "" {
 		if err := validateBranchName(r.Branch); err != nil {
-			return Session{}, err
+			return err
 		}
+	}
+	return nil
+}
+
+func newSessionWithContext(ctx context.Context, dir string, r NewSessionRequest) (Session, error) {
+	if err := validateNewSessionRequest(r); err != nil {
+		return Session{}, err
 	}
 	top, err := git(dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Session{}, err
 	}
-	if r.Issue != "" {
-		// Two calls for one issue would otherwise both see no worktree and
-		// create one, or overwrite each other's hand-off.
-		unlock, err := acquireIssueLock(top, r.Issue)
-		if err != nil {
-			return Session{}, err
-		}
-		defer unlock()
+	unlock, err := acquireCloneLockWithContext(ctx, top)
+	if err != nil {
+		return Session{}, err
+	}
+	defer unlock()
+	return newSessionLocked(dir, r, top)
+}
+
+func newSessionLocked(dir string, r NewSessionRequest, top string) (Session, error) {
+	id, err := NewIdentity(r.Harness, r.Role)
+	if err != nil {
+		return Session{}, err
 	}
 	s := Session{Identity: id.String(), Parent: r.Parent, Issue: r.Issue, Worktree: top, Created: time.Now().UTC().Format(time.RFC3339)}
 	linked, err := inLinkedWorktree(top)
@@ -664,6 +693,22 @@ func writeSession(s Session) error {
 // directory, so a crash leaves either the old contents or the new ones, never
 // a truncated file.
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicWith(path, data, syncDirDefault)
+}
+
+func syncDirDefault(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
+}
+
+func writeFileAtomicWith(path string, data []byte, syncDir func(string) error) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -688,15 +733,13 @@ func writeFileAtomic(path string, data []byte) error {
 		return err
 	}
 	// The rename itself must reach disk, or a crash can lose the new name.
-	d, err := os.Open(filepath.Dir(path))
-	if err != nil {
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		if dirSyncErr(err) == nil {
+			return nil
+		}
 		return err
 	}
-	if err := d.Sync(); err != nil {
-		_ = d.Close()
-		return err
-	}
-	return d.Close()
+	return nil
 }
 
 func readSession(dir string) (Session, error) {
@@ -780,6 +823,21 @@ func ListSessions(dir, base string) ([]SessionStatus, error) {
 // ReleaseSession removes the worktree and branch of the session with the given
 // instance. Without force it refuses while the branch is not merged into base.
 func ReleaseSession(dir, instance, base string, force bool) (Session, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cloneLockWait)
+	defer cancel()
+	return releaseSessionWithContext(ctx, dir, instance, base, force)
+}
+
+func releaseSessionWithContext(ctx context.Context, dir, instance, base string, force bool) (Session, error) {
+	unlock, err := acquireCloneLockWithContext(ctx, dir)
+	if err != nil {
+		return Session{}, err
+	}
+	defer unlock()
+	return releaseSessionLocked(dir, instance, base, force)
+}
+
+func releaseSessionLocked(dir, instance, base string, force bool) (Session, error) {
 	sessions, err := ListSessions(dir, base)
 	if err != nil {
 		return Session{}, err
