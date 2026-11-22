@@ -59,6 +59,12 @@ The system shall grant a permission when any role binding applicable to the prin
 ### REQ-AUTH-018 — Scopes narrow only
 The system shall allow a principal's non-empty scopes only to narrow the permissions that applicable bindings grant.
 
+### REQ-AUTH-030 — Scope grammar and fail-closed narrowing
+When a principal carries a `session:<id>` scope, the system shall keep a granted permission only for a resource whose resolver-supplied session equals `<id>`; a scope string in any other form shall grant nothing; and a non-empty scope list with no recognized form shall deny the action with `permission_denied` and audit reason `scope-narrowed`. An empty scope list shall not narrow the granted permissions.
+
+### REQ-AUTH-031 — Authorization scopes only
+The system shall hold in `Principal.Scopes` only authorization scopes minted by the system for scoped worker or service tokens (REQ-AUTH-005), and shall not copy an identity provider's OAuth `scope` claim into `Principal.Scopes`.
+
 ### REQ-AUTH-019 — Denial message holds no detail
 When a policy check denies an action, the system shall return `permission_denied` with a message that names neither the required action nor any role.
 
