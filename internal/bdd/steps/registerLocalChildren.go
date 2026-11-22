@@ -35,6 +35,9 @@ func registerLocalChildren(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^flow "([^"]*)" waits at gate "([^"]*)"$`, func(ctx context.Context, name, gate string) error {
+		if world(ctx).Temporal != nil {
+			return temporalW(ctx).ensureControlFlow(name, gate)
+		}
 		w := localStepWorld(ctx)
 		w.setFlow(name, w.gateFlow(gate))
 		return nil

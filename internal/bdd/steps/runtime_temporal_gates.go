@@ -10,6 +10,7 @@ import (
 	sdktemporal "go.temporal.io/sdk/temporal"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/runtime"
 )
 
 func registerTemporalGates(sc *godog.ScenarioContext) {
@@ -88,4 +89,15 @@ func gateRejectError(err error) error {
 		return fmt.Errorf("gate rejected: code %q message %q", app.Type(), app.Message())
 	}
 	return fmt.Errorf("gate rejected: %w", err)
+}
+
+// temporalGateAwaitFlow is a flow-host body that blocks on gate until it is resolved.
+func temporalGateAwaitFlow(gate string) func(runtime.DurableContext, json.RawMessage) (json.RawMessage, error) {
+	return func(dc runtime.DurableContext, _ json.RawMessage) (json.RawMessage, error) {
+		var payload json.RawMessage
+		if err := dc.Await(runtime.GateSpec{Name: gate}).Get(&payload); err != nil {
+			return nil, err
+		}
+		return payload, nil
+	}
 }

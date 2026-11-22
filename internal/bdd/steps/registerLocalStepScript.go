@@ -110,6 +110,10 @@ func registerLocalStepScript(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^a flow calls step "([^"]*)" that returns (\{.*\})$`, func(ctx context.Context, name, result string) error {
+		if world(ctx).Temporal != nil {
+			raw := json.RawMessage(result)
+			return temporalW(ctx).addStepFlow(name, name, raw, false, raw)
+		}
 		w := localStepWorld(ctx)
 		if err := w.ensureStep(ctx, name); err != nil {
 			return err

@@ -27,14 +27,29 @@ func registerTemporal(sc *godog.ScenarioContext) {
 	registerTemporalChecks(sc)
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Temporal; w != nil {
-			w.close()
+			if err := w.close(); err != nil {
+				return ctx, err
+			}
 		}
 		return ctx, nil
 	})
 
-	// Stored for WP-L5-02 (c) server version pinning; unused in data-path scenarios.
+	registerTemporalControl(sc)
+	registerTemporalServe(sc)
+	registerTemporalSetup(sc)
+	registerTemporalDescribe(sc)
+	registerTemporalList(sc)
+	registerTemporalCancelResolve(sc)
+
 	sc.Step(`^a Temporal test server at version "([^"]*)"$`, func(ctx context.Context, version string) error {
-		temporalW(ctx).version = version
+		w := temporalW(ctx)
+		w.version = version
+		clock := world(ctx).Core.clock
+		stub, err := newTemporalStub(clock.Now, version)
+		if err != nil {
+			return err
+		}
+		w.stub = stub
 		return nil
 	})
 	sc.Step(`^a blob store and a payload codec served by a simulated key service$`, func(ctx context.Context) error {

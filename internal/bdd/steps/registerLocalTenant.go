@@ -74,6 +74,13 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^describing run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			if err := temporalControlLastError(w, code); err != nil {
+				return err
+			}
+			return temporalNotSent(w, "WorkflowService/DescribeWorkflowExecution")
+		}
 		return localLastError(localStepWorld(ctx), code)
 	})
 	sc.Step(`^tenant "([^"]*)" describing run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, tenant, runID, code string) error {
@@ -85,6 +92,9 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^tenant "([^"]*)" describes run "([^"]*)" as "([^"]*)"$`, func(ctx context.Context, tenant, runID, want string) error {
+		if world(ctx).Temporal != nil {
+			return temporalDescribeAs(ctx, tenant, runID, want)
+		}
 		w := localStepWorld(ctx)
 		state, err := w.stateOf(ctx, tenant, runID)
 		if err != nil {
@@ -104,6 +114,9 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^tenant "([^"]*)" lists (\d+) runs? for tenant "([^"]*)" with run id "([^"]*)"$`,
 		func(ctx context.Context, caller string, want int, tenant, runID string) error {
+			if world(ctx).Temporal != nil {
+				return temporalListCount(ctx, caller, want, tenant, runID)
+			}
 			w := localStepWorld(ctx)
 			if w.lastErr != nil {
 				return w.lastErr
@@ -133,6 +146,13 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^cancelling run "([^"]*)" fails with code "([^"]*)"$`, func(ctx context.Context, runID, code string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			if err := temporalControlLastError(w, code); err != nil {
+				return err
+			}
+			return temporalNotSent(w, "WorkflowService/RequestCancelWorkflowExecution")
+		}
 		return localLastError(localStepWorld(ctx), code)
 	})
 	sc.Step(`^tenant "([^"]*)" resolves gate "([^"]*)" of run "([^"]*)" with payload (\{.*\})$`,
@@ -143,6 +163,13 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			return nil
 		})
 	sc.Step(`^resolving the gate fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			if err := temporalControlLastError(w, code); err != nil {
+				return err
+			}
+			return temporalNotSent(w, "WorkflowService/UpdateWorkflowExecution")
+		}
 		return localLastError(localStepWorld(ctx), code)
 	})
 	sc.Step(`^tenant "([^"]*)" has no run with id "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
@@ -171,10 +198,21 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			return localStartWithTenants(ctx, runID, flow, "", requestTenant)
 		})
 	sc.Step(`^starting the run fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if world(ctx).Temporal != nil {
+			return temporalControlLastError(temporalW(ctx), code)
+		}
 		return localLastError(localStepWorld(ctx), code)
 	})
 	sc.Step(`^the request names a run reference of tenant "([^"]*)" to run "([^"]*)"$`, func(ctx context.Context, tenant, runID string) error {
-		localStepWorld(ctx).pendingRef = runtime.RunRef{RunID: runID, TenantID: core.TenantID(tenant)}
+		ref := runtime.RunRef{RunID: runID, TenantID: core.TenantID(tenant)}
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			w.mu.Lock()
+			w.control.pendingRef = ref
+			w.mu.Unlock()
+			return nil
+		}
+		localStepWorld(ctx).pendingRef = ref
 		return nil
 	})
 	sc.Step(`^run "([^"]*)" is described with context tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
@@ -244,9 +282,30 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 			return nil
 		})
 	sc.Step(`^listing runs fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			if err := temporalListFailure(w, code); err != nil {
+				return err
+			}
+			return temporalNotSent(w, "WorkflowService/ListWorkflowExecutions")
+		}
 		return localListFailure(localStepWorld(ctx), code)
 	})
 	sc.Step(`^the run reference the start returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			w.mu.Lock()
+			lastErr := w.control.lastErr
+			lastStart := w.control.lastStart
+			w.mu.Unlock()
+			if lastErr != nil {
+				return fmt.Errorf("the start failed: %w", lastErr)
+			}
+			if lastStart.RunID != runID || string(lastStart.TenantID) != tenant {
+				return fmt.Errorf("the start returned %q of tenant %q, want %q of tenant %q", lastStart.RunID, lastStart.TenantID, runID, tenant)
+			}
+			return nil
+		}
 		w := localStepWorld(ctx)
 		if w.lastErr != nil {
 			return fmt.Errorf("the start failed: %w", w.lastErr)
@@ -257,6 +316,20 @@ func registerLocalTenant(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the run reference the description returned is run "([^"]*)" of tenant "([^"]*)"$`, func(ctx context.Context, runID, tenant string) error {
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			w.mu.Lock()
+			lastErr := w.control.lastErr
+			lastStatus := w.control.lastStatus
+			w.mu.Unlock()
+			if lastErr != nil {
+				return fmt.Errorf("the description failed: %w", lastErr)
+			}
+			if lastStatus.Ref.RunID != runID || string(lastStatus.Ref.TenantID) != tenant {
+				return fmt.Errorf("the description returned %q of tenant %q, want %q of tenant %q", lastStatus.Ref.RunID, lastStatus.Ref.TenantID, runID, tenant)
+			}
+			return nil
+		}
 		w := localStepWorld(ctx)
 		if w.lastErr != nil {
 			return fmt.Errorf("the description failed: %w", w.lastErr)

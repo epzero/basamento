@@ -7,8 +7,9 @@
 // edition, Temporal Cloud or a self-hosted cluster for SaaS). See ADR-0002 and
 // docs/architecture/runtime.md.
 //
-// Status: contract implemented; runtime/local implemented (WP-L5-01); the
-// Temporal runtime is in progress (WP-L5-02).
+// Status: contract implemented; runtime/local implemented (WP-L5-01);
+// runtime/temporal implemented through the control plane (WP-L5-02 pull
+// requests (a), (b), (c); embedded packaging WP-L5-03).
 package runtime
 
 import (

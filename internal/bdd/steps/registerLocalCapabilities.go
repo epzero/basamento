@@ -2,33 +2,28 @@ package steps
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cucumber/godog"
 )
 
 func registerLocalCapabilities(sc *godog.ScenarioContext) {
 	// Capabilities.
-	sc.Step(`^the runtime is "local"$`, func(ctx context.Context) error {
+	sc.Step(`^the runtime is "(local|temporal)"$`, func(ctx context.Context, kind string) error {
+		if kind == "temporal" {
+			return temporalW(ctx).ensureRuntime()
+		}
 		localStepWorld(ctx).runtime(ctx)
 		return nil
 	})
 	sc.Step(`^the runtime reports capability "([^"]*)" as (true|false)$`, func(ctx context.Context, name, want string) error {
-		caps := localStepWorld(ctx).runtime(ctx).Capabilities()
-		values := map[string]bool{
-			"durable":           caps.Durable,
-			"sync_gate_updates": caps.SyncGateUpdates,
-			"continue_as_new":   caps.ContinueAsNew,
-			"polyglot_queues":   caps.PolyglotQueues,
+		if world(ctx).Temporal != nil {
+			w := temporalW(ctx)
+			if err := w.ensureRuntime(); err != nil {
+				return err
+			}
+			return checkRuntimeCapability(w.rt.Capabilities(), name, want)
 		}
-		got, ok := values[name]
-		if !ok {
-			return fmt.Errorf("unknown capability %q", name)
-		}
-		if fmt.Sprintf("%t", got) != want {
-			return fmt.Errorf("capability %q is %t, want %s", name, got, want)
-		}
-		return nil
+		return checkRuntimeCapability(localStepWorld(ctx).runtime(ctx).Capabilities(), name, want)
 	})
 
 }

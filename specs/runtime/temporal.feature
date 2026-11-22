@@ -11,7 +11,7 @@ Feature: The Temporal runtime
     Given a Temporal test server at version "1.32.2"
     And a blob store and a payload codec served by a simulated key service
 
-  @planned @wp:WP-L5-02 @REQ-RT-039 @id:RT-039-01
+  @REQ-RT-039 @id:RT-039-01
   Scenario: The temporal runtime reports its capabilities
     Given the runtime is "temporal"
     Then the runtime reports capability "durable" as true
@@ -67,7 +67,7 @@ Feature: The Temporal runtime
     And the run history holds neither "sk-live-4f9a2c" nor "json/plain"
     And the run returns {"api_key": "sk-live-4f9a2c"}
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-040 @REQ-RT-031 @id:RT-031-02
+  @security @REQ-RT-040 @REQ-RT-031 @id:RT-031-02
   Scenario: A run without a tenant fails before any payload reaches the history unencrypted
     Given a flow calls step "fetch" that returns {"ok": true}
     When a run of "fetch" without a tenant is started on the temporal runtime
@@ -135,12 +135,12 @@ Feature: The Temporal runtime
     And the run's durable events are "a", "b", "c", "d", "e", "f"
     And the run returns "done"
 
-  @planned @wp:WP-L5-02 @REQ-RT-037 @id:RT-037-01
+  @REQ-RT-037 @id:RT-037-01
   Scenario: The temporal runtime starts against a server at the pinned version
     When the temporal runtime starts against the Temporal test server
     Then the runtime is serving
 
-  @planned @wp:WP-L5-02 @REQ-RT-037 @id:RT-037-02
+  @REQ-RT-037 @id:RT-037-02
   Scenario Outline: The temporal runtime refuses a server outside the pinned range with unsupported
     Given a simulated Temporal server version "<server>"
     When the temporal runtime starts against that server
@@ -161,7 +161,7 @@ Feature: The Temporal runtime
     And the run was continued as new 1 time
     And the run returns "done"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-07
+  @security @REQ-RT-042 @id:RT-042-07
   Scenario: Starting a run for another tenant than the context's is rejected before any history is recorded
     Given a flow calls step "fetch" that returns {"ok": true}
     When a run of "fetch" is started on the temporal runtime with context tenant "acme" and request tenant "globex"
@@ -169,14 +169,14 @@ Feature: The Temporal runtime
     And step "fetch" was executed 0 times
     And the Temporal test server holds no run history for that start
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-08
+  @security @REQ-RT-042 @id:RT-042-08
   Scenario: Describing a run for another tenant than the context's is rejected on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     And the request names a run reference of tenant "globex" to run "shared-1"
     When run "shared-1" is described on the temporal runtime with context tenant "acme"
     Then describing run "shared-1" fails with code "invalid_argument"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-09
+  @security @REQ-RT-042 @id:RT-042-09
   Scenario: Cancelling a run for another tenant than the context's is rejected on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     And the request names a run reference of tenant "globex" to run "shared-1"
@@ -184,7 +184,7 @@ Feature: The Temporal runtime
     Then cancelling run "shared-1" fails with code "invalid_argument"
     And tenant "globex" describes run "shared-1" as "running"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-10
+  @security @REQ-RT-042 @id:RT-042-10
   Scenario: Resolving a gate for another tenant than the context's is rejected on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     And the request names a run reference of tenant "globex" to run "shared-1"
@@ -192,13 +192,13 @@ Feature: The Temporal runtime
     Then resolving the gate fails with code "invalid_argument"
     And tenant "globex" describes run "shared-1" as "running"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-11
+  @security @REQ-RT-042 @id:RT-042-11
   Scenario: Listing runs for another tenant than the context's is rejected on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When runs of flow "review" are listed on the temporal runtime for request tenant "globex" with context tenant "acme"
     Then listing runs fails with code "invalid_argument"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-042 @id:RT-042-12
+  @security @REQ-RT-042 @id:RT-042-12
   Scenario Outline: Starting a run with an empty or matching request tenant uses the context tenant on the temporal runtime
     Given flow "review" waits at gate "approve"
     When run "r1" of "review" is started on the temporal runtime with context tenant "acme" and request tenant "<tenant>"
@@ -209,25 +209,25 @@ Feature: The Temporal runtime
       |        |
       | acme   |
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-04
+  @security @REQ-RT-043 @id:RT-043-04
   Scenario: The run reference a start returns carries the run's tenant on the temporal runtime
     Given a flow calls step "render" that returns {"ok": true}
     When run "r1" of "render" is started on the temporal runtime with context tenant "acme" and an empty request tenant
     Then the run reference the start returned is run "r1" of tenant "acme"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-05
+  @security @REQ-RT-043 @id:RT-043-05
   Scenario: Describing a run returns a run reference carrying that run's tenant on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When run "shared-1" is described on the temporal runtime with context tenant "globex" and an empty reference tenant
     Then the run reference the description returned is run "shared-1" of tenant "globex"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-043 @id:RT-043-06
+  @security @REQ-RT-043 @id:RT-043-06
   Scenario: Listing runs returns run references carrying each run's tenant on the temporal runtime
     Given tenant "globex" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When runs of flow "review" are listed on the temporal runtime with context tenant "globex" and an empty query tenant
     Then tenant "globex" lists 1 run for tenant "globex" with run id "shared-1"
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-040 @REQ-RT-042 @id:RT-040-01
+  @security @REQ-RT-040 @REQ-RT-042 @id:RT-040-01
   Scenario: Starting a run without a tenant in the context is rejected on the temporal runtime even when the request names one
     Given a flow calls step "fetch" that returns {"ok": true}
     When run "r1" of "fetch" is started on the temporal runtime without a context tenant and with request tenant "acme"
@@ -235,7 +235,7 @@ Feature: The Temporal runtime
     And step "fetch" was executed 0 times
     And the Temporal test server holds no run history for that start
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-01
+  @security @REQ-RT-045 @id:RT-045-01
   Scenario Outline: Listing runs without a tenant in the context is rejected on the temporal runtime
     Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When runs of flow "review" are listed on the temporal runtime without a context tenant and with query tenant "<tenant>"
@@ -246,7 +246,7 @@ Feature: The Temporal runtime
       |        |
       | acme   |
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-02
+  @security @REQ-RT-045 @id:RT-045-02
   Scenario Outline: Describing a run without a tenant in the context is rejected on the temporal runtime
     Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When run "shared-1" is described on the temporal runtime without a context tenant and with reference tenant "<tenant>"
@@ -257,7 +257,7 @@ Feature: The Temporal runtime
       |        |
       | acme   |
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-03
+  @security @REQ-RT-045 @id:RT-045-03
   Scenario Outline: Cancelling a run without a tenant in the context is rejected on the temporal runtime
     Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When run "shared-1" is cancelled on the temporal runtime without a context tenant and with reference tenant "<tenant>"
@@ -269,7 +269,7 @@ Feature: The Temporal runtime
       |        |
       | acme   |
 
-  @planned @wp:WP-L5-02 @security @REQ-RT-045 @id:RT-045-04
+  @security @REQ-RT-045 @id:RT-045-04
   Scenario Outline: Resolving a gate without a tenant in the context is rejected on the temporal runtime
     Given tenant "acme" has run "shared-1" of flow "review" on the temporal runtime waiting at gate "approve"
     When gate "approve" of run "shared-1" is resolved on the temporal runtime without a context tenant, reference tenant "<tenant>" and payload {"approved": true}
