@@ -1627,3 +1627,25 @@ scenarios:
         ref: https://github.com/epzero/basamento/pull/108
         human:
             status: pending
+    MODEL-089-01:
+        hash: sha256:930c7742518211cf1091f98d543a47b8ab76025b854c8436b3bc867be3cde9a8
+        reqs:
+            - REQ-MODEL-089
+        tier: P0
+        author: caster:spec-author:311a1b
+        reviewer: cursor:spec-reviewer:56c132
+        approved_at: "2026-11-22"
+        note: 'NAT dial-out: platform must never dial the worker; WorkerService path behind no inbound route.'
+        human:
+            status: pending
+    MODEL-090-01:
+        hash: sha256:81104935cbdf424001fe8617c0492edf9ccc7ff9bf75111bc0ab6d2b38b4c950
+        reqs:
+            - REQ-MODEL-090
+        tier: P2
+        author: caster:spec-author:311a1b
+        reviewer: cursor:spec-reviewer:56c132
+        approved_at: "2026-11-22"
+        note: 'New kit serve system-level composition: pool registration, invoker accounting, remote for router choice.'
+        human:
+            status: pending
