@@ -63,6 +63,8 @@ func SetStatus(dir, issue, status, note string) (Session, error) {
 	return setStatusWithContext(ctx, dir, issue, status, note)
 }
 
+// setStatusWithContext takes the clone lock for the read-modify-write; ctx
+// bounds only the wait. SetStatus passes a ctx with cloneLockWait.
 func setStatusWithContext(ctx context.Context, dir, issue, status, note string) (Session, error) {
 	unlock, err := acquireCloneLockWithContext(ctx, dir)
 	if err != nil {
@@ -72,6 +74,7 @@ func setStatusWithContext(ctx context.Context, dir, issue, status, note string) 
 	return setStatusLocked(dir, issue, status, note)
 }
 
+// setStatusLocked updates the session file; the caller holds the clone lock.
 func setStatusLocked(dir, issue, status, note string) (Session, error) {
 	if !contains(statuses, status) {
 		return Session{}, fmt.Errorf("status %q is not one of %s", status, strings.Join(statuses, ", "))
@@ -426,31 +429,37 @@ func NewSession(dir string, r NewSessionRequest) (Session, error) {
 	return newSessionWithContext(ctx, dir, r)
 }
 
-func validateNewSessionRequest(r NewSessionRequest) error {
-	if _, err := NewIdentity(r.Harness, r.Role); err != nil {
-		return err
+// validateNewSessionRequest checks arguments in pure Go (and issues a fresh
+// identity) before the clone lock, so invalid input fails immediately.
+func validateNewSessionRequest(r NewSessionRequest) (Identity, error) {
+	id, err := NewIdentity(r.Harness, r.Role)
+	if err != nil {
+		return Identity{}, err
 	}
 	if r.Issue != "" && !issueKey.MatchString(r.Issue) {
-		return fmt.Errorf("issue %q is not a work package id (WP-L3-05) or a tracker key (ABC-12)", r.Issue)
+		return Identity{}, fmt.Errorf("issue %q is not a work package id (WP-L3-05) or a tracker key (ABC-12)", r.Issue)
 	}
 	if r.Parent != "" {
 		if _, err := ParseIdentity(r.Parent); err != nil {
-			return fmt.Errorf("parent: %w", err)
+			return Identity{}, fmt.Errorf("parent: %w", err)
 		}
 	}
 	if err := checkRefNotOption("base ref", r.Base); err != nil {
-		return err
+		return Identity{}, err
 	}
 	if r.Branch != "" {
 		if err := validateBranchName(r.Branch); err != nil {
-			return err
+			return Identity{}, err
 		}
 	}
-	return nil
+	return id, nil
 }
 
+// newSessionWithContext takes the clone lock at top for the whole call; ctx
+// bounds only the wait. NewSession passes a ctx with cloneLockWait.
 func newSessionWithContext(ctx context.Context, dir string, r NewSessionRequest) (Session, error) {
-	if err := validateNewSessionRequest(r); err != nil {
+	id, err := validateNewSessionRequest(r)
+	if err != nil {
 		return Session{}, err
 	}
 	top, err := git(dir, "rev-parse", "--show-toplevel")
@@ -462,14 +471,11 @@ func newSessionWithContext(ctx context.Context, dir string, r NewSessionRequest)
 		return Session{}, err
 	}
 	defer unlock()
-	return newSessionLocked(dir, r, top)
+	return newSessionLocked(dir, r, top, id)
 }
 
-func newSessionLocked(dir string, r NewSessionRequest, top string) (Session, error) {
-	id, err := NewIdentity(r.Harness, r.Role)
-	if err != nil {
-		return Session{}, err
-	}
+// newSessionLocked creates the session and worktree; the caller holds the clone lock.
+func newSessionLocked(dir string, r NewSessionRequest, top string, id Identity) (Session, error) {
 	s := Session{Identity: id.String(), Parent: r.Parent, Issue: r.Issue, Worktree: top, Created: time.Now().UTC().Format(time.RFC3339)}
 	linked, err := inLinkedWorktree(top)
 	if err != nil {
@@ -568,18 +574,19 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 		return reviewSnapshot(top, linked, s, branch, id.Instance)
 	}
 	s.Branch = branch
+	// Git lists at most one worktree per branch; refuse before checkout or
+	// worktree add, because add detaches and checkout -B on git 2.44+ refuses a
+	// branch checked out elsewhere and would otherwise leave an orphan worktree.
 	elsewhere, atMain, err := checkedOutWorktree(top, branch)
 	if err != nil {
 		return Session{}, err
 	}
-	if elsewhere != "" {
+	reuse := linked && filepath.Clean(elsewhere) == filepath.Clean(top)
+	if elsewhere != "" && !reuse {
 		if atMain {
-			if filepath.Clean(elsewhere) != filepath.Clean(top) || !linked {
-				return Session{}, fmt.Errorf("branch %s is checked out in the main checkout %s; switch that checkout to another branch (for example `git switch main`), then retry, or work there", branch, elsewhere)
-			}
-		} else if filepath.Clean(elsewhere) != filepath.Clean(top) {
-			return Session{}, fmt.Errorf("branch %s is already checked out in worktree %s; work there, or release that worktree first", branch, elsewhere)
+			return Session{}, fmt.Errorf("branch %s is checked out in the main checkout %s; switch that checkout to another branch (for example `git switch main`), then retry, or work there", branch, elsewhere)
 		}
+		return Session{}, fmt.Errorf("branch %s is already checked out in worktree %s; work there, or release that worktree first", branch, elsewhere)
 	}
 	if linked {
 		status, err := git(top, "status", "--porcelain")
@@ -624,8 +631,7 @@ func continueBranch(top string, linked bool, s Session, id Identity, branch stri
 	} else if !os.IsNotExist(err) {
 		return Session{}, err
 	}
-	// worktree add below detaches, and checkout -B then refuses on Git 2.44+ a
-	// branch checked out elsewhere, leaving an orphaned worktree behind.
+	// Refusal for a branch held elsewhere is checked above (before linked checkout too).
 	if _, err := git(top, "worktree", "add", s.Worktree, headBranchRef(branch)); err != nil {
 		return Session{}, err
 	}
@@ -696,6 +702,7 @@ func writeFileAtomic(path string, data []byte) error {
 	return writeFileAtomicWith(path, data, syncDirDefault)
 }
 
+// syncDirDefault opens dir and fsyncs it after a session-file rename.
 func syncDirDefault(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
@@ -708,6 +715,8 @@ func syncDirDefault(dir string) error {
 	return d.Close()
 }
 
+// writeFileAtomicWith is like writeFileAtomic but syncDir stands in for the
+// post-rename directory sync so tests can model unsupported filesystems.
 func writeFileAtomicWith(path string, data []byte, syncDir func(string) error) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
@@ -828,6 +837,8 @@ func ReleaseSession(dir, instance, base string, force bool) (Session, error) {
 	return releaseSessionWithContext(ctx, dir, instance, base, force)
 }
 
+// releaseSessionWithContext takes the clone lock for the read-modify-write; ctx
+// bounds only the wait. ReleaseSession passes a ctx with cloneLockWait.
 func releaseSessionWithContext(ctx context.Context, dir, instance, base string, force bool) (Session, error) {
 	unlock, err := acquireCloneLockWithContext(ctx, dir)
 	if err != nil {
@@ -837,6 +848,7 @@ func releaseSessionWithContext(ctx context.Context, dir, instance, base string, 
 	return releaseSessionLocked(dir, instance, base, force)
 }
 
+// releaseSessionLocked removes a session worktree; the caller holds the clone lock.
 func releaseSessionLocked(dir, instance, base string, force bool) (Session, error) {
 	sessions, err := ListSessions(dir, base)
 	if err != nil {

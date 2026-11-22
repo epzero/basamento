@@ -15,7 +15,9 @@ import (
 // reviewDetachSHA: originHasBranch via ls-remote, then fetch), each bounded by
 // gitRemoteTimeout plus gitWaitDelay, plus local work. The budget is that
 // worst-case hold plus 10s so a healthy but slow first call never makes a
-// waiter on the second fail.
+// waiter on the second fail. The budget outlasts one such holder, not a queue:
+// several slow commands in a row can still make a later waiter time out with
+// the usual “another gate agent command may still be running” message.
 const cloneLockWait = 2*(gitRemoteTimeout+gitWaitDelay) + 10*time.Second
 
 // errLockContended reports that the lock is held elsewhere. A lock failure for

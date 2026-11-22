@@ -370,6 +370,7 @@ func TestLockFailuresThatAreNotContentionAreReportedAsThemselves(t *testing.T) {
 	}
 }
 
+// holdCloneLock takes the clone lock until release is called (tests only).
 func holdCloneLock(t *testing.T, repo string) *fileLock {
 	t.Helper()
 	path, err := cloneLockPath(repo)
@@ -383,6 +384,7 @@ func holdCloneLock(t *testing.T, repo string) *fileLock {
 	return l
 }
 
+// cancelledLockWaitCtx returns a context already cancelled (tests only).
 func cancelledLockWaitCtx(t *testing.T) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -390,6 +392,7 @@ func cancelledLockWaitCtx(t *testing.T) context.Context {
 	return ctx
 }
 
+// requireLockWaitEnded requires the lock-wait-cancelled error from acquireCloneLockWithContext.
 func requireLockWaitEnded(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -1323,6 +1326,22 @@ func TestContinueBranchMainCheckoutMessage(t *testing.T) {
 	}
 }
 
+func TestContinueBranchAllowsReuseInLinkedWorktree(t *testing.T) {
+	repo := gitRepo(t)
+	branch := "WP-L6-16-reuse"
+	linked := filepath.Join(filepath.Dir(repo), "repo-worktrees", branch)
+	mustGit(t, repo, "worktree", "add", "-q", "-b", branch, linked)
+	s, err := NewSession(linked, NewSessionRequest{
+		Harness: "cursor", Role: RoleImplementer, Issue: "WP-L6-16", Branch: branch,
+	})
+	if err != nil {
+		t.Fatalf("a linked worktree already on the branch may continue there: %v", err)
+	}
+	if s.Worktree != linked || s.Branch != branch {
+		t.Fatalf("session stays in the linked worktree: %+v", s)
+	}
+}
+
 func TestContinueBranchMainCheckoutMessageFromLinkedWorktree(t *testing.T) {
 	repo := gitRepo(t)
 	branch := "WP-L6-15-main"
@@ -1346,6 +1365,7 @@ func TestContinueBranchMainCheckoutMessageFromLinkedWorktree(t *testing.T) {
 	}
 }
 
+// installPostCheckoutHook fails checkout -B but allows worktree add (tests only).
 func installPostCheckoutHook(t *testing.T, repo string) {
 	t.Helper()
 	gitDir, err := git(repo, "rev-parse", "--git-dir")
