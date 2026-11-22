@@ -70,6 +70,12 @@ The system shall lease an invocation only to a worker of the invocation's pool t
 ### REQ-MODEL-013 — A pool keeps what it serves
 While no present worker of a pool serves a model that a worker of the pool declared, the catalog shall list the model with availability `offline`.
 
+### REQ-MODEL-089 — A dial-out worker is served
+When a worker with no inbound route joins a pool with its pool token and asks for work through the platform's WorkerService, the system shall lease it an invocation it declared, without the platform dialling the worker.
+
+### REQ-MODEL-090 — kit serve composes the worker side
+When `kit serve` starts with a declared pool and a configured worker, and that worker dials in, the system shall register the pool, account the invocation the worker finishes through the platform's `model.Invoker`, and assign a configured remote so the router can choose between the worker and it.
+
 ### REQ-MODEL-014 — Queue timeout
 If an invocation is not leased within its queue timeout, then the system shall fail it with code `unavailable` and release its reservation.
 
