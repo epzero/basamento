@@ -305,3 +305,34 @@ more workers should be asked for now.
   first call; `min: 1` is the remedy and is a cost decision.
 - Not decided here: preemption of running work, keeping a conversation on
   one worker, and third-party pools.
+
+## Amendment — 2026-11-22 (EP0-212)
+
+The Decision's "it dials out" fixes which side opens the connection, not that
+there is only one transport. The transport is a **port** with two
+implementations, and both belong to `WP-L3-07`:
+
+| Profile | Transport | Shape |
+| --- | --- | --- |
+| cloud, or any worker on another machine | `WorkerService` (`basamento.worker.v1`, connect) | The calls of §4 cross the network; the worker opens the connection and the platform never dials it. |
+| embedded: `kit serve` and `kit worker` in one process | the same calls against the pool's SQL store | No listener and no network: the queue is one table and the worker one pull loop. |
+
+Both implement the same `worker.Transport` with the same semantics; a transport
+that behaves differently is a bug in that transport, not a second design.
+
+`WP-L3-07` therefore owes the port, both implementations and the composition
+root that makes either reachable:
+
+- `kit serve` opens the worker store, registers the pool, constructs the
+  platform-side `model.Invoker`, assigns the configured remotes and serves
+  `WorkerService` for workers that dial in;
+- `kit worker` joins through `--pool-url` or through the shared store in the
+  embedded profile, and runs the same pull loop either way.
+
+`WP-L3-08` (§12) is unchanged: it starts workers, it does not build their
+transport. A worker package with a store, a queue and an in-process adapter but
+no service, no dial-out client and no caller in `kit serve` is not the contract
+this ADR describes, and it is not done.
+
+The gate covers the dial-out path through `WorkerService`: an in-process
+shortcut alone cannot show that a worker behind NAT is served.
