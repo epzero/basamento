@@ -54,6 +54,39 @@ both implementations).
   around migrating; on SQLite take the write lock (`BEGIN IMMEDIATE`) and read
   the version again under it. Both opens succeed.
 
+### Migration-set composition (ADR-0023)
+
+A host composes the migration sets of the capabilities it runs into **one**
+goose track, once per database URL (D7). `platform/sql` offers
+`MigrationSet{Name, Band, FS}` and the pure `MergeMigrations`, which republishes
+the files in a flat in-memory `fs.FS` under absolute-version names
+`<version>_<name>[.postgres].sql`, leaving `Open`'s `fs.FS` port unchanged.
+
+- **Banding (D1, D2, D4).** A package claims one band for the life of the
+  project and exports `MigrationBand` beside `Migrations()`; the ledger is in
+  `platform/sql/doc.go` (band 0 is the root baseline at version 1, credentials
+  1, eventlog 2, authz 3). A local number maps to
+  `version_id = band * BandSize + local`, with `BandSize = 1_000_000` and
+  `MaxBand = 9999`. `MergeMigrations` validates before goose sees anything:
+  bands in range, no two sets in one band, local numbers in range and unique,
+  D3 file names and no subdirectories. It fails with `internal` and a fixed
+  message naming the set(s) and the band (REQ-SQL-026).
+- **Out-of-order (D5).** Every provider opens goose with
+  `WithAllowOutofOrder(true)`: a migration appended to a lower band after a
+  higher band was applied still runs, and each absolute version is recorded
+  (REQ-SQL-027).
+- **SQLite exclusion (D5).** On SQLite, every merged basename ending in
+  `.postgres.sql` is passed to `goose.WithExcludeNames` and the *same* list
+  filters the version math; on Postgres nothing is excluded (REQ-SQL-028).
+- **Version check (D6).** Before any write, under the existing locks, the
+  dialect-specific `applied` set is compared with the dialect-specific `binary`
+  set. `max(applied) > max(binary)` keeps REQ-SQL-008's `unsupported` message
+  `sql: database schema newer than binary`; otherwise `applied ⊄ binary` is
+  `unsupported` with the fixed message
+  `sql: database schema has a migration this binary does not carry` and details
+  for the lowest missing version (REQ-SQL-029). `SchemaVersion` still reports
+  the newest applied version.
+
 ## 3. Dialect differences the store must hide
 
 | Concern | SQLite | Postgres | Rule |

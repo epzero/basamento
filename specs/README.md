@@ -46,4 +46,4 @@ Capabilities:
 | [`bus`](bus/requirements.md) | Implemented (WP-L1-03, `platform/bus`, BDD fake `internal/bdd/bustest`). |
 | [`expr`](expr/requirements.md) | Implemented (WP-L2-01). |
 | [`blob`](blob/requirements.md) | Implemented (WP-L1-02, WP-L1-08). |
-| [`sql`](sql/requirements.md) | Implemented (WP-L1-01). |
+| [`sql`](sql/requirements.md) | In progress (WP-L1-01); 5 @planned scenarios for ADR-0023 migration composition (EP0-221). |

@@ -1,7 +1,8 @@
 # SQL: store, migrations and tenant-scoped repositories
 
-Status: **Implemented** (WP-L1-01, platform/sql). Design: ADR-0001, ADR-0004,
-[`design.md`](design.md).
+Status: **In progress** (WP-L1-01, platform/sql; 5 @planned scenarios for
+ADR-0023 migration composition, EP0-221). Design: ADR-0001, ADR-0004,
+ADR-0023, [`design.md`](design.md).
 
 The SQL store is the SQL port of `platform`: SQLite (`modernc.org/sqlite`) in
 the embedded profile, Postgres (`pgx`) in the cloud profile, selected by URL.
@@ -49,6 +50,18 @@ If the schema version of a database is newer than the newest migration of the mi
 
 ### REQ-SQL-009 — Concurrent opens migrate once
 When several SQL stores open the same database at the same time, the SQL store shall apply each pending migration exactly once and open every one of them.
+
+### REQ-SQL-026 — Composed migration versions are banded without collisions
+When a host composes several packages' migration sets into one goose track, the SQL store shall give each migration the absolute version `band * BandSize + local` of its package's allocated band, and shall refuse a composition where two sets share a band with code `internal` and a fixed message naming both sets and the band, before any migration runs (ADR-0023).
+
+### REQ-SQL-027 — A migration in an earlier band is applied later
+When a migration is added to a package's band below a band whose migrations are already applied, the SQL store shall apply that migration and record its version while keeping the already-applied higher-band versions applied.
+
+### REQ-SQL-028 — Postgres-only fragments run only on Postgres
+When a composed migration set contains a `.postgres.sql` fragment, the SQL store shall exclude that fragment's exact basename from the migrations it runs and from the version bookkeeping on SQLite, and shall apply it on Postgres.
+
+### REQ-SQL-029 — A version the binary does not carry is refused
+If a database has an applied migration version that is not among the versions of the composed migration set for the dialect in use, then the SQL store shall fail to open with code `unsupported` and the fixed message `sql: database schema has a migration this binary does not carry`, before writing to the database.
 
 ## Tenancy
 

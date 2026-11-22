@@ -439,3 +439,58 @@ scenarios:
         note: 'Security: SQL store errors redact URL userinfo passwords and credential query parameters, and withhold driver error text when a URL carried a secret.'
         human:
             status: pending
+    SQL-026-01:
+        hash: sha256:a0467e3243e3e38d819cc075cd39e07705cfee0a2e75da5e0ce898b8295aca04
+        reqs:
+            - REQ-SQL-026
+        tier: P2
+        author: caster:spec-author:0dcf1f
+        reviewer: cursor:spec-reviewer:c0c2fe
+        approved_at: "2026-11-22"
+        note: 'ADR-0023 composition: banded absolute versions in one goose track, and Postgres-only fragments excluded on SQLite.'
+        human:
+            status: pending
+    SQL-026-02:
+        hash: sha256:e037d56614778c22c462ad4cd494206071403e91eb32b9624b036e98f078775f
+        reqs:
+            - REQ-SQL-026
+        tier: P0
+        author: caster:spec-author:0dcf1f
+        reviewer: cursor:spec-reviewer:c0c2fe
+        approved_at: "2026-11-22"
+        note: 'Migration durability and safety: band collision and orphan applied versions are refused before any write; out-of-order lower-band migrations must apply without losing higher-band state.'
+        human:
+            status: pending
+    SQL-027-01:
+        hash: sha256:92fd0bc5c548a1638be8078aa3ba3b12482f65e1793360109e23ebb567528381
+        reqs:
+            - REQ-SQL-027
+        tier: P0
+        author: caster:spec-author:0dcf1f
+        reviewer: cursor:spec-reviewer:c0c2fe
+        approved_at: "2026-11-22"
+        note: 'Migration durability and safety: band collision and orphan applied versions are refused before any write; out-of-order lower-band migrations must apply without losing higher-band state.'
+        human:
+            status: pending
+    SQL-028-01:
+        hash: sha256:51b4742d94ee53265cb72800da9e920540cb0d440a5b7766a2660afee2ea6b4b
+        reqs:
+            - REQ-SQL-028
+        tier: P2
+        author: caster:spec-author:0dcf1f
+        reviewer: cursor:spec-reviewer:c0c2fe
+        approved_at: "2026-11-22"
+        note: 'ADR-0023 composition: banded absolute versions in one goose track, and Postgres-only fragments excluded on SQLite.'
+        human:
+            status: pending
+    SQL-029-01:
+        hash: sha256:ef26d22310f8a13fa44985587340896b6602acf4472da0ff271f12d8812ab83e
+        reqs:
+            - REQ-SQL-029
+        tier: P0
+        author: caster:spec-author:0dcf1f
+        reviewer: cursor:spec-reviewer:c0c2fe
+        approved_at: "2026-11-22"
+        note: 'Migration durability and safety: band collision and orphan applied versions are refused before any write; out-of-order lower-band migrations must apply without losing higher-band state.'
+        human:
+            status: pending
