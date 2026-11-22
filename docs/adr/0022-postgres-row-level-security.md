@@ -27,11 +27,15 @@ On Postgres with **RLS mode** enabled on `Open`, the application pool uses a
 pgx stdlib `driver.Connector` wrapper (not the migrate connection). Before
 every statement the wrapper reads `core.TenantFrom(ctx)` and D6 system scope
 when present. With no tenant and no allowed system scope, return
-`invalid_argument` before SQL. When the context tenant or scope differs from
-the cached value on this physical connection, run
-`SELECT set_config('app.tenant', $1, false)` or the system GUC, then the
-statement. Inside `Store.InTx` each statement uses the same rule—there is no pin
-at transaction begin.
+`invalid_argument` before SQL. When the cached pair `(tenant, scope)` differs from the statement's, the wrapper
+runs **one** SQL statement:
+`SELECT set_config('app.tenant', $1, false), set_config('app.system', $2, false)`.
+Tenant scope uses `(tenant, '')`; system scope uses `('', scope)`. Both GUCs are
+always written together so a stale `app.system` cannot leave the relay discovery
+policy enabled during a tenant statement (measured on PostgreSQL 16: with
+`relay` left set, a tenant-only `set_config` still shows all pending outbox
+rows). Then run the application statement. Inside `Store.InTx` each statement
+uses the same rule—there is no pin at transaction begin.
 
 **Cache invariants:**
 
@@ -79,7 +83,8 @@ owned by whichever login runs migrations (`sql.migrate_url`).
 | `audit_seq` | `SELECT`, `UPDATE` |
 | goose version table | none |
 
-Each fragment preconditions that `bas_app` exists (e.g. `DO $$ … $$` in
+Each fragment first checks that `bas_app` exists and fails with a message that
+names the role if it does not (for example a `DO` block inside
 `-- +goose StatementBegin`). Operator steps: `docs/architecture/auth.md`.
 
 Two URLs: `sql.migrate_url` (goose) and `sql.url` (`bas_app` pool). `Open` in
@@ -102,16 +107,26 @@ plain `pgx` connection on `sql.url`, run
 refuse if either is true, then close the handle. The wrapper's “no tenant, no
 SQL” rule does not apply to this pre-wrapper check.
 
-Without RLS mode, behaviour stays as today (admin Postgres in ADR-0015
-conformance).
+**RLS mode** affects only the tenant wrapper, the two URLs, and the refusal
+checks above. A Postgres open **without** RLS mode is still used for the
+conformance lane and administration (admin login, ADR-0015); that login bypasses
+RLS. Policy fragments still run on every Postgres migrate (D3).
 
-**Gate fixture:** `internal/bdd/sqltest` creates `bas_app` with a random
-password from the seeded generator, migrates on the admin URL, opens the store
-on a real `bas_app` URL—the same path as production.
+**Gate fixture:** `internal/bdd/sqltest` creates `bas_app` on the cluster once
+(idempotently, before any scenario database is migrated), with a random password
+from the seeded generator; migrates on the admin URL; opens the store on a real
+`bas_app` URL in RLS scenarios—the same path as production.
 
 Config surface for `sql.migrate_url`: **EP0-217**.
 
 ### D3 — One goose track; exclude `.postgres.sql` on SQLite
+
+On **every Postgres open** (RLS mode or not), goose applies the shared
+migrations and every `.postgres.sql` fragment. SQLite opens exclude those files.
+Reasons: one schema per dialect—a Postgres database always carries its policies,
+never a mode-dependent schema; goose refuses later `Up` when an unapplied version
+is lower than one already recorded, so skipping fragments on first migrate would
+block applying them without out-of-order handling.
 
 Postgres-only files are `NNNNN_<name>.postgres.sql` in the same `fs.FS` as
 shared migrations, versions interleaved in apply order. Goose
@@ -167,12 +182,13 @@ tenant table.
 
 The only cross-tenant read on a tenant table in production today is
 `SELECT DISTINCT tenant_id, run_id FROM eventlog_outbox WHERE relayed_at IS
-NULL` (`stream/eventlog/relay.go`). Lease paths use per-run tenant in SQL under
-`core.WithTenant`.
+NULL` (`stream/eventlog/relay.go`). Slice **D** changes the relay's lease
+statements to run under `core.WithTenant(ctx, run.tenant)` (today they pass the
+tenant only as a SQL parameter).
 
 `platform/sql` exports a context marker (e.g. `WithSystemScope(ctx,
-ScopeRelayDiscovery)`), setting `app.system` instead of `app.tenant`; cache
-tracks the pair; unknown scopes rejected.
+ScopeRelayDiscovery)`), setting `app.system` with `app.tenant` cleared via the
+paired `set_config` (D1); cache tracks the pair; unknown scopes rejected.
 
 On `eventlog_outbox`:
 

@@ -76,16 +76,19 @@ decisions are [ADR-0022](../../docs/adr/0022-postgres-row-level-security.md)
 **D1**–**D8**. This section records only `platform/sql` mechanics by ADR
 number.
 
-**Open (ADR D2, D3).** `Open` gains an explicit **RLS mode** option the cloud
-profile sets; without it Postgres behaviour stays as today. RLS mode refuses
-`invalid_argument` when: URL is not Postgres; `MigrateURL` is missing; migrate
-and application URLs resolve to the same `current_user`; or the application
-role is superuser or has `BYPASSRLS`. In RLS mode `OpenOptions` carries
-`MigrateURL` (`sql.migrate_url`, **EP0-217**) and uses `rawURL` (`sql.url`,
-`bas_app`) for the application pool. Migrate runs on `MigrateURL`, then the
-pool opens on `sql.url`. **Role self-check** runs on a short-lived plain
-connection to `sql.url` before the tenant wrapper is registered (D2); then that
-handle is closed.
+**Open (ADR D2, D3).** Every **Postgres** `Open` runs goose on the shared FS and
+every `.postgres.sql` fragment (D3). SQLite excludes those files by exact
+basename. `Open` gains an explicit **RLS mode** option the cloud profile sets;
+without RLS mode there is no tenant wrapper, no second URL, and no D2 refusal
+checks—the conformance lane may use an admin login that bypasses RLS. RLS mode
+refuses `invalid_argument` when: URL is not Postgres; `MigrateURL` is missing;
+migrate and application URLs resolve to the same `current_user`; or the
+application role is superuser or has `BYPASSRLS`. In RLS mode `OpenOptions`
+carries `MigrateURL` (`sql.migrate_url`, **EP0-217**) and uses `rawURL`
+(`sql.url`, `bas_app`) for the application pool. Migrate runs on `MigrateURL`,
+then the pool opens on `sql.url`. **Role self-check** runs on a short-lived
+plain connection to `sql.url` before the tenant wrapper is registered (D2);
+then that handle is closed.
 
 One shared migration `fs.FS` per open; `platform/sql` walks the FS and passes
 **exact** basenames ending in `.postgres.sql` to `goose.WithExcludeNames` on
@@ -94,9 +97,11 @@ skip the same names (D3). Multi-package merge: **ADR-0023** (EP0-216).
 
 **Wrapper (ADR D1, D5, D6).** Postgres application pools in RLS mode register
 the tenant connector wrapper (pgx stdlib). A `sql.Tx` does not pin the tenant;
-each statement uses its own context's tenant. Invariants: per-statement
-`set_config` when cached tenant or system scope differs; cache unknown after
-errors, `Rollback`, failed `Commit`; no unconditional `RESET` on reuse;
+each statement uses its own context's tenant. When the cached `(tenant, scope)`
+pair differs, one statement sets both `app.tenant` and `app.system` (empty
+string for the inactive side) so relay scope cannot leak into tenant statements.
+Invariants: cache unknown after errors, `Rollback`, failed `Commit`; no
+unconditional `RESET` on reuse;
 `ResetSession` forwards to pgx; every driver statement path intercepted;
 embed-forward pgx optional interfaces; no tenant work at `Connect`. System scope
 API names (e.g. `WithSystemScope`, `ScopeRelayDiscovery`) and allowed call-site
