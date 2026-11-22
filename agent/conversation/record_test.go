@@ -26,7 +26,7 @@ func TestAuthorize(t *testing.T) {
 
 func TestAcceptDeduplicatesByID(t *testing.T) {
 	rec := newTestRecord()
-	first, err := rec.Accept(Message{ID: "m1", Text: "Hello"})
+	first, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +36,14 @@ func TestAcceptDeduplicatesByID(t *testing.T) {
 	if _, ok := rec.BeginTurn(); !ok {
 		t.Fatal("no turn started")
 	}
-	again, err := rec.Accept(Message{ID: "m1", Text: "Hello"})
+	again, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if again.Kind != DecisionDuplicate {
 		t.Fatalf("kind = %s, want duplicate", again.Kind)
 	}
-	sameText, err := rec.Accept(Message{ID: "m2", Text: "Hello"})
+	sameText, err := rec.Accept(Message{ID: "m2", Tenant: "acme", User: "ana", Text: "Hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,19 +57,32 @@ func TestAcceptDeduplicatesByID(t *testing.T) {
 
 func TestAcceptRefusesSteerAndCancelWithoutTurn(t *testing.T) {
 	rec := newTestRecord()
-	if _, err := rec.Accept(Message{ID: "m1", Text: "later", Mode: ModeSteer}); core.CodeOf(err) != core.CodeConflict {
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "later", Mode: ModeSteer}); core.CodeOf(err) != core.CodeConflict {
 		t.Fatalf("steer: %v, want conflict", err)
 	}
-	if _, err := rec.Accept(Message{ID: "m2", Text: "stop", Mode: ModeCancel}); core.CodeOf(err) != core.CodeConflict {
+	if _, err := rec.Accept(Message{ID: "m2", Tenant: "acme", User: "ana", Text: "stop", Mode: ModeCancel}); core.CodeOf(err) != core.CodeConflict {
 		t.Fatalf("cancel: %v, want conflict", err)
+	}
+}
+
+func TestAcceptRefusesAnotherPrincipal(t *testing.T) {
+	rec := newTestRecord()
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ben", Text: "Hello"}); core.CodeOf(err) != core.CodePermissionDenied {
+		t.Fatalf("another user: %v, want permission_denied", err)
+	}
+	if _, err := rec.Accept(Message{ID: "m2", Tenant: "globex", User: "ana", Text: "Hello"}); core.CodeOf(err) != core.CodeNotFound {
+		t.Fatalf("another tenant: %v, want not_found", err)
+	}
+	if len(rec.Handled) != 0 {
+		t.Fatalf("handled = %v, want nothing accepted", rec.Handled)
 	}
 }
 
 func TestBeginTurnHistoryAndQueueOrder(t *testing.T) {
 	rec := newTestRecord()
 	for _, m := range []Message{
-		{ID: "m1", Text: "One"},
-		{ID: "m2", Text: "Two"},
+		{ID: "m1", Tenant: "acme", User: "ana", Text: "One"},
+		{ID: "m2", Tenant: "acme", User: "ana", Text: "Two"},
 	} {
 		if _, err := rec.Accept(m); err != nil {
 			t.Fatal(err)
@@ -109,7 +122,7 @@ func TestBeginTurnHistoryAndQueueOrder(t *testing.T) {
 
 func TestSteerAppendsToRunningTurn(t *testing.T) {
 	rec := newTestRecord()
-	if _, err := rec.Accept(Message{ID: "m1", Text: "Write"}); err != nil {
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Write"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := rec.BeginTurn(); !ok {
@@ -125,7 +138,7 @@ func TestSteerAppendsToRunningTurn(t *testing.T) {
 
 func TestEndTurnRecordsInterruptedAndCompletesInPlace(t *testing.T) {
 	rec := newTestRecord()
-	if _, err := rec.Accept(Message{ID: "m1", Text: "Look up"}); err != nil {
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Look up"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := rec.BeginTurn(); !ok {
@@ -157,15 +170,44 @@ func TestEndTurnRecordsInterruptedAndCompletesInPlace(t *testing.T) {
 	}
 }
 
-func TestCancelConversationDropsQueue(t *testing.T) {
+func TestEndTurnCompletesAnInterruptedMessageWithTheRetriedText(t *testing.T) {
 	rec := newTestRecord()
-	if _, err := rec.Accept(Message{ID: "m1", Text: "Write"}); err != nil {
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Tell me a story"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := rec.BeginTurn(); !ok {
 		t.Fatal("no turn")
 	}
-	if _, err := rec.Accept(Message{ID: "m2", Text: "Then"}); err != nil {
+	rec.EndTurn(TurnOutput{
+		State:    TurnCancelled,
+		Code:     "cancelled",
+		Messages: []ModelMessage{{Text: "Once", Status: StatusInterrupted}},
+	})
+	rec.Running = 1
+	rec.EndTurn(TurnOutput{State: TurnCompleted, Messages: []ModelMessage{{Text: "Once upon a time"}}})
+	models := 0
+	for _, m := range rec.Messages {
+		if m.Role == RoleModel {
+			models++
+			if m.Text != "Once upon a time" || m.Status != StatusComplete {
+				t.Fatalf("model message = %+v, want the retried text completed in place", m)
+			}
+		}
+	}
+	if models != 1 {
+		t.Fatalf("model messages = %d, want 1", models)
+	}
+}
+
+func TestCancelConversationDropsQueue(t *testing.T) {
+	rec := newTestRecord()
+	if _, err := rec.Accept(Message{ID: "m1", Tenant: "acme", User: "ana", Text: "Write"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rec.BeginTurn(); !ok {
+		t.Fatal("no turn")
+	}
+	if _, err := rec.Accept(Message{ID: "m2", Tenant: "acme", User: "ana", Text: "Then"}); err != nil {
 		t.Fatal(err)
 	}
 	rec.CancelConversation()
@@ -175,7 +217,7 @@ func TestCancelConversationDropsQueue(t *testing.T) {
 	if len(rec.Queue) != 0 {
 		t.Fatalf("queue = %+v, want empty", rec.Queue)
 	}
-	if _, err := rec.Accept(Message{ID: "m3", Text: "Still there?"}); err == nil {
+	if _, err := rec.Accept(Message{ID: "m3", Tenant: "acme", User: "ana", Text: "Still there?"}); err == nil {
 		t.Fatal("cancelled conversation accepted a message")
 	}
 }
@@ -191,9 +233,10 @@ func TestCheckpointDue(t *testing.T) {
 	if !rec.CheckpointDue(7, runtime.Caps{ContinueAsNew: true}) {
 		t.Fatal("no checkpoint at the threshold")
 	}
-	rec.Checkpointed()
-	if rec.Calls != 0 || rec.Continued != 1 {
-		t.Fatalf("after checkpoint: calls=%d continued=%d", rec.Calls, rec.Continued)
+	// Only the runtime can say whether it continued; a declined checkpoint
+	// leaves the count alone, so the next boundary asks again.
+	if rec.Calls != 7 {
+		t.Fatalf("calls=%d, want 7", rec.Calls)
 	}
 	if rec.CheckpointDue(0, runtime.Caps{ContinueAsNew: true}) {
 		t.Fatal("checkpointed below the default threshold")

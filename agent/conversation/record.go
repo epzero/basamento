@@ -114,14 +114,14 @@ type Record struct {
 	User      string          `json:"user"`
 	ID        string          `json:"id"`
 	Flow      runtime.FlowRef `json:"flow"`
+	TurnFlow  runtime.FlowRef `json:"turn_flow"`
 	Turns     []Turn          `json:"turns,omitempty"`
 	Messages  []MessageRecord `json:"messages,omitempty"`
 	Queue     []Message       `json:"queue,omitempty"`
 	Handled   []string        `json:"handled,omitempty"`
 	Running   int             `json:"running,omitempty"` // 1-based turn index
 	Cancelled bool            `json:"cancelled,omitempty"`
-	Calls     int             `json:"calls,omitempty"`     // since this run started
-	Continued int             `json:"continued,omitempty"` // continue-as-new count
+	Calls     int             `json:"calls,omitempty"` // since this run started
 }
 
 // NewRecord returns an empty conversation record.
@@ -173,6 +173,9 @@ type Decision struct {
 // is a duplicate and runs no second turn (REQ-CONV-005). Steering and cancel
 // with no running turn are refused (REQ-CONV-020, REQ-CONV-021).
 func (r *Record) Accept(msg Message) (Decision, error) {
+	if err := r.Authorize(Principal{Tenant: msg.Tenant, User: msg.User}); err != nil {
+		return Decision{}, err
+	}
 	if msg.ID == "" {
 		return Decision{}, core.NewError(core.CodeInvalidArgument, "conversation: a message needs an id", nil)
 	}
@@ -314,10 +317,10 @@ func (r *Record) EndTurn(result TurnOutput) {
 			}
 		}
 		if existing >= 0 {
-			if r.Messages[existing].Status == StatusInterrupted && status == StatusComplete {
-				r.Messages[existing].Status = StatusComplete
-			}
-			if r.Messages[existing].Text == "" {
+			if r.Messages[existing].Status == StatusInterrupted {
+				r.Messages[existing].Status = status
+				r.Messages[existing].Text = m.Text
+			} else if r.Messages[existing].Text == "" {
 				r.Messages[existing].Text = m.Text
 			}
 			continue
@@ -378,13 +381,6 @@ func (r *Record) CheckpointDue(threshold int, caps runtime.Caps) bool {
 		threshold = DefaultCheckpointThreshold
 	}
 	return r.Calls >= threshold
-}
-
-// Checkpointed resets the durable-call count and counts a continuation
-// (REQ-CONV-014).
-func (r *Record) Checkpointed() {
-	r.Calls = 0
-	r.Continued++
 }
 
 // Marshal encodes the record as JSON for the run's state.
