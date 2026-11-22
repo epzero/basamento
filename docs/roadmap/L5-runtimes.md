@@ -15,7 +15,10 @@ The workflow that runs the flow host, step activities, payload codec (blob claim
 ### WP-L5-03 — Embedded Temporal server
 Depends: WP-L5-02, WP-L1-05.
 Owns: `runtime/temporal/embedded` (its own Go module).
-In-process server on file-backed SQLite, started by `kit serve` and `kit run`, with the settings measured in `runtime/temporal/embedded/BENCHMARKS.md`. Specs: `specs/runtime/embedded.feature`.
+In-process server on file-backed SQLite, started by `kit serve`, with the
+settings measured in `runtime/temporal/embedded/BENCHMARKS.md`. The data-directory
+lock and `temporal/frontend.grpc` contract (`docs/architecture/runtime.md` D22)
+lets a later `kit run` attach. Specs: `specs/runtime/embedded.feature`.
 
 ### WP-L5-04 — Runtime conformance suite
 Depends: WP-L5-01, WP-L5-02, WP-L5-03.

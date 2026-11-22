@@ -1,6 +1,8 @@
 # ADR-0002 — Runtime-neutral durable execution on Temporal
 
-**Status:** accepted · **Date:** 2026-11-01
+**Status:** accepted · **Date:** 2026-11-01 · **Amended 2026-11-22:** ADR-0021
+records how the root module links the nested server and amends the consequence
+about library users and the module graph.
 
 ## Context
 Flows run for seconds to days, call paid vendors and wait for people. The
@@ -27,5 +29,9 @@ workflows run unchanged on Temporal Cloud or a self-hosted cluster.
   the contract.
 - File-backed SQLite is outside Temporal's production envelope. It suits the
   single-user embedded profile, with backups and a tested upgrade path.
-  Measured costs: about 50 ms per sequential step, a 116 MB binary, about
-  210 MB of memory.
+  Measured costs: about 50 ms per sequential step, a 116 MB stripped **bench**
+  binary, a stripped linked `kit` with the server of **134 MB** (ADR-0021), and
+  about 210 MB of memory for the server process.
+- Linking the server into `kit` lists the nested module in the root `go.mod`;
+  a consumer that imports only `runtime` grows from 185 to 282 modules in
+  `go list -m -e all` (+97) without compiling the server tree (ADR-0021).

@@ -444,6 +444,106 @@ None. `layering.yaml` already lists `runtime/temporal`
 other layer), so the runtime may import the payload codec of WP-L1-04 and the
 blob store of WP-L1-02 through `platform`.
 
+## Embedded Temporal server (WP-L5-03)
+
+Architecture decisions **D12–D24** are in `docs/architecture/runtime.md` §5.
+**ADR-0021** is the binding record for linking and OpenTelemetry caps. This
+section is the implementer checklist.
+
+### Linking (D12 — see ADR-0021)
+
+1. **Owner prerequisite:** tag `runtime/temporal/embedded/v0.1.0` on `main`
+   (never move or delete). Order: nested tag → root `require` → root release tag.
+2. Root `go.mod` / `go.sum` (high risk): add exactly:
+
+```text
+require github.com/epzero/basamento/runtime/temporal/embedded v0.1.0
+replace github.com/epzero/basamento/runtime/temporal/embedded => ./runtime/temporal/embedded
+```
+
+plus the six OpenTelemetry `replace` lines in ADR-0021 (comment: cap until server
+builds against `otel/log` v1.x).
+
+3. `cmd/kit` imports the embedded package; only `cmd/kit` and optional
+   `internal/bdd` helpers; **`layering.yaml` unchanged** (prefix `runtime` already
+   allows).
+4. `CGO_ENABLED=0 go build ./cmd/kit` — already covered by `make gate` `build`
+   (`go build ./...`) once the import exists.
+5. Align nested `go.mod` to root shared versions (except pinned OTel); unified
+   `modernc.org/sqlite` **v1.57.0**; re-run nested `bench-cli crash` after align.
+6. Record G3 wall time in the pull request; owner decides `@slow` if >3 min delta.
+
+### `runtime/temporal/embedded` package (D13–D19)
+
+| Spike (today) | Required |
+| --- | --- |
+| `Start(o Options)` | `Start(ctx, o Options) (*Server, error)`; `ErrInUse`, `ErrUnsupportedPlatform` |
+| `Stop()` drops error | `Stop(ctx) error`; release `<DBFile>.lock` last |
+| `freePort()` panics (×5 listeners) | return listen/bind errors; TOCTOU on all five (D18) |
+| `MkdirAll` `0o755` | `0o700` for `temporal/` |
+| in-memory `mem` + wall clock | tests only; production file `DBFile` |
+| `Options` without `Logger` | `Logger *slog.Logger` required (nil → error; bench noop OK) |
+| no readiness | SDK dial: 50 ms → 1 s backoff, `select` + `ctx`; kit timeout 30 s |
+| no singleton guarantee | Unix: `flock` on `<DBFile>.lock`; non-Unix: `ErrUnsupportedPlatform` |
+
+Nested-module unit tests + crash/replay after parity (`embedded.yml`).
+
+### `cmd/kit` wiring (D20–D22)
+
+Embedded profile only, **server only** (no `temporal.Runtime` in WP-L5-03):
+
+1. Open sql, blob, bus, secrets via existing `wirePort` list.
+2. In `startPorts`, after the last port and before `net.Listen`: `embedded.Start`
+   (`context.WithTimeout` 30 s for readiness), write `temporal/frontend.grpc`,
+   wrap `embedded.Server` in a `config.Port` adapter (`Close` = D22).
+3. Append the adapter to `opened` for `config.NewServer`.
+4. Bind HTTP; print existing ready line (unchanged REQ-CONFIG-020 text).
+5. Shutdown via `Server.Serve`: HTTP drain → unlink `frontend.grpc` →
+   `Stop(shutdown.timeout)` → reverse close of sql/blob/bus/secrets.
+
+Not a `wirePort`. Map `ErrInUse` / `ErrUnsupportedPlatform` / readiness timeout
+per D13/D15. Cloud: out of scope.
+
+### Configuration
+
+No new `internal/config` keys in WP-L5-03. Later: `runtime.temporal` address for
+cloud (designer).
+
+### Testing and lanes (D23–D24)
+
+Implement four harness steps matching `embedded.feature` (see runtime.md D23).
+Harness: subprocess `kit serve`, read `frontend.grpc`, in-process
+`temporal.New` (PR #169) with task queue `bdd-conformance-linear`, placeholder
+host with steps `s1`–`s3` (each returns arg+1), `RegisterFlowHost`, `Start`
+input `1`, worker `Serve`; wait with SDK
+`GetWorkflow(..., "").Get(ctx, nil)` (blocking long poll) or channels; then one
+`Describe` → `completed`; Then asserts recorded step order `s1`, `s2`, `s3`.
+See runtime.md D23 (`RunRef` → workflow id). Moves to `runtime/conformance` in
+WP-L5-04. Proves server-in-`kit`, not worker-in-`kit`.
+
+| Scenario | Lane | Notes |
+| --- | --- | --- |
+| `RT-003-01` | G3 (default); `@slow` if >3 min gate growth | Owner decides |
+| `RT-001-01` goldens | WP-L5-04 | |
+
+### Follow-ups (designer / owner / implementation; not all in WP-L5-03)
+
+| Artifact | Risk | Request |
+| --- | --- | --- |
+| `go.mod` / `go.sum` (root) | high | D12 lines + OTel caps (implementation) |
+| `Makefile` | high | `make licenses` ignore `github.com/cactus/go-statsd-client/statsd` as `embedded.yml` |
+| `.github/workflows/embedded.yml` | high | Path filters include `go.mod`, `go.sum`, `cmd/kit/**` |
+| `runtime/temporal/embedded/go.mod` | high | Parity with root (implementation PR) |
+| `embedded.feature` | medium | remove `@planned` when green |
+| Nested tag `…/embedded/v0.1.0` | — | owner prerequisite |
+| `gate gomod` parity check | high | separate ticket (`tools/gate`); owner |
+| Harness steps + `linear` placeholder | medium | implementation (`internal/bdd`) |
+| `temporal.Options` workflow-task timeout | high | later work package (`runtime/temporal`, D19) |
+| `docs/architecture/runtime.md` ADR-0002 116 MB note | low | done in design/ADR |
+| `specs/config/design.md` §5 | medium | one sentence: embedded server after four ports (implementation) |
+| `specs/config` cloud Temporal address | medium | defer |
+| `docs/roadmap/L5-runtimes.md` | low | `kit serve` only (done in design commit) |
+
 ## Open questions
 
 1. **Default step retry limit (`REQ-RT-018`)**: `runtime/runtime.go:48` states `MaxAttempts int // 0 = runtime default`, without pinning a number in `ADR-0002` or `docs/architecture/runtime.md`. This spec chooses `3` attempts for `runtime/local` when `MaxAttempts` is `0`. Confirm whether `3` is the intended default for `local` (and whether `temporal` in `WP-L5-02` should share it).

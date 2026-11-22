@@ -57,29 +57,259 @@ states and durable events. Every runtime must reproduce them
 (`specs/runtime/conformance.feature`). Temporal histories recorded by the suite
 are replayed on every change to catch nondeterminism.
 
-## 5. Embedded server: measured
+## 5. Embedded Temporal server (WP-L5-03)
 
-Measured with `runtime/temporal/embedded/bench` (details in `runtime/temporal/embedded/BENCHMARKS.md`):
+The embedded profile runs a pinned **Temporal server v1.32** in-process on a
+file-backed SQLite database under `data.dir`, started by `kit serve` with no
+external Temporal service (REQ-RT-003). The server stays in nested module
+`runtime/temporal/embedded` (ADR-0002); **linking into `kit`** is ADR-0021.
+Library packages never import it; only `cmd/kit` and, if needed, `internal/bdd`
+may. WP-L5-03 wires the server in `kit serve`; it does **not** register a flow
+host or worker in the `kit` process (that lands in a later work package).
 
-- a 116 MB static binary;
+### Measured cost
+
+Runtime behaviour (server-only bench, `runtime/temporal/embedded/BENCHMARKS.md`):
+
+- a **116 MB** stripped static binary when `bench` links server, SDK and worker
+  (not the `kit` binary size; see below);
 - a 0.3–0.55 s cold start and a sub-100 ms start on an existing database;
-- about 210 MB of memory;
+- about 210 MB of RSS;
 - about 50 ms per sequential step (the same as the official dev server);
 - correct recovery after `kill -9` in 10 of 10 runs;
 - deterministic replay.
 
-Settings for the embedded profile:
+**Linking cost** (measured **2026-11-22** on darwin/arm64, Go 1.26.11;
+`CGO_ENABLED=0 go build -o kit ./cmd/kit`; **MB = 10⁶ bytes**; CI will differ —
+ADR-0021): unstripped `kit` **106 MB → 196 MB**; stripped with
+`-ldflags='-s -w'` (as `BENCHMARKS.md`) **72 MB → 134 MB**. The **116 MB** in
+ADR-0002 and `BENCHMARKS.md` is the stripped **bench** binary, not `kit`.
+`go build ./cmd/kit` takes about **20–70 s** wall with a warm cache and about
+**four CPU-minutes** cold; root `go.mod` **199 → 310** lines (+111, 96
+`// indirect`); `go.sum` **737 → 1073** (+336); `go list -m all` **426 → 563**
+(+137); `go list -deps ./cmd/kit` **1127 → 1729** packages.
+
+~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
+work that needs lower latency runs on the `local` runtime.
+
+### Linking into one `kit` binary (D12)
+
+See **ADR-0021** for the full decision. Summary:
+
+- `cmd/kit` imports `runtime/temporal/embedded`; root `go.mod` **`require`s
+  `v0.1.0`**, **`replace`s** to `./runtime/temporal/embedded`, and **`replace`s
+  the OpenTelemetry family** at v1.45.0 / `otel/log` v0.20.0 so
+  `go.temporal.io/server` v1.32.2 compiles in the same graph as `gocloud.dev`
+  v0.49.0. A `replace` cap overrides every required version; raising a
+  `require` above a cap has no effect while the cap stands. The gate's
+  `go build ./cmd/kit` fails when a cap is removed or weakened while the server
+  still needs it; delete the six caps and rebuild to learn whether they can go.
+  Caps apply only to the root module's builds (consumers ignore them).
+- **Tag prerequisite (owner):** `runtime/temporal/embedded/v0.1.0` on `main`
+  before the implementation merges; order: nested tag → root `require` bump →
+  root release tag.
+- **`go install …/cmd/kit@version` is not supported** (root `replace`); releases
+  build from a checkout (`ADR-0021`).
+- **Parity:** raise the nested `go.mod` to the root's versions for shared
+  modules (except the pinned OTel family); unified `modernc.org/sqlite` is
+  **v1.57.0**; re-run embedded **crash + replay** after alignment.
+- **Module graph (measured 2026-11-22):** a consumer that `require`s only the
+  root and imports only `runtime`: `go list -m -e all` **185 → 282** (+97); one
+  that also imports `runtime/temporal`, `platform/blob` and `platform/sql`:
+  **384 → 450** (+66). No `go.temporal.io/server` packages in `go list -deps`;
+  consumers resolve `otel` v1.47.0 (caps invisible). Listing grows ~40–50%;
+  nothing from the server tree is compiled (ADR-0002 amended).
+
+**Rejected:** child/helper binary (constitution, ADR-0001, REQ-RT-003);
+downgrading `gocloud.dev` instead of OTel caps (blob tests break); forking
+server; waiting for upstream near term; nested `cmd/kit` module (ambiguous
+import when the root tree still ships `cmd/kit`, or high churn to retarget
+build, BDD, layering — owner may still choose it; caps in the root graph are
+the reason caps stay on the root `go.mod`, per ADR-0021).
+
+`make gate` **`build`** is already `go build ./...`; once `cmd/kit` imports
+embedded, that step links the server — no separate gate target.
+
+### Module API and lifecycle (D13–D19)
+
+**D13 — `Start(ctx, Options) (*Server, error)` and `(*Server) Stop(ctx)
+error`.** Replace the spike's sync API and dropped `Stop` error. Export plain
+Go errors the module cannot wrap as `core.Error`: `ErrInUse` when the
+data-directory lock cannot be acquired (`cmd/kit` → `unavailable`,
+`temporal: embedded data directory is in use`); `ErrUnsupportedPlatform` on
+non-Unix builds (`cmd/kit` → `unsupported`,
+`temporal: the embedded server needs a Unix host`). No `panic` in library code.
+
+**D14 — Loopback listeners and trust boundary.** The spike opens five loopback
+listeners (`embedded.go`: frontend gRPC and HTTP, history, matching, worker), all
+on `127.0.0.1` with ephemeral ports unless tests set `Options.Port` (D18). The
+OSS Temporal server has no authentication. The frontend HTTP listener stays
+only if the server cannot start with `HTTPPort` 0 — the implementation pull
+request must try `HTTPPort` 0 and disable HTTP when that works; record the
+result. Trust domain: every local process that can reach loopback, the same as
+`kit serve` under `auth.mode: none` (REQ-AUTH-001 requires loopback). Payloads
+are encrypted by the data converter, so a hostile local process cannot read
+them, but it can cancel, terminate or signal runs. On a multi-user host the
+embedded profile is not safe against other local users; use the cloud profile
+or OS-level restriction. Mode `0600` on `frontend.grpc` is hygiene, not
+protection (ports can be scanned). Accepted risk (ADR-0021).
+
+**D15 — Ready.** `Start` returns after `temporal.Server.Start()` succeeds.
+Readiness: dial the frontend with the SDK (`client.Dial`; it already calls
+`GetSystemInfo` via `loadCapabilities`); retry after **50 ms**, doubling up to
+**1 s**, using `select` on a timer and `ctx.Done()` (no `time.Sleep`). The caller
+supplies the bound: `cmd/kit` passes `context.WithTimeout(ctx, 30*time.Second)`
+(constant, not a setting). On expiry `Start` stops the server, releases the lock
+and returns an error wrapping `ctx.Err()` and the last dial error; `cmd/kit`
+maps it to `unavailable` (`temporal: the embedded server did not become ready`).
+The **1.32** major.minor version check stays in `runtime/temporal.Serve`
+(WP-L5-02 part (c) D7), not in the embedded module.
+
+**D16 — Data directory layout.** Caller passes absolute paths; the module does
+not import `internal/config`:
+
+| Path | Purpose |
+| --- | --- |
+| `temporal/sqlite.db` | Temporal persistence (`modernc.org/sqlite`) |
+| `temporal/sqlite.db.lock` | Exclusive non-blocking advisory lock for one server instance (see D17) |
+| `temporal/frontend.grpc` | One line `host:port`, mode `0600`, write temp file then rename after ready |
+
+Parent directory mode `0700` when missing. SQLite pragmas as today unless
+`TemporalDefaults`.
+
+**D17 — One server per data directory and upgrade.** WAL SQLite **allows** a
+second `Start` on the same file without an advisory lock — two servers would
+corrupt history ownership; unlike SQL migrations, that is not a harmless race.
+**Unix:** before opening the DB, take `flock(LOCK_EX|LOCK_NB)` on
+`<DBFile>.lock`, hold until `Stop` (kernel releases on crash — no stale lock);
+match `platform/sql/migrate_lock_unix.go` (`O_NOFOLLOW`, regular file).
+**Non-Unix:** `embedded.Start` returns `ErrUnsupportedPlatform`; do not start
+unlocked (`platform/sql/migrate_lock_other.go` runs migrations without a lock;
+that pattern must not apply here). CI runs on Linux; developers also build on
+macOS; nothing in the specs promises Windows. **Owner:** non-Unix embedded
+Temporal support.
+
+**Upgrade test (default A, ADR-0021):** golden database from the previous pin
+plus a nested-module test that opens it under the current pin and completes a
+workflow; refresh at every pin bump (`-update`, reason in commit body); size to
+be measured in the implementation pull request. Alternative B: manual backup
+only.
+
+Schema: empty file → `SetupSchema` + namespace; existing file → server-managed
+`schema_version` on open. Same **1.32** patch opens older DBs; newer
+major.minor refuses at `Serve` version check.
+
+**D18 — Ports.** The spike calls `freePort()` five times (frontend gRPC when
+`Port` is 0, frontend HTTP, history, matching, worker). Each use of
+`net.Listen("127.0.0.1:0")` returns a port and **closes the listener** before
+the server binds. That is a loopback time-of-check race for **every** listener:
+if a port is taken before bind, `Start` returns the bind error and `cmd/kit`
+fails startup — no retry loop. Production uses ephemeral ports; tests may set a
+fixed frontend gRPC port.
+
+**D19 — Tuning and logging.** Partitions = 1, archival off, one history shard,
+noop DC redirection; `Options.Logger *slog.Logger` is required (nil is an error;
+bench may pass a noop logger). Create the database directory with mode **0700**
+(not the spike's `0755`).
+**Workflow-task timeout 2–3 s** (BENCHMARKS.md) is set on
+`client.StartWorkflowOptions.WorkflowTaskTimeout` when starting workflows (as in
+`embedded/bench/main.go`), not in embedded `dynConfig` and not a worker option.
+A small additive field on `temporal.Options` belongs to whichever work package
+first constructs `temporal.Runtime` inside `kit` (not WP-L5-03).
+
+### Composition in `cmd/kit` (D20–D22)
+
+Read `cmd/kit/serve.go` (`wire`, `wireEmbedded`, `startPorts`, `runServe`) and
+`internal/config/serve.go` (`Port` is `interface{ Close() error }`;
+`Server.Serve` drains HTTP, then closes `ports` in reverse).
+
+**D20 — Embedded profile startup (WP-L5-03 only).** The embedded server is **not**
+a `wirePort` (the ready line prints `name=implementation` for every `wirePort`;
+REQ-CONFIG-020 keeps the text:
+`ready profile=embedded runtime=temporal listen=… sql=… blob=… bus=… secrets=…`;
+`wire` already returns `runtime=temporal` for both profiles). **`startPorts`**
+gains a runtime step after the last platform port and before `net.Listen`: call
+`embedded.Start` with `DBFile` = `data.dir/temporal/sqlite.db`, write
+`temporal/frontend.grpc` (temp + rename), return a `config.Port` adapter whose
+`Close` runs D22; append it to the `opened` list passed to `config.NewServer` so
+`Server.Serve` closes it first on shutdown (reverse order). **Placement:** after
+the four ports (a later `temporal.Runtime` needs blob and secrets for its data
+converter; the server starts at the same hook so the step can grow from
+server-only into the full runtime). **No** `temporal.Runtime`, **no** `Serve`,
+**no** flow host in WP-L5-03. On `embedded.Start` failure: map D13 errors to
+stderr and exit 1; `startPorts` closes opened ports in reverse (existing code).
+On termination before ready: cancel `Start`'s `ctx`, `Start` stops a
+half-started server, releases the lock, returns `ctx.Err()`, exit 0 as today.
+
+**D21 — Cloud profile.** No in-process server; external address via a future
+config key (out of WP-L5-03).
+
+**D22 — Shutdown.** Order: HTTP drain (`config.Server.Serve`) → remove
+`frontend.grpc` → `embedded.Server.Stop(ctx)` (releases the lock last) → other
+ports close in reverse via `Server.Serve`. Treat `frontend.grpc` as a hint (stale
+after crash until overwritten; a failed dial means stale). `Stop` uses
+`shutdown.timeout` from the end of the HTTP drain; a late or failed `Stop` is
+reported on stderr and does not change `Server.Serve`'s exit code; the kernel
+releases the lock on process exit. **Future `kit run`:** try the lock — acquired
+means start a server; refused means attach using `frontend.grpc` (not WP-L5-03).
+
+### Proof and conformance (D23–D24)
+
+**D23 — `RT-003-01`.** Register these four step phrases (scenario wording):
+
+1. `Given a machine with no database, Temporal or NATS server running`
+2. `When "kit serve --profile embedded" starts with an empty data directory`
+3. `Then the server reports ready`
+4. `And a run of conformance flow "linear" completes`
+
+**Driver (today's specs):** (a) subprocess `kit serve --profile embedded` with an
+empty `data.dir` and env that does not point at external SQL/Temporal/NATS
+(that is all the Given step can assert; it does not scan the host); (b) wait for
+the ready line; (c) read `temporal/frontend.grpc`; (d) build an in-process `runtime/temporal.Runtime` (PR #169 API) with
+`Options.Client.HostPort` from the file, `Options.TaskQueue` =
+`bdd-conformance-linear` (not `DefaultTaskQueue` `basamento-flow`, so no future
+`kit` worker competes), plus opened blob and secrets stores for `New`; register a
+**linear placeholder** flow host in `internal/bdd` that runs three steps named
+`s1`–`s3`, each returning its numeric argument plus one through `DurableContext.Step`;
+register matching step handlers; call `Runtime.Start` with JSON input `1` and
+tenant in context; run `Serve` on a worker goroutine. Waits use blocking calls
+only: the ready line is already a subprocess stdout read; completion waits on
+the Temporal SDK long poll
+`client.GetWorkflow(ctx, workflowID, "").Get(ctx, nil)` on a harness client
+dialed to the same `HostPort` and namespace (a nil result pointer decodes
+nothing, so the tenant payload converter is not needed) or on channels — no poll
+loop on `Describe` (`go tool gate hygiene` forbids `time.Sleep`, `time.After`,
+`time.Now` and friends in tests; every harness wait is blocking or channel-
+driven, and the scenario context carries the overall deadline). After the wait,
+assert once that `Runtime.Describe` reports state `completed`. Step handlers
+record the steps they ran in order; the Then step asserts the recorded sequence
+`s1`, `s2`, `s3` (no encrypted payload decode). Names follow PR #169:
+`RegisterFlowHost`, `HostWorkflowName`, `Start(ctx, StartRequest)`. `RunRef`
+carries `RunID` and `TenantID`; the SDK workflow id is `<tenant>/<runID>` when
+the tenant is non-empty, else the bare `RunID` (PR #169 `workflowID` in
+`ids.go`), which is what `GetWorkflow` needs. Lives in `internal/bdd` until
+WP-L5-04 moves it to `runtime/conformance` with goldens. This proves the server
+inside `kit` and a harness worker on the cluster — not a worker inside `kit`.
+
+**Lane:** PR gate G3, not `@slow`, given measured link cost above; implementer
+records G3 duration delta; if **>3 minutes** over the previous green run, move to
+`@slow` + nightly (`redgreen` still runs the scenario by id). Owner decides.
+
+**Red→green:** base without embedded wiring fails (no server in `kit serve`;
+undefined steps count as fail on base).
+
+**D24 — Goldens.** WP-L5-04 owns golden `linear` (`RT-001-01`); WP-L5-03 runs
+the flow only.
+
+### Settings reference (from measurements)
 
 | Setting | Value | Why |
 | --- | --- | --- |
 | Task-queue partitions | 1 | One worker process; four partitions only add forwarding latency (fan-out 2–3× faster). |
 | SQLite | `journal_mode=wal`, `synchronous=normal`, `busy_timeout=10000`, 4 connections | Double the fan-out throughput; survives process crashes. |
-| Workflow-task timeout | 2–3 s | Bounds recovery when a task was handed to a dead process (default 10 s). |
+| Workflow-task timeout | 2–3 s | `StartWorkflowOptions.WorkflowTaskTimeout` when starting runs (see D19). |
 | Module pins | server, API and SDK versions from the matching `temporalio/cli` release | Newer API modules do not compile against a given server release. |
 | Go | ≥ 1.26.11 | Required by server v1.32. |
-
-~50 ms per sequential step adds about 1 s to a 20-step agent loop. Interactive
-work that needs lower latency runs on the `local` runtime.
 
 ## 6. Temporal runtime: data path (WP-L5-02, pull request (a))
 
