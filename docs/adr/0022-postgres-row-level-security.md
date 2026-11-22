@@ -11,10 +11,8 @@ second line of defence behind repository tenant filters. Almost every
 repository statement—including `auth/authz.SQLStore.BindingsForCheck`—runs
 autocommit on the pooled `Execer`. Shared goose migrations must stay valid on
 SQLite. Column names differ (`tenant` vs `tenant_id`). Multi-package migration
-composition was unset when this ADR was drafted (`cmd/kit` ships a baseline
-migration only; BDD merges with ad hoc renumbering); **ADR-0023** (EP0-216)
-now decides it. This ADR closes implementer choices
-for the cloud profile.
+composition is decided in **ADR-0023** (EP0-216): today `cmd/kit` ships only a
+baseline migration and the BDD harness merges the sets with ad hoc renumbering.
 
 ## Decision
 
@@ -27,8 +25,8 @@ On Postgres with **RLS mode** enabled on `Open`, the application pool uses a
 pgx stdlib `driver.Connector` wrapper (not the migrate connection). Before
 every statement the wrapper reads `core.TenantFrom(ctx)` and D6 system scope
 when present. With no tenant and no allowed system scope, return
-`invalid_argument` before SQL. When the cached pair `(tenant, scope)` differs from the statement's, the wrapper
-runs **one** SQL statement:
+`invalid_argument` before SQL. When the cached pair `(tenant, scope)` differs
+from the statement's, the wrapper runs **one** SQL statement:
 `SELECT set_config('app.tenant', $1, false), set_config('app.system', $2, false)`.
 Tenant scope uses `(tenant, '')`; system scope uses `('', scope)`. Both GUCs are
 always written together so a stale `app.system` cannot leave the relay discovery
@@ -138,7 +136,7 @@ wrongly trip “database schema newer than binary” otherwise. One
 `goose_db_version` table, one advisory lock. `Down` fragments drop policies and
 `NO FORCE` / `DISABLE`.
 
-Multi-package merge order and stable version bands: **ADR-0023** (EP0-216).
+Stable version bands and one merged goose track: **ADR-0023** (EP0-216).
 
 ### D4 — Tables, exemptions, schema rule
 
@@ -271,9 +269,8 @@ Part (b) implementation slices (ticketed after this ADR is accepted):
 - **(C)** auth postgres fragments + AUTH-027–029 steps.
 - **(D)** eventlog fragments + relay D6.
 
-Follow-ups: **ADR-0023**/EP0-216 and EP0-221 (migration composition),
-**EP0-218** (`gate rls`), **EP0-219** (Postgres span store), **EP0-220**
-(kit cloud wiring).
+Migration composition: **ADR-0023** (EP0-216). Follow-ups: **EP0-218** (`gate
+rls`), **EP0-219** (Postgres span store), **EP0-220** (kit cloud wiring).
 
 Embedded profile unchanged (SQLite). Wrapper stays in `platform/sql`.
 

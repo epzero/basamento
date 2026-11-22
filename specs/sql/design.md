@@ -93,7 +93,8 @@ then that handle is closed.
 One shared migration `fs.FS` per open; `platform/sql` walks the FS and passes
 **exact** basenames ending in `.postgres.sql` to `goose.WithExcludeNames` on
 SQLite (not a glob pattern). `maxMigrationVersion` and `checkSchemaVersion`
-skip the same names (D3). Multi-package merge: **ADR-0023** (EP0-216).
+skip the same names (D3). Stable version bands and one merged goose track:
+**ADR-0023** (EP0-216).
 
 **Wrapper (ADR D1, D5, D6).** Postgres application pools in RLS mode register
 the tenant connector wrapper (pgx stdlib). A `sql.Tx` does not pin the tenant;
