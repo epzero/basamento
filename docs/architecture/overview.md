@@ -43,6 +43,10 @@ of `kit`. Status words: **Implemented**,
 
 Ports are selected by URL in configuration (see `platform/platform.go`).
 
+For SQL, the host composes the migration sets of the capabilities it runs into
+one goose track through `platform/sql` and opens that single composed set for
+every store of a database URL, rather than one baseline set (ADR-0023).
+
 ## 3. Layers
 
 `layering.yaml` is canonical and enforced by `go tool gate layering`. The
