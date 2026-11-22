@@ -279,14 +279,14 @@ scenarios:
         human:
             status: pending
     AUTH-018-01:
-        hash: sha256:70d7ee724e6b2a2aa06176df6bdf31f890c43dbf10c62f5d9e6cec7d46ea1eef
+        hash: sha256:657db52f20e8faee3d3c5996516ab4d52f952d520ebbb388031c5e7555013df5
         reqs:
             - REQ-AUTH-018
         tier: P0
-        author: caster:spec-author:73e264
-        reviewer: cursor:spec-reviewer:70bfca
+        author: caster:spec-author:3b18f4
+        reviewer: cursor:spec-reviewer:8e30b8
         approved_at: "2026-11-22"
-        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        note: 'Security: scope grammar fail-closed narrowing, authorization-only Principal.Scopes, resolver Session for session:<id>, CEL condition uses resource.attrs.'
         human:
             status: pending
     AUTH-019-01:
@@ -345,14 +345,14 @@ scenarios:
         human:
             status: pending
     AUTH-024-01:
-        hash: sha256:f35ac58626cb1f3e0e982b385a85aab5019a069d32fe1b4b8ccee9cd880370a2
+        hash: sha256:60e01a97589248e115c1bdce567655024e9af650a786bfa28aeade806df0de60
         reqs:
             - REQ-AUTH-024
         tier: P0
-        author: caster:spec-author:73e264
-        reviewer: cursor:spec-reviewer:70bfca
+        author: caster:spec-author:3b18f4
+        reviewer: cursor:spec-reviewer:8e30b8
         approved_at: "2026-11-22"
-        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        note: 'Security: scope grammar fail-closed narrowing, authorization-only Principal.Scopes, resolver Session for session:<id>, CEL condition uses resource.attrs.'
         human:
             status: pending
     AUTH-025-01:
@@ -408,5 +408,27 @@ scenarios:
         reviewer: cursor:spec-reviewer:70bfca
         approved_at: "2026-11-22"
         note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-030-01:
+        hash: sha256:4bea995008a7e8a6df4ac937c0dcb77ddcd56bf218dd082c3b348f9842ff78a5
+        reqs:
+            - REQ-AUTH-030
+        tier: P0
+        author: caster:spec-author:3b18f4
+        reviewer: cursor:spec-reviewer:8e30b8
+        approved_at: "2026-11-22"
+        note: 'Security: scope grammar fail-closed narrowing, authorization-only Principal.Scopes, resolver Session for session:<id>, CEL condition uses resource.attrs.'
+        human:
+            status: pending
+    AUTH-031-01:
+        hash: sha256:2e917bedf22c9198eead684cbc1256cf2a00d56dc1a3774b360b7293d1ee4fb1
+        reqs:
+            - REQ-AUTH-031
+        tier: P0
+        author: caster:spec-author:3b18f4
+        reviewer: cursor:spec-reviewer:8e30b8
+        approved_at: "2026-11-22"
+        note: 'Security: scope grammar fail-closed narrowing, authorization-only Principal.Scopes, resolver Session for session:<id>, CEL condition uses resource.attrs.'
         human:
             status: pending
