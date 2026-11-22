@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -21,6 +22,8 @@ type loopTransport struct {
 	releases  []string
 	heartbeat worker.HeartbeatAnswer
 	beatErr   error
+	// finishErr, when set, decides Finish's answer per client ref.
+	finishErr func(ref string) error
 	starting  chan string
 	finished  chan string
 	left      chan struct{}
@@ -80,6 +83,9 @@ func (t *loopTransport) Finish(_ context.Context, _, _, ref, state string, _ jso
 	select {
 	case t.finished <- ref:
 	default:
+	}
+	if t.finishErr != nil {
+		return t.finishErr(ref)
 	}
 	return nil
 }
@@ -442,5 +448,92 @@ func TestWorkerLoopFreesUnitsAfterAnInvocationFinishes(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("serve: %v", err)
+	}
+}
+
+func TestWorkerLoopDropsAPermanentResultAndKeepsLeasing(t *testing.T) {
+	tr := newLoopTransport()
+	tr.finishErr = func(ref string) error {
+		if ref == "stale" {
+			return core.NewError(core.CodeNotFound, "the invocation is gone", nil)
+		}
+		return nil
+	}
+	tr.leased = []worker.Invocation{{ClientRef: "r1", Model: "m", Units: 1, Request: json.RawMessage(`{}`)}}
+	j, err := worker.OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	if err := j.Record(worker.JournalEntry{Kind: "result", ClientRef: "stale", Attempt: 1,
+		State: string(model.StateSucceeded), Result: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	p := &loopProvider{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loop := &workerLoop{client: loopClient(t, tr, j), capacity: 1}
+	loop.runner = &worker.Runner{Client: loop.client, Providers: map[string]model.Invoker{"m": p}}
+	done := make(chan error, 1)
+	go func() { done <- loop.serve(ctx) }()
+
+	// A permanent rejection must not wedge replay: the lease loop starts.
+	// A regression here blocks forever rather than failing a select.
+	if ref := <-tr.starting; ref != "r1" {
+		t.Fatalf("started %q, want r1", ref)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	pending, err := j.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending %+v after a permanent rejection, want the result dropped", pending)
+	}
+}
+
+func TestWorkerLoopRetriesATransientResult(t *testing.T) {
+	tr := newLoopTransport()
+	var mu sync.Mutex
+	attempts := 0
+	second := make(chan struct{}, 1)
+	tr.finishErr = func(string) error {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			return core.NewError(core.CodeUnavailable, "the platform is busy", nil)
+		}
+		second <- struct{}{}
+		return nil
+	}
+	j, err := worker.OpenJournal(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	loop := &workerLoop{client: loopClient(t, tr, j), replayInterval: time.Millisecond, stderr: io.Discard}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		loop.redeliver(context.Background(), []worker.JournalEntry{{Kind: "result", ClientRef: "r1", Attempt: 1,
+			State: string(model.StateSucceeded), Result: json.RawMessage(`{}`)}}, stop)
+	}()
+	// A regression leaves the result pending forever; the test then times out
+	// on the package deadline rather than signalling.
+	<-second
+	close(stop)
+	<-done
+	pending, err := j.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending %+v after a successful redelivery, want none", pending)
 	}
 }

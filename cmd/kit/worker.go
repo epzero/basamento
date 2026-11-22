@@ -71,7 +71,7 @@ func runWorker(args []string) error {
 		return fmt.Errorf("kit worker: --models loaded no descriptors")
 	}
 
-	db, err := psql.Open(ctx, url, migrations)
+	db, err := psql.Open(ctx, url, credentials.Migrations())
 	if err != nil {
 		return fmt.Errorf("kit worker: sql store: %w", err)
 	}
@@ -137,6 +137,10 @@ type workerLoop struct {
 	stdout   io.Writer
 	stderr   io.Writer
 
+	// replayInterval is the first pause between result-redelivery rounds;
+	// tests shorten it. Zero reads as replayRetry.
+	replayInterval time.Duration
+
 	// beats and sweeps override the tickers in tests; nil uses the real ones.
 	// swept, when set, receives one value after each janitor pass.
 	beats  <-chan time.Time
@@ -180,7 +184,7 @@ func (l *workerLoop) serve(ctx context.Context) error {
 		l.janitor(runCtx, sweepStop)
 	}()
 
-	if err := l.replay(runCtx); err != nil {
+	if err := l.replay(runCtx, ctx.Done()); err != nil {
 		_, _ = fmt.Fprintln(l.stderr, "kit worker: journal:", err)
 	}
 
@@ -417,10 +421,31 @@ func fatalError(err error) bool {
 	return false
 }
 
+// replayRetry is the first pause between result-redelivery rounds; it doubles
+// up to replayRetryMax so a long platform outage does not hammer Finish.
+const (
+	replayRetry    = time.Second
+	replayRetryMax = 30 * time.Second
+)
+
+// permanentResultError says whether a Finish rejection can never change: the
+// invocation is gone, the worker was removed, or the journaled result is
+// invalid. Retrying such a result forever would block the worker's progress
+// for no gain (ADR-0012 §7).
+func permanentResultError(err error) bool {
+	switch core.CodeOf(err) {
+	case core.CodeNotFound, core.CodeUnauthenticated, core.CodeInvalidArgument:
+		return true
+	}
+	return false
+}
+
 // replay resumes the leases and redelivers the results the journal kept
 // (ADR-0012 §7). A lease the platform no longer holds is recorded done: its
-// outcome is already settled.
-func (l *workerLoop) replay(ctx context.Context) error {
+// outcome is already settled. Results the platform permanently rejects are
+// dropped; transient ones are retried in the background so a slow redelivery
+// never holds up leasing.
+func (l *workerLoop) replay(ctx context.Context, stop <-chan struct{}) error {
 	pending, err := l.client.Pending()
 	if err != nil {
 		return err
@@ -436,14 +461,20 @@ func (l *workerLoop) replay(ctx context.Context) error {
 		}
 		if p.Kind == "result" {
 			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts, p.Attempt)
-			if err == nil || core.CodeOf(err) == worker.CodeLeaseLost {
+			switch {
+			case err == nil || core.CodeOf(err) == worker.CodeLeaseLost:
 				l.markDone(p.ClientRef)
-				continue
+			case permanentResultError(err):
+				// The platform will never accept this result; keeping it
+				// would wedge the worker on a journal entry it cannot settle.
+				_, _ = fmt.Fprintf(l.stderr, "kit worker: drop result %s: %v\n", p.ClientRef, err)
+				l.markDone(p.ClientRef)
+			default:
+				_, _ = fmt.Fprintf(l.stderr, "kit worker: redeliver %s: %v\n", p.ClientRef, err)
+				// A transient failure must not wait for the next restart:
+				// the lease expires meanwhile (ADR-0012 §7).
+				redeliver = append(redeliver, p)
 			}
-			_, _ = fmt.Fprintf(l.stderr, "kit worker: redeliver %s: %v\n", p.ClientRef, err)
-			// A transient failure must not wait for the next restart: the
-			// lease expires meanwhile (ADR-0012 §7).
-			redeliver = append(redeliver, p)
 			continue
 		}
 		if err := l.client.Resume(ctx, p.ClientRef, p.Attempt); err != nil {
@@ -470,24 +501,53 @@ func (l *workerLoop) replay(ctx context.Context) error {
 			_, _ = fmt.Fprintf(l.stderr, "kit worker: invocation %s: %v\n", p.ClientRef, runErr)
 		}
 	}
-	for len(redeliver) > 0 && ctx.Err() == nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
-		}
-		var again []worker.JournalEntry
-		for _, p := range redeliver {
-			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts, p.Attempt)
-			if err == nil || core.CodeOf(err) == worker.CodeLeaseLost {
-				l.markDone(p.ClientRef)
-				continue
-			}
-			again = append(again, p)
-		}
-		redeliver = again
+	if len(redeliver) > 0 {
+		// Redelivery runs beside the lease loop: a result the platform is
+		// slow to accept must not stop the worker taking new work.
+		go l.redeliver(ctx, redeliver, stop)
 	}
 	return nil
+}
+
+// redeliver retries the journaled results the platform rejected transiently
+// until they are accepted, permanently rejected, or the worker shuts down.
+func (l *workerLoop) redeliver(ctx context.Context, pending []worker.JournalEntry, stop <-chan struct{}) {
+	wait := l.retry()
+	for len(pending) > 0 {
+		select {
+		case <-stop:
+			return
+		case <-time.After(wait):
+		}
+		var again []worker.JournalEntry
+		for _, p := range pending {
+			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts, p.Attempt)
+			switch {
+			case err == nil || core.CodeOf(err) == worker.CodeLeaseLost:
+				l.markDone(p.ClientRef)
+			case permanentResultError(err):
+				_, _ = fmt.Fprintf(l.stderr, "kit worker: drop result %s: %v\n", p.ClientRef, err)
+				l.markDone(p.ClientRef)
+			default:
+				again = append(again, p)
+			}
+		}
+		pending = again
+		if wait < replayRetryMax {
+			wait *= 2
+			if wait > replayRetryMax {
+				wait = replayRetryMax
+			}
+		}
+	}
+}
+
+// retry is the first redelivery pause.
+func (l *workerLoop) retry() time.Duration {
+	if l.replayInterval > 0 {
+		return l.replayInterval
+	}
+	return replayRetry
 }
 
 // attemptOf reads the current attempt of a journal entry written before the
