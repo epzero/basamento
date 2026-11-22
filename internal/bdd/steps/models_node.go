@@ -71,6 +71,7 @@ type nodeProvider struct {
 	cancels  int
 
 	acceptedCh chan struct{}
+	followedCh chan struct{}
 	lookupCh   chan struct{}
 	cancelCh   chan struct{}
 	world      *nodeWorld
@@ -97,6 +98,7 @@ func newNodeProvider(w *nodeWorld, id string, op model.Capability) *nodeProvider
 		lookup:     true,
 		runs:       map[string]*providerRun{},
 		acceptedCh: make(chan struct{}, 16),
+		followedCh: make(chan struct{}, 16),
 		lookupCh:   make(chan struct{}, 4),
 		cancelCh:   make(chan struct{}, 4),
 		world:      w,
@@ -159,6 +161,13 @@ func (p *nodeProvider) Events(ctx context.Context, h model.Handle, after int64) 
 	p.mu.Unlock()
 	if run == nil {
 		return nil, core.NewError(core.CodeNotFound, "no invocation", map[string]any{"client_ref": h.ClientRef})
+	}
+	// The run's handler is now following the invocation, so a cancel reaches
+	// the step that delivers it to the provider instead of ending the run
+	// first (MODEL-009-01, EP0-198).
+	select {
+	case p.followedCh <- struct{}{}:
+	default:
 	}
 	out := make(chan model.Event, len(run.events))
 	for _, event := range run.events {
@@ -510,14 +519,26 @@ func (w *nodeWorld) cancelRun() error {
 	}
 }
 
+// waitAccepted waits until the provider accepted the invocation and the run's
+// handler is following it. The second wait is what keeps the invocation
+// running from the runtime's point of view: cancelling before the handler
+// reaches the follow step can end the run without the provider ever seeing a
+// cancel request (MODEL-009-01, EP0-198).
 func (w *nodeWorld) waitAccepted() error {
 	select {
 	case <-w.provider.acceptedCh:
-		return nil
 	case <-w.doneCh:
 		return fmt.Errorf("the run ended before the provider accepted the invocation")
 	case <-time.After(waitBound):
 		return fmt.Errorf("timed out waiting for the provider to accept")
+	}
+	select {
+	case <-w.provider.followedCh:
+		return nil
+	case <-w.doneCh:
+		return fmt.Errorf("the run ended before the node followed the invocation")
+	case <-time.After(waitBound):
+		return fmt.Errorf("timed out waiting for the node to follow the invocation")
 	}
 }
 
