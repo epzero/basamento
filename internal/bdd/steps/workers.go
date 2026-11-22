@@ -428,6 +428,10 @@ func workerSpillSetting(ctx context.Context, tenant, onOff string, minutes int) 
 }
 
 func registerWorker(sc *godog.ScenarioContext) {
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		world(ctx).Worker = newWorkerWorld()
+		return ctx, nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w := world(ctx).Worker; w != nil {
 			w.teardown()
