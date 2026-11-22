@@ -50,9 +50,6 @@ func TestTokenVerify(t *testing.T) {
 	if p.ID != "tok_1" || p.Tenant != "acme" {
 		t.Fatalf("principal = %+v", p)
 	}
-	if len(p.Scopes) != 2 || p.Scopes[0] != "runs:read" {
-		t.Fatalf("scopes = %v", p.Scopes)
-	}
 
 	cases := map[string]struct {
 		secret string
@@ -69,6 +66,19 @@ func TestTokenVerify(t *testing.T) {
 				t.Fatalf("code = %s, want unauthenticated", core.CodeOf(err))
 			}
 		})
+	}
+}
+
+func TestNewTokenScopesReachPrincipal(t *testing.T) {
+	issued := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	secret, token := testToken(t, issued.Add(time.Hour))
+
+	p, err := token.Verify(secret, issued)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(p.Scopes) != 2 || p.Scopes[0] != "runs:read" || p.Scopes[1] != "runs:write" {
+		t.Fatalf("scopes = %v", p.Scopes)
 	}
 }
 

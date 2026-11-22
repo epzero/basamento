@@ -120,17 +120,32 @@ func TestOIDCAuthenticateAcceptsValidToken(t *testing.T) {
 	clock := coretest.NewFakeClock(testNow())
 	verifier := testOIDC(t, clock)
 	key := rsaPrivateKey(t)
-	raw := signToken(t, jwt.SigningMethodRS256, key, testKeyID, testClaims(clock.Now()))
+	now := clock.Now()
 
-	p, err := verifier.Authenticate(context.Background(), raw)
-	if err != nil {
-		t.Fatalf("Authenticate: %v", err)
+	cases := map[string]func(jwt.MapClaims){
+		"provider scope claim": func(claims jwt.MapClaims) {
+			claims["scope"] = "openid profile email"
+		},
+		"no scope claim": func(claims jwt.MapClaims) {
+			delete(claims, "scope")
+		},
 	}
-	if p.ID != "user-1" || p.Tenant != "acme" {
-		t.Fatalf("principal = %+v", p)
-	}
-	if len(p.Scopes) != 2 || p.Scopes[0] != "runs:read" || p.Scopes[1] != "runs:write" {
-		t.Fatalf("scopes = %v", p.Scopes)
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims := testClaims(now)
+			mutate(claims)
+			raw := signToken(t, jwt.SigningMethodRS256, key, testKeyID, claims)
+			p, err := verifier.Authenticate(context.Background(), raw)
+			if err != nil {
+				t.Fatalf("Authenticate: %v", err)
+			}
+			if p.ID != "user-1" || p.Tenant != "acme" {
+				t.Fatalf("principal = %+v", p)
+			}
+			if len(p.Scopes) != 0 {
+				t.Fatalf("scopes = %v, want none", p.Scopes)
+			}
+		})
 	}
 }
 

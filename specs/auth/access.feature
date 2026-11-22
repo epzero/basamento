@@ -26,7 +26,7 @@ Feature: Authentication and tenancy
       | issued for audience "other"    |
       | expired one minute ago         |
 
-  @planned @wp:WP-L8-01 @REQ-AUTH-031 @id:AUTH-031-01
+  @wp:WP-L8-01 @REQ-AUTH-031 @id:AUTH-031-01
   Scenario: Provider OAuth scopes do not become authorization scopes
     Given auth mode "oidc" with issuer "https://id.example.test" and audience "kit"
     When a request carries a valid token with provider scope claim "openid profile email"

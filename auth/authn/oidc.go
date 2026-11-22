@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -145,9 +144,6 @@ func (o *OIDC) Authenticate(ctx context.Context, raw string) (Principal, error) 
 			return Principal{}, unauthenticated()
 		}
 		principal.Tenant = core.TenantID(tenant)
-	}
-	if scope, ok := claims["scope"].(string); ok {
-		principal.Scopes = strings.Fields(scope)
 	}
 	return principal, nil
 }

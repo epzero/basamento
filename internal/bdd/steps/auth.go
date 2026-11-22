@@ -26,26 +26,34 @@ var oidcTestKeyPEM []byte
 var oidcUnknownKeyPEM []byte
 
 type authWorld struct {
-	mode     authn.Mode
-	issuer   string
-	audience string
-	key      *rsa.PrivateKey
-	verifier *authn.OIDC
+	mode      authn.Mode
+	issuer    string
+	audience  string
+	key       *rsa.PrivateKey
+	verifier  *authn.OIDC
+	principal authn.Principal
 }
 
 func newAuthWorld() *authWorld { return &authWorld{} }
 
-func (w *authWorld) signWith(key *rsa.PrivateKey, now time.Time, audience string, expires time.Time) (string, error) {
-	if key == nil {
-		return "", fmt.Errorf("no signing key")
-	}
-	claims := jwt.MapClaims{
+func (w *authWorld) claims(now time.Time, audience string, expires time.Time) jwt.MapClaims {
+	return jwt.MapClaims{
 		"iss":    w.issuer,
 		"aud":    audience,
 		"sub":    "ana",
 		"iat":    jwt.NewNumericDate(now),
 		"exp":    jwt.NewNumericDate(expires),
 		"tenant": "acme",
+	}
+}
+
+func (w *authWorld) signWith(key *rsa.PrivateKey, now time.Time, audience string, expires time.Time) (string, error) {
+	return w.signClaims(key, w.claims(now, audience, expires))
+}
+
+func (w *authWorld) signClaims(key *rsa.PrivateKey, claims jwt.MapClaims) (string, error) {
+	if key == nil {
+		return "", fmt.Errorf("no signing key")
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = "issuer-1"
@@ -60,7 +68,8 @@ func (w *authWorld) authenticate(ctx context.Context, raw string) error {
 	if w.verifier == nil {
 		return fmt.Errorf("no oidc verifier: the auth mode is not oidc")
 	}
-	_, err := w.verifier.Authenticate(ctx, raw)
+	principal, err := w.verifier.Authenticate(ctx, raw)
+	w.principal = principal
 	world(ctx).Core.lastErr = err
 	return nil
 }
@@ -128,6 +137,29 @@ func registerAuth(sc *godog.ScenarioContext) {
 			return err
 		}
 		return w.authenticate(ctx, raw)
+	})
+	sc.Step(`^a request carries a valid token with provider scope claim "([^"]*)"$`, func(ctx context.Context, scope string) error {
+		w := world(ctx).Auth
+		now := world(ctx).Core.clock.Now()
+		claims := w.claims(now, w.audience, now.Add(time.Hour))
+		claims["scope"] = scope
+		raw, err := w.signClaims(w.key, claims)
+		if err != nil {
+			return err
+		}
+		return w.authenticate(ctx, raw)
+	})
+	sc.Step(`^the request is accepted$`, func(ctx context.Context) error {
+		if err := world(ctx).Core.lastErr; err != nil {
+			return fmt.Errorf("request failed: %w", err)
+		}
+		return nil
+	})
+	sc.Step(`^the principal carries no scopes$`, func(ctx context.Context) error {
+		if scopes := world(ctx).Auth.principal.Scopes; len(scopes) != 0 {
+			return fmt.Errorf("principal scopes = %v, want none", scopes)
+		}
+		return nil
 	})
 
 	sc.Step(`^"kit serve" is asked to listen on "([^"]*)"$`, func(ctx context.Context, addr string) error {
