@@ -1,9 +1,10 @@
 # Auth
 
 Status: **Implemented** for the `none` and `oidc` modes and local bearer-token
-records (WP-L8-01, `auth/authn`). **Planned**: local accounts (argon2id
-passwords, passkeys, cookie sessions), request wiring in the API, and
-authorization (WP-L8-02). Decision: ADR-0008. Specs: `specs/auth`.
+records (WP-L8-01, `auth/authn`). **Implemented (core)**: in-app authorization library (`auth/authz`, WP-L8-02
+part (a)). **Planned**: Gherkin scenarios for authorization, local accounts
+(argon2id passwords, passkeys, cookie sessions), request wiring in the API, and
+row-level security (WP-L8-02 part (b)). Decision: ADR-0008. Specs: `specs/auth`.
 
 ## 1. Authentication modes
 
@@ -45,9 +46,38 @@ new one and replacing the stored record. Every rejection is
 
 ## 2. Authorization
 
+Package `auth/authz` implements the design in `specs/auth/design.md` §1–§7.
+
+- **Catalog and roles.** Twenty-nine actions are declared in Go with three
+  built-in roles (`viewer`, `member`, `admin`) as fixed supersets.
+- **Bindings.** Role bindings live in SQL (`authz_bindings`) through
+  `platform/sql`; the tenant always comes from the context.
+- **Check.** `Authorizer.Check(ctx, principal, action, resource)` follows the
+  design procedure: undeclared action, tenant mismatch, binding union with CEL
+  conditions (10 000 cost units per evaluation, bounded compile cache), scope
+  narrowing, then permission membership. Allowed checks write no audit event.
+  Store failures return `unavailable` with no audit record.
+- **Grant authority.** One `authorize` pass per decision: one store read and one
+  union of binding conditions. `Grant` / `Revoke` / `List` validate grammars
+  first, then require the grant action plus every permission of the target role,
+  then compile conditions (at most 2048 bytes) on grant, then write. Scope
+  grammar is a fail-closed seam until EP0-208; `scope-narrowed` is recorded only
+  when narrowing removes a permission that bindings would otherwise grant.
+- **Denial audit.** One `authz.deny` event per denial via `Record` on a
+  `context.WithoutCancel` derived context (5 s bound). `Principal` and
+  `Resource` are sanitised (UTF-8, no controls, 256-byte cap per field).
+  Reason categories are fixed strings. When condition errors compete,
+  `condition-cost-exceeded` wins over `condition-error` over `no-binding`.
+  Audit `Record` failures do not change the denial; they log (sanitised
+  principal, reason category, code only) and optionally increment
+  `AuditFailureCounter`.
+- **RPC guard.** `Guard` refuses undeclared procedures at wiring time; declared
+  procedures resolve the resource then call `Check` without touching audit on
+  wiring errors.
+
 - Permissions are declared in Go. Roles are bound per project and stored in SQL.
 - A single `authz.Check(principal, action, resource)` runs in a connect
-  interceptor. Denials return `permission_denied` and write an audit event
+  interceptor (WP-L6-03). Denials return `permission_denied` and write an audit event
   (REQ-AUTH-004).
 - **Audit**: every producer, the credential store and this check among them,
   records through `platform.Audit`. There is one audit store, owned by the

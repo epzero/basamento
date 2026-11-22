@@ -1,9 +1,11 @@
 # Auth: identity, tenancy and permissions
 
 Status: **Partially implemented**: the `none` and `oidc` authentication modes
-(WP-L8-01). **Planned**: local accounts, authorization (WP-L8-02), and the
-requirements proved through the API in WP-L6-03 and WP-L9-01. Design:
-ADR-0008, `docs/architecture/auth.md`.
+(WP-L8-01); the authorization core in `auth/authz` (WP-L8-02 part (a)) with
+unit tests. **Planned**: Gherkin scenarios for authorization, local accounts,
+row-level security (WP-L8-02 part (b)), API wiring (WP-L6-03), and the
+requirements proved through the API in WP-L9-01. Scope narrowing is fail-closed
+until EP0-208 defines the grammar. Design: ADR-0008, `docs/architecture/auth.md`.
 
 ### REQ-AUTH-001 — No auth means loopback only
 While the auth mode is `none`, the server shall refuse to listen on any non-loopback address.
