@@ -21,6 +21,8 @@ type JournalEntry struct {
 	Attempt            int             `json:"attempt,omitempty"`
 	LeaseExpiresUnixMS int64           `json:"lease_expires_unix_ms,omitempty"`
 	ProviderHandle     string          `json:"provider_handle,omitempty"`
+	Request            json.RawMessage `json:"request,omitempty"`
+	State              string          `json:"state,omitempty"`
 	Result             json.RawMessage `json:"result,omitempty"`
 	ErrorCode          string          `json:"error_code,omitempty"`
 	CostMpts           int64           `json:"cost_mpts,omitempty"`
@@ -88,7 +90,10 @@ func (j *Journal) Entries() ([]JournalEntry, error) {
 	defer func() { _ = f.Close() }()
 	var out []JournalEntry
 	scn := bufio.NewScanner(f)
-	scn.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	// A lease entry carries the whole request (ADR-0012 §7), so one line can
+	// be far larger than a handle or a result; 16 MiB leaves room for a long
+	// chat transcript without turning the journal into a memory hog.
+	scn.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scn.Scan() {
 		if len(scn.Bytes()) == 0 {
 			continue
@@ -105,28 +110,35 @@ func (j *Journal) Entries() ([]JournalEntry, error) {
 	return out, nil
 }
 
-// Pending returns the leases that have no result yet, keyed by client ref in
-// the order they were first leased.
+// Pending returns the leases and results that have no done entry yet, keyed by
+// client ref in the order they were first leased. A result entry carries the
+// terminal state a restart has to redeliver (ADR-0012 §7).
 func (j *Journal) Pending() ([]JournalEntry, error) {
 	entries, err := j.Entries()
 	if err != nil {
 		return nil, err
 	}
 	order := []string{}
-	byRef := map[string]JournalEntry{}
+	leases := map[string]JournalEntry{}
+	results := map[string]JournalEntry{}
 	finished := map[string]bool{}
 	for _, e := range entries {
 		switch e.Kind {
 		case "lease":
-			if _, ok := byRef[e.ClientRef]; !ok {
+			if _, ok := leases[e.ClientRef]; !ok {
 				order = append(order, e.ClientRef)
 			}
-			byRef[e.ClientRef] = e
+			leases[e.ClientRef] = e
 		case "handle":
-			if prev, ok := byRef[e.ClientRef]; ok {
+			if prev, ok := leases[e.ClientRef]; ok {
 				prev.ProviderHandle = e.ProviderHandle
-				byRef[e.ClientRef] = prev
+				leases[e.ClientRef] = prev
 			}
+		case "result":
+			if _, ok := leases[e.ClientRef]; !ok && results[e.ClientRef].ClientRef == "" {
+				order = append(order, e.ClientRef)
+			}
+			results[e.ClientRef] = e
 		case "done":
 			finished[e.ClientRef] = true
 		}
@@ -136,7 +148,20 @@ func (j *Journal) Pending() ([]JournalEntry, error) {
 		if finished[ref] {
 			continue
 		}
-		out = append(out, byRef[ref])
+		if r, ok := results[ref]; ok {
+			if l, ok := leases[ref]; ok {
+				r.Model = l.Model
+				r.Attempt = l.Attempt
+				r.LeaseExpiresUnixMS = l.LeaseExpiresUnixMS
+				r.ProviderHandle = l.ProviderHandle
+				r.Request = l.Request
+			}
+			out = append(out, r)
+			continue
+		}
+		if l, ok := leases[ref]; ok {
+			out = append(out, l)
+		}
 	}
 	return out, nil
 }

@@ -43,19 +43,70 @@ func (i *Invoker) Describe(ctx context.Context) ([]model.Descriptor, error) {
 	return out, nil
 }
 
+// StartOptions are a run's start options for one worker invocation: the
+// priority class the run chose (ADR-0012 §5) and its queue timeout. The zero
+// value means normal class and the platform's default queue timeout.
+type StartOptions struct {
+	Class        Class
+	QueueTimeout time.Duration
+	MaxRuntime   time.Duration
+	ReservedMpts int64
+	TraceParent  string
+}
+
+// DefaultQueueTimeout is how long an invocation may wait for a worker when
+// the run did not choose a queue timeout.
+const DefaultQueueTimeout = 10 * time.Minute
+
+type startOptionsKey struct{}
+
+// WithStartOptions returns a context carrying the run's start options.
+func WithStartOptions(ctx context.Context, opts StartOptions) context.Context {
+	return context.WithValue(ctx, startOptionsKey{}, opts)
+}
+
+// StartOptionsFrom returns the run's start options, with defaults filled in.
+func StartOptionsFrom(ctx context.Context) StartOptions {
+	opts, _ := ctx.Value(startOptionsKey{}).(StartOptions)
+	if opts.Class == "" {
+		opts.Class = ClassNormal
+	}
+	if opts.QueueTimeout == 0 {
+		opts.QueueTimeout = DefaultQueueTimeout
+	}
+	return opts
+}
+
 // Start queues the invocation. It is idempotent per client ref because the
-// queue has one row per client ref.
+// queue has one row per client ref. The units are the pool descriptor's
+// (ADR-0012 §6); the class and queue timeout are the run's start options.
 func (i *Invoker) Start(ctx context.Context, r model.Request) (model.Handle, error) {
 	tenant, _ := core.TenantFrom(ctx)
+	desc, err := i.Store.descriptorFor(ctx, i.Pool, r.Model)
+	if err != nil {
+		return model.Handle{}, err
+	}
+	units := desc.Units
+	if units <= 0 {
+		units = 1
+	}
+	payload, err := encodeRequest(r)
+	if err != nil {
+		return model.Handle{}, err
+	}
+	opts := StartOptionsFrom(ctx)
 	inv, err := i.Store.Enqueue(ctx, Invocation{
 		ClientRef:    r.ClientRef,
 		Pool:         i.Pool,
 		Tenant:       tenant,
 		Model:        r.Model,
-		Class:        ClassNormal,
-		Units:        1,
-		Request:      requestPayload(r),
-		QueueTimeout: 10 * time.Minute,
+		Class:        opts.Class,
+		Units:        units,
+		Request:      payload,
+		QueueTimeout: opts.QueueTimeout,
+		MaxRuntime:   opts.MaxRuntime,
+		ReservedMpts: opts.ReservedMpts,
+		TraceParent:  opts.TraceParent,
 	})
 	if err != nil {
 		return model.Handle{}, err
@@ -63,11 +114,47 @@ func (i *Invoker) Start(ctx context.Context, r model.Request) (model.Handle, err
 	return model.Handle{Provider: i.Provider(), ID: inv.ClientRef, ClientRef: inv.ClientRef}, nil
 }
 
-func requestPayload(r model.Request) json.RawMessage {
-	if len(r.Params) == 0 {
-		return json.RawMessage("{}")
+// encodeRequest stores the whole request, not only its parameters: the worker
+// rebuilds it faithfully before it calls its provider (ADR-0012 §7).
+func encodeRequest(r model.Request) (json.RawMessage, error) {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"worker: invocation request is not encodable", map[string]any{"cause": err.Error()})
 	}
-	return r.Params
+	return raw, nil
+}
+
+// decodeRequest rebuilds the request a worker queued. A request recorded
+// before the whole request was carried held only parameters; such a payload
+// is passed through as parameters. A full request always names its model and
+// its client ref, so a bare params object with a "model" key is not mistaken
+// for one.
+func decodeRequest(inv Invocation) (model.Request, error) {
+	req := model.Request{}
+	if len(inv.Request) > 0 && string(inv.Request) != "{}" {
+		var probe struct {
+			Model     string `json:"model"`
+			ClientRef string `json:"client_ref"`
+		}
+		if err := json.Unmarshal(inv.Request, &probe); err != nil {
+			return model.Request{}, core.NewError(core.CodeInvalidArgument,
+				"worker: invocation request is not a model.Request", map[string]any{"cause": err.Error()})
+		}
+		if probe.Model == "" || probe.ClientRef == "" {
+			req.Params = inv.Request
+		} else if err := json.Unmarshal(inv.Request, &req); err != nil {
+			return model.Request{}, core.NewError(core.CodeInvalidArgument,
+				"worker: invocation request is not a model.Request", map[string]any{"cause": err.Error()})
+		}
+	}
+	if req.Model == "" {
+		req.Model = inv.Model
+	}
+	if req.ClientRef == "" {
+		req.ClientRef = inv.ClientRef
+	}
+	return req, nil
 }
 
 // Events delivers the partial output the queue holds and closes when the

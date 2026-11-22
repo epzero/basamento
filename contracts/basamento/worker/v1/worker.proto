@@ -164,6 +164,16 @@ message Event {
   google.protobuf.Struct data = 7;
 }
 
+// ResumeRequest takes back an in-doubt invocation inside its grace period.
+message ResumeRequest {
+  string worker_id = 1;
+  string credential = 2;
+  string client_ref = 3;
+}
+
+// ResumeResponse is empty.
+message ResumeResponse {}
+
 // EventsRequest batches partial output for one lease.
 message EventsRequest {
   string worker_id = 1;
@@ -240,6 +250,8 @@ service WorkerService {
   rpc Starting(StartingRequest) returns (StartingResponse);
   // Started is sent after the provider accepted, with its handle.
   rpc Started(StartedRequest) returns (StartedResponse);
+  // Resume takes back an in-doubt invocation inside its grace period.
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
   // Events sends partial output in batches.
   rpc Events(EventsRequest) returns (EventsResponse);
   // Finish reports the result.

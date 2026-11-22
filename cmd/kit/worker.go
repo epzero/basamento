@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -82,56 +86,286 @@ func runWorker(args []string) error {
 	}
 	fmt.Printf("kit worker: %s joined pool %s with %d descriptors\n", joined.ID, joined.Pool, len(joined.Descriptors))
 
-	pending, err := client.Pending()
-	if err != nil {
-		return fmt.Errorf("kit worker: journal: %w", err)
+	runner := &worker.Runner{Client: client, Providers: invokers}
+	loop := &workerLoop{
+		client: client, runner: runner, capacity: *capacity, once: *once,
+		stdout: os.Stdout, stderr: os.Stderr,
 	}
-	if len(pending) > 0 {
-		fmt.Printf("kit worker: resuming %d invocations from the journal\n", len(pending))
+	return loop.serve(ctx)
+}
+
+// heartbeatInterval is how often the worker tells the platform it is alive.
+// A heartbeat runs beside invocations, so a long job is never declared lost
+// while it is healthy (ADR-0012 §4, §7).
+const heartbeatInterval = 30 * time.Second
+
+// workerLoop is the kit worker's run loop: heartbeat, replay the journal,
+// lease, run, and drain on a signal or the platform's order.
+type workerLoop struct {
+	client   *worker.Client
+	runner   *worker.Runner
+	capacity int
+	once     bool
+	stdout   io.Writer
+	stderr   io.Writer
+
+	// beats overrides the heartbeat ticker in tests; nil uses the real one.
+	beats <-chan time.Time
+
+	mu        sync.Mutex
+	inUse     int
+	draining  atomic.Bool
+	fatal     atomic.Bool
+	drained   chan struct{}
+	drainOnce sync.Once
+}
+
+func (l *workerLoop) serve(ctx context.Context) error {
+	if l.stdout == nil {
+		l.stdout = io.Discard
+	}
+	if l.stderr == nil {
+		l.stderr = io.Discard
+	}
+	// Invocations outlive a SIGTERM: the signal stops new leases and lets the
+	// work in flight finish or be handed back (ADR-0012 §6).
+	runCtx := context.WithoutCancel(ctx)
+	l.drained = make(chan struct{})
+
+	var wg sync.WaitGroup
+	hbStop := make(chan struct{})
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		l.heartbeat(runCtx, hbStop)
+	}()
+
+	if err := l.replay(runCtx); err != nil {
+		_, _ = fmt.Fprintln(l.stderr, "kit worker: journal:", err)
 	}
 
-	runner := &worker.Runner{Client: client, Providers: invokers}
-	heartbeat := time.NewTicker(30 * time.Second)
-	defer heartbeat.Stop()
+	leaseDone := make(chan struct{})
+	go func() {
+		defer close(leaseDone)
+		l.lease(ctx, runCtx, &wg)
+	}()
+
+	<-leaseDone
+	wg.Wait()
+	close(hbStop)
+	<-hbDone
+
+	_ = l.client.Leave(context.Background())
+	if l.fatal.Load() {
+		return errors.New("kit worker: no longer holds its leases")
+	}
+	return nil
+}
+
+func (l *workerLoop) heartbeat(ctx context.Context, stop <-chan struct{}) {
+	tick := l.beats
+	if tick == nil {
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
 	for {
 		select {
-		case <-ctx.Done():
-			_ = client.Leave(context.Background())
-			return nil
-		case <-heartbeat.C:
-			if _, err := client.Heartbeat(ctx, *capacity); err != nil {
-				fmt.Fprintln(os.Stderr, "kit worker: heartbeat:", err)
+		case <-stop:
+			return
+		case <-tick:
+			answer, err := l.client.Heartbeat(ctx, l.free())
+			if err != nil {
+				if fatalError(err) {
+					l.fatal.Store(true)
+					l.drain()
+					return
+				}
+				_, _ = fmt.Fprintln(l.stderr, "kit worker: heartbeat:", err)
+				continue
 			}
-			continue
-		default:
+			for _, ref := range answer.Cancel {
+				if !l.runner.Cancel(ref) {
+					// The invocation is still queued; the platform removes it
+					// itself. Nothing local to cancel.
+					continue
+				}
+			}
+			if answer.Drain {
+				l.drain()
+			}
 		}
-		leased, err := client.LeaseOnce(ctx, *capacity, nil, 30*time.Second)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "kit worker: lease:", err)
+	}
+}
+
+func (l *workerLoop) lease(ctx context.Context, runCtx context.Context, wg *sync.WaitGroup) {
+	for {
+		if ctx.Err() != nil {
+			l.drain()
+		}
+		if l.draining.Load() || l.fatal.Load() {
+			return
+		}
+		free := l.free()
+		if free <= 0 {
 			select {
 			case <-ctx.Done():
-				return nil
+				l.drain()
+				return
+			case <-l.drained:
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+			continue
+		}
+		leased, err := l.client.LeaseOnce(ctx, free, nil, 30*time.Second)
+		if err != nil {
+			_, _ = fmt.Fprintln(l.stderr, "kit worker: lease:", err)
+			if fatalError(err) {
+				l.fatal.Store(true)
+				l.drain()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				l.drain()
+				return
+			case <-l.drained:
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+		if len(leased) == 0 {
+			if l.once {
+				l.drain()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				l.drain()
+				return
+			case <-l.drained:
+				return
 			case <-time.After(time.Second):
 			}
 			continue
 		}
 		for _, inv := range leased {
-			if err := runner.Run(ctx, inv); err != nil {
-				fmt.Fprintf(os.Stderr, "kit worker: invocation %s: %v\n", inv.ClientRef, err)
+			if ctx.Err() != nil {
+				l.drain()
 			}
-		}
-		if *once {
-			_ = client.Leave(context.Background())
-			return nil
-		}
-		if len(leased) == 0 {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(time.Second):
+			if l.draining.Load() || l.fatal.Load() {
+				// A signal arrived between the lease and the start: hand the
+				// lease back unused instead of abandoning it.
+				_ = l.client.Release(context.WithoutCancel(ctx), inv.ClientRef, time.Time{})
+				continue
 			}
+			l.addUnits(inv.Units)
+			wg.Add(1)
+			go func(inv worker.Invocation) {
+				defer wg.Done()
+				defer l.addUnits(-inv.Units)
+				if err := l.runner.Run(runCtx, inv); err != nil {
+					_, _ = fmt.Fprintf(l.stderr, "kit worker: invocation %s: %v\n", inv.ClientRef, err)
+				}
+			}(inv)
+		}
+		if l.once {
+			l.drain()
+			return
 		}
 	}
+}
+
+// drain stops the loop taking new work: the leases it holds run to their end
+// and the process leaves (ADR-0012 §6).
+func (l *workerLoop) drain() {
+	l.draining.Store(true)
+	l.drainOnce.Do(func() { close(l.drained) })
+}
+
+// fatalError says whether a heartbeat or lease error means this worker can
+// never take work again: the platform no longer holds its leases, its
+// credential was revoked, or its worker row is gone (REQ-MODEL-024,
+// REQ-MODEL-030).
+func fatalError(err error) bool {
+	switch core.CodeOf(err) {
+	case worker.CodeLeaseLost, core.CodeUnauthenticated, core.CodeNotFound:
+		return true
+	}
+	return false
+}
+
+// replay resumes the leases and redelivers the results the journal kept
+// (ADR-0012 §7). A lease the platform no longer holds is recorded done: its
+// outcome is already settled.
+func (l *workerLoop) replay(ctx context.Context) error {
+	pending, err := l.client.Pending()
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	_, _ = fmt.Fprintf(l.stdout, "kit worker: resuming %d invocations from the journal\n", len(pending))
+	for _, p := range pending {
+		if p.Kind == "result" {
+			err := l.client.Finish(ctx, p.ClientRef, p.State, p.Result, core.Code(p.ErrorCode), p.CostMpts)
+			if err == nil || core.CodeOf(err) == worker.CodeLeaseLost {
+				l.markDone(p.ClientRef)
+				continue
+			}
+			_, _ = fmt.Fprintf(l.stderr, "kit worker: redeliver %s: %v\n", p.ClientRef, err)
+			continue
+		}
+		if err := l.client.Resume(ctx, p.ClientRef); err != nil {
+			if core.CodeOf(err) == worker.CodeLeaseLost {
+				l.markDone(p.ClientRef)
+				continue
+			}
+			_, _ = fmt.Fprintf(l.stderr, "kit worker: resume %s: %v\n", p.ClientRef, err)
+			continue
+		}
+		inv := worker.Invocation{
+			ClientRef: p.ClientRef, Model: p.Model, Attempt: p.Attempt, Request: p.Request,
+		}
+		var runErr error
+		if p.ProviderHandle != "" {
+			runErr = l.runner.RunResumed(ctx, inv, p.ProviderHandle)
+		} else {
+			runErr = l.runner.Run(ctx, inv)
+		}
+		if runErr != nil {
+			_, _ = fmt.Fprintf(l.stderr, "kit worker: invocation %s: %v\n", p.ClientRef, runErr)
+		}
+	}
+	return nil
+}
+
+func (l *workerLoop) markDone(clientRef string) {
+	if j := l.client.Journal(); j != nil {
+		_ = j.Record(worker.JournalEntry{Kind: "done", ClientRef: clientRef})
+	}
+}
+
+func (l *workerLoop) free() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	free := l.capacity - l.inUse
+	if free < 0 {
+		return 0
+	}
+	return free
+}
+
+func (l *workerLoop) addUnits(units int) {
+	if units <= 0 {
+		units = 1
+	}
+	l.mu.Lock()
+	l.inUse += units
+	l.mu.Unlock()
 }
 
 func loadWorkerProviders(list string) ([]worker.Descriptor, map[string]model.Invoker, error) {

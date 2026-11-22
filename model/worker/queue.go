@@ -532,10 +532,22 @@ func (s *Store) Events(ctx context.Context, workerID, credential, clientRef stri
 				return err
 			}
 		}
+		var last int64
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(MAX(seq), 0) FROM worker_events WHERE client_ref = ?`, clientRef).Scan(&last); err != nil {
+			return err
+		}
 		for _, e := range events {
-			data := e.Data
-			if len(data) == 0 {
-				data = json.RawMessage("{}")
+			// The sequence is the store's: a worker that restarted, a new
+			// attempt or a reset can never collide with or go behind what a
+			// follower has already seen (REQ-MODEL-023).
+			if e.Seq <= last {
+				e.Seq = last + 1
+			}
+			last = e.Seq
+			data, err := json.Marshal(e)
+			if err != nil {
+				return core.NewError(core.CodeInvalidArgument, "worker: event is not encodable", nil)
 			}
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO worker_events (client_ref, seq, kind, data) VALUES (?, ?, ?, ?)`,
@@ -935,15 +947,30 @@ func (s *Store) EventsAfter(ctx context.Context, clientRef string, after int64) 
 	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
-		var e Event
-		var data string
-		if err := rows.Scan(&e.Seq, &e.Kind, &data); err != nil {
+		var seq int64
+		var kind, data string
+		if err := rows.Scan(&seq, &kind, &data); err != nil {
 			return nil, err
 		}
-		e.Data = json.RawMessage(data)
+		e := Event{Seq: seq, Kind: kind}
+		var stored Event
+		if err := json.Unmarshal([]byte(data), &stored); err == nil && eventHasPayload(stored) {
+			e = stored
+			e.Seq = seq
+			e.Kind = kind
+		} else {
+			e.Data = json.RawMessage(data)
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// eventHasPayload distinguishes a stored full event from a bare data payload
+// written before events carried their text, audio, progress and attempt.
+func eventHasPayload(e Event) bool {
+	return e.Kind != "" || e.Text != "" || len(e.Audio) > 0 || e.Progress != 0 ||
+		e.Attempt != 0 || len(e.Data) > 0
 }
 
 // Waiting counts the invocations waiting in a pool.
