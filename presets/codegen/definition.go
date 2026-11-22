@@ -87,10 +87,8 @@ func (s Sources) Compile() error {
 		if def == nil {
 			return invalid("codegen: flow %q is required", name)
 		}
-		for _, stage := range codegenir.ExpectedStages() {
-			if _, ok := def.Nodes[stage]; !ok {
-				return invalid("codegen: flow %q has no stage %q", name, stage)
-			}
+		if err := checkLoopMatchesRunner(def); err != nil {
+			return err
 		}
 	}
 	for _, ref := range promptRefs(s.Flows) {
@@ -99,6 +97,67 @@ func (s Sources) Compile() error {
 		}
 	}
 	return nil
+}
+
+// checkLoopMatchesRunner keeps the declarative IR a faithful mirror of the
+// loop the Runner implements: the same stage order, edges and guards, and the
+// map stages' sequential max_parallel.
+func checkLoopMatchesRunner(def *flow.IR) error {
+	order := codegenir.ExpectedStages()
+	runner := stageNames(LoopStages())
+	if len(order) != len(runner) {
+		return invalid("codegen: flow %q declares %d stages, the runner runs %d", def.Name, len(order), len(runner))
+	}
+	for i := range order {
+		if order[i] != runner[i] {
+			return invalid("codegen: flow %q stage %d is %q, the runner runs %q", def.Name, i, order[i], runner[i])
+		}
+	}
+	repair, review := codegenir.LoopGuards()
+	guards := DefaultGuards()
+	if repair != (flow.Guard{MaxVisits: guards.Repair.MaxVisits, CostMpts: guards.Repair.CostMpts}) {
+		return invalid("codegen: flow %q repair guard %+v does not match the runner's %+v", def.Name, repair, guards.Repair)
+	}
+	if review != (flow.Guard{MaxVisits: guards.SelfReview.MaxVisits}) {
+		return invalid("codegen: flow %q self-review guard %+v does not match the runner's %+v", def.Name, review, guards.SelfReview)
+	}
+	if err := codegenir.CheckLoop(def); err != nil {
+		return invalid("codegen: flow %q does not mirror the runner: %s", def.Name, err.Error())
+	}
+	return checkMaxParallel(def)
+}
+
+// checkMaxParallel rejects a map stage that asks for parallelism the
+// sequential runner does not provide. max_parallel is a declaration the runner
+// honours by refusing a flow it cannot execute as written.
+func checkMaxParallel(def *flow.IR) error {
+	for _, stage := range []string{codegenir.ImplementStages, codegenir.VerifyStage} {
+		node, ok := def.Nodes[stage]
+		if !ok {
+			return invalid("codegen: flow %q has no stage %q", def.Name, stage)
+		}
+		var spec struct {
+			MaxParallel *int `json:"max_parallel"`
+		}
+		if err := json.Unmarshal(node.Spec, &spec); err != nil {
+			return invalid("codegen: flow %q stage %q has an unreadable spec: %s", def.Name, stage, err.Error())
+		}
+		if spec.MaxParallel == nil {
+			return invalid("codegen: flow %q stage %q declares no max_parallel; the runner is sequential", def.Name, stage)
+		}
+		if *spec.MaxParallel != 0 {
+			return invalid("codegen: flow %q stage %q declares max_parallel %d; the runner is sequential", def.Name, stage, *spec.MaxParallel)
+		}
+	}
+	return nil
+}
+
+func stageNames(stages []Stage) []string {
+	out := make([]string, len(stages))
+	for i, stage := range stages {
+		out[i] = string(stage)
+	}
+	return out
 }
 
 // Version returns the version id: the lowercase hex SHA-256 of the canonical

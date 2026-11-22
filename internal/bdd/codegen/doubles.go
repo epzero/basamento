@@ -21,15 +21,19 @@ type ScriptedModel struct {
 	Reviews    [][]preset.Finding
 	RepeatLast bool // reviews repeat the last scripted findings
 
-	requests  []preset.Request
-	repairIdx int
-	reviewIdx int
-	lastWS    preset.Workspace
+	requests    []preset.Request
+	repairIdx   int
+	reviewIdx   int
+	lastWS      preset.Workspace
+	lastByStage map[preset.Stage]preset.Workspace
 }
 
 // NewScriptedModel returns an empty scripted model.
 func NewScriptedModel() *ScriptedModel {
-	return &ScriptedModel{Workspaces: map[string]preset.Workspace{}}
+	return &ScriptedModel{
+		Workspaces:  map[string]preset.Workspace{},
+		lastByStage: map[preset.Stage]preset.Workspace{},
+	}
 }
 
 // SetPlan sets the plan the planner returns and names each module's workspace
@@ -83,6 +87,7 @@ func (m *ScriptedModel) Complete(_ context.Context, req preset.Request) (json.Ra
 			ws = preset.Workspace{ID: "ws-" + req.Module}
 		}
 		m.lastWS = ws
+		m.lastByStage[req.Stage] = ws
 		return json.Marshal(ws)
 	case "repair":
 		ws := preset.Workspace{ID: fmt.Sprintf("ws-repair-%d", m.repairIdx+1)}
@@ -91,6 +96,7 @@ func (m *ScriptedModel) Complete(_ context.Context, req preset.Request) (json.Ra
 		}
 		m.repairIdx++
 		m.lastWS = ws
+		m.lastByStage[req.Stage] = ws
 		return json.Marshal(ws)
 	case "reviewer":
 		var findings []preset.Finding
@@ -119,10 +125,23 @@ func (m *ScriptedModel) LastWorkspace() preset.Workspace {
 	return m.lastWS
 }
 
-// SandboxCall is one command the simulated sandbox ran.
+// LastWorkspaceFor is the workspace the model returned in stage. It lets a
+// scenario compare the sandbox's input with what the model actually returned,
+// not with the runner's own copy of it.
+func (m *ScriptedModel) LastWorkspaceFor(stage preset.Stage) (preset.Workspace, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ws, ok := m.lastByStage[stage]
+	return ws, ok
+}
+
+// SandboxCall is one command the simulated sandbox ran and the result it
+// returned, so a scenario can compare a later request with the verification
+// that produced it.
 type SandboxCall struct {
 	Workspace preset.Workspace
 	Command   string
+	Result    preset.TestResult
 }
 
 // SimulatedSandbox owns the scripted test results. It records every call with
@@ -148,14 +167,14 @@ func (s *SimulatedSandbox) SetResults(results ...preset.TestResult) {
 func (s *SimulatedSandbox) RunTests(_ context.Context, workspace preset.Workspace, command string) (preset.TestResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls = append(s.calls, SandboxCall{Workspace: workspace, Command: command})
-	if len(s.results) == 0 {
-		return preset.TestResult{}, nil
+	next := preset.TestResult{}
+	if len(s.results) > 0 {
+		next = s.results[0]
+		if len(s.results) > 1 {
+			s.results = s.results[1:]
+		}
 	}
-	next := s.results[0]
-	if len(s.results) > 1 {
-		s.results = s.results[1:]
-	}
+	s.calls = append(s.calls, SandboxCall{Workspace: workspace, Command: command, Result: next})
 	return next, nil
 }
 

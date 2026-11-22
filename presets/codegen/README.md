@@ -24,6 +24,10 @@ a person's review gate; it is never composed into a run.
 - `version.go` semantics live in `definition.go`: the version is the SHA-256 of
   the canonical flows plus the prompt and eval files, sorted by path.
 - `registry.go`: the version lifecycle (compile, eval, review gate).
+- `store.go`: the durable version record, `<scores>.versions.json` next to the
+  scores file; a rejection survives a re-run and is not re-proposed.
+- `eval.go`: the `@eval` suite. It loads a case's recorded runs and collects
+  their metric values; the thresholds stay in `specs/presets/eval.feature`.
 - `run.go`: the runner. The model, sandbox and git host are ports; the gate
   drives them with the scripted doubles in `internal/bdd/codegen`. A run's id
   comes from an injected source (crypto/rand by default), verify runs exactly
@@ -35,5 +39,17 @@ go run ./cmd/codegen version        # the current version hash
 go run ./cmd/codegen flows          # each flow's canonical hash
 go run ./cmd/codegen eval --scores scores.json
 ```
+
+The `@eval` lane replays the recordings nightly:
+
+```bash
+BDD_TAGS='@eval && ~@planned && ~@quarantine' \
+CODEGEN_EVAL_DIR="$PWD/presets/codegen/evals" \
+go test -count=1 ./internal/bdd/
+```
+
+`eval --scores` reads a `case -> metric -> score` file; `propose` and
+`resolve` read a `version -> case -> score` file and share the durable
+`<scores>.versions.json` record beside it.
 
 Specs: `specs/presets/`. The scenarios run in the repository's BDD gate.

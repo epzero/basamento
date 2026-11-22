@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -43,6 +45,7 @@ type codegenWorld struct {
 
 	evalCase    string
 	evalFixture string
+	evalSuite   *preset.EvalSuite
 }
 
 func newCodegenWorld() *codegenWorld {
@@ -386,7 +389,9 @@ func registerCodegen(sc *godog.ScenarioContext) {
 			}
 			reg.Add(next, preset.DefaultSources(), map[string]int{"plan-modules": 90, "iterate-minimal": 90})
 			reg.Propose(next)
-			reg.Resolve(next, "approved")
+			if _, err := reg.Resolve(next, "approved"); err != nil {
+				return err
+			}
 			return nil
 		})
 
@@ -476,16 +481,13 @@ func registerCodegen(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the call ran on the workspace the model returned in stage "([^"]*)"$`, func(ctx context.Context, _ string) error {
+	sc.Step(`^the call ran on the workspace the model returned in stage "([^"]*)"$`, func(ctx context.Context, stage string) error {
 		w := world(ctx).Codegen
-		calls := w.sandbox.Calls()
-		if len(calls) == 0 {
-			return fmt.Errorf("the sandbox received no call")
+		want, ok := w.model.LastWorkspaceFor(preset.Stage(stage))
+		if !ok {
+			return fmt.Errorf("the model returned no workspace in stage %q", stage)
 		}
-		if calls[0].Workspace.ID != w.state.LastVerified.ID {
-			return fmt.Errorf("the call ran on %q, want the verified workspace %q", calls[0].Workspace.ID, w.state.LastVerified.ID)
-		}
-		return nil
+		return checkSandboxWorkspace(w.sandbox.Calls(), want)
 	})
 	sc.Step(`^the repair stage ran (\d+) times?$`, func(ctx context.Context, n int) error {
 		if got := world(ctx).Codegen.countStage(preset.StageRepair); got != n {
@@ -508,11 +510,7 @@ func registerCodegen(sc *godog.ScenarioContext) {
 		if err := json.Unmarshal(req.Input, &in); err != nil {
 			return err
 		}
-		calls := w.sandbox.Calls()
-		if len(calls) == 0 || len(in.Failures) == 0 {
-			return fmt.Errorf("the repair received no failing test output")
-		}
-		return nil
+		return checkRepairFailures(w.sandbox.Calls(), in.Failures)
 	})
 	sc.Step(`^the repair stage's first run received the finding of the first self-review$`, func(ctx context.Context) error {
 		w := world(ctx).Codegen
@@ -828,42 +826,109 @@ func registerCodegen(sc *godog.ScenarioContext) {
 	sc.Step(`^a person resolves the review gate of version "([^"]*)" with "([^"]*)"$`,
 		func(ctx context.Context, id, decision string) error {
 			w := world(ctx).Codegen
-			w.lastVersion = w.registryOrNew().Resolve(id, decision)
-			if w.lastVersion == nil {
-				return fmt.Errorf("no version %q", id)
+			v, err := w.registryOrNew().Resolve(id, decision)
+			if err != nil {
+				return err
 			}
+			w.lastVersion = v
 			return nil
 		})
 
-	// Eval lane (nightly).
+	// Eval lane (nightly). The suite collects the recorded case's values; the
+	// threshold in the scenario text decides pass/fail.
 	sc.Step(`^eval suite "([^"]*)" and case "([^"]*)" with fixture "([^"]*)"$`,
 		func(ctx context.Context, suite, caseID, fixture string) error {
 			w := world(ctx).Codegen
 			w.evalCase, w.evalFixture = caseID, fixture
-			_ = suite
+			w.evalSuite = preset.NewEvalSuite(suite)
 			return nil
 		})
 	sc.Step(`^a change request that adds one command$`, func(context.Context) error { return nil })
 	sc.Step(`^the judge scores the plan and implement prompts the codegen flow builds over (\d+) runs and the plans they produce$`,
-		func(context.Context, int) error { return nil })
+		func(ctx context.Context, runs int) error {
+			return world(ctx).Codegen.runEval(runs)
+		})
 	sc.Step(`^the judge scores the workspace the iterate flow commits for the request over (\d+) runs$`,
-		func(context.Context, int) error { return nil })
+		func(ctx context.Context, runs int) error {
+			return world(ctx).Codegen.runEval(runs)
+		})
 	sc.Step(`^the mean module coverage score is at least (\d+)$`, func(ctx context.Context, want int) error {
-		return meanAtLeast(world(ctx).Codegen.evalCase, "module_coverage", want)
+		return world(ctx).Codegen.meanAtLeast("module_coverage", want)
 	})
 	sc.Step(`^the mean prompt-quality score is at least (\d+)$`, func(ctx context.Context, want int) error {
-		return meanAtLeast(world(ctx).Codegen.evalCase, "prompt_quality", want)
+		return world(ctx).Codegen.meanAtLeast("prompt_quality", want)
 	})
 	sc.Step(`^the mean score for changing only the requested command is at least (\d+)$`, func(ctx context.Context, want int) error {
-		return meanAtLeast(world(ctx).Codegen.evalCase, "requested_command", want)
+		return world(ctx).Codegen.meanAtLeast("requested_command", want)
 	})
 	sc.Step(`^the mean score for leaving unrelated files untouched is at least (\d+)$`, func(ctx context.Context, want int) error {
-		return meanAtLeast(world(ctx).Codegen.evalCase, "untouched", want)
+		return world(ctx).Codegen.meanAtLeast("untouched", want)
 	})
 }
 
-func meanAtLeast(caseID, metric string, want int) error {
-	mean, err := preset.DefaultSources().Mean(caseID, metric)
+// checkSandboxWorkspace asserts the sandbox's first call ran on want, the
+// workspace the model returned in the scenario's stage. A runner that passes a
+// different workspace (for example a stale one) fails here.
+func checkSandboxWorkspace(calls []codegen.SandboxCall, want preset.Workspace) error {
+	if len(calls) == 0 {
+		return fmt.Errorf("the sandbox received no call")
+	}
+	if calls[0].Workspace.ID != want.ID {
+		return fmt.Errorf("the call ran on %q, want the workspace the model returned %q", calls[0].Workspace.ID, want.ID)
+	}
+	return nil
+}
+
+// checkRepairFailures asserts a repair request carried the failures of the
+// verification that produced it: the first sandbox call's result.
+func checkRepairFailures(calls []codegen.SandboxCall, got []string) error {
+	if len(calls) == 0 {
+		return fmt.Errorf("the sandbox received no call")
+	}
+	want := calls[0].Result.Failures
+	if len(got) != len(want) {
+		return fmt.Errorf("the repair received %d failures, want the %d of the failing verification", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return fmt.Errorf("the repair received failure %d %q, want %q", i+1, got[i], want[i])
+		}
+	}
+	return nil
+}
+
+// runEval runs the scenario's recorded eval case and collects its metric
+// values. The scenario's own "over N runs" is checked, not assumed.
+func (w *codegenWorld) runEval(runs int) error {
+	if w.evalSuite == nil || w.evalCase == "" {
+		return fmt.Errorf("no eval case is set")
+	}
+	want, ok := preset.EvalFixtures()[w.evalCase]
+	if !ok {
+		return fmt.Errorf("eval case %q has no fixture", w.evalCase)
+	}
+	if w.evalFixture != want {
+		return fmt.Errorf("eval case %q uses fixture %q, want %q", w.evalCase, w.evalFixture, want)
+	}
+	src, err := evalSources()
+	if err != nil {
+		return err
+	}
+	if err := w.evalSuite.Run(w.evalCase, src); err != nil {
+		return err
+	}
+	if got := w.evalSuite.Runs(w.evalCase); got != runs {
+		return fmt.Errorf("the eval case %q ran %d times, want %d", w.evalCase, got, runs)
+	}
+	return nil
+}
+
+// meanAtLeast applies the scenario's threshold to the suite's collected mean.
+func (w *codegenWorld) meanAtLeast(metric string, want int) error {
+	if w.evalSuite == nil {
+		return fmt.Errorf("no eval suite is set")
+	}
+	mean, err := w.evalSuite.Mean(w.evalCase, metric)
 	if err != nil {
 		return err
 	}
@@ -871,6 +936,33 @@ func meanAtLeast(caseID, metric string, want int) error {
 		return fmt.Errorf("the mean %s score is %.2f, want at least %d", metric, mean, want)
 	}
 	return nil
+}
+
+// evalSources loads the recorded cases from CODEGEN_EVAL_DIR when the nightly
+// lane sets it (the lane fills that directory from live runs), and from the
+// embedded recordings otherwise.
+func evalSources() (preset.Sources, error) {
+	src := preset.DefaultSources()
+	dir := os.Getenv("CODEGEN_EVAL_DIR")
+	if dir == "" {
+		return src, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return src, fmt.Errorf("eval fixtures %s: %w", dir, err)
+	}
+	src.Evals = map[string][]byte{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return src, err
+		}
+		src.Evals["evals/"+entry.Name()] = data
+	}
+	return src, nil
 }
 
 func (w *codegenWorld) scoreMap(first, second int) map[string]int {

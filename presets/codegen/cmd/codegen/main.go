@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 
@@ -48,10 +49,11 @@ func usage() {
 
   flows              print the flows and their canonical hashes
   version            print the preset version hash
-  eval --scores FILE print the recorded eval means
+  eval --scores FILE print the recorded eval means (case -> metric -> score)
   propose --version ID --scores FILE [--current ID]
-                     run compile and eval for a proposed version
-  resolve --version ID --scores FILE [--current ID] --decision approved|rejected
+                     run compile and eval for a proposed version; the durable
+                     record is <scores>.versions.json
+  resolve --version ID --scores FILE --decision approved|rejected
                      record a person's decision on a version's review gate`)
 }
 
@@ -85,7 +87,9 @@ func version() error {
 	return nil
 }
 
-func eval(args []string) error {
+func eval(args []string) error { return evalTo(os.Stdout, args) }
+
+func evalTo(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	scores := fs.String("scores", "", "recorded scores file")
 	if err := fs.Parse(args); err != nil {
@@ -95,20 +99,32 @@ func eval(args []string) error {
 	if err != nil {
 		return err
 	}
-	src := codegen.DefaultSources()
-	for _, caseID := range []string{"plan-modules", "iterate-minimal"} {
-		for _, metric := range sortedMetrics(recorded[caseID]) {
-			mean, err := src.Mean(caseID, metric)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s %s %.2f\n", caseID, metric, mean)
+	return writeEvalMeans(w, recorded)
+}
+
+// writeEvalMeans prints the values the scores file records, not an embedded
+// mean. A case's value is the recorded mean for its metric.
+func writeEvalMeans(w io.Writer, recorded map[string]map[string]int) error {
+	printed := 0
+	for _, caseID := range codegen.Suite() {
+		scores, ok := recorded[caseID]
+		if !ok {
+			continue
 		}
+		for _, metric := range sortedMetrics(scores) {
+			fmt.Fprintf(w, "%s %s %.2f\n", caseID, metric, float64(scores[metric]))
+			printed++
+		}
+	}
+	if printed == 0 {
+		return core.NewError(core.CodeInvalidArgument, "the scores file has no case scores", nil)
 	}
 	return nil
 }
 
-func propose(args []string) error {
+func propose(args []string) error { return proposeTo(os.Stdout, args) }
+
+func proposeTo(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("propose", flag.ContinueOnError)
 	id := fs.String("version", "", "version id")
 	current := fs.String("current", "", "the current version id")
@@ -123,53 +139,95 @@ func propose(args []string) error {
 	if err != nil {
 		return err
 	}
-	reg := codegen.NewRegistry([]string{"plan-modules", "iterate-minimal"})
+	if _, ok := recorded[*id]; !ok {
+		return core.NewError(core.CodeInvalidArgument, fmt.Sprintf("--version %q has no recorded scores in %s", *id, *scores), nil)
+	}
 	if *current != "" {
-		reg.Add(*current, codegen.DefaultSources(), recorded[*current])
-		reg.AcceptInitial(*current)
+		if _, ok := recorded[*current]; !ok {
+			return core.NewError(core.CodeInvalidArgument, fmt.Sprintf("--current %q has no recorded scores in %s", *current, *scores), nil)
+		}
+	}
+	recordPath := codegen.RecordPath(*scores)
+	reg, err := codegen.LoadRegistry(recordPath, codegen.Suite())
+	if err != nil {
+		return err
+	}
+	if *current != "" {
+		if reg.Current != "" && reg.Current != *current {
+			return core.NewError(core.CodeConflict, fmt.Sprintf("the record's current version is %q, not %q", reg.Current, *current), nil)
+		}
+		if reg.Current == "" {
+			if v := reg.Add(*current, codegen.DefaultSources(), recorded[*current]); v.Status == codegen.StatusRejected {
+				return core.NewError(core.CodeConflict, fmt.Sprintf("the recorded current version %q is rejected", *current), nil)
+			}
+			reg.AcceptInitial(*current)
+		}
 	}
 	reg.Add(*id, codegen.DefaultSources(), recorded[*id])
-	report(reg.Propose(*id))
-	return nil
+	report(w, reg.Propose(*id))
+	return codegen.SaveRegistry(recordPath, reg)
 }
 
-func resolve(args []string) error {
+func resolve(args []string) error { return resolveTo(os.Stdout, args) }
+
+func resolveTo(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
 	id := fs.String("version", "", "version id")
-	current := fs.String("current", "", "the current version id")
-	scores := fs.String("scores", "", "recorded scores file")
+	scores := fs.String("scores", "", "recorded scores file (its sibling record is read)")
 	decision := fs.String("decision", "", "approved|rejected")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	recorded, err := readScores(*scores)
+	if *id == "" {
+		return core.NewError(core.CodeInvalidArgument, "--version is required", nil)
+	}
+	if err := validateDecision(*decision); err != nil {
+		return err
+	}
+	if *scores == "" {
+		return core.NewError(core.CodeInvalidArgument, "--scores is required", nil)
+	}
+	reg, err := codegen.LoadRegistry(codegen.RecordPath(*scores), codegen.Suite())
 	if err != nil {
 		return err
 	}
-	reg := codegen.NewRegistry([]string{"plan-modules", "iterate-minimal"})
-	reg.Add(*current, codegen.DefaultSources(), recorded[*current])
-	reg.AcceptInitial(*current)
-	reg.Add(*id, codegen.DefaultSources(), recorded[*id])
-	reg.Propose(*id)
-	report(reg.Resolve(*id, *decision))
-	return nil
+	if reg.Get(*id) == nil {
+		return core.NewError(core.CodeNotFound, fmt.Sprintf("version %q is not recorded; run propose first", *id), nil)
+	}
+	v, err := reg.Resolve(*id, *decision)
+	if err != nil {
+		return err
+	}
+	report(w, v)
+	return codegen.SaveRegistry(codegen.RecordPath(*scores), reg)
 }
 
-func report(v *codegen.Version) {
+func validateDecision(decision string) error {
+	switch decision {
+	case "approved", "rejected":
+		return nil
+	case "":
+		return core.NewError(core.CodeInvalidArgument, "--decision is required (approved or rejected)", nil)
+	default:
+		return core.NewError(core.CodeInvalidArgument, fmt.Sprintf("unknown --decision %q; use approved or rejected", decision), nil)
+	}
+}
+
+func report(w io.Writer, v *codegen.Version) {
 	if v == nil {
-		fmt.Println("no such version")
+		fmt.Fprintln(w, "no such version")
 		return
 	}
-	fmt.Printf("version %s %s\n", v.ID, v.Status)
+	fmt.Fprintf(w, "version %s %s\n", v.ID, v.Status)
 	if v.Code != "" {
-		fmt.Printf("code %s", v.Code)
+		fmt.Fprintf(w, "code %s", v.Code)
 		if v.Case != "" {
-			fmt.Printf(" case %s", v.Case)
+			fmt.Fprintf(w, " case %s", v.Case)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 	if v.GateOpen {
-		fmt.Println("review gate open")
+		fmt.Fprintln(w, "review gate open")
 	}
 }
 

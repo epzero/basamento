@@ -204,6 +204,49 @@ func TestRepairCostLimitFailsBeforeVisits(t *testing.T) {
 	}
 }
 
+// S5c: the repair visit cost is pinned at Start, so a resume rebuilt with a
+// cheaper config still stops at the guard the run started under.
+func TestResumePinsTheRepairVisitCost(t *testing.T) {
+	t.Parallel()
+	model := &fakeModel{plan: planOf("store")}
+	sandbox := &fakeSandbox{results: []TestResult{{Failures: []string{"tests fail"}}}}
+	r := bootstrapRunner(model, sandbox, &fakeGit{}, DefaultGuards())
+	r.Config.RepairVisitCost = 2500
+	st, err := r.Start(context.Background(), Input{Brief: "invoices"}, stopAfter{StageVerify})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RepairVisitCost != 2500 {
+		t.Fatalf("state pinned cost %d, want 2500", st.RepairVisitCost)
+	}
+	// A resumed run rebuilt with a cheaper config must not exceed the guard.
+	r.Config.RepairVisitCost = 100
+	if _, err := r.Resume(context.Background(), st, NoControl{}); err != nil {
+		t.Fatal(err)
+	}
+	if !st.Failed || st.Limit != "cost" || st.RepairVisits != 2 || st.RepairCost != 5000 {
+		t.Fatalf("state %+v, want failed cost after 2 repairs at 2500", st)
+	}
+}
+
+// S7: the review policy is recorded in the state at Start, so the scenario's
+// "no person asked / no reviewer session" assertions observe a real field.
+func TestStartRecordsTheReviewPolicy(t *testing.T) {
+	t.Parallel()
+	r := bootstrapRunner(&fakeModel{plan: planOf("store")}, &fakeSandbox{}, &fakeGit{}, DefaultGuards())
+	r.Config.Policy = Policy{AsksPerson: true, ReviewerSessions: 1}
+	st, err := r.Start(context.Background(), Input{Brief: "invoices"}, NoControl{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.PersonAsked {
+		t.Fatal("state does not record that a person was asked")
+	}
+	if st.ReviewerSessions != 1 {
+		t.Fatalf("state records %d reviewer sessions, want 1", st.ReviewerSessions)
+	}
+}
+
 func TestIterateCommitsOnANewBranch(t *testing.T) {
 	t.Parallel()
 	model := &fakeModel{plan: planOf("parser")}

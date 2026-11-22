@@ -19,6 +19,12 @@ const (
 	StageCommit     Stage = "commit"
 )
 
+// LoopStages is the stage order the Runner implements. The IR declares the
+// same order and Compile cross-checks the two (definition.go).
+func LoopStages() []Stage {
+	return []Stage{StagePlan, StageImplement, StageVerify, StageRepair, StageSelfReview, StageCommit}
+}
+
 // Flows the preset defines.
 const (
 	FlowBootstrap = "codegen.bootstrap"

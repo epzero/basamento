@@ -46,6 +46,14 @@ type Input struct {
 	BaseBranch    string `json:"base_branch,omitempty"`
 }
 
+// Policy is the run's review policy: the loop's real behavior, recorded in
+// the state at Start so a scenario can observe it. The codegen loop asks no
+// person and starts no reviewer session before the commit (REQ-PRESET-008).
+type Policy struct {
+	AsksPerson       bool
+	ReviewerSessions int
+}
+
 // Config is a run's pinned definition and guards.
 type Config struct {
 	Flow            string
@@ -53,6 +61,7 @@ type Config struct {
 	Prompts         string
 	Evals           string
 	Guards          Guards
+	Policy          Policy
 	RepairVisitCost int64 // milli-points per repair visit; 0 = 1000
 	MaxModules      int   // largest accepted plan; 0 = DefaultMaxModules
 }
@@ -66,11 +75,12 @@ type Event struct {
 // State is a run's serializable state. Checkpoints, the stage log and the
 // pinned version live here, so a resume continues from the same point.
 type State struct {
-	Flow    string
-	Version string
-	Prompts string
-	Evals   string
-	Guards  Guards
+	Flow            string
+	Version         string
+	Prompts         string
+	Evals           string
+	Guards          Guards
+	RepairVisitCost int64 // pinned at Start; a resume keeps it
 
 	RunID string
 	Input Input
@@ -167,16 +177,19 @@ func (r *Runner) Start(ctx context.Context, in Input, ctl Control) (*State, erro
 		return nil, invalid("codegen: the run id source returned an empty id")
 	}
 	st := &State{
-		Flow:        r.Config.Flow,
-		Version:     r.Config.Version,
-		Prompts:     r.Config.Prompts,
-		Evals:       r.Config.Evals,
-		Guards:      r.Config.Guards,
-		RunID:       id,
-		Input:       in,
-		Checkpoints: map[Stage]bool{},
-		Next:        StagePlan,
-		Started:     true,
+		Flow:             r.Config.Flow,
+		Version:          r.Config.Version,
+		Prompts:          r.Config.Prompts,
+		Evals:            r.Config.Evals,
+		Guards:           r.Config.Guards,
+		RepairVisitCost:  r.repairVisitCost(),
+		PersonAsked:      r.Config.Policy.AsksPerson,
+		ReviewerSessions: r.Config.Policy.ReviewerSessions,
+		RunID:            id,
+		Input:            in,
+		Checkpoints:      map[Stage]bool{},
+		Next:             StagePlan,
+		Started:          true,
 		Events: []Event{{
 			Type: "run-started",
 			Data: map[string]string{
@@ -313,7 +326,7 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			input["failures"] = st.LastTests.Failures
 		}
 		st.RepairVisits++
-		st.RepairCost += r.Config.RepairVisitCost
+		st.RepairCost += st.repairVisitCost()
 		resp, err := r.Model.Complete(ctx, Request{
 			Flow: st.Flow, Stage: stage, Agent: "repair",
 			PromptVersion: st.Prompts, Input: mustJSON(input),
@@ -422,12 +435,31 @@ func (r *Runner) maxModules() int {
 	return DefaultMaxModules
 }
 
+// repairVisitCost returns the cost a run pins at Start. A zero config uses the
+// documented default, so a resumed run never reads a rebuilt config.
+func (r *Runner) repairVisitCost() int64 {
+	if r.Config.RepairVisitCost > 0 {
+		return r.Config.RepairVisitCost
+	}
+	return 1000
+}
+
+// repairVisitCost returns the cost pinned in the state at Start. A zero value
+// is a state built before the pin (or a runner built without New) and uses the
+// documented default.
+func (st *State) repairVisitCost() int64 {
+	if st.RepairVisitCost > 0 {
+		return st.RepairVisitCost
+	}
+	return 1000
+}
+
 // repairLimit reports the guard a repair would exceed, or "" when it may run.
 func (r *Runner) repairLimit(st *State) string {
 	if st.Guards.Repair.MaxVisits > 0 && st.RepairVisits >= st.Guards.Repair.MaxVisits {
 		return "visits"
 	}
-	if st.Guards.Repair.CostMpts > 0 && st.RepairCost+r.Config.RepairVisitCost > st.Guards.Repair.CostMpts {
+	if st.Guards.Repair.CostMpts > 0 && st.RepairCost+st.repairVisitCost() > st.Guards.Repair.CostMpts {
 		return "cost"
 	}
 	return ""

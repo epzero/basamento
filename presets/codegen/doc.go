@@ -12,12 +12,18 @@
 //
 // The flows are IR (package ir) compiled to the same canonical IR as any other
 // flow (ADR-0003). A run pins the version it started with; the version is the
-// content hash of the flows, prompts and evals (version.go). A new version is
-// accepted only when it compiles, its @eval suite does not regress and a person
-// resolves its review gate (registry.go).
+// content hash of the flows, prompts and evals (definition.go). A new version
+// is accepted only when it compiles, its @eval suite does not regress and a
+// person resolves its review gate (registry.go).
 //
-// The Runner interprets the IR's stage order and its guards. The model, the
-// sandbox and the git host are injected ports so that a run is deterministic in
-// the gate: the BDD harness in internal/bdd/codegen supplies a scripted model,
-// a simulated sandbox and a simulated git host (ADR-0011, specs/presets/design.md §3).
+// The Runner implements the loop itself: its stage order, routing and guards
+// live in run.go and stage.go. The flows in package ir are the declarative
+// mirror of that loop, and Compile cross-checks their order, edges, guards and
+// sequential max_parallel against the runner. The model, the sandbox and the
+// git host are injected ports so that a run is deterministic in the gate: the
+// BDD harness in internal/bdd/codegen supplies a scripted model, a simulated
+// sandbox and a simulated git host (ADR-0011, specs/presets/design.md §3).
+//
+// The @eval suite scores recorded cases: EvalSuite collects a case's metric
+// values and the scenario's thresholds decide pass/fail (REQ-PRESET-019).
 package codegen

@@ -2,9 +2,11 @@ package ir
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/epzero/basamento/flow"
+	flowir "github.com/epzero/basamento/flow/ir"
 )
 
 func TestVerifyRunsOneToolNodePerPlanTest(t *testing.T) {
@@ -65,6 +67,40 @@ func TestVerifyRunsOneToolNodePerPlanTest(t *testing.T) {
 		}
 		if spec.Tool != "run-tests" || len(spec.Args) != 1 || spec.Args[0] != want[i] {
 			t.Fatalf("node %q spec %+v, want run-tests with %q", id, spec, want[i])
+		}
+	}
+}
+
+// S8: the version flow states both lifecycle outcomes, not only FAIL.
+func TestVersionFlowStatesTheApprovedAndRejectedEdges(t *testing.T) {
+	t.Parallel()
+	def := Version()
+	var approved, rejected bool
+	for _, edge := range def.Edges {
+		if edge.From != VersionReview {
+			continue
+		}
+		if edge.To == VersionAccepted && strings.Contains(edge.When, "approved") {
+			approved = true
+		}
+		if edge.To == flowir.Fail && strings.Contains(edge.When, "rejected") {
+			rejected = true
+		}
+	}
+	if !approved || !rejected {
+		t.Fatalf("version flow edges approved=%v rejected=%v, want both", approved, rejected)
+	}
+	if _, ok := def.Nodes[VersionAccepted]; !ok {
+		t.Fatal("version flow has no accepted node")
+	}
+}
+
+// S8: the IR's loop matches the edges and guards the runner implements.
+func TestCheckLoopAcceptsBothRunFlows(t *testing.T) {
+	t.Parallel()
+	for _, def := range []*flow.IR{Bootstrap(), Iterate()} {
+		if err := CheckLoop(def); err != nil {
+			t.Fatalf("flow %q: %v", def.Name, err)
 		}
 	}
 }

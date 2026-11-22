@@ -51,7 +51,8 @@ Go: the root and embedded `go.mod` files name the same minimum patch
 `GOTOOLCHAIN=go<patch>` from the root `go.mod` unless the environment already
 set it.
 
-Nightly: `@live`, `@slow`, `@eval` (live), full mutation run,
+Nightly: `@live`, `@slow`, `@eval` (the eval lane replays the recordings in
+`presets/codegen/evals` via `CODEGEN_EVAL_DIR`), full mutation run,
 the **line** job above, and a flake hunt (one `go test -race -count=10 -timeout 90m
 ./...` run that repeats every test ten times to look for nondeterminism; the
 timeout is explicit because it applies per test binary and the default 10 minutes
