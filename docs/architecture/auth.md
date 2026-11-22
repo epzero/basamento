@@ -59,10 +59,11 @@ Package `auth/authz` implements the design in `specs/auth/design.md` §1–§7.
   Store failures return `unavailable` with no audit record.
 - **Grant authority.** One `authorize` pass per decision: one store read and one
   union of binding conditions. `Grant` / `Revoke` / `List` validate grammars
-  first, then require the grant action plus every permission of the target role,
-  then compile conditions (at most 2048 bytes) on grant, then write. Scope
-  grammar is a fail-closed seam until EP0-208; `scope-narrowed` is recorded only
-  when narrowing removes a permission that bindings would otherwise grant.
+  first,   then require the grant action plus every permission of the target role,
+  then compile conditions (at most 2048 bytes) on grant, then write. Scopes
+  narrow through recognized `session:` forms matched against `Resource.Session`;
+  unrecognized lists fail closed. `scope-narrowed` applies when narrowing removes
+  a permission that bindings would otherwise grant, or when no scope form is recognized.
 - **Denial audit.** One `authz.deny` event per denial via `Record` on a
   `context.WithoutCancel` derived context (5 s bound). `Principal` and
   `Resource` are sanitised (UTF-8, no controls, 256-byte cap per field).

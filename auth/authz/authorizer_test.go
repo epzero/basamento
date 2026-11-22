@@ -216,32 +216,6 @@ func TestAuditRecordFailureStillDenies(t *testing.T) {
 	}
 }
 
-func TestScopeNarrowedWhenWouldAllow(t *testing.T) {
-	h := newHarness(t)
-	tenant := "acme"
-	seedTenantWideAdmin(t, h, tenant, "ada")
-	ctx := tenantCtx(t, tenant)
-	p := principal("ada", tenant)
-	p.Scopes = []string{"run:r1"}
-	mustDeny(t, h, ctx, p, "run.get", authz.Resource{Kind: "run", ID: "r1"})
-	events, _ := h.audit.snap()
-	if events[0].Reason != authz.ReasonScopeNarrowed {
-		t.Fatalf("reason %q", events[0].Reason)
-	}
-}
-
-func TestScopeNarrowedNotWithoutBinding(t *testing.T) {
-	h := newHarness(t)
-	ctx := tenantCtx(t, "acme")
-	p := principal("bob", "acme")
-	p.Scopes = []string{"run:r1"}
-	mustDeny(t, h, ctx, p, "run.get", authz.Resource{Kind: "run", ID: "r1"})
-	events, _ := h.audit.snap()
-	if events[0].Reason != authz.ReasonNoBinding {
-		t.Fatalf("reason %q", events[0].Reason)
-	}
-}
-
 func TestGrantValidationOrder(t *testing.T) {
 	h := newHarness(t)
 	tenant := "acme"

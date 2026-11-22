@@ -150,7 +150,7 @@ func (c *conditionCache) len() int {
 	return len(c.order)
 }
 
-func evalCondition(p *expr.Program, comp *conditionCompiler, principal authn.Principal, resource Resource) (condEval, error) {
+func evalCondition(p *expr.Program, comp *conditionCompiler, principal authn.Principal, resource Resource) condEval {
 	vars := map[string]any{
 		"principal": map[string]any{
 			"id":     principal.ID,
@@ -164,23 +164,23 @@ func evalCondition(p *expr.Program, comp *conditionCompiler, principal authn.Pri
 		},
 	}
 	if p == nil {
-		return condTrue, nil
+		return condError
 	}
 	out, err := p.Eval(vars)
 	if err != nil {
 		if comp.isCostErr(err) {
-			return condCost, err
+			return condCost
 		}
-		return condError, err
+		return condError
 	}
 	b, ok := out.(bool)
 	if !ok {
-		return condError, errInvalidCondition()
+		return condError
 	}
 	if b {
-		return condTrue, nil
+		return condTrue
 	}
-	return condFalse, nil
+	return condFalse
 }
 
 func scopesToAny(scopes []string) []any {
@@ -195,13 +195,26 @@ func scopesToAny(scopes []string) []any {
 }
 
 func worstConditionReason(a, b string) string {
-	rank := map[string]int{
-		ReasonNoBinding:           0,
-		ReasonConditionError:      1,
-		ReasonConditionCostExceed: 2,
-	}
-	if rank[a] >= rank[b] {
+	return worseConditionReason(a, b)
+}
+
+func worseConditionReason(a, b string) string {
+	ra, rb := conditionReasonRank(a), conditionReasonRank(b)
+	if ra >= rb {
 		return a
 	}
 	return b
+}
+
+func conditionReasonRank(r string) int {
+	switch r {
+	case ReasonConditionCostExceed:
+		return 3
+	case ReasonConditionError:
+		return 2
+	case ReasonNoBinding:
+		return 1
+	default:
+		return 0
+	}
 }

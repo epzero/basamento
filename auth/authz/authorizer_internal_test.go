@@ -58,6 +58,10 @@ func (r *recordingAudit) Record(_ context.Context, e platform.AuditEvent) error 
 	return nil
 }
 
+func testRoles() map[Role]PermissionSet {
+	return cloneRoleTable(rolePermissions)
+}
+
 func mustCompiler(t *testing.T, limit uint64) *conditionCompiler {
 	t.Helper()
 	if limit == 0 {
@@ -96,6 +100,7 @@ func TestAuthorizeMemberDenyGrantOneAudit(t *testing.T) {
 		compile:   mustCompiler(t, defaultCostLimit),
 		cache:     newConditionCache(8),
 		costLimit: defaultCostLimit,
+		roles:     testRoles(),
 	}
 	res := Resource{Project: "p1", Kind: "project", ID: "p1"}
 	p := authn.Principal{ID: "m", Tenant: "acme"}
@@ -123,6 +128,7 @@ func TestCheckStoreFailureUnavailableNoAudit(t *testing.T) {
 		compile:   mustCompiler(t, defaultCostLimit),
 		cache:     newConditionCache(8),
 		costLimit: defaultCostLimit,
+		roles:     testRoles(),
 	}
 	ctx := core.WithTenant(context.Background(), "acme")
 	err := a.Check(ctx, authn.Principal{ID: "ada", Tenant: "acme"}, "run.get", Resource{Kind: "run", ID: "r1"})
@@ -143,6 +149,7 @@ func TestGrantAuthorityStoreFailureNoAudit(t *testing.T) {
 		compile:   mustCompiler(t, defaultCostLimit),
 		cache:     newConditionCache(8),
 		costLimit: defaultCostLimit,
+		roles:     testRoles(),
 	}
 	ctx := core.WithTenant(context.Background(), "acme")
 	err := a.Grant(ctx, authn.Principal{ID: "ada", Tenant: "acme"}, Binding{
@@ -168,6 +175,7 @@ func TestOneBindingsQueryPerCheck(t *testing.T) {
 		compile:   mustCompiler(t, defaultCostLimit),
 		cache:     newConditionCache(8),
 		costLimit: defaultCostLimit,
+		roles:     testRoles(),
 	}
 	ctx := core.WithTenant(context.Background(), "acme")
 	if err := inner.Grant(ctx, Binding{Principal: "ada", Role: RoleAdmin, Project: ""}); err != nil {
@@ -225,6 +233,7 @@ func TestAuditSurvivesCancelledContext(t *testing.T) {
 		compile:   mustCompiler(t, defaultCostLimit),
 		cache:     newConditionCache(8),
 		costLimit: defaultCostLimit,
+		roles:     testRoles(),
 	}
 	tenant := core.TenantID("acme")
 	ctx := core.WithTenant(context.Background(), tenant)

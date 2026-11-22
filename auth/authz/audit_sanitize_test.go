@@ -27,11 +27,11 @@ func TestAuditSanitizeResourceInDenial(t *testing.T) {
 		wantRes string
 	}{
 		{name: "clean", id: "r1", wantRes: "run:r1"},
-		{name: "1mib", id: strings.Repeat("x", 1<<20), wantRes: "run:" + strings.Repeat("x", 256)},
+		{name: "1mib", id: strings.Repeat("x", 1<<20), wantRes: "run:[invalid]"},
 		{name: "newline", id: "a\nb", wantRes: "run:[invalid]"},
 		{name: "badutf8", id: string([]byte{0xff, 0xfe}), wantRes: "run:[invalid]"},
 		{name: "256bytes", id: strings.Repeat("b", 256), wantRes: "run:" + strings.Repeat("b", 256)},
-		{name: "257bytes", id: strings.Repeat("b", 257), wantRes: "run:" + strings.Repeat("b", 256)},
+		{name: "257bytes", id: strings.Repeat("b", 257), wantRes: "run:[invalid]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

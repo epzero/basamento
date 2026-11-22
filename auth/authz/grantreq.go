@@ -3,7 +3,7 @@ package authz
 import "slices"
 
 // grantRequirements lists the grant (or revoke) action plus every permission of target.
-func grantRequirements(action string, target Role) []string {
+func grantRequirements(action string, target Role, rolePerms func(Role) PermissionSet) []string {
 	seen := make(map[string]struct{}, 32)
 	add := func(a string) {
 		seen[a] = struct{}{}

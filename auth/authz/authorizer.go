@@ -45,6 +45,7 @@ type Authorizer struct {
 	compile   *conditionCompiler
 	cache     *conditionCache
 	costLimit uint64
+	roles     map[Role]PermissionSet
 }
 
 // New validates options and returns an Authorizer.
@@ -83,7 +84,27 @@ func New(opts Options) (*Authorizer, error) {
 		compile:   cc,
 		cache:     newConditionCache(cacheSize),
 		costLimit: limit,
+		roles:     cloneRoleTable(rolePermissions),
 	}, nil
+}
+
+func cloneRoleTable(in map[Role]PermissionSet) map[Role]PermissionSet {
+	out := make(map[Role]PermissionSet, len(in))
+	for k, v := range in {
+		out[k] = v.clone()
+	}
+	return out
+}
+
+func (a *Authorizer) rolePermsFor(r Role) PermissionSet {
+	if ps, ok := a.roles[r]; ok {
+		return ps.clone()
+	}
+	return nil
+}
+
+func (a *Authorizer) grantRequirements(action string, target Role) []string {
+	return grantRequirements(action, target, a.rolePermsFor)
 }
 
 // Check runs the decision procedure of design §5 on principal, action and resource.
@@ -106,19 +127,13 @@ func (a *Authorizer) authorize(ctx context.Context, principal authn.Principal, r
 	}
 	perms, condReason := a.unionBindings(principal, resource, rows)
 	beforeNarrow := perms.clone()
-	narrowed := narrowScopes(perms, principal.Scopes)
+	nr := narrowScopes(perms, principal.Scopes, resource.Session)
 
 	for _, action := range required {
-		if narrowed.Has(action) {
+		if nr.perms.Has(action) {
 			continue
 		}
-		reason := ReasonNoBinding
-		if condReason != "" {
-			reason = condReason
-		}
-		if len(principal.Scopes) > 0 && beforeNarrow.Has(action) {
-			reason = ReasonScopeNarrowed
-		}
+		reason := denyReasonForScopes(principal.Scopes, beforeNarrow, action, condReason, nr)
 		return a.deny(ctx, principal, resource, reason)
 	}
 	return nil
@@ -133,7 +148,7 @@ func (a *Authorizer) unionBindings(principal authn.Principal, resource Resource,
 			worst = worstConditionReason(worst, reason)
 		}
 		if hold {
-			perms = perms.Union(rolePerms(row.Role))
+			perms = perms.Union(a.rolePermsFor(row.Role))
 		}
 	}
 	return perms, worst
@@ -148,8 +163,7 @@ func (a *Authorizer) evalBinding(principal authn.Principal, resource Resource, r
 	if err != nil {
 		return false, ReasonConditionError
 	}
-	ev, err := evalCondition(p, a.compile, principal, resource)
-	switch ev {
+	switch evalCondition(p, a.compile, principal, resource) {
 	case condTrue:
 		return true, ""
 	case condFalse:
@@ -157,7 +171,6 @@ func (a *Authorizer) evalBinding(principal authn.Principal, resource Resource, r
 	case condCost:
 		return false, ReasonConditionCostExceed
 	default:
-		_ = err
 		return false, ReasonConditionError
 	}
 }
@@ -201,7 +214,7 @@ func (a *Authorizer) Grant(ctx context.Context, grantor authn.Principal, b Bindi
 		return errInvalidRole()
 	}
 	res := Resource{Project: b.Project, Kind: "project", ID: b.Project}
-	if err := a.authorize(ctx, grantor, res, grantRequirements("binding.grant", b.Role)...); err != nil {
+	if err := a.authorize(ctx, grantor, res, a.grantRequirements("binding.grant", b.Role)...); err != nil {
 		return err
 	}
 	if b.Condition != "" {
@@ -227,7 +240,7 @@ func (a *Authorizer) Revoke(ctx context.Context, grantor authn.Principal, princi
 		return errInvalidRole()
 	}
 	res := Resource{Project: project, Kind: "project", ID: project}
-	if err := a.authorize(ctx, grantor, res, grantRequirements("binding.revoke", role)...); err != nil {
+	if err := a.authorize(ctx, grantor, res, a.grantRequirements("binding.revoke", role)...); err != nil {
 		return err
 	}
 	return a.store.Revoke(ctx, principalID, role, project)

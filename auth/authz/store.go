@@ -49,7 +49,7 @@ VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (tenant, project, principal, role) DO UPDATE SET
   condition = excluded.condition`,
 		string(tenant), b.Project, b.Principal, string(b.Role), cond)
-	return err
+	return psql.MapError(err)
 }
 
 // Revoke removes a binding for the context tenant.
@@ -63,11 +63,11 @@ DELETE FROM authz_bindings
 WHERE tenant = ? AND project = ? AND principal = ? AND role = ?`,
 		string(tenant), project, principalID, string(role))
 	if err != nil {
-		return err
+		return psql.MapError(err)
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return psql.MapError(err)
 	}
 	if n == 0 {
 		return core.NewError(core.CodeNotFound, "binding not found", nil)
@@ -126,7 +126,7 @@ WHERE tenant = ? AND principal = ? AND (project = '' OR project = ?)`,
 			string(tenant), principalID, resourceProject)
 	}
 	if err != nil {
-		return nil, err
+		return nil, psql.MapError(err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []BindingRow

@@ -13,7 +13,7 @@ func TestGrantRequirementsUnion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.role), func(t *testing.T) {
-			got := grantRequirements(tc.action, tc.role)
+			got := grantRequirements(tc.action, tc.role, rolePerms)
 			seen := make(map[string]struct{}, len(got))
 			for _, a := range got {
 				seen[a] = struct{}{}

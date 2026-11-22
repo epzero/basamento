@@ -6,6 +6,9 @@ type Resource struct {
 	Project string
 	Kind    string
 	ID      string
+	// Session is set by the per-RPC resolver for every resource a worker token
+	// can address. It is not stored, not audited, and not visible to CEL.
+	Session string
 	Attrs   map[string]any
 }
 
