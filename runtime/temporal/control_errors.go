@@ -33,12 +33,15 @@ func (r *Runtime) clientError(op string, err error) error {
 	if errors.Is(err, context.Canceled) {
 		return core.NewError(core.CodeCancelled, "temporal: the request was cancelled", opDetail(op))
 	}
+	if ce := (*serviceerror.Canceled)(nil); errors.As(err, &ce) {
+		return core.NewError(core.CodeCancelled, "temporal: the request was cancelled", opDetail(op))
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return core.NewError(core.CodeTimeout, "temporal: the request timed out", opDetail(op))
 	}
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
-		return mapApplicationError(appErr)
+		return mapApplicationError(op, appErr)
 	}
 	if nf := (*serviceerror.NotFound)(nil); errors.As(err, &nf) {
 		return core.NewError(core.CodeNotFound, "temporal: run not found", opDetail(op))
@@ -71,13 +74,13 @@ func (r *Runtime) clientError(op string, err error) error {
 	return core.NewError(core.CodeInternal, "temporal: the server call failed", opDetail(op))
 }
 
-func mapApplicationError(appErr *temporal.ApplicationError) error {
+func mapApplicationError(op string, appErr *temporal.ApplicationError) error {
 	code := core.Code(appErr.Type())
 	switch code {
 	case core.CodeNotFound, core.CodeConflict, core.CodeUnavailable:
-		return core.NewError(code, appErr.Message(), nil)
+		return core.NewError(code, appErr.Message(), opDetail(op))
 	default:
-		return core.NewError(core.CodeInternal, "temporal: the server call failed", nil)
+		return core.NewError(core.CodeInternal, "temporal: the server call failed", opDetail(op))
 	}
 }
 

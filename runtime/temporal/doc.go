@@ -16,7 +16,8 @@
 // namespace, TLS and credentials; the runtime owns DataConverter and
 // ContextPropagators. Tenant ids that are unsafe inside visibility query literals
 // (quotes, backslash, controls, and the like) are rejected on every control call;
-// see docs/architecture/runtime.md §8 (control plane, tenant filters).
+// see docs/architecture/runtime.md §8 (control plane, tenant filters). A host
+// that uses only the control plane releases the lazily dialled client with Close.
 //
 // Failure messages in Temporal history are plaintext: only core error codes and
 // messages cross the boundary (Details maps are dropped). Non-core errors become

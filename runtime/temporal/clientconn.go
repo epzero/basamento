@@ -39,6 +39,20 @@ func (r *Runtime) clientFor() (client.Client, error) {
 	return cl, nil
 }
 
+// Close releases the lazily dialled Temporal client when one exists and marks the
+// runtime shut down so later control calls and Serve return unavailable. It is not
+// part of runtime.Runtime. The method implements io.Closer; the returned error is
+// always nil. Close waits for a dial in progress (the SDK bounds the dial; this
+// runtime adds no bound) and does not wait for in-flight control calls (they fail
+// with cancelled when the connection closes). Close does not stop a running Serve
+// (the host cancels Serve's context; Serve's defer performs the same shutdown).
+// It is idempotent and safe to call more than once and concurrently with control
+// calls.
+func (r *Runtime) Close() error {
+	r.shutdown()
+	return nil
+}
+
 // shutdown marks the runtime closed and closes the client if one was opened.
 func (r *Runtime) shutdown() {
 	r.clientMu.Lock()
