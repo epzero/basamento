@@ -80,3 +80,333 @@ scenarios:
             status: accepted
             by: human:epzero
             at: "2026-11-01"
+    AUTH-006-01:
+        hash: sha256:5a7e3a4eba2fe055a4c32174dffbaca0ff4b3abe84c902054d76444e5b769538
+        reqs:
+            - REQ-AUTH-006
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-007-01:
+        hash: sha256:129ac0761fa294e74cb0efc189be81a730c9bd93de5af2aa5c41b451762cac31
+        reqs:
+            - REQ-AUTH-007
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-007-02:
+        hash: sha256:bfb3abbe04bb6967e8a0293281dd75ef4720c1fef92c52b04a5b840903d2b52e
+        reqs:
+            - REQ-AUTH-007
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-008-01:
+        hash: sha256:c79ae7e4b715cdc04ce74699ece56e2192c95995d25a944927ff374be05afe3c
+        reqs:
+            - REQ-AUTH-008
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-008-02:
+        hash: sha256:d90352731e948f6bff03db653d8f2bcfc9e47f243961b613d1c5e60ffac628e0
+        reqs:
+            - REQ-AUTH-008
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-008-03:
+        hash: sha256:d229a410d8b07ad1efe13f86f8fbdbce51a935dd68f3f903914577e469014488
+        reqs:
+            - REQ-AUTH-008
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-009-01:
+        hash: sha256:a356a52fe458889cf0f4d3a7d8dc67fe3af30660b1c2a76e010d49fdc8d7e866
+        reqs:
+            - REQ-AUTH-009
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-010-01:
+        hash: sha256:24d1a36b050b6db55c24e85e959c7de7682d45ac12fb15e548d2704b73fee11f
+        reqs:
+            - REQ-AUTH-010
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-010-02:
+        hash: sha256:d535d22216ed3e2ee0d0338d115dffa9d4146e50238abe16ae807fe91f7d5e9d
+        reqs:
+            - REQ-AUTH-010
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-011-01:
+        hash: sha256:6d7e57b362ae16d8b0f87b1a8bf0239a3ddb29996b0804bc6e01b3cb8611a408
+        reqs:
+            - REQ-AUTH-011
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-012-01:
+        hash: sha256:8eb93fd0ac20237a84cbe44728d405e050b88866e31fa2473ea3e4dc3af68733
+        reqs:
+            - REQ-AUTH-012
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-012-02:
+        hash: sha256:5992bc3bb858731c82ec547cad1b16bfb2b3fdad9dac59d3f81238ed191db02e
+        reqs:
+            - REQ-AUTH-012
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-013-01:
+        hash: sha256:72700a096fc0728fcdf61444253210a194da29f7a7a9df22af4fbdf023866922
+        reqs:
+            - REQ-AUTH-013
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-014-01:
+        hash: sha256:5d61062c5fe37eb936ec2f17ad69609c5e24283adc383d2a5e75c7606f4e3ffa
+        reqs:
+            - REQ-AUTH-014
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-014-02:
+        hash: sha256:5203928a4b57947b0459aa582630b629e24b2a7ff42f6ab4e5b7c23eb45b13b8
+        reqs:
+            - REQ-AUTH-014
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-015-01:
+        hash: sha256:6b0ed9024e8bed367a68caaa0ef4ce443dec8288d7743e1244d4f6454f1657e1
+        reqs:
+            - REQ-AUTH-015
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-016-01:
+        hash: sha256:30d285d381773b69686e1dc90cfdc3122e5e71b3f4df3623bdd49310a350bd83
+        reqs:
+            - REQ-AUTH-016
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-017-01:
+        hash: sha256:bb5e898d99e3a501b4058eaccead26330f3a2447a601f1069eb40c5d3ade07a7
+        reqs:
+            - REQ-AUTH-017
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-018-01:
+        hash: sha256:70d7ee724e6b2a2aa06176df6bdf31f890c43dbf10c62f5d9e6cec7d46ea1eef
+        reqs:
+            - REQ-AUTH-018
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-019-01:
+        hash: sha256:d2298b17f3bb2c87373b0f7bbf0a0ed50870429271a0eea0c39338d1bafa0565
+        reqs:
+            - REQ-AUTH-019
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-020-01:
+        hash: sha256:875872c312a24a790e496438b0808e748b812724170359059b6dc4ef368c0065
+        reqs:
+            - REQ-AUTH-020
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-021-01:
+        hash: sha256:f160143471c47eb454f3b90d38895faa5deacf1e4c8318deb236897053ef036e
+        reqs:
+            - REQ-AUTH-021
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-022-01:
+        hash: sha256:714d514cec1bd037f3da0375896e87ddb8593be7421eb822afa60847db38048b
+        reqs:
+            - REQ-AUTH-022
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-023-01:
+        hash: sha256:447873bb103d02ac0a1fd02441b9868d8a217034225e3126392c851f741774a7
+        reqs:
+            - REQ-AUTH-023
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-024-01:
+        hash: sha256:f35ac58626cb1f3e0e982b385a85aab5019a069d32fe1b4b8ccee9cd880370a2
+        reqs:
+            - REQ-AUTH-024
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-025-01:
+        hash: sha256:47ceee8d07e4da3796856ae309ee9bbd2ce93646a6ff2aa33232144d08ff433b
+        reqs:
+            - REQ-AUTH-025
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-026-01:
+        hash: sha256:832cd2497b277a103bb47da0b2c3946d0e6717f209350b4f28efb57929aad926
+        reqs:
+            - REQ-AUTH-026
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-027-01:
+        hash: sha256:bd92c351eac7b75cf222a7dfa1464b3de1d982b3d62627fa512c4f525fdb1f91
+        reqs:
+            - REQ-AUTH-027
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-028-01:
+        hash: sha256:1dbff3a4ed6049b7decc15b4e54c1b7558695010efba4d44bb42d63e2a6a2365
+        reqs:
+            - REQ-AUTH-028
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
+    AUTH-029-01:
+        hash: sha256:acd5415f85bbe6a2d4a82e10e2145424e9fd4f4eedd8fa213a0a47b8b92cd605
+        reqs:
+            - REQ-AUTH-029
+        tier: P0
+        author: caster:spec-author:73e264
+        reviewer: cursor:spec-reviewer:70bfca
+        approved_at: "2026-11-22"
+        note: 'Security: in-app RBAC — declared actions, RPC wiring, roles, caller-supplied resource, bindings, grant authority, default deny, CEL conditions, denial audit; cloud Postgres RLS (WP-L8-02).'
+        human:
+            status: pending
