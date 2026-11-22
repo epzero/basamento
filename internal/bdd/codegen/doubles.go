@@ -33,11 +33,11 @@ func NewScriptedModel() *ScriptedModel {
 }
 
 // SetPlan sets the plan the planner returns and names each module's workspace
-// ws-<module>.
+// ws-<module>. The plan's tests are the repository's default `go test ./...`.
 func (m *ScriptedModel) SetPlan(modules ...string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Plan = preset.Plan{}
+	m.Plan = preset.Plan{Tests: []string{"go test ./..."}}
 	for _, name := range modules {
 		m.Plan.Modules = append(m.Plan.Modules, preset.Module{Name: name})
 		m.Workspaces[name] = preset.Workspace{ID: "ws-" + name}
@@ -100,7 +100,7 @@ func (m *ScriptedModel) Complete(_ context.Context, req preset.Request) (json.Ra
 				m.reviewIdx++
 			}
 		}
-		return json.Marshal(preset.Findings{Findings: findings})
+		return json.Marshal(preset.Findings{Findings: append([]preset.Finding{}, findings...)})
 	}
 	return nil, fmt.Errorf("scripted model: unknown agent %q", req.Agent)
 }
@@ -189,11 +189,12 @@ type SimulatedGitHost struct {
 	repos       map[string]*Repo
 	commits     []RecordedCommit
 	writerCalls int
+	keys        map[string]bool
 }
 
 // NewSimulatedGitHost returns an empty git host.
 func NewSimulatedGitHost() *SimulatedGitHost {
-	return &SimulatedGitHost{repos: map[string]*Repo{}}
+	return &SimulatedGitHost{repos: map[string]*Repo{}, keys: map[string]bool{}}
 }
 
 // SetupRepo creates repo with n commits on the default branch.
@@ -221,12 +222,16 @@ func (g *SimulatedGitHost) Commit(_ context.Context, c preset.Commit) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.writerCalls++
+	if c.Key != "" && g.keys[c.Key] {
+		return nil
+	}
 	if c.NewRepo {
 		r := &Repo{Default: "main", Heads: map[string]int{}, Exists: true}
 		r.Commits = 1
 		r.Heads[r.Default] = 1
 		g.repos[c.Repo] = r
 		g.commits = append(g.commits, RecordedCommit{Commit: c, Branch: r.Default, Default: r.Default})
+		g.markCommitted(c)
 		return nil
 	}
 	r := g.repos[c.Repo]
@@ -246,7 +251,15 @@ func (g *SimulatedGitHost) Commit(_ context.Context, c preset.Commit) error {
 	r.Commits++
 	r.Heads[c.Branch]++
 	g.commits = append(g.commits, RecordedCommit{Commit: c, Branch: c.Branch, Default: r.Default})
+	g.markCommitted(c)
 	return nil
+}
+
+// markCommitted records an idempotency key after the host accepted the commit.
+func (g *SimulatedGitHost) markCommitted(c preset.Commit) {
+	if c.Key != "" {
+		g.keys[c.Key] = true
+	}
 }
 
 // Commits returns the recorded commits, in order.

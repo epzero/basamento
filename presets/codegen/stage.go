@@ -54,9 +54,11 @@ type Module struct {
 	Name string `json:"name"`
 }
 
-// Plan is the planner's structured output.
+// Plan is the planner's structured output. Tests are the sandbox commands the
+// verify stage runs, in plan order (REQ-PRESET-005).
 type Plan struct {
 	Modules []Module `json:"modules"`
+	Tests   []string `json:"tests"`
 }
 
 // Workspace is the files a model stage returned. The sandbox tests it and the
@@ -103,8 +105,8 @@ type Model interface {
 	Complete(ctx context.Context, req Request) (json.RawMessage, error)
 }
 
-// Sandbox tests one workspace. The command is the plan's test command; the
-// simulated sandbox records it with the workspace it received.
+// Sandbox tests one workspace with one of the plan's test commands; the
+// simulated sandbox records the command with the workspace it received.
 type Sandbox interface {
 	RunTests(ctx context.Context, workspace Workspace, command string) (TestResult, error)
 }
@@ -112,13 +114,15 @@ type Sandbox interface {
 // Commit is one commit request. NewRepo asks for the first commit of a new
 // repository on its default branch. Otherwise Branch is created from From when
 // it does not exist, and the commit lands on it; From may be the default
-// branch, which is then left untouched.
+// branch, which is then left untouched. Key is the run's stable idempotency
+// key for this stage, so a retried commit is the same commit.
 type Commit struct {
 	Stage     Stage     `json:"stage"`
 	Repo      string    `json:"repo"`
 	Branch    string    `json:"branch,omitempty"`
 	From      string    `json:"from,omitempty"`
 	NewRepo   bool      `json:"new_repo,omitempty"`
+	Key       string    `json:"idempotency_key,omitempty"`
 	Workspace Workspace `json:"workspace"`
 }
 

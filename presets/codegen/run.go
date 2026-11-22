@@ -2,9 +2,12 @@ package codegen
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"path"
+	"strings"
 
 	"github.com/epzero/basamento/core"
 )
@@ -13,6 +16,10 @@ import (
 // state keeps its completed stages, so a resume never repeats them
 // (REQ-PRESET-003).
 var ErrStop = errors.New("codegen: stop after stage")
+
+// DefaultMaxModules is the largest plan the runner accepts when
+// Config.MaxModules is zero.
+const DefaultMaxModules = 8
 
 // Control lets a caller hold a run before a stage, or stop it after one. It is
 // how the gate exercises resume without a wall clock or a sleep.
@@ -47,6 +54,7 @@ type Config struct {
 	Evals           string
 	Guards          Guards
 	RepairVisitCost int64 // milli-points per repair visit; 0 = 1000
+	MaxModules      int   // largest accepted plan; 0 = DefaultMaxModules
 }
 
 // Event is one progress event a run exposes.
@@ -81,6 +89,10 @@ type State struct {
 	Verifications    int
 	Next             Stage
 
+	CommitKey       string
+	CommitAttempted bool
+	Committed       bool
+
 	Started  bool
 	Done     bool
 	Failed   bool
@@ -102,7 +114,9 @@ type Runner struct {
 	Sandbox Sandbox
 	GitHost GitHost
 
-	runs int
+	// IDs returns a new run id. New installs a crypto/rand source; a test
+	// injects a deterministic one.
+	IDs func() (string, error)
 }
 
 // New returns a runner over the three ports.
@@ -110,7 +124,10 @@ func New(cfg Config, model Model, sandbox Sandbox, git GitHost) *Runner {
 	if cfg.RepairVisitCost <= 0 {
 		cfg.RepairVisitCost = 1000
 	}
-	return &Runner{Config: cfg, Model: model, Sandbox: sandbox, GitHost: git}
+	if cfg.MaxModules <= 0 {
+		cfg.MaxModules = DefaultMaxModules
+	}
+	return &Runner{Config: cfg, Model: model, Sandbox: sandbox, GitHost: git, IDs: randomRunID}
 }
 
 // Start begins a run and executes it until it completes, fails or a Control
@@ -122,17 +139,40 @@ func (r *Runner) Start(ctx context.Context, in Input, ctl Control) (*State, erro
 	if r.Config.Flow != FlowBootstrap && r.Config.Flow != FlowIterate {
 		return nil, invalid("codegen: unknown flow %q", r.Config.Flow)
 	}
+	switch r.Config.Flow {
+	case FlowBootstrap:
+		if strings.TrimSpace(in.Brief) == "" {
+			return nil, invalid("codegen: a bootstrap run needs a brief")
+		}
+	case FlowIterate:
+		if strings.TrimSpace(in.Repo) == "" {
+			return nil, invalid("codegen: an iterate run needs a repository")
+		}
+		if strings.TrimSpace(in.BaseBranch) == "" {
+			return nil, invalid("codegen: an iterate run needs a base branch")
+		}
+	}
 	if ctl == nil {
 		ctl = NoControl{}
 	}
-	r.runs++
+	ids := r.IDs
+	if ids == nil {
+		ids = randomRunID
+	}
+	id, err := ids()
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, invalid("codegen: the run id source returned an empty id")
+	}
 	st := &State{
 		Flow:        r.Config.Flow,
 		Version:     r.Config.Version,
 		Prompts:     r.Config.Prompts,
 		Evals:       r.Config.Evals,
 		Guards:      r.Config.Guards,
-		RunID:       fmt.Sprintf("run-%d", r.runs),
+		RunID:       id,
 		Input:       in,
 		Checkpoints: map[Stage]bool{},
 		Next:        StagePlan,
@@ -205,14 +245,20 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			Flow: st.Flow, Stage: stage, Agent: "planner",
 			PromptVersion: st.Prompts, Input: mustJSON(map[string]string{
 				"brief": st.Input.Brief, "change_request": st.Input.ChangeRequest,
+				"repo": st.Input.Repo, "base_branch": st.Input.BaseBranch,
 			}),
 		})
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(resp, &st.Plan); err != nil {
+		var plan Plan
+		if err := json.Unmarshal(resp, &plan); err != nil {
 			return invalid("codegen: planner returned an invalid plan: %s", err.Error())
 		}
+		if err := r.validatePlan(plan); err != nil {
+			return err
+		}
+		st.Plan = plan
 		st.complete(stage)
 		st.Next = StageImplement
 
@@ -221,22 +267,28 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			resp, err := r.Model.Complete(ctx, Request{
 				Flow: st.Flow, Stage: stage, Agent: "implement_module",
 				Module: module.Name, PromptVersion: st.Prompts,
-				Input: mustJSON(map[string]string{"module": module.Name}),
+				Input: mustJSON(map[string]any{"module": module.Name, "workspace": st.Workspace}),
 			})
 			if err != nil {
 				return err
 			}
-			if err := json.Unmarshal(resp, &st.Workspace); err != nil {
-				return invalid("codegen: implementer returned an invalid workspace: %s", err.Error())
+			ws, err := decodeWorkspace(resp, "implementer")
+			if err != nil {
+				return err
 			}
+			st.Workspace = accumulateWorkspace(st.Workspace, ws)
 		}
 		st.complete(stage)
 		st.Next = StageVerify
 
 	case StageVerify:
-		result, err := r.Sandbox.RunTests(ctx, st.Workspace, "go test ./...")
-		if err != nil {
-			return err
+		result := TestResult{}
+		for _, command := range st.Plan.Tests {
+			next, err := r.Sandbox.RunTests(ctx, st.Workspace, command)
+			if err != nil {
+				return err
+			}
+			result.Failures = append(result.Failures, next.Failures...)
 		}
 		st.Verifications++
 		st.LastTests = result
@@ -254,12 +306,14 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			st.fail(msg)
 			return nil
 		}
-		input := map[string]any{}
+		input := map[string]any{"workspace": st.Workspace}
 		if len(st.PendingFindings) > 0 {
 			input["findings"] = st.PendingFindings
 		} else {
 			input["failures"] = st.LastTests.Failures
 		}
+		st.RepairVisits++
+		st.RepairCost += r.Config.RepairVisitCost
 		resp, err := r.Model.Complete(ctx, Request{
 			Flow: st.Flow, Stage: stage, Agent: "repair",
 			PromptVersion: st.Prompts, Input: mustJSON(input),
@@ -267,11 +321,11 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(resp, &st.Workspace); err != nil {
-			return invalid("codegen: repair returned an invalid workspace: %s", err.Error())
+		ws, err := decodeWorkspace(resp, "repair")
+		if err != nil {
+			return err
 		}
-		st.RepairVisits++
-		st.RepairCost += r.Config.RepairVisitCost
+		st.Workspace = ws
 		st.PendingFindings = nil
 		st.complete(stage)
 		st.Next = StageVerify
@@ -281,6 +335,7 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			st.fail("visits")
 			return nil
 		}
+		st.SelfReviewVisits++
 		resp, err := r.Model.Complete(ctx, Request{
 			Flow: st.Flow, Stage: stage, Agent: "reviewer",
 			PromptVersion: st.Prompts, Input: mustJSON(map[string]any{
@@ -290,11 +345,10 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 		if err != nil {
 			return err
 		}
-		var findings Findings
-		if err := json.Unmarshal(resp, &findings); err != nil {
-			return invalid("codegen: reviewer returned invalid findings: %s", err.Error())
+		findings, err := decodeFindings(resp)
+		if err != nil {
+			return err
 		}
-		st.SelfReviewVisits++
 		st.log(stage)
 		if len(findings.Findings) > 0 {
 			st.PendingFindings = findings.Findings
@@ -309,7 +363,8 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 		st.Next = StageCommit
 
 	case StageCommit:
-		commit := Commit{Stage: stage, Workspace: st.LastVerified}
+		key := commitKey(st, stage)
+		commit := Commit{Stage: stage, Key: key, Workspace: st.LastVerified}
 		if st.Flow == FlowBootstrap {
 			commit.Repo = st.Input.Brief
 			commit.NewRepo = true
@@ -318,9 +373,15 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 			commit.Branch = "codegen/" + st.RunID
 			commit.From = st.Input.BaseBranch
 		}
+		if err := validateCommit(commit); err != nil {
+			return err
+		}
+		st.CommitKey = key
+		st.CommitAttempted = true
 		if err := r.GitHost.Commit(ctx, commit); err != nil {
 			return err
 		}
+		st.Committed = true
 		st.complete(stage)
 		st.Next = ""
 		st.Done = true
@@ -329,6 +390,36 @@ func (r *Runner) stage(ctx context.Context, st *State, stage Stage) error {
 		return invalid("codegen: unknown stage %q", stage)
 	}
 	return nil
+}
+
+func (r *Runner) validatePlan(plan Plan) error {
+	if len(plan.Modules) == 0 {
+		return invalid("codegen: planner returned a plan with no modules")
+	}
+	if max := r.maxModules(); len(plan.Modules) > max {
+		return invalid("codegen: plan has %d modules, the maximum is %d", len(plan.Modules), max)
+	}
+	for i, module := range plan.Modules {
+		if strings.TrimSpace(module.Name) == "" {
+			return invalid("codegen: plan module %d has no name", i+1)
+		}
+	}
+	if len(plan.Tests) == 0 {
+		return invalid("codegen: planner returned a plan with no tests")
+	}
+	for i, command := range plan.Tests {
+		if strings.TrimSpace(command) == "" {
+			return invalid("codegen: plan test %d is empty", i+1)
+		}
+	}
+	return nil
+}
+
+func (r *Runner) maxModules() int {
+	if r.Config.MaxModules > 0 {
+		return r.Config.MaxModules
+	}
+	return DefaultMaxModules
 }
 
 // repairLimit reports the guard a repair would exceed, or "" when it may run.
@@ -378,4 +469,136 @@ func mustJSON(v any) json.RawMessage {
 		panic("codegen: marshal: " + err.Error())
 	}
 	return raw
+}
+
+func randomRunID() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "run-" + hex.EncodeToString(b[:]), nil
+}
+
+func commitKey(st *State, stage Stage) string {
+	return st.RunID + ":" + string(stage)
+}
+
+func accumulateWorkspace(base, next Workspace) Workspace {
+	if len(next.Files) > 0 {
+		if base.Files == nil {
+			base.Files = map[string]string{}
+		}
+		for name, body := range next.Files {
+			base.Files[name] = body
+		}
+	}
+	if next.ID != "" {
+		base.ID = next.ID
+	}
+	return base
+}
+
+func decodeWorkspace(resp json.RawMessage, who string) (Workspace, error) {
+	var ws Workspace
+	if err := json.Unmarshal(resp, &ws); err != nil {
+		return Workspace{}, invalid("codegen: %s returned an invalid workspace: %s", who, err.Error())
+	}
+	if ws.ID == "" {
+		return Workspace{}, invalid("codegen: %s returned a workspace with no id", who)
+	}
+	return ws, nil
+}
+
+func decodeFindings(resp json.RawMessage) (Findings, error) {
+	var body struct {
+		Findings *[]Finding `json:"findings"`
+	}
+	if err := json.Unmarshal(resp, &body); err != nil {
+		return Findings{}, invalid("codegen: reviewer returned invalid findings: %s", err.Error())
+	}
+	if body.Findings == nil {
+		return Findings{}, invalid("codegen: reviewer returned no findings field")
+	}
+	for i, finding := range *body.Findings {
+		if strings.TrimSpace(finding.Message) == "" {
+			return Findings{}, invalid("codegen: reviewer finding %d has no message", i+1)
+		}
+	}
+	return Findings{Findings: *body.Findings}, nil
+}
+
+// validateCommit refuses a commit the git host cannot safely receive: a
+// workspace path that escapes the repository, a malformed repository name, or
+// a malformed branch or base ref.
+func validateCommit(c Commit) error {
+	if !validRepo(c.Repo) {
+		return invalid("codegen: commit repository %q is not valid", c.Repo)
+	}
+	if c.Branch != "" && !validRef(c.Branch) {
+		return invalid("codegen: commit branch %q is not valid", c.Branch)
+	}
+	if c.From != "" && !validRef(c.From) {
+		return invalid("codegen: commit base ref %q is not valid", c.From)
+	}
+	if !c.NewRepo && c.Branch == "" {
+		return invalid("codegen: a commit to an existing repository needs a branch")
+	}
+	for name := range c.Workspace.Files {
+		if !validWorkspacePath(name) {
+			return invalid("codegen: commit workspace path %q is not a clean relative path", name)
+		}
+	}
+	return nil
+}
+
+func validWorkspacePath(name string) bool {
+	if name == "" || path.IsAbs(name) || strings.Contains(name, `\`) {
+		return false
+	}
+	if path.Clean(name) != name {
+		return false
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func validRepo(repo string) bool {
+	if repo == "" || strings.HasPrefix(repo, "/") || strings.HasSuffix(repo, "/") || strings.ContainsAny(repo, " \t\r\n\\") {
+		return false
+	}
+	for _, segment := range strings.Split(repo, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+		for _, r := range segment {
+			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func validRef(ref string) bool {
+	if ref == "" || ref == "@" || strings.HasPrefix(ref, "-") || strings.HasPrefix(ref, "/") ||
+		strings.HasSuffix(ref, "/") || strings.HasSuffix(ref, ".") || strings.HasSuffix(ref, ".lock") ||
+		strings.Contains(ref, "..") || strings.Contains(ref, "//") || strings.Contains(ref, "@{") {
+		return false
+	}
+	for _, r := range ref {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return false
+		}
+	}
+	for _, segment := range strings.Split(ref, "/") {
+		if segment == "" || strings.HasPrefix(segment, ".") {
+			return false
+		}
+	}
+	return true
 }

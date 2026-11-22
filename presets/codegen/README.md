@@ -25,7 +25,9 @@ a person's review gate; it is never composed into a run.
   the canonical flows plus the prompt and eval files, sorted by path.
 - `registry.go`: the version lifecycle (compile, eval, review gate).
 - `run.go`: the runner. The model, sandbox and git host are ports; the gate
-  drives them with the scripted doubles in `internal/bdd/codegen`.
+  drives them with the scripted doubles in `internal/bdd/codegen`. A run's id
+  comes from an injected source (crypto/rand by default), verify runs exactly
+  the plan's `tests`, and a commit carries a stable per-run idempotency key.
 
 ```bash
 go test ./...                       # this module's unit tests

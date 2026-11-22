@@ -36,6 +36,7 @@ type codegenWorld struct {
 
 	registry    *preset.Registry
 	lastVersion *preset.Version
+	nextRunID   int
 
 	repo          string
 	defaultBranch string
@@ -93,7 +94,12 @@ func (w *codegenWorld) runnerFor() *preset.Runner {
 		Guards:          w.guards,
 		RepairVisitCost: w.repairCost,
 	}
-	return preset.New(cfg, w.model, w.sandbox, w.git)
+	r := preset.New(cfg, w.model, w.sandbox, w.git)
+	r.IDs = func() (string, error) {
+		w.nextRunID++
+		return fmt.Sprintf("run-%d", w.nextRunID), nil
+	}
+	return r
 }
 
 func (w *codegenWorld) start(in preset.Input) error {

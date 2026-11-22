@@ -14,6 +14,7 @@ const (
 	ImplementStages = "implement"
 	ImplementChild  = "implement_module"
 	VerifyStage     = "verify"
+	VerifyChild     = "verify_test"
 	RepairStage     = "repair"
 	SelfReviewStage = "self-review"
 	CommitStage     = "commit"
@@ -107,9 +108,14 @@ func loop(name string, first string) *flow.IR {
 				Spec: json.RawMessage(`{"agent":"implement_module","model":"codegen","prompt":"prompts/implement.md","output_schema":"workspace"}`),
 			},
 			VerifyStage: {
+				Kind: "map",
+				Out:  "tests",
+				Spec: json.RawMessage(`{"over":"state.plan.tests","max_parallel":0,"node":"` + VerifyChild + `"}`),
+			},
+			VerifyChild: {
 				Kind: "tool",
 				Out:  "tests",
-				Spec: json.RawMessage(`{"tool":"run-tests","command":"go test ./..."}`),
+				Spec: json.RawMessage(`{"tool":"run-tests","args":[]}`),
 			},
 			RepairStage: {
 				Kind:  "agent",
@@ -133,13 +139,34 @@ func loop(name string, first string) *flow.IR {
 			{From: PlanStages, To: ImplementStages},
 			{From: ImplementStages, To: ImplementChild},
 			{From: ImplementChild, To: VerifyStage},
-			{From: VerifyStage, To: SelfReviewStage, When: `size(state.tests.failures) == 0`},
-			{From: VerifyStage, To: RepairStage},
+			{From: VerifyStage, To: VerifyChild},
+			{From: VerifyChild, To: SelfReviewStage, When: `size(state.tests.failures) == 0`},
+			{From: VerifyChild, To: RepairStage},
 			{From: RepairStage, To: VerifyStage},
 			{From: SelfReviewStage, To: CommitStage, When: `size(state.findings.findings) == 0`},
 			{From: SelfReviewStage, To: RepairStage},
 		},
 	}
+}
+
+// VerifyNodes returns one tool node per plan test, in plan order. Each node
+// carries its command as literal spec.args: the host reads spec.tool and
+// delivers the args, never a "command" field.
+func VerifyNodes(tests []string) map[string]flow.Node {
+	nodes := make(map[string]flow.Node, len(tests))
+	for i, test := range tests {
+		nodes[fmt.Sprintf("%s_%d", VerifyChild, i+1)] = VerifyNode(test)
+	}
+	return nodes
+}
+
+// VerifyNode returns the tool node that runs one plan test.
+func VerifyNode(test string) flow.Node {
+	spec, err := json.Marshal(map[string]any{"tool": "run-tests", "args": []string{test}})
+	if err != nil {
+		panic("codegen ir: verify node: " + err.Error())
+	}
+	return flow.Node{Kind: "tool", Out: "tests", Spec: spec}
 }
 
 // ExpectedStages is the order the Runner executes for both run flows. It mirrors
