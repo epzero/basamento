@@ -122,6 +122,13 @@ needs a new generic text adds it there, plus a source for its world, and never
 registers a shared text itself; `World` fields and the `register*` calls in
 `Initialize` stay sorted alphabetically.
 
+The step library is registered **once per godog suite** (`TestSuiteInitializer`
+in `internal/bdd/bdd_test.go`), not before every scenario. Per-scenario state
+belongs in `World`, which the `Before` hook in `steps.Initialize` creates for
+each scenario. A `register*` function must not declare variables for its steps
+to share across scenarios; `register_state_test.go` enforces that rule on the
+package's register functions.
+
 **No AI in the gate.** AI takes part only in labelled lanes:
 
 | Lane | Where AI acts | Determinism in the PR gate |
