@@ -822,6 +822,13 @@ func registerCredentials(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^the audit store rejects every record$`, func(ctx context.Context) error {
+		if az := world(ctx).Authz; az != nil {
+			if err := az.ensureStore(ctx); err != nil {
+				return err
+			}
+			az.auditWrap.reject = true
+			return nil
+		}
 		w := credentialsW(ctx)
 		w.audit.mu.Lock()
 		w.audit.reject = true

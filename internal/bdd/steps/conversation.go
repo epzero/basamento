@@ -1880,6 +1880,11 @@ func registerConversation(sc *godog.ScenarioContext) {
 		return checkConvErr(world(ctx).Conversation, code)
 	})
 	sc.Step(`^the action fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
+		// The authz feature uses the same phrase; dispatch on its world so the
+		// phrase has one registration (EP0-115 rebase).
+		if w := world(ctx).Authz; w != nil {
+			return checkAuthzErrCode(w, code)
+		}
 		return checkConvErr(world(ctx).Conversation, code)
 	})
 
