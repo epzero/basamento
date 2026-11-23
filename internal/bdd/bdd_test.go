@@ -140,21 +140,35 @@ func TestFeatures(t *testing.T) {
 	enforceStrictNoPostgresSkips(t)
 }
 
+// registerSteps wires the shared step library once per godog suite (EP0-228).
+// steps.Initialize registers every step pattern and godog compiles each with
+// regexp.MustCompile; ScenarioInitializer ran that before every scenario, so cost
+// grew with patterns times scenarios and dominated wall time under -race.
+// TestSuiteInitializer runs once and godog copies registration into each scenario.
+func registerSteps(tsc *godog.TestSuiteContext) {
+	steps.Initialize(tsc.ScenarioContext())
+}
+
+// newSuite builds a strict godog suite that registers steps through TestSuiteInitializer.
+func newSuite(t *testing.T, name string, paths []string, tags string) godog.TestSuite {
+	return godog.TestSuite{
+		Name:                 name,
+		TestSuiteInitializer: registerSteps,
+		Options: &godog.Options{
+			Format:   "pretty",
+			Paths:    paths,
+			Tags:     tags,
+			Strict:   true,
+			TestingT: t,
+		},
+	}
+}
+
 func runBusBackendSuite(t *testing.T, tags, backend string) {
 	t.Run("bus-"+backend, func(t *testing.T) {
 		t.Setenv("BDD_BUS_BACKEND", backend)
 		t.Setenv("BDD_SQL_PROFILE", "embedded")
-		suite := godog.TestSuite{
-			Name:                "basamento-bus-" + backend,
-			ScenarioInitializer: steps.Initialize,
-			Options: &godog.Options{
-				Format:   "pretty",
-				Paths:    []string{"../../specs/bus"},
-				Tags:     tags,
-				Strict:   true,
-				TestingT: t,
-			},
-		}
+		suite := newSuite(t, "basamento-bus-"+backend, []string{"../../specs/bus"}, tags)
 		if code := suite.Run(); code != 0 {
 			t.Fatalf("godog exited with status %d", code)
 		}
@@ -170,17 +184,7 @@ func runSuite(t *testing.T, tags, profile string) {
 		if profile != "" {
 			t.Setenv("BDD_SQL_PROFILE", profile)
 		}
-		suite := godog.TestSuite{
-			Name:                name,
-			ScenarioInitializer: steps.Initialize,
-			Options: &godog.Options{
-				Format:   "pretty",
-				Paths:    scenarioPaths(),
-				Tags:     tags,
-				Strict:   true,
-				TestingT: t,
-			},
-		}
+		suite := newSuite(t, name, scenarioPaths(), tags)
 		if code := suite.Run(); code != 0 {
 			t.Fatalf("godog exited with status %d", code)
 		}

@@ -48,8 +48,12 @@ type World struct {
 
 func world(ctx context.Context) *World { return ctx.Value(worldKey{}).(*World) }
 
-// Initialize registers hooks and every domain's steps. It creates only the
-// empty World; each register* fills its own field in its own Before hook.
+// Initialize registers hooks and every domain's steps once per godog suite run
+// (TestSuiteInitializer in internal/bdd/bdd_test.go). Everything it registers is
+// shared by all scenarios of that suite; per-scenario state lives in World, which
+// the Before hook below creates each scenario; each register* fills its own field
+// in its own Before hook. Domain register* functions must not hold scenario state
+// in variables their step closures capture (see register_state_test.go).
 func Initialize(sc *godog.ScenarioContext) {
 	sharedFailures = newFailureRegistry()
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
