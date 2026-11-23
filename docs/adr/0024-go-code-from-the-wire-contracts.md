@@ -51,11 +51,13 @@ eight packages until one layer key `contracts/gen` exists.
 
 ### D2 — Committed output
 
-Generated Go is **committed** under `contracts/gen/go/basamento/<svc>/v1/`
-(import path `github.com/epzero/basamento/contracts/gen/go/...`). Never
-hand-edited. Any change under `contracts/basamento/**/*.proto` includes the
-regenerated `contracts/gen/go/**` in the **same pull request** (`contracts-gen`
-enforces it).
+**Everything under `contracts/gen/` is generated output; nothing else may live
+there.** `buf` writes Go only under `contracts/gen/go/` (import path
+`github.com/epzero/basamento/contracts/gen/go/basamento/<svc>/v1/`, …). Files
+carry the generated header and are never hand-edited. Any change under
+`contracts/basamento/**/*.proto` includes the regenerated `contracts/gen/go/**`
+in the **same pull request** (`contracts-gen` enforces the whole tree under
+`contracts/gen/`).
 
 Rejected: build-time-only output, top-level `wire/`, `internal/`, a separate
 contracts module, partial generation.
@@ -72,12 +74,19 @@ contracts module, partial generation.
   assumes `buf` is on `PATH`; when invoked by hand without it, exit with
   `buf not found: run make tools` — it does **not** read `GATE_STRICT`.
 - **Drift algorithm:** `cd contracts && buf generate --output <tmpdir>` (does
-  not touch the committed tree), then recursively compare `<tmpdir>/gen/go` with
-  `contracts/gen/go` (differing, missing, extra files). Failure names
-  **`make generate`**. If only `.proto` changes, **`go build` may still pass**
-  until imports need new symbols; `contracts-gen` fails in `static` anyway.
+  not touch the committed tree), then recursively compare `<tmpdir>/gen` with
+  `contracts/gen` (differing, missing, extra, and **non-regular** entries — a
+  symlink is never followed and is a failure). **Extra** paths in the committed
+  tree say to **delete them and run `make generate`** (`clean: true` removes
+  stale files only under `contracts/gen/go/`). Other failures name
+  **`make generate`**. This scope matches the layer `contracts/gen`, `.gitattributes`
+  `contracts/gen/**`, and `REVIEW.md` §Skip: the drift check is what makes
+  “generated, skip in review” safe. If only `.proto` changes, **`go build` may
+  still pass** until imports need new symbols; `contracts-gen` fails in
+  `static` anyway.
   Unit tests in `internal/gate` with generator injected (no `buf` in tests):
-  clean tree; differing, missing, extra files; generate error. Extend
+  clean tree; differing, missing, extra files; extra package outside `go/`;
+  non-regular entries; generate error. Extend
   `internal/gate/makefile_test.go` to pin that `generate` and `contracts-gen`
   exist and `contracts-gen` is on the `static` list (same style as existing pin
   tests).
@@ -148,8 +157,9 @@ follow-up grants `stream` → `contracts/gen`.
 - **Repository metrics:** extend root **`REVIEW.md`** §Skip and
   **`docs/engineering/code-review.md`** §3 (non-generated lines) to include
   **`contracts/gen/**`**, alongside `go.sum`, mermaid blocks, and
-  `spec.lock.yaml` hashes — with note that **`contracts-gen` checks it**. That
-  is what keeps finder depth and line-count rules from counting regenerated Go.
+  `spec.lock.yaml` hashes — with note that **`contracts-gen` checks the whole
+  tree**. That is what keeps finder depth and line-count rules from counting
+  anything under `contracts/gen/`.
 - **No `contracts/REVIEW.md`.** Reviewers read `.proto` diffs and trust
   `contracts-gen`.
 
@@ -202,8 +212,8 @@ No BDD for the toolchain itself.
 
 ## Consequences
 
-- Large proto PRs; mitigated by linguist-generated, §Skip policy, and
-  `.proto`-first review.
+- Large proto PRs; mitigated by linguist-generated, whole-tree `contracts-gen`,
+  §Skip policy, and `.proto`-first review.
 - ~6.5k generated lines; `connect` dependency.
 - `buf` only for `make generate` and G1 `contracts-gen`, not for `go build`.
 - **G5 mutation testing** (WP-L0 follow-up, `qa-gate.md`): when enabled, must
@@ -211,15 +221,16 @@ No BDD for the toolchain itself.
 
 ## Revert
 
-Remove generation artifacts, layer row and grants, drift check, `.gitattributes`;
-regenerate `overview.md` §3 via `go tool gate docs -write`.
+Remove `contracts/gen`, `buf.gen.yaml`, tool pins, drift check, layer row and
+grants, `.gitattributes` and §Skip entries; regenerate `overview.md` §3 via
+`go tool gate docs -write`.
 
 ## Implementation changes these files
 
 | Path | Change | Who | Tier |
 | --- | --- | --- | --- |
 | `contracts/buf.gen.yaml` | D1 (`clean: true`, plugins) | Developer | High |
-| `contracts/gen/go/**` | D2, D8 output | Developer | High |
+| `contracts/gen/**` | D2, D8 output (`go/` from buf; tree must match drift) | Developer | High |
 | `go.mod`, `go.sum` | D1 `tool` + tidy (network) | Developer | High |
 | `layering.yaml` | D4 toolchain portion; EP0-227 adds `model/worker/dialout` | Developer | High |
 | `Makefile` | `generate` (direct buf); `contracts-gen: $(call tool,buf,$(GATE) contracts-gen)` on `static` | Developer | High |
