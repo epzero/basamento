@@ -27,3 +27,4 @@ direction is the exception: its ADR is written as **Proposed** (§5).
 | [0016](0016-internal-config-layer.md) | The `internal/config` layer: grants for `cmd/kit` and the BDD harness only | Accepted |
 | [0017](0017-vault-transit-key-service.md) | Keep Vault Transit (`hashivault://`): own driver; token from file; refused at open until then | Accepted |
 | [0018](0018-layering-covers-tests-and-excluded-files.md) | Layering covers test imports and build-excluded files; `internal/bdd` is test-only | Accepted |
+| [0024](0024-go-code-from-the-wire-contracts.md) | Buf-generated, committed connect/protobuf Go under `contracts/gen/go`; drift check in G1 | Proposed |
