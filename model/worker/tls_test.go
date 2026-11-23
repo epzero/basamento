@@ -211,3 +211,15 @@ func TestDialWorkerServiceRefusesPlaintextOffLoopback(t *testing.T) {
 	}
 	_ = tr.Close()
 }
+
+func TestClampLeaseWait(t *testing.T) {
+	for _, tc := range []struct{ in, want time.Duration }{
+		{-time.Second, 0},
+		{30 * time.Second, 30 * time.Second},
+		{68 * 365 * 24 * time.Hour, maxLeaseWait},
+	} {
+		if got := clampLeaseWait(tc.in); got != tc.want {
+			t.Fatalf("clampLeaseWait(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

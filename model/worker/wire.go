@@ -35,6 +35,15 @@ type Service struct {
 	dials atomic.Int64
 }
 
+// maxLeaseWait bounds what one Lease long poll may hold a store-backed
+// goroutine awake, whatever wait_seconds the worker asks for.
+const maxLeaseWait = time.Minute
+
+// maxWorkerStreams bounds concurrent WorkerService calls per connection; a
+// worker needs a handful of short calls, and each long poll is bounded by
+// maxLeaseWait.
+const maxWorkerStreams = 64
+
 // NewService returns the platform side of the worker contract over store.
 func NewService(store *Store) *Service { return &Service{store: store} }
 
@@ -129,7 +138,7 @@ func loadCertPool(path string) (*x509.CertPool, error) {
 // caller owns the process lifecycle and should stop the server when its
 // context ends.
 func (s *Service) GRPCServer(creds credentials.TransportCredentials) *grpc.Server {
-	var opts []grpc.ServerOption
+	opts := []grpc.ServerOption{grpc.MaxConcurrentStreams(maxWorkerStreams)}
 	if creds != nil {
 		opts = append(opts, grpc.Creds(creds))
 	}
@@ -202,7 +211,7 @@ func (s *Service) Lease(ctx context.Context, req *workerv1.LeaseRequest) (*worke
 		FreeUnits:  int(req.GetFreeUnits()),
 		WarmModels: req.GetWarmModels(),
 		TimeLeft:   time.Duration(req.GetTimeLeftSeconds()) * time.Second,
-		Wait:       time.Duration(req.GetWaitSeconds()) * time.Second,
+		Wait:       clampLeaseWait(time.Duration(req.GetWaitSeconds()) * time.Second),
 	})
 	if err != nil {
 		return nil, toStatus(err)
@@ -748,6 +757,18 @@ func loopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// clampLeaseWait bounds a worker-supplied long poll. Negative values mean no
+// wait, as the store treats them.
+func clampLeaseWait(wait time.Duration) time.Duration {
+	if wait < 0 {
+		return 0
+	}
+	if wait > maxLeaseWait {
+		return maxLeaseWait
+	}
+	return wait
 }
 
 func toStatus(err error) error {
