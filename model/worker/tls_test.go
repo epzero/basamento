@@ -186,3 +186,26 @@ func writeTestTLS(t *testing.T, dir string) (caFile, serverCert, serverKey, clie
 	}
 	return filepath.Join(dir, "ca.pem"), filepath.Join(dir, "server.pem"), filepath.Join(dir, "server.key"), filepath.Join(dir, "client.pem"), filepath.Join(dir, "client.key")
 }
+
+func TestDialWorkerServiceRefusesPlaintextOffLoopback(t *testing.T) {
+	if _, err := DialWorkerService("10.0.0.1:8443"); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("plaintext dial off loopback = %v, want invalid_argument", err)
+	}
+	tr, err := DialWorkerService("127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("plaintext dial on loopback: %v", err)
+	}
+	_ = tr.Close()
+}
+
+func TestClampLeaseWait(t *testing.T) {
+	for _, tc := range []struct{ in, want time.Duration }{
+		{-time.Second, 0},
+		{30 * time.Second, 30 * time.Second},
+		{68 * 365 * 24 * time.Hour, maxLeaseWait},
+	} {
+		if got := clampLeaseWait(tc.in); got != tc.want {
+			t.Fatalf("clampLeaseWait(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
