@@ -2,10 +2,14 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	workerv1 "github.com/epzero/basamento/model/worker/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -32,10 +37,102 @@ type Service struct {
 // NewService returns the platform side of the worker contract over store.
 func NewService(store *Store) *Service { return &Service{store: store} }
 
-// GRPCServer returns a gRPC server with this service registered. The caller
-// owns the process lifecycle and should stop the server when its context ends.
-func (s *Service) GRPCServer() *grpc.Server {
-	srv := grpc.NewServer()
+// TLSConfig names the PEM files that secure WorkerService. The platform and
+// the worker both present a certificate; CAFile verifies the peer. An empty
+// CAFile keeps the platform's certificate unchecked by the worker and lets
+// the platform accept any client certificate the listener admits, so a
+// deployment that leaves it out must stay on loopback.
+type TLSConfig struct {
+	CertFile string
+	KeyFile  string
+	CAFile   string
+}
+
+// Empty reports whether no TLS file was configured.
+func (c TLSConfig) Empty() bool {
+	return c.CertFile == "" && c.KeyFile == "" && c.CAFile == ""
+}
+
+// ServerCredentials loads the platform side of WorkerService. CertFile and
+// KeyFile are required; CAFile makes the platform require and verify the
+// worker's certificate (mutual TLS), so a worker without a trusted
+// certificate is refused before a call runs.
+func (c TLSConfig) ServerCredentials() (credentials.TransportCredentials, error) {
+	if c.CertFile == "" || c.KeyFile == "" {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"worker TLS needs both --worker.tls.cert-file and --worker.tls.key-file", nil)
+	}
+	cert, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+	if err != nil {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"worker TLS certificate or key could not be read", map[string]any{"cert": c.CertFile, "key": c.KeyFile})
+	}
+	cfg := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+	}
+	if c.CAFile != "" {
+		pool, err := loadCertPool(c.CAFile)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ClientCAs = pool
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return credentials.NewTLS(cfg), nil
+}
+
+// ClientCredentials loads the worker side of WorkerService. CAFile verifies
+// the platform's certificate. CertFile and KeyFile are optional together and
+// present the worker's certificate; a platform with a CA file requires them.
+func ClientCredentials(certFile, keyFile, caFile string) (credentials.TransportCredentials, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if caFile != "" {
+		pool, err := loadCertPool(caFile)
+		if err != nil {
+			return nil, err
+		}
+		cfg.RootCAs = pool
+	}
+	if certFile != "" || keyFile != "" {
+		if certFile == "" || keyFile == "" {
+			return nil, core.NewError(core.CodeInvalidArgument,
+				"worker TLS needs both a client certificate and its key", nil)
+		}
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, core.NewError(core.CodeInvalidArgument,
+				"worker TLS client certificate or key could not be read", nil)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+	return credentials.NewTLS(cfg), nil
+}
+
+func loadCertPool(path string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"worker TLS CA file could not be read", map[string]any{"ca": path})
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, core.NewError(core.CodeInvalidArgument,
+			"worker TLS CA file holds no certificate", map[string]any{"ca": path})
+	}
+	return pool, nil
+}
+
+// GRPCServer returns a gRPC server with this service registered. A nil creds
+// serves plaintext, which ServeWorkerService admits on loopback only. The
+// caller owns the process lifecycle and should stop the server when its
+// context ends.
+func (s *Service) GRPCServer(creds credentials.TransportCredentials) *grpc.Server {
+	var opts []grpc.ServerOption
+	if creds != nil {
+		opts = append(opts, grpc.Creds(creds))
+	}
+	srv := grpc.NewServer(opts...)
 	workerv1.RegisterWorkerServiceServer(srv, s)
 	return srv
 }
@@ -46,8 +143,16 @@ func (s *Service) GRPCServer() *grpc.Server {
 func (s *Service) OutboundDials() int64 { return s.dials.Load() }
 
 // ServeWorkerService serves srv on ln until ctx is cancelled or the server
-// stops. It returns nil for a clean shutdown.
-func ServeWorkerService(ctx context.Context, ln net.Listener, srv *grpc.Server) error {
+// stops. It returns nil for a clean shutdown. A plaintext listener that is not
+// on loopback is refused before it serves: the contract carries pool tokens
+// and worker credentials, so off-host traffic needs TLS.
+func ServeWorkerService(ctx context.Context, ln net.Listener, srv *grpc.Server, secure bool) error {
+	if !secure {
+		if err := refuseOffLoopback(ln.Addr()); err != nil {
+			_ = ln.Close()
+			return err
+		}
+	}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ln) }()
 	select {
@@ -227,9 +332,16 @@ type GRPCTransport struct {
 }
 
 // DialWorkerService dials the platform's WorkerService listener. The worker
-// is the side that connects; behind NAT it needs no inbound route.
-func DialWorkerService(target string) (*GRPCTransport, error) {
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// is the side that connects; behind NAT it needs no inbound route. Passing a
+// credentials.TransportCredentials (built with ClientCredentials) secures the
+// connection; with none the call is plaintext, which the platform admits on
+// loopback only.
+func DialWorkerService(target string, creds ...credentials.TransportCredentials) (*GRPCTransport, error) {
+	var transport credentials.TransportCredentials = insecure.NewCredentials()
+	if len(creds) > 0 && creds[0] != nil {
+		transport = creds[0]
+	}
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(transport))
 	if err != nil {
 		return nil, fmt.Errorf("worker: dial %s: %w", target, err)
 	}
@@ -564,6 +676,30 @@ func structToRaw(st *structpb.Struct) (json.RawMessage, error) {
 		return nil, core.NewError(core.CodeInvalidArgument, "worker: payload cannot be read", nil)
 	}
 	return raw, nil
+}
+
+// refuseOffLoopback reports whether a plaintext listener is safe: loopback
+// only, where the process can prove the peer is on this machine.
+func refuseOffLoopback(addr net.Addr) error {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("worker listener %q is not a host:port address", addr), nil)
+	}
+	if loopbackHost(host) {
+		return nil
+	}
+	return core.NewError(core.CodeInvalidArgument,
+		fmt.Sprintf("worker listener %q is refused: without TLS it accepts loopback addresses only", addr),
+		map[string]any{"key": "worker.listen"})
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func toStatus(err error) error {

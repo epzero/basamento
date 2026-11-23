@@ -592,14 +592,14 @@ func (w *workerWorld) startPlatformListener(ctx context.Context) error {
 		return err
 	}
 	svc := worker.NewService(st)
-	srv := svc.GRPCServer()
+	srv := svc.GRPCServer(nil)
 	pctx, cancel := context.WithCancel(ctx)
 	w.platformAddr = ln.Addr().String()
 	w.platformLn = ln
 	w.platformSrv = srv
 	w.platform = svc
 	w.platformCancel = cancel
-	go func() { _ = worker.ServeWorkerService(pctx, ln, srv) }()
+	go func() { _ = worker.ServeWorkerService(pctx, ln, srv, false) }()
 	return nil
 }
 
@@ -661,7 +661,7 @@ func (w *workerWorld) startKitServe(ctx context.Context, pool string) error {
 	httpAddr := free.Addr().String()
 	_ = free.Close()
 	w.kitSQL = "sqlite:///" + filepath.Join(dir, "kit.db")
-	w.kitToken = "bdd-pool-token"
+	w.kitToken = "bdd-pool-token-0123456789abcdef"
 	tokenFile := filepath.Join(dir, "pool.token")
 	if err := os.WriteFile(tokenFile, []byte(w.kitToken+"\n"), 0o600); err != nil {
 		return err

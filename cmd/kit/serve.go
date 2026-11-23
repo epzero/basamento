@@ -31,6 +31,7 @@ import (
 	"github.com/epzero/basamento/platform/secrets"
 	"github.com/epzero/basamento/platform/sql"
 	"google.golang.org/grpc"
+	grpccreds "google.golang.org/grpc/credentials"
 )
 
 // wirePort is one port the composition root opens, in start-up order.
@@ -185,6 +186,22 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 	if store == nil {
 		return nil, fmt.Errorf("kit serve: worker listener needs the SQL port")
 	}
+	tlsConfig := worker.TLSConfig{
+		CertFile: wiring["worker.tls.cert-file"],
+		KeyFile:  wiring["worker.tls.key-file"],
+		CAFile:   wiring["worker.tls.ca-file"],
+	}
+	var serverCreds grpccreds.TransportCredentials
+	if !tlsConfig.Empty() {
+		var err error
+		serverCreds, err = tlsConfig.ServerCredentials()
+		if err != nil {
+			return nil, fmt.Errorf("kit serve: %w", err)
+		}
+	}
+	if err := validateWorkerListen(wiring["worker.listen"], serverCreds != nil); err != nil {
+		return nil, err
+	}
 	ln, err := net.Listen("tcp", wiring["worker.listen"])
 	if err != nil {
 		return nil, fmt.Errorf("kit serve: worker listener: %w", err)
@@ -243,13 +260,36 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 		model:   remoteModel,
 		labels:  parseLabels(wiring["worker.remote-labels"]),
 	}
-	platform.srv = worker.NewService(store).GRPCServer()
+	platform.srv = worker.NewService(store).GRPCServer(serverCreds)
 	go func() {
-		if err := worker.ServeWorkerService(ctx, ln, platform.srv); err != nil {
+		if err := worker.ServeWorkerService(ctx, ln, platform.srv, serverCreds != nil); err != nil {
 			fmt.Fprintln(os.Stderr, "worker service:", err)
 		}
 	}()
 	return platform, nil
+}
+
+// validateWorkerListen mirrors the rule authn applies to the main listener:
+// a plaintext worker listener is loopback-only because it carries pool tokens
+// and worker credentials. TLS lifts that limit and is the documented way to
+// serve workers on another machine.
+func validateWorkerListen(addr string, secure bool) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("kit serve: --worker.listen %q is not a host:port address", addr)
+	}
+	if secure || loopbackHost(host) {
+		return nil
+	}
+	return fmt.Errorf("kit serve: --worker.listen %q is refused: without --worker.tls.cert-file and --worker.tls.key-file it accepts loopback addresses only", addr)
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // readyFields are the worker-side facts the ready line reports.

@@ -36,6 +36,10 @@ var wiringFlags = []string{
 	"worker.remote",
 	"worker.remote-model",
 	"worker.remote-labels",
+	"worker.remote-manifest",
+	"worker.tls.cert-file",
+	"worker.tls.key-file",
+	"worker.tls.ca-file",
 }
 
 type flags struct {

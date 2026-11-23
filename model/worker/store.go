@@ -225,9 +225,8 @@ func (s *Store) CreatePool(ctx context.Context, spec PoolSpec) (Pool, error) {
 // deployment configuration, so operators can provision workers with it. Only
 // the hash is kept.
 func (s *Store) EnsurePoolWithToken(ctx context.Context, spec PoolSpec, token string) (Pool, bool, error) {
-	if strings.TrimSpace(token) == "" {
-		return Pool{}, false, core.NewError(core.CodeInvalidArgument,
-			"worker: pool token must not be empty", nil)
+	if err := validatePoolToken(token); err != nil {
+		return Pool{}, false, err
 	}
 	p, err := s.Pool(ctx, spec.ID)
 	switch {
@@ -243,6 +242,23 @@ func (s *Store) EnsurePoolWithToken(ctx context.Context, spec PoolSpec, token st
 		return Pool{}, false, err
 	}
 	return Pool{PoolSpec: spec, Token: token}, true, nil
+}
+
+// minPoolTokenLen is the shortest pool token the platform accepts. A pool
+// token is the only credential a worker joins with, so a short one is
+// guessable; generated tokens are 43 characters.
+const minPoolTokenLen = 16
+
+func validatePoolToken(token string) error {
+	if strings.TrimSpace(token) == "" {
+		return core.NewError(core.CodeInvalidArgument, "worker: pool token must not be empty", nil)
+	}
+	if len(token) < minPoolTokenLen {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("worker: pool token is too short: at least %d characters are required", minPoolTokenLen),
+			map[string]any{"min_length": minPoolTokenLen})
+	}
+	return nil
 }
 
 func (s *Store) insertPool(ctx context.Context, spec PoolSpec, token string) error {
@@ -348,6 +364,9 @@ func (s *Store) poolByToken(ctx context.Context, token string) (PoolSpec, error)
 // is refused with conflict (REQ-MODEL-028); an unknown or revoked token is
 // refused with unauthenticated and audited (REQ-MODEL-029).
 func (s *Store) Join(ctx context.Context, req JoinRequest) (Worker, error) {
+	if err := validatePoolToken(req.PoolToken); err != nil {
+		return Worker{}, err
+	}
 	pool, err := s.poolByToken(ctx, req.PoolToken)
 	if err != nil {
 		if aerr := s.auditEventFor(ctx, "", "worker.refuse", s.poolIDByToken(ctx, req.PoolToken), "failed", "unauthenticated"); aerr != nil {
