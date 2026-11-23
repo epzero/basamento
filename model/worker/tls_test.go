@@ -200,3 +200,14 @@ func newLeaf(t *testing.T, dir, name string, ca *x509.Certificate, caKey *ecdsa.
 	}
 	return certFile, keyFile
 }
+
+func TestDialWorkerServiceRefusesPlaintextOffLoopback(t *testing.T) {
+	if _, err := DialWorkerService("10.0.0.1:8443"); core.CodeOf(err) != core.CodeInvalidArgument {
+		t.Fatalf("plaintext dial off loopback = %v, want invalid_argument", err)
+	}
+	tr, err := DialWorkerService("127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("plaintext dial on loopback: %v", err)
+	}
+	_ = tr.Close()
+}

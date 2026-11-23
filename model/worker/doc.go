@@ -5,8 +5,13 @@
 // and worker administration, and routing by labels.
 //
 // A worker is `kit worker`: it dials out, joins one pool with a pool token,
-// declares what it serves and pulls invocations from the queue. The platform
-// decides their order; a worker only says how many units it has free. The
-// contract is basamento.worker.v1; this package is the implementation a flow
-// reaches through model.Invoker.
+// declares what it serves and pulls invocations from the queue. In the
+// embedded profile it shares the SQL store through LocalTransport; on another
+// machine it dials the platform's WorkerService with --pool-url, secured by
+// the --pool-tls-* files. The platform serves that listener on a pool's
+// store; plaintext is allowed on loopback only, and a non-loopback listener
+// needs the --worker.tls.* pair. The platform decides the queue order; a
+// worker only says how many units it has free. The contract is
+// basamento.worker.v1; this package is the implementation a flow reaches
+// through model.Invoker.
 package worker

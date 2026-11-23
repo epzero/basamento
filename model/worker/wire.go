@@ -341,6 +341,8 @@ func DialWorkerService(target string, creds ...credentials.TransportCredentials)
 	var transport credentials.TransportCredentials = insecure.NewCredentials()
 	if len(creds) > 0 && creds[0] != nil {
 		transport = creds[0]
+	} else if err := refusePlaintextTarget(target); err != nil {
+		return nil, err
 	}
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(transport))
 	if err != nil {
@@ -723,6 +725,21 @@ func refuseOffLoopback(addr net.Addr) error {
 	return core.NewError(core.CodeInvalidArgument,
 		fmt.Sprintf("worker listener %q is refused: without TLS it accepts loopback addresses only", addr),
 		map[string]any{"key": "worker.listen"})
+}
+
+// refusePlaintextTarget keeps a plaintext worker client on loopback, matching
+// the platform's rule for its listener. A pool on another machine needs TLS.
+func refusePlaintextTarget(target string) error {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return core.NewError(core.CodeInvalidArgument,
+			fmt.Sprintf("worker: pool URL %q is not a host:port address", target), nil)
+	}
+	if loopbackHost(host) {
+		return nil
+	}
+	return core.NewError(core.CodeInvalidArgument,
+		fmt.Sprintf("worker: pool URL %q is refused without TLS: use --pool-tls-cert-file, --pool-tls-key-file and --pool-tls-ca-file", target), nil)
 }
 
 func loopbackHost(host string) bool {

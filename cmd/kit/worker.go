@@ -22,19 +22,60 @@ import (
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
+// openWorkerTransport picks the transport ADR-0012 describes: the embedded
+// SQL store when poolURL is empty, or the dial-out WorkerService client when
+// it is set. It returns the embedded store, if any, for the worker's janitor.
+func openWorkerTransport(ctx context.Context, poolURL, sqlURL string, tls worker.TLSConfig) (worker.Transport, *worker.Store, func(), error) {
+	if poolURL != "" {
+		var tr *worker.GRPCTransport
+		var err error
+		if tls.Empty() {
+			tr, err = worker.DialWorkerService(poolURL)
+		} else {
+			creds, cerr := worker.ClientCredentials(tls.CertFile, tls.KeyFile, tls.CAFile)
+			if cerr != nil {
+				return nil, nil, func() {}, fmt.Errorf("kit worker: %w", cerr)
+			}
+			tr, err = worker.DialWorkerService(poolURL, creds)
+		}
+		if err != nil {
+			return nil, nil, func() {}, fmt.Errorf("kit worker: %w", err)
+		}
+		return tr, nil, func() { _ = tr.Close() }, nil
+	}
+	db, err := psql.Open(ctx, sqlURL, credentials.Migrations())
+	if err != nil {
+		return nil, nil, func() {}, fmt.Errorf("kit worker: sql store: %w", err)
+	}
+	store, err := worker.Open(ctx, db, worker.Options{
+		Clock: core.SystemClock{},
+		Audit: credentials.NewSQLAudit(db),
+	})
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, func() {}, fmt.Errorf("kit worker: worker store: %w", err)
+	}
+	return worker.LocalTransport{Store: store}, store, func() { _ = db.Close() }, nil
+}
+
 // runWorker runs `kit worker`: it loads the providers from local manifests,
 // joins one pool with a pool token and pulls invocations from its queue until
 // it is signalled or, with --once, after one lease (ADR-0012).
 //
-// The first version wires the embedded profile: the platform and the worker
-// share the SQL store through worker.LocalTransport. The cloud profile's
-// generated gRPC client of basamento.worker.v1 is a later work package; the
-// contract and the client loop are the same.
+// Without --pool-url the platform and the worker share the SQL store through
+// worker.LocalTransport, which is the embedded profile. With --pool-url the
+// worker dials the platform's basamento.worker.v1 WorkerService, so it works
+// behind NAT on another machine (ADR-0012 §4); --pool-tls-* secures that
+// connection.
 func runWorker(args []string) error {
 	fs := flag.NewFlagSet("kit worker", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	poolToken := fs.String("pool-token", "", "pool token from the platform (prefer --pool-token-file or BASAMENTO_POOL_TOKEN)")
 	poolTokenFile := fs.String("pool-token-file", "", "file holding the pool token")
+	poolURL := fs.String("pool-url", "", "platform WorkerService host:port; empty uses the embedded SQL store")
+	poolTLSCertFile := fs.String("pool-tls-cert-file", "", "client certificate for a TLS pool URL")
+	poolTLSKeyFile := fs.String("pool-tls-key-file", "", "client key for a TLS pool URL")
+	poolTLSCAFile := fs.String("pool-tls-ca-file", "", "CA that signs the platform certificate")
 	sqlURL := fs.String("sql-url", "", "SQL store URL of the embedded platform (prefer --sql-url-file or BASAMENTO_SQL_URL)")
 	sqlURLFile := fs.String("sql-url-file", "", "file holding the SQL store URL")
 	dataDir := fs.String("data-dir", "", "writable directory for the worker journal (required)")
@@ -56,8 +97,11 @@ func runWorker(args []string) error {
 	if *poolToken != "" || *sqlURL != "" {
 		_, _ = fmt.Fprintln(os.Stderr, "kit worker: a token or URL in the command line is visible to other users; prefer a file or environment variable")
 	}
-	if token == "" || url == "" || *dataDir == "" {
-		return fmt.Errorf("kit worker: a pool token, a SQL URL and --data-dir are required")
+	if token == "" || *dataDir == "" {
+		return fmt.Errorf("kit worker: a pool token and --data-dir are required")
+	}
+	if *poolURL == "" && url == "" {
+		return fmt.Errorf("kit worker: --sql-url is required for the embedded profile; set --pool-url to dial a platform instead")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -71,26 +115,19 @@ func runWorker(args []string) error {
 		return fmt.Errorf("kit worker: --models loaded no descriptors")
 	}
 
-	db, err := psql.Open(ctx, url, credentials.Migrations())
-	if err != nil {
-		return fmt.Errorf("kit worker: sql store: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-	store, err := worker.Open(ctx, db, worker.Options{
-		Clock: core.SystemClock{},
-		Audit: credentials.NewSQLAudit(db),
-	})
-	if err != nil {
-		return fmt.Errorf("kit worker: worker store: %w", err)
-	}
-
 	journal, err := worker.OpenJournal(*dataDir)
 	if err != nil {
 		return fmt.Errorf("kit worker: %w", err)
 	}
 	defer func() { _ = journal.Close() }()
-
-	client := worker.NewClient(worker.LocalTransport{Store: store}, journal)
+	transport, store, closeTransport, err := openWorkerTransport(ctx, *poolURL, url, worker.TLSConfig{
+		CertFile: *poolTLSCertFile, KeyFile: *poolTLSKeyFile, CAFile: *poolTLSCAFile,
+	})
+	if err != nil {
+		return err
+	}
+	defer closeTransport()
+	client := worker.NewClient(transport, journal)
 	joined, err := client.Join(ctx, worker.JoinRequest{
 		PoolToken:       token,
 		ProtocolVersion: worker.ProtocolVersion,
