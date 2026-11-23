@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"embed"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -17,18 +16,18 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform/blob"
 	"github.com/epzero/basamento/platform/bus"
+	"github.com/epzero/basamento/platform/credentials"
 	"github.com/epzero/basamento/platform/secrets"
 	"github.com/epzero/basamento/platform/sql"
 )
-
-//go:embed migrations/*.sql
-var migrations embed.FS
 
 // wirePort is one port the composition root opens, in start-up order.
 type wirePort struct {
@@ -94,6 +93,17 @@ func runServe(args []string) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// The platform owns queue time: the janitor runs here, not only in a
+	// worker process, so a pool with no worker still times out and expires
+	// (ADR-0012 §11). The worker composition root (providers, routing) is a
+	// separate work package. A platform that cannot open its worker store
+	// must not serve as if time-driven work were running.
+	if err := startWorkerJanitor(ctx, opened); err != nil {
+		closePorts(opened)
+		stop()
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
@@ -104,6 +114,32 @@ func runServe(args []string) {
 	code := srv.Serve(ctx)
 	stop()
 	os.Exit(code)
+}
+
+// startWorkerJanitor runs the worker queue's time-driven rules over the
+// platform's SQL port until the process ends. It reports an error when the
+// platform has a worker store it cannot open: serving without the janitor
+// would silently stop queue timeouts, lease expiry and retention.
+func startWorkerJanitor(ctx context.Context, opened []config.Port) error {
+	for _, p := range opened {
+		db, ok := p.(*sql.Store)
+		if !ok {
+			continue
+		}
+		store, err := worker.Open(ctx, db, worker.Options{
+			Clock:   core.SystemClock{},
+			Audit:   credentials.NewSQLAudit(db),
+			Recover: true,
+		})
+		if err != nil {
+			return fmt.Errorf("kit serve: worker store: %w", err)
+		}
+		go store.RunJanitor(ctx, time.Second, func(err error) {
+			fmt.Fprintln(os.Stderr, "worker janitor:", err)
+		})
+		return nil
+	}
+	return nil
 }
 
 // startPorts opens the ports in order and binds the listener, all under ctx.
@@ -228,11 +264,9 @@ func embeddedBusDataDir(raw string) (string, error) {
 }
 
 func openSQL(ctx context.Context, raw string) (config.Port, error) {
-	migrationsFS, err := fs.Sub(migrations, "migrations")
-	if err != nil {
-		return nil, err
-	}
-	return sql.Open(ctx, raw, migrationsFS)
+	// The audit tables are owned by platform/credentials; their migration is
+	// the single source, so the kit does not keep a copy that can drift.
+	return sql.Open(ctx, raw, credentials.Migrations())
 }
 
 func openBlob(ctx context.Context, raw string) (config.Port, error) {

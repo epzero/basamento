@@ -14,6 +14,8 @@ import (
 
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/platform/credentials"
+	psql "github.com/epzero/basamento/platform/sql"
 )
 
 func testKey() []byte { return bytes.Repeat([]byte{0x42}, 32) }
@@ -476,5 +478,19 @@ func TestLoadOrCreateKeyTightensAnExistingDirectory(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("key file mode = %o, want 600", got)
+	}
+}
+
+func TestStartWorkerJanitorFailsWhenTheWorkerStoreCannotOpen(t *testing.T) {
+	dir := t.TempDir()
+	db, err := psql.Open(context.Background(), "sqlite:///"+filepath.Join(dir, "kit.db"), credentials.Migrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := startWorkerJanitor(context.Background(), []config.Port{db}); err == nil {
+		t.Fatal("startWorkerJanitor accepted a store it cannot open; serve would run without the janitor")
 	}
 }

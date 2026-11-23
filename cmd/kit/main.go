@@ -20,6 +20,11 @@ func main() {
 		fmt.Println(version)
 	case "serve":
 		runServe(os.Args[2:])
+	case "worker":
+		if err := runWorker(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "config":
 		if len(os.Args) < 3 || os.Args[2] != "validate" {
 			usage()
@@ -36,5 +41,5 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: kit <version|serve|config validate> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: kit <version|serve|worker|config validate> [flags]")
 }
