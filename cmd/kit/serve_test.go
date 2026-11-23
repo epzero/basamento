@@ -608,3 +608,24 @@ func TestCompositionEndpointFailsWithoutComposition(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateWorkerWiringNamesTheMissingFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		wiring map[string]string
+		want   string
+	}{
+		{"pool without listener", map[string]string{"worker.pool": "acme-gpu"}, "--worker.pool needs --worker.listen"},
+		{"token file without pool", map[string]string{"worker.listen": "127.0.0.1:0", "worker.pool-token-file": "token"}, "--worker.pool-token-file needs --worker.pool"},
+		{"remote without manifest", map[string]string{"worker.listen": "127.0.0.1:0", "worker.remote": "cloud", "worker.remote-model": "sdxl"}, "--worker.remote needs --worker.remote-manifest"},
+		{"tls without cert", map[string]string{"worker.listen": "127.0.0.1:0", "worker.tls.key-file": "key.pem"}, "--worker.tls.cert-file"},
+	} {
+		err := validateWorkerWiring(tc.wiring)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: validateWorkerWiring = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	if err := validateWorkerWiring(map[string]string{}); err != nil {
+		t.Fatalf("empty wiring = %v, want nil", err)
+	}
+}

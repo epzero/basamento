@@ -75,6 +75,10 @@ func runServe(args []string) {
 	}
 
 	wiring := f.workerWiring()
+	if err := validateWorkerWiring(wiring); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	ports, runtimeName := wire(result.Config)
 
 	// Install the handler before a port opens or the listener binds: a signal
@@ -292,6 +296,52 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 		}
 	}()
 	return platform, nil
+}
+
+// validateWorkerWiring refuses half-configured worker flags instead of
+// dropping them: an operator who names a pool, a remote or TLS files without
+// the listener would otherwise believe the worker side is wired when it is
+// not.
+func validateWorkerWiring(wiring map[string]string) error {
+	if wiring["worker.listen"] == "" {
+		for _, key := range []string{
+			"worker.pool", "worker.pool-tenant", "worker.pool-token-file",
+			"worker.remote", "worker.remote-model", "worker.remote-labels", "worker.remote-manifest",
+			"worker.tls.cert-file", "worker.tls.key-file", "worker.tls.ca-file",
+		} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.listen", key)
+			}
+		}
+		return nil
+	}
+	if wiring["worker.pool"] == "" {
+		for _, key := range []string{"worker.pool-tenant", "worker.pool-token-file"} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.pool", key)
+			}
+		}
+	}
+	if wiring["worker.remote"] == "" {
+		for _, key := range []string{"worker.remote-model", "worker.remote-labels", "worker.remote-manifest"} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.remote", key)
+			}
+		}
+	} else {
+		if wiring["worker.remote-model"] == "" {
+			return fmt.Errorf("kit serve: --worker.remote needs --worker.remote-model")
+		}
+		if wiring["worker.remote-manifest"] == "" {
+			return fmt.Errorf("kit serve: --worker.remote needs --worker.remote-manifest so the remote has an Invoker")
+		}
+	}
+	if wiring["worker.tls.cert-file"] == "" || wiring["worker.tls.key-file"] == "" {
+		if wiring["worker.tls.cert-file"] != "" || wiring["worker.tls.key-file"] != "" || wiring["worker.tls.ca-file"] != "" {
+			return fmt.Errorf("kit serve: worker TLS needs both --worker.tls.cert-file and --worker.tls.key-file")
+		}
+	}
+	return nil
 }
 
 // validateWorkerListen mirrors the rule authn applies to the main listener:
