@@ -248,41 +248,42 @@ returns `permission_denied` — and the failure is logged and counted as a metri
 
 This is the second line of defence behind the tenant filter every
 `platform/sql` repository already applies ([`specs/sql/design.md` §4](../sql/design.md)).
-It is enforced only in the cloud profile.
+It is enforced only in the cloud profile. Normative decisions:
+[ADR-0022](../../docs/adr/0022-postgres-row-level-security.md) **D1**–**D8**.
 
-- **Connection identity.** Migrations create an owner role that owns the tenant
-  tables and a separate application role used by the running process. The
-  application role has no `BYPASSRLS` and is not the owner, so it cannot turn
-  policies off.
-- **Tenant variable.** Before each transaction, `platform/sql` calls
-  `set_config('app.tenant', $1, true)` with the tenant from the context as a
-  bound parameter — never string-concatenated. `true` scopes it to the
-  transaction. `current_setting('app.tenant', true)` returns NULL when unset.
-- **Policy shape**, for every tenant table:
+- **Role (ADR D2).** Application traffic uses `bas_app` only (`sql.url`);
+  migrations use `sql.migrate_url`. Migrations do not create roles or passwords.
+
+- **Policy shape** (every tenant table in ADR D4):
 
   ```sql
   ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
   ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
   CREATE POLICY tenant_isolation ON <table>
-    USING (tenant = current_setting('app.tenant', true))
-    WITH CHECK (tenant = current_setting('app.tenant', true));
+    USING (<tenant_col> = current_setting('app.tenant', true))
+    WITH CHECK (<tenant_col> = current_setting('app.tenant', true));
   ```
 
-  With the variable unset the predicate is unknown for every row, so the
-  transaction sees no rows (REQ-AUTH-028). `FORCE` is required because the
-  application role would otherwise be subject to policies only as non-owner;
-  being a non-owner without `BYPASSRLS` is also required (REQ-AUTH-027).
-- **Tables.** Every tenant table, including the credential store's, the audit
-  store's and the new `authz_bindings` table, gets the policy. Migrations create
-  the roles and the policies (REQ-AUTH-029); SQLite has no RLS and is unaffected.
-- **Gate proof.** The scenarios tagged `@profile:cloud` run on the Postgres lane
-  of the gate as [ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md)
-  decides: a fresh database per scenario, a server from `BDD_POSTGRES_URL` or an
-  embedded Postgres 16, and a `postgres-unavailable` skip only when no server is
-  usable. The component driver opens the store through its public port and
-  asserts, on both the audit and `authz_bindings` tables, that a transaction with
-  one tenant set sees only that tenant's rows and a transaction with no tenant
-  variable sees none. No test hook is added to production code.
+  `<tenant_col>` is `tenant` or `tenant_id` as defined on the table. No `TO`
+  clause. `eventlog_outbox` additionally carries the permissive read policy in
+  ADR D6. Exemptions and the schema rule (composite tenant keys): ADR D4.
+
+- **Tenant variable (ADR D1, D5).** Set through `platform/sql` before each
+  statement when RLS mode is on; details in ADR and `specs/sql/design.md` §4.
+
+- **Tables (ADR D4).** REQ-AUTH-029 names credentials, audit and authz; REQ-AUTH-027
+  “every tenant table” includes eventlog tables in D4. Not in scope until decided:
+  Postgres `telemetry_spans`.
+
+- **Gate proof (ADR D8).** Scenarios `@profile:cloud` run on the Postgres lane
+  ([ADR-0015](../../docs/adr/0015-how-the-pr-gate-runs-postgres.md)): fresh
+  database, store and migrations as production (`bas_app` URL after fixture
+  creates the role). Steps seed two tenants via the public store API. A
+  **separate** raw `database/sql` pool on the same `bas_app` URL (no wrapper)
+  runs the SQL transactions in AUTH-027-01 and AUTH-028-01 to prove database
+  policies. REQ-AUTH-028 “every transaction” is satisfied because the wrapper
+  sets the variable before every statement (designer interpretation only). No
+  production test hooks.
 
 ## 9. Delivery split
 
