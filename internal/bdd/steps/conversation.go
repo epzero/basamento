@@ -323,7 +323,8 @@ type convDC struct {
 	settle chan struct{}
 
 	// atGate is the sticky half of the settle state: set when the coordinator
-	// waits at a gate, cleared only when act installs the next settle channel.
+	// waits on a durable call, cleared only when act installs the next settle
+	// channel.
 	// It survives the channel it was set for, so a waiter that arrives after
 	// the coordinator blocked does not install a channel nobody will close
 	// (EP0-232).
@@ -532,12 +533,17 @@ func (d *convDC) act(fn func() error) error {
 	d.mu.Lock()
 	settle := make(chan struct{})
 	d.settle = settle
+	prev := d.atGate
 	d.atGate = false
 	d.mu.Unlock()
 	if err := fn(); err != nil {
 		d.mu.Lock()
 		if d.settle == settle {
+			// The coordinator may still be parked on a durable call; without
+			// restoring the mark a later waitSettled would install a channel
+			// blocked already ran past and hang (EP0-232).
 			d.settle = nil
+			d.atGate = prev
 		}
 		d.mu.Unlock()
 		return err

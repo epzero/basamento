@@ -1,6 +1,9 @@
 package steps
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // EP0-232: the nightly flake-hunt caught a lost wakeup. When the coordinator
 // reached its first gate before start called waitSettled, blocked cleared
@@ -13,7 +16,22 @@ func TestConvDCWaitSettledAfterBlockReturns(t *testing.T) {
 
 	// The coordinator blocks at its gate before the harness awaits the settle.
 	dc.blocked()
-	dc.waitSettled()
+
+	// Bound the wait: on a regression (the atGate guard gone) waitSettled would
+	// block the whole test binary until the runner's timeout, which is exactly
+	// the nightly hang this change exists to prevent.
+	done := make(chan struct{})
+	go func() {
+		dc.waitSettled()
+		close(done)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("waitSettled did not return within %v after the coordinator blocked", waitBound)
+	}
 }
 
 // A completed run must keep unblocking the same wait path: markFinished closes
