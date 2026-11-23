@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -249,7 +250,7 @@ func (s *Service) Resume(ctx context.Context, req *workerv1.ResumeRequest) (*wor
 func (s *Service) Events(ctx context.Context, req *workerv1.EventsRequest) (*workerv1.EventsResponse, error) {
 	events := make([]Event, 0, len(req.GetEvents()))
 	for _, e := range req.GetEvents() {
-		data, err := structToRaw(e.GetData())
+		data, err := payloadBytes(e.GetDataJson())
 		if err != nil {
 			return nil, toStatus(err)
 		}
@@ -267,7 +268,7 @@ func (s *Service) Events(ctx context.Context, req *workerv1.EventsRequest) (*wor
 
 // Finish implements WorkerService.
 func (s *Service) Finish(ctx context.Context, req *workerv1.FinishRequest) (*workerv1.FinishResponse, error) {
-	result, err := structToRaw(req.GetResult())
+	result, err := payloadBytes(req.GetResultJson())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -432,13 +433,13 @@ func (t *GRPCTransport) Resume(ctx context.Context, workerID, credential, client
 func (t *GRPCTransport) Events(ctx context.Context, workerID, credential, clientRef string, attempt int, events []Event) error {
 	batch := make([]*workerv1.Event, 0, len(events))
 	for _, e := range events {
-		data, err := rawToStruct(e.Data)
+		data, err := payloadBytes(e.Data)
 		if err != nil {
 			return err
 		}
 		batch = append(batch, &workerv1.Event{
 			Seq: e.Seq, Kind: e.Kind, Text: e.Text, Audio: e.Audio,
-			Progress: e.Progress, Attempt: int32(e.Attempt), Data: data,
+			Progress: e.Progress, Attempt: int32(e.Attempt), DataJson: data,
 		})
 	}
 	_, err := t.client.Events(ctx, &workerv1.EventsRequest{
@@ -450,13 +451,13 @@ func (t *GRPCTransport) Events(ctx context.Context, workerID, credential, client
 
 // Finish implements Transport.
 func (t *GRPCTransport) Finish(ctx context.Context, workerID, credential, clientRef, state string, result json.RawMessage, code core.Code, cost int64, attempt int) error {
-	raw, err := rawToStruct(result)
+	raw, err := payloadBytes(result)
 	if err != nil {
 		return err
 	}
 	_, err = t.client.Finish(ctx, &workerv1.FinishRequest{
 		WorkerId: workerID, Credential: credential, ClientRef: clientRef, State: state,
-		Result: raw, ErrorCode: string(code), CostMilliPoints: cost, Attempt: int32(attempt),
+		ResultJson: raw, ErrorCode: string(code), CostMilliPoints: cost, Attempt: int32(attempt),
 	})
 	return fromStatus(err)
 }
@@ -574,12 +575,12 @@ func descriptorFromPB(pb *workerv1.Descriptor) (Descriptor, error) {
 }
 
 func invocationToPB(inv Invocation) (*workerv1.Invocation, error) {
-	req, err := rawToStruct(inv.Request)
+	req, err := payloadBytes(inv.Request)
 	if err != nil {
 		return nil, err
 	}
 	pb := &workerv1.Invocation{
-		ClientRef: inv.ClientRef, Model: inv.Model, Request: req, Units: int32(inv.Units),
+		ClientRef: inv.ClientRef, Model: inv.Model, RequestJson: req, Units: int32(inv.Units),
 		Attempt: int32(inv.Attempt), TraceParent: inv.TraceParent,
 	}
 	if !inv.LeaseExpires.IsZero() {
@@ -589,7 +590,7 @@ func invocationToPB(inv Invocation) (*workerv1.Invocation, error) {
 }
 
 func invocationFromPB(pb *workerv1.Invocation) (Invocation, error) {
-	req, err := structToRaw(pb.GetRequest())
+	req, err := payloadJSON(pb.GetRequestJson())
 	if err != nil {
 		return Invocation{}, err
 	}
@@ -650,6 +651,36 @@ func stateFromPB(s workerv1.WorkerState) State {
 	default:
 		return ""
 	}
+}
+
+// payloadBytes carries an opaque JSON object to the wire. Raw bytes keep
+// every number exactly as the producer wrote it; a Struct would parse it into
+// float64 and corrupt integers above 2^53 (REQ-MODEL-090's determinism).
+func payloadBytes(raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if !isJSONObject(raw) {
+		return nil, core.NewError(core.CodeInvalidArgument, "worker: payload is not a JSON object", nil)
+	}
+	return raw, nil
+}
+
+// payloadJSON reads an opaque JSON object from the wire without re-encoding
+// it, so its numbers keep the exact text the worker sent.
+func payloadJSON(raw []byte) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if !isJSONObject(raw) {
+		return nil, core.NewError(core.CodeInvalidArgument, "worker: payload is not a JSON object", nil)
+	}
+	return json.RawMessage(append([]byte(nil), raw...)), nil
+}
+
+func isJSONObject(raw []byte) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
 }
 
 func rawToStruct(raw json.RawMessage) (*structpb.Struct, error) {

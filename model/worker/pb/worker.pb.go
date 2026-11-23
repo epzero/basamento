@@ -739,12 +739,11 @@ func (x *LeaseResponse) GetInvocations() []*Invocation {
 // Invocation is what a worker is given. It holds no credential and no more
 // about the tenant than the work needs (ADR-0012 §10).
 type Invocation struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	ClientRef string                 `protobuf:"bytes,1,opt,name=client_ref,json=clientRef,proto3" json:"client_ref,omitempty"`
-	Model     string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
-	// Opaque request payload, as model.Request.
-	Request *structpb.Struct `protobuf:"bytes,3,opt,name=request,proto3" json:"request,omitempty"`
-	Units   int32            `protobuf:"varint,4,opt,name=units,proto3" json:"units,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ClientRef   string                 `protobuf:"bytes,1,opt,name=client_ref,json=clientRef,proto3" json:"client_ref,omitempty"`
+	Model       string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	RequestJson []byte                 `protobuf:"bytes,8,opt,name=request_json,json=requestJson,proto3" json:"request_json,omitempty"`
+	Units       int32                  `protobuf:"varint,4,opt,name=units,proto3" json:"units,omitempty"`
 	// Attempt number of this invocation, starting at 1.
 	Attempt int32 `protobuf:"varint,5,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	// Lease expiry, Unix milliseconds.
@@ -799,9 +798,9 @@ func (x *Invocation) GetModel() string {
 	return ""
 }
 
-func (x *Invocation) GetRequest() *structpb.Struct {
+func (x *Invocation) GetRequestJson() []byte {
 	if x != nil {
-		return x.Request
+		return x.RequestJson
 	}
 	return nil
 }
@@ -1066,7 +1065,7 @@ type Event struct {
 	Audio         []byte                 `protobuf:"bytes,4,opt,name=audio,proto3" json:"audio,omitempty"`
 	Progress      float64                `protobuf:"fixed64,5,opt,name=progress,proto3" json:"progress,omitempty"`
 	Attempt       int32                  `protobuf:"varint,6,opt,name=attempt,proto3" json:"attempt,omitempty"`
-	Data          *structpb.Struct       `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`
+	DataJson      []byte                 `protobuf:"bytes,8,opt,name=data_json,json=dataJson,proto3" json:"data_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1143,9 +1142,9 @@ func (x *Event) GetAttempt() int32 {
 	return 0
 }
 
-func (x *Event) GetData() *structpb.Struct {
+func (x *Event) GetDataJson() []byte {
 	if x != nil {
-		return x.Data
+		return x.DataJson
 	}
 	return nil
 }
@@ -1380,7 +1379,7 @@ type FinishRequest struct {
 	Credential      string                 `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
 	ClientRef       string                 `protobuf:"bytes,3,opt,name=client_ref,json=clientRef,proto3" json:"client_ref,omitempty"`
 	State           string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Result          *structpb.Struct       `protobuf:"bytes,5,opt,name=result,proto3" json:"result,omitempty"`
+	ResultJson      []byte                 `protobuf:"bytes,9,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
 	ErrorCode       string                 `protobuf:"bytes,6,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	CostMilliPoints int64                  `protobuf:"varint,7,opt,name=cost_milli_points,json=costMilliPoints,proto3" json:"cost_milli_points,omitempty"`
 	// Attempt of the lease this result belongs to.
@@ -1447,9 +1446,9 @@ func (x *FinishRequest) GetState() string {
 	return ""
 }
 
-func (x *FinishRequest) GetResult() *structpb.Struct {
+func (x *FinishRequest) GetResultJson() []byte {
 	if x != nil {
-		return x.Result
+		return x.ResultJson
 	}
 	return nil
 }
@@ -1936,17 +1935,17 @@ const file_basamento_worker_v1_worker_proto_rawDesc = "" +
 	"\x11time_left_seconds\x18\x05 \x01(\x05R\x0ftimeLeftSeconds\x12!\n" +
 	"\fwait_seconds\x18\x06 \x01(\x05R\vwaitSeconds\"R\n" +
 	"\rLeaseResponse\x12A\n" +
-	"\vinvocations\x18\x01 \x03(\v2\x1f.basamento.worker.v1.InvocationR\vinvocations\"\xfa\x01\n" +
+	"\vinvocations\x18\x01 \x03(\v2\x1f.basamento.worker.v1.InvocationR\vinvocations\"\xf9\x01\n" +
 	"\n" +
 	"Invocation\x12\x1d\n" +
 	"\n" +
 	"client_ref\x18\x01 \x01(\tR\tclientRef\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\x121\n" +
-	"\arequest\x18\x03 \x01(\v2\x17.google.protobuf.StructR\arequest\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\x12!\n" +
+	"\frequest_json\x18\b \x01(\fR\vrequestJson\x12\x14\n" +
 	"\x05units\x18\x04 \x01(\x05R\x05units\x12\x18\n" +
 	"\aattempt\x18\x05 \x01(\x05R\aattempt\x121\n" +
 	"\x15lease_expires_unix_ms\x18\x06 \x01(\x03R\x12leaseExpiresUnixMs\x12!\n" +
-	"\ftrace_parent\x18\a \x01(\tR\vtraceParent\"\x87\x01\n" +
+	"\ftrace_parent\x18\a \x01(\tR\vtraceParentJ\x04\b\x03\x10\x04R\arequest\"\x87\x01\n" +
 	"\x0fStartingRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1e\n" +
 	"\n" +
@@ -1965,15 +1964,15 @@ const file_basamento_worker_v1_worker_proto_rawDesc = "" +
 	"client_ref\x18\x03 \x01(\tR\tclientRef\x12'\n" +
 	"\x0fprovider_handle\x18\x04 \x01(\tR\x0eproviderHandle\x12\x18\n" +
 	"\aattempt\x18\x05 \x01(\x05R\aattempt\"\x11\n" +
-	"\x0fStartedResponse\"\xba\x01\n" +
+	"\x0fStartedResponse\"\xb6\x01\n" +
 	"\x05Event\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x14\n" +
 	"\x05audio\x18\x04 \x01(\fR\x05audio\x12\x1a\n" +
 	"\bprogress\x18\x05 \x01(\x01R\bprogress\x12\x18\n" +
-	"\aattempt\x18\x06 \x01(\x05R\aattempt\x12+\n" +
-	"\x04data\x18\a \x01(\v2\x17.google.protobuf.StructR\x04data\"\x85\x01\n" +
+	"\aattempt\x18\x06 \x01(\x05R\aattempt\x12\x1b\n" +
+	"\tdata_json\x18\b \x01(\fR\bdataJsonJ\x04\b\a\x10\bR\x04data\"\x85\x01\n" +
 	"\rResumeRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1e\n" +
 	"\n" +
@@ -1992,7 +1991,7 @@ const file_basamento_worker_v1_worker_proto_rawDesc = "" +
 	"client_ref\x18\x03 \x01(\tR\tclientRef\x122\n" +
 	"\x06events\x18\x04 \x03(\v2\x1a.basamento.worker.v1.EventR\x06events\x12\x18\n" +
 	"\aattempt\x18\x05 \x01(\x05R\aattempt\"\x10\n" +
-	"\x0eEventsResponse\"\x97\x02\n" +
+	"\x0eEventsResponse\"\x95\x02\n" +
 	"\rFinishRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1e\n" +
 	"\n" +
@@ -2000,12 +1999,13 @@ const file_basamento_worker_v1_worker_proto_rawDesc = "" +
 	"credential\x12\x1d\n" +
 	"\n" +
 	"client_ref\x18\x03 \x01(\tR\tclientRef\x12\x14\n" +
-	"\x05state\x18\x04 \x01(\tR\x05state\x12/\n" +
-	"\x06result\x18\x05 \x01(\v2\x17.google.protobuf.StructR\x06result\x12\x1d\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\x12\x1f\n" +
+	"\vresult_json\x18\t \x01(\fR\n" +
+	"resultJson\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12*\n" +
 	"\x11cost_milli_points\x18\a \x01(\x03R\x0fcostMilliPoints\x12\x18\n" +
-	"\aattempt\x18\b \x01(\x05R\aattempt\"\x10\n" +
+	"\aattempt\x18\b \x01(\x05R\aattemptJ\x04\b\x05\x10\x06R\x06result\"\x10\n" +
 	"\x0eFinishResponse\"\xcb\x01\n" +
 	"\x0eReleaseRequest\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x1e\n" +
@@ -2127,37 +2127,34 @@ var file_basamento_worker_v1_worker_proto_depIdxs = []int32{
 	3,  // 6: basamento.worker.v1.JoinRequest.descriptors:type_name -> basamento.worker.v1.Descriptor
 	29, // 7: basamento.worker.v1.JoinRequest.labels:type_name -> basamento.worker.v1.JoinRequest.LabelsEntry
 	10, // 8: basamento.worker.v1.LeaseResponse.invocations:type_name -> basamento.worker.v1.Invocation
-	31, // 9: basamento.worker.v1.Invocation.request:type_name -> google.protobuf.Struct
-	31, // 10: basamento.worker.v1.Event.data:type_name -> google.protobuf.Struct
-	15, // 11: basamento.worker.v1.EventsRequest.events:type_name -> basamento.worker.v1.Event
-	31, // 12: basamento.worker.v1.FinishRequest.result:type_name -> google.protobuf.Struct
-	1,  // 13: basamento.worker.v1.HeartbeatResponse.state:type_name -> basamento.worker.v1.WorkerState
-	30, // 14: basamento.worker.v1.HeartbeatResponse.cancel_attempts:type_name -> basamento.worker.v1.HeartbeatResponse.CancelAttemptsEntry
-	6,  // 15: basamento.worker.v1.WorkerService.Join:input_type -> basamento.worker.v1.JoinRequest
-	8,  // 16: basamento.worker.v1.WorkerService.Lease:input_type -> basamento.worker.v1.LeaseRequest
-	11, // 17: basamento.worker.v1.WorkerService.Starting:input_type -> basamento.worker.v1.StartingRequest
-	13, // 18: basamento.worker.v1.WorkerService.Started:input_type -> basamento.worker.v1.StartedRequest
-	16, // 19: basamento.worker.v1.WorkerService.Resume:input_type -> basamento.worker.v1.ResumeRequest
-	18, // 20: basamento.worker.v1.WorkerService.Events:input_type -> basamento.worker.v1.EventsRequest
-	20, // 21: basamento.worker.v1.WorkerService.Finish:input_type -> basamento.worker.v1.FinishRequest
-	22, // 22: basamento.worker.v1.WorkerService.Release:input_type -> basamento.worker.v1.ReleaseRequest
-	24, // 23: basamento.worker.v1.WorkerService.Heartbeat:input_type -> basamento.worker.v1.HeartbeatRequest
-	26, // 24: basamento.worker.v1.WorkerService.Leave:input_type -> basamento.worker.v1.LeaveRequest
-	7,  // 25: basamento.worker.v1.WorkerService.Join:output_type -> basamento.worker.v1.JoinResponse
-	9,  // 26: basamento.worker.v1.WorkerService.Lease:output_type -> basamento.worker.v1.LeaseResponse
-	12, // 27: basamento.worker.v1.WorkerService.Starting:output_type -> basamento.worker.v1.StartingResponse
-	14, // 28: basamento.worker.v1.WorkerService.Started:output_type -> basamento.worker.v1.StartedResponse
-	17, // 29: basamento.worker.v1.WorkerService.Resume:output_type -> basamento.worker.v1.ResumeResponse
-	19, // 30: basamento.worker.v1.WorkerService.Events:output_type -> basamento.worker.v1.EventsResponse
-	21, // 31: basamento.worker.v1.WorkerService.Finish:output_type -> basamento.worker.v1.FinishResponse
-	23, // 32: basamento.worker.v1.WorkerService.Release:output_type -> basamento.worker.v1.ReleaseResponse
-	25, // 33: basamento.worker.v1.WorkerService.Heartbeat:output_type -> basamento.worker.v1.HeartbeatResponse
-	27, // 34: basamento.worker.v1.WorkerService.Leave:output_type -> basamento.worker.v1.LeaveResponse
-	25, // [25:35] is the sub-list for method output_type
-	15, // [15:25] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 9: basamento.worker.v1.EventsRequest.events:type_name -> basamento.worker.v1.Event
+	1,  // 10: basamento.worker.v1.HeartbeatResponse.state:type_name -> basamento.worker.v1.WorkerState
+	30, // 11: basamento.worker.v1.HeartbeatResponse.cancel_attempts:type_name -> basamento.worker.v1.HeartbeatResponse.CancelAttemptsEntry
+	6,  // 12: basamento.worker.v1.WorkerService.Join:input_type -> basamento.worker.v1.JoinRequest
+	8,  // 13: basamento.worker.v1.WorkerService.Lease:input_type -> basamento.worker.v1.LeaseRequest
+	11, // 14: basamento.worker.v1.WorkerService.Starting:input_type -> basamento.worker.v1.StartingRequest
+	13, // 15: basamento.worker.v1.WorkerService.Started:input_type -> basamento.worker.v1.StartedRequest
+	16, // 16: basamento.worker.v1.WorkerService.Resume:input_type -> basamento.worker.v1.ResumeRequest
+	18, // 17: basamento.worker.v1.WorkerService.Events:input_type -> basamento.worker.v1.EventsRequest
+	20, // 18: basamento.worker.v1.WorkerService.Finish:input_type -> basamento.worker.v1.FinishRequest
+	22, // 19: basamento.worker.v1.WorkerService.Release:input_type -> basamento.worker.v1.ReleaseRequest
+	24, // 20: basamento.worker.v1.WorkerService.Heartbeat:input_type -> basamento.worker.v1.HeartbeatRequest
+	26, // 21: basamento.worker.v1.WorkerService.Leave:input_type -> basamento.worker.v1.LeaveRequest
+	7,  // 22: basamento.worker.v1.WorkerService.Join:output_type -> basamento.worker.v1.JoinResponse
+	9,  // 23: basamento.worker.v1.WorkerService.Lease:output_type -> basamento.worker.v1.LeaseResponse
+	12, // 24: basamento.worker.v1.WorkerService.Starting:output_type -> basamento.worker.v1.StartingResponse
+	14, // 25: basamento.worker.v1.WorkerService.Started:output_type -> basamento.worker.v1.StartedResponse
+	17, // 26: basamento.worker.v1.WorkerService.Resume:output_type -> basamento.worker.v1.ResumeResponse
+	19, // 27: basamento.worker.v1.WorkerService.Events:output_type -> basamento.worker.v1.EventsResponse
+	21, // 28: basamento.worker.v1.WorkerService.Finish:output_type -> basamento.worker.v1.FinishResponse
+	23, // 29: basamento.worker.v1.WorkerService.Release:output_type -> basamento.worker.v1.ReleaseResponse
+	25, // 30: basamento.worker.v1.WorkerService.Heartbeat:output_type -> basamento.worker.v1.HeartbeatResponse
+	27, // 31: basamento.worker.v1.WorkerService.Leave:output_type -> basamento.worker.v1.LeaveResponse
+	22, // [22:32] is the sub-list for method output_type
+	12, // [12:22] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_basamento_worker_v1_worker_proto_init() }
