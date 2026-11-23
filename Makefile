@@ -45,7 +45,7 @@ gate: static spec test redgreen ## everything the PR gate runs
 static: fmt vet build layering hygiene gomod lint vuln licenses buf ## G1
 
 fmt:
-	@out="$$(git ls-files -co --exclude-standard '*.go' | xargs gofmt -l)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	@out="$$(git -c core.quotePath=false ls-files -z -co --exclude-standard '*.go' | xargs -0 gofmt -l 2>&1)"; ret=$$?; if [ $$ret -ne 0 ]; then echo "$$out"; exit $$ret; fi; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 vet:
 	$(GO) vet ./...
