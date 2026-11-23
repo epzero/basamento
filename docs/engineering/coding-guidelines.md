@@ -72,10 +72,7 @@ check every change against this page. Tools enforce what they can
 - **Size:** prefer functions under ~60 lines and files under ~500 lines; split
   when a file holds two ideas.
 - **Generated code** carries the standard `// Code generated … DO NOT EDIT.`
-  header and is never edited by hand. Wire-derived Go lives only under
-  `contracts/gen/go/` (`ADR-0024`); regenerate with `make generate` after `.proto`
-  or plugin pin changes. Domain packages convert at adapter boundaries; they do
-  not export generated message types.
+  header and is never edited by hand.
 
 ## 3. Tests
 

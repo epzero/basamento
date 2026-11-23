@@ -13,198 +13,196 @@ clients for `basamento.browser.v1` conformance against an external runner.
 `stream/stream.go` is a hand-written mirror of `stream.proto`
 (`docs/architecture/streaming.md` §2).
 
-The root module already pins `google.golang.org/protobuf` v1.36.12 and
+The root module pins `google.golang.org/protobuf` v1.36.12 and
 `google.golang.org/grpc` v1.84.0. It has no `connectrpc.com/connect`, no
 `protoc-gen-*`, no `buf.gen.yaml`, and no generate or drift step. `make tools`
-pins `buf` v1.75.0. CI sets `GATE_STRICT=1` and runs `make tools`
-(`.github/workflows/gate.yml`).
+pins `buf` v1.75.0. CI sets `GATE_STRICT=1` and runs `make tools`.
 
-Probes on a copy of `main` with `contracts/buf.gen.yaml`, plugins from `go tool`,
-and committed output under `contracts/gen/go` (re-run 2026-11-23): eight packages,
-6 509 lines; `worker.pb.go` 2 187 + `worker.connect.go` 384; warm `buf generate`
-≈0.4 s; `go build` / `go vet` / `golangci-lint` / `go-licenses` / `go tool gate
-hygiene` pass; second generate is byte-identical; `go tool gate layering` fails
-until eight `contracts/gen/go/...` rows exist.
+Probes (2026-11-23, scratch tree with `buf.gen.yaml` and committed
+`contracts/gen/go`): eight packages, 6 509 lines; warm `buf generate` ≈0.4 s;
+`go build` / `go vet` / `golangci-lint` / `go-licenses` / `gate hygiene` pass;
+`go tool gate layering` reports `package not assigned to a layer` for those
+eight packages until one layer key `contracts/gen` exists.
 
 ## Decision
 
 ### D1 — Generator and pins
 
-- **Buf** v1.75.0 (`Makefile` `BUF_VERSION`; bumped only in `Makefile` / `make
-  tools`, not in `go.mod`).
-- **Plugins** pinned as root `go.mod` **`tool`** entries:
-  `google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12` (same patch as the
-  runtime `require`) and
-  `connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.1`.
-- **Runtime:** `require connectrpc.com/connect v1.21.1` (generated connect
-  stubs import it; adapters may import it directly).
-- **`contracts/buf.gen.yaml`:** `version: v2`, `managed.enabled: true` with
-  `go_package_prefix: github.com/epzero/basamento/contracts/gen/go`, plugins
-  `local: [go, tool, protoc-gen-go]` and `local: [go, tool,
-  protoc-gen-connect-go]`, `out: gen/go`, `opt: paths=source_relative`. Protos
-  stay unedited; managed mode supplies `go_package`.
-- **Bump rule:** protobuf runtime patch → match `protoc-gen-go`, regenerate;
-  connect → match `protoc-gen-connect-go` and `connect` require, regenerate; buf
-  → `BUF_VERSION` only unless `buf.gen.yaml` schema changes.
+- **Buf** v1.75.0 (`Makefile` `BUF_VERSION`; not in `go.mod`).
+- **`tool` entries:** `google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12`
+  (same patch as runtime `require`) and
+  `connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.1` — exactly two new
+  `tool` lines (no bare `connectrpc.com/connect` in `tool`).
+- **`require`:** `connectrpc.com/connect v1.21.1` after `go mod tidy` following
+  the first committed `contracts/gen/go` (probe: `// indirect` until hand-written
+  adapters import connect; either form is fine).
+- **`contracts/buf.gen.yaml`:** `version: v2`, top-level **`clean: true`**
+  (deletes output dirs before generate; stale `.pb.go` from removed protos do
+  not survive), `managed` with `go_package_prefix:
+  github.com/epzero/basamento/contracts/gen/go`, plugins `local: [go, tool,
+  protoc-gen-go]` and `local: [go, tool, protoc-gen-connect-go]`, `out: gen/go`,
+  `opt: paths=source_relative`.
+- **Bumps:** protobuf patch → match `protoc-gen-go`, regenerate; connect → match
+  `protoc-gen-connect-go` and `require`, regenerate. A `BUF_VERSION` bump lands
+  with regeneration; `contracts-gen` catches stale output if plugin bytes change.
 
 ### D2 — Committed output
 
 Generated Go is **committed** under `contracts/gen/go/basamento/<svc>/v1/`
-(import path `github.com/epzero/basamento/contracts/gen/go/...`). Files carry the
-standard generated header and are never hand-edited. No other artifacts in that
-tree.
+(import path `github.com/epzero/basamento/contracts/gen/go/...`). Never
+hand-edited. Any change under `contracts/basamento/**/*.proto` includes the
+regenerated `contracts/gen/go/**` in the **same pull request** (`contracts-gen`
+enforces it).
 
-Rejected for this repository: build-time-only output (`go install @latest` and
-agents without `buf` break); top-level `wire/` (extra name, no gain);
-`internal/` (blocks external conformance importers); a separate tagged contracts
-module (release overhead); mixing generated and hand-written Go in one package.
+Rejected: build-time-only output, top-level `wire/`, `internal/`, a separate
+contracts module, partial generation.
 
 ### D3 — Drift check in the gate
 
-- **`make generate`:** `cd contracts && buf generate` via the existing `tool`
-  macro (needs `buf` from `make tools` and plugin `tool` entries in `go.mod`).
-- **`go tool gate contracts-gen`:** regenerate into a temp directory offline,
-  compare with `contracts/gen/go`, fail with a message naming `make generate`.
-  Unit-tested in `internal/gate` (table cases: clean tree, stale file, missing
-  dir).
-- **Wiring:** `contracts-gen` on the `static` / G1 path next to `buf` in the
-  `Makefile`. Same skip behaviour as `buf`: missing binary → notice locally,
-  `GATE_STRICT=1` → hard fail (CI already installs tools). **No**
-  `.github/workflows/gate.yml` or `make tools` change.
+- **`make generate`:** `cd contracts && buf generate` via the `tool` macro.
+- **`go tool gate contracts-gen`:** `cd contracts && buf generate --output
+  <tmpdir>` (does not touch committed tree; probe: stale file in committed tree
+  survived while output went to `<tmpdir>/gen/go/`), then recursively compare
+  `<tmpdir>/gen/go` with `contracts/gen/go` (differing, missing, and extra
+  files); failure names `make generate`. Unit tests in `internal/gate` with the
+  generator injected (no `buf` in tests): clean tree; differing file; missing
+  file; extra file; generate error.
+- **G1 wiring** in the `Makefile` next to `buf`; same skip / `GATE_STRICT`
+  behaviour. No `.github/workflows/gate.yml` or `make tools` change.
 
-`buf breaking` (wire compatibility vs base) and `contracts-gen` (committed Go
-matches current protos and plugin pins) are orthogonal.
+`buf breaking` (wire JSON vs base) and `contracts-gen` (committed Go vs protos
+and pins) are orthogonal.
 
 ### D4 — Layering
 
-New layer **`contracts/gen`** with **`[]`** imports (third-party only via
-generated code: protobuf, connect).
+Layer **`contracts/gen`** with **`[]`** (generated code imports protobuf and
+connect only).
 
 | Layer | Add to allow-list |
 | --- | --- |
-| `model/worker` | `contracts/gen` |
 | `api` | `contracts/gen` |
-| `cmd/kit` | `contracts/gen` |
 | `internal/bdd` | `contracts/gen` |
+| `model/worker/dialout` | `contracts/gen` |
 
-**Not** granted now: `stream` (hand mirror stays), `internal/gate` / `tools/gate`
-(drift shells out to buf; no import of generated packages).
+**EP0-227** adds row `model/worker/dialout: [core, platform, model,
+contracts/gen]` in its own change; **this ADR is the authority** — no further
+ADR for that row. Listing `model` grants every `model/...` sub-layer by
+path-segment prefix (`internal/gate/layering.go`), so `cmd/kit` (already lists
+`model`) mounts `model/worker/dialout` without a `contracts/gen` grant.
 
-**`deny_external`** — add prefix `connectrpc.com/` on:
+**`model/worker`** stays wire-free: **no** `contracts/gen` grant; keep
+`deny_external` `connectrpc.com/` and `google.golang.org/grpc` on `model/worker`.
+**`model/worker/dialout`** is **not** under those denies — adapters call
+`connect.NewRequest`, generated clients, and conversions between wire messages
+and `model/worker` domain types.
+
+**Weakness (honest):** allow-lists match by prefix, so any layer listing
+`model` may import `model/worker/dialout`. The gate enforces **direct** imports
+only: domain layers do not import connect/grpc. **Domain layers must not import
+adapter layers** (`model/worker/dialout`, `api` wire handlers) — review rule in
+this ADR and the `coding-guidelines.md` bullet the implementation adds.
+
+**`deny_external`:** add `connectrpc.com/` and `google.golang.org/grpc` on
 `core`, `expr`, `flow`, `flow/host`, `prompt`, `model`, `model/node`,
-`model/worker`, `tool`, `agent`, `stream` (direct imports only; importing
-`contracts/gen` stays allowed). Add `google.golang.org/grpc` on the same layers so
-RPC stubs stay in adapters, not domain code (`grpc` today appears only in
-`internal/bdd` temporal stubs and tests).
+`model/worker`, `tool`, `agent`, `stream` (not on `model/worker/dialout`, `api`,
+`internal/bdd`, `contracts/gen`).
 
-**Exact `layering.yaml` edits:** one new `layers` key `contracts/gen: []`; four
-allow-list entries above; two `deny_external` keys per domain layer listed (same
-pattern as `go.temporal.io/`).
+**Exact toolchain `layering.yaml` edits:** `contracts/gen: []`; allow-list
+entries for `api` and `internal/bdd` only; `deny_external` keys above.
+**EP0-227 adds** `model/worker/dialout` row and package tree.
+
+Probe (2026-11-23): with rules applied, `model/worker` importing
+`connectrpc.com/connect` → `may not import connectrpc.com/connect`; the same
+import in `model/worker/dialout` → `layering: ok`.
 
 ### D5 — Domain types stay domain types
 
 Exported APIs of `model`, `model/worker`, `stream`, `agent`, and siblings use
-domain types only. Generated messages and connect clients appear in transport
-adapters (`api`, `cmd/kit` wiring, `internal/bdd` conformance), with conversion
-at the boundary.
+domain types only. Wire shapes live in **`api`**, **`model/worker/dialout`**, and
+**`internal/bdd`** conformance steps, with conversion at the boundary. **`cmd/kit`**
+wires adapters and does not import generated types.
 
-**`stream/stream.go`:** unchanged in the toolchain work item. Replace it with
-generated types only when a follow-up removes the mirror and grants `stream` →
-`contracts/gen` (proto or domain change, own review).
+**`stream/stream.go`:** unchanged in the toolchain WP; replace only when a
+follow-up grants `stream` → `contracts/gen`.
 
 ### D6 — Review and noise
 
-- **`contracts/**` stays high tier** (`review.yaml`); regenerated files inherit
-  that — no new rule.
-- **`.gitattributes`:** `contracts/gen/** linguist-generated=true` so hosts collapse
-  diffs. Reviewers validate `.proto` edits and a green `contracts-gen`, not
-  generated line noise.
-- **No `contracts/REVIEW.md`** (`**/REVIEW.md` is high tier; little added value).
+- **`contracts/**` stays high tier**; regenerated files inherit it.
+- **`.gitattributes`:** `contracts/gen/** linguist-generated=true`. Reviewers
+  read `.proto` diffs and trust `contracts-gen`, not generated lines.
+- **No `contracts/REVIEW.md`.**
 
 ### D7 — Dependencies and updates
 
-- **Connect** v1.21.1: Apache-2.0; `govulncheck ./contracts/...` clean on probe
-  tree; module graph is essentially connect plus existing protobuf stack.
-- **Procedure:** any bump to protobuf, connect, or plugin tools lands with
-  regeneration in the same change; stale committed output fails `contracts-gen`.
-- **`buf breaking`** guards published wire JSON; **`contracts-gen`** guards Go
-  output and pins.
+- **Connect** v1.21.1: Apache-2.0; its `go.mod` requires Go **1.26.0** and
+  `google.golang.org/protobuf` **v1.36.11** (≤ repository pin v1.36.12; no Go
+  bump needed, ADR-0014). If a future connect release raises `go` above the
+  repository pin, it waits on a toolchain ADR. `govulncheck ./contracts/...`
+  clean on probe tree.
+- Co-bump protobuf, connect, or plugins with regeneration in one change.
 
 ### D8 — What is generated first
 
-**All four contracts** in one change (invoke, stream, worker, browser). Partial
-trees complicate layering and drift for no benefit (~6.5k lines, one compile
-cost).
+All four contracts in one toolchain change (~6.5k lines).
 
 ### D9 — Operations
 
-- **Regenerate:** `make tools` (once) + `make generate`; needs network only when
-  filling the module cache (`make tools` / first `go` download). After that,
-  agents with `GOPROXY=off` and a warm cache build and run the gate without
-  network; subagents on leads follow the lead-only network rule, but **committed
-  gen** lets implementers compile without `buf`.
-- **TypeScript clients:** out of scope (ADR-0001). Layout leaves room: protos in
-  `contracts/basamento/...`, `buf.gen.yaml` beside `buf.yaml`, output outside the
-  proto tree — a later `buf.gen` plugin can target another `out` without revisiting
-  Go decisions.
+`make tools` + `make generate`; committed gen lets `go build` work without
+`buf`. TypeScript clients out of scope; `buf.gen.yaml` beside protos allows
+another language `out` later.
 
 ### D10 — Work items (ordering)
 
 | Item | Owns | Risk | Proof | Order |
 | --- | --- | --- | --- | --- |
-| **Toolchain** (this ADR) | `contracts/`, `go.mod`, `layering.yaml`, `Makefile`, `internal/gate`, `.gitattributes`, docs | High (`contracts/**`, `go.mod`, `layering.yaml`, gate) | `contracts-gen` unit tests; `make gate`; packages compile | **Before** EP0-227 |
-| **EP0-227** dial-out worker transport | `model/worker`, `api`, `cmd/kit` adapters | High | BDD MODEL-089-01, MODEL-090-01 | After toolchain |
-| **WP-L6-03** connect `api` surface | `api` | Medium–high | Scenarios as they land | Parallel after toolchain |
-| **WP-L9-01** browser conformance | `internal/bdd`, `contracts` usage | High | Browser conformance suite | After toolchain; runner external |
+| **Toolchain** (this ADR) | `contracts/`, `go.mod`, `layering.yaml` (through D4), `Makefile`, `internal/gate`, `.gitattributes` | High | `contracts-gen` tests; compile; `make gate` | **Before EP0-227 |
+| **EP0-227** dial-out transport | `model/worker/dialout`, `cmd/kit` wiring; `.proto` + regen if proto changes | High | MODEL-089-01, MODEL-090-01 | After toolchain |
+| **WP-L6-03** | `api` adapters | Medium–high | Scenarios as they land | After toolchain |
+| **WP-L9-01** | `internal/bdd` | High | Browser conformance | After toolchain |
 
-No BDD scenarios for the toolchain; behaviour is enforced by `contracts-gen`,
-compilation, and downstream transport scenarios.
+No BDD for the toolchain itself.
 
 ## Alternatives considered
 
 | Option | Cost | Why not |
 | --- | --- | --- |
-| Hand-written mirrors (status quo) | Duplication, drift from `.proto` | EP0-227 and conformance need wire-accurate types |
-| Generate at build time, do not commit | Every build needs buf + plugins | Breaks `go install`, offline agents, simple CI |
-| Buf BSR remote generation | Account, network, third-party availability | Pins already in `go.mod`; repo stays self-contained |
-| grpc-go + `protoc-gen-go-grpc` | grpc stack in domain; ADR-0012 chose Connect | ADR-0012; UIs already on connect clients |
-| Output under `internal/` | External conformance cannot import | Browser/worker contracts consumed from this module |
-| Separate contracts Go module | Tags, version skew, two `go.mod` gates | One binary, one gate (ADR-0001) |
-| Worker-only generation | Odd layering / drift with three stale protos | All four are small |
+| Hand-written mirrors | Drift from `.proto` | EP0-227 / conformance need wire types |
+| Generate at build, do not commit | Every build needs buf | Breaks `go install`, offline agents |
+| Buf BSR remote gen | Account, network | Self-contained pins in `go.mod` |
+| grpc-go + `protoc-gen-go-grpc` | grpc in domain; ADR-0012 chose Connect | UIs on connect clients |
+| Output under `internal/` | Blocks conformance importers | — |
+| Separate contracts module | Two gates, tags | ADR-0001 single binary |
+| Connect adapters inside `model/worker` | Conflicts with `deny_external` on connect | Needs second ADR for EP0-227 |
 
 ## Consequences
 
-- **Review noise:** large diffs on proto changes; mitigated by linguist-generated
-  and reviewer focus on `.proto` + drift.
-- **Repository size:** ~6.5k generated lines (stable until protos grow).
-- **New dependency:** `connectrpc.com/connect` (and generated code imports).
-- **Regenerate-only tool:** `buf` not required for `go build` after commit; only
-  for `make generate` and `contracts-gen`.
+- Large proto PRs; mitigated by linguist-generated and `.proto`-first review.
+- ~6.5k generated lines; `connect` dependency.
+- `buf` only for `make generate` / `contracts-gen`, not for `go build`.
+- **G5 mutation testing** (WP-L0 follow-up, `qa-gate.md`): when enabled, must
+  **skip** files with the generated header (record as requirement on that work).
 
 ## Revert
 
-Remove `contracts/gen`, `buf.gen.yaml`, tool pins, `contracts-gen`, layer row and
-grants, `.gitattributes` entry, and this ADR; restore docs bullets; regenerate
-`overview.md` §3 via `go tool gate docs -write`.
+Remove generation artifacts, layer row and grants, drift check, `.gitattributes`;
+regenerate `overview.md` §3 via `go tool gate docs -write`.
 
 ## Implementation changes these files
 
 | Path | Change | Who | Tier |
 | --- | --- | --- | --- |
-| `contracts/buf.gen.yaml` | As in D1 | Developer | High |
-| `contracts/gen/go/**` | Generated output (all four services) | Developer | High |
-| `go.mod`, `go.sum` | `tool` plugin pins; `require connect` | Developer | High |
-| `layering.yaml` | D4 row, grants, `deny_external` | Developer | High |
-| `Makefile` | `generate` target; `contracts-gen` on G1 | Developer | High |
-| `internal/gate/contracts_gen.go` (+ tests) | Drift check | Developer | High |
-| `tools/gate` | Register `contracts-gen` subcommand | Developer | High |
-| `.gitattributes` | `linguist-generated` for `contracts/gen/**` | Developer | Medium |
-| `docs/adr/README.md` | Index row | Developer | High |
-| `docs/adr/0024-…` | Status → accepted when owner approves | Architect | High |
-| `docs/engineering/qa-gate.md` | G1 lists `contracts-gen`, `make generate` | Developer | Medium |
-| `docs/engineering/coding-guidelines.md` | Generated-code paragraph (paths, regen) | Developer | Medium |
-| `docs/architecture/overview.md` §3 | Regenerated module map (`gate docs -write`) | Developer | Medium |
-| `docs/architecture/streaming.md` | No change (D5) | — | — |
+| `contracts/buf.gen.yaml` | D1 (`clean: true`, plugins) | Developer | High |
+| `contracts/gen/go/**` | D2, D8 output | Developer | High |
+| `go.mod`, `go.sum` | D1 `tool` + tidy `require` | Developer | High |
+| `layering.yaml` | D4 toolchain portion; EP0-227 adds `model/worker/dialout` | Developer | High |
+| `Makefile` | `generate`, `contracts-gen` on G1 | Developer | High |
+| `internal/gate/contracts_gen.go` (+ tests) | D3 | Developer | High |
+| `tools/gate` | Register `contracts-gen` | Developer | High |
+| `.gitattributes` | D6 | Developer | Medium |
+| `docs/adr/0024-…` | Status → accepted after owner approve | Architect | High |
+| `docs/engineering/qa-gate.md` | Add to G1: `` `gate contracts-gen` (fix with `make generate`; ADR-0024) `` | Developer | Medium |
+| `docs/engineering/coding-guidelines.md` | Extend generated-code bullet: paths under `contracts/gen/go/`, `make generate`, domain packages do not export wire types or import adapter layers | Developer | Medium |
+| `docs/architecture/overview.md` §3 | `go tool gate docs -write` after layering | Developer | Medium |
 
-EP0-227 and later WPs add adapters that import `contracts/gen`; they do not
-change generation policy.
+EP0-227 and later WPs add `model/worker/dialout` and other adapters; they do not
+reopen generation policy.
