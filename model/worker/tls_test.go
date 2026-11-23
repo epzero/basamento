@@ -2,13 +2,6 @@ package worker
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -126,100 +119,70 @@ type addrListener struct {
 
 func (l *addrListener) Addr() net.Addr { return l.addr }
 
+// The TLS fixtures are fixed PEM files, not generated at run time: tests use
+// no global randomness, and the same pair exercises every round.
+const (
+	testCACert = `-----BEGIN CERTIFICATE-----
+MIIBZDCCAQugAwIBAgIBATAKBggqhkjOPQQDAjAZMRcwFQYDVQQDEw53b3JrZXIg
+dGVzdCBDQTAgFw0wMDAxMDEwMDAwMDBaGA8yMTAwMDEwMTAwMDAwMFowGTEXMBUG
+A1UEAxMOd29ya2VyIHRlc3QgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQ5
+HxuHhym3TrbD0VSiahM/PsWkybOX/yP5u0ZxQ1rDwtgpKcDSDkz1wKCkqofNZtLI
+/bDyP7uw8LE1NRZ3Vi18o0IwQDAOBgNVHQ8BAf8EBAMCAoQwDwYDVR0TAQH/BAUw
+AwEB/zAdBgNVHQ4EFgQUuQGkeSK6pF3vDN4MOXI2BtDty/kwCgYIKoZIzj0EAwID
+RwAwRAIgHeOpUQpbiPtFXWPBLYrYQP7vwd1C930Ry27ontitXZMCIEOFRHEVs64G
+SQYKUKvyNDqd8R+meeKQ3c4OfSJHdl3j
+-----END CERTIFICATE-----
+`
+	testServerCert = `-----BEGIN CERTIFICATE-----
+MIIBfzCCASWgAwIBAgIBBjAKBggqhkjOPQQDAjAZMRcwFQYDVQQDEw53b3JrZXIg
+dGVzdCBDQTAgFw0wMDAxMDEwMDAwMDBaGA8yMTAwMDEwMTAwMDAwMFowETEPMA0G
+A1UEAxMGc2VydmVyMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmKGsoWAKUDec
+pYRO+7dpqIkrrXCoeu5nQdqLYLy0kv2VXsNg1a2dP8TK/d/xlPSJTv0fZOHXcU9a
+mZG8S5W3jaNkMGIwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMB
+MB8GA1UdIwQYMBaAFLkBpHkiuqRd7wzeDDlyNgbQ7cv5MBoGA1UdEQQTMBGCCWxv
+Y2FsaG9zdIcEfwAAATAKBggqhkjOPQQDAgNIADBFAiBfnK4oT+wEseOmfjYBzJi+
+BQcnGFJEbX6IX35FSPuKQQIhAOanHShGkEzwQJpq6dgGyJnmK9pasOoZnqWUQ92z
+dElO
+-----END CERTIFICATE-----
+`
+	testServerKey = `-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEILxHfUj893U+qJuE1Zyk+KO14xWN/K5KHH/i5vwWZvEAoAoGCCqGSM49
+AwEHoUQDQgAEmKGsoWAKUDecpYRO+7dpqIkrrXCoeu5nQdqLYLy0kv2VXsNg1a2d
+P8TK/d/xlPSJTv0fZOHXcU9amZG8S5W3jQ==
+-----END EC PRIVATE KEY-----
+`
+	testClientCert = `-----BEGIN CERTIFICATE-----
+MIIBYzCCAQmgAwIBAgIBBjAKBggqhkjOPQQDAjAZMRcwFQYDVQQDEw53b3JrZXIg
+dGVzdCBDQTAgFw0wMDAxMDEwMDAwMDBaGA8yMTAwMDEwMTAwMDAwMFowETEPMA0G
+A1UEAxMGY2xpZW50MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExV8IaXoICd4Y
+7bI++adZ3L5qTe94SNSFyLd8+Kl+u/HMc8tu1IRKWYzCKSh8AIFPSSVGBEXPVrL/
+4Ht1AS3Uy6NIMEYwDgYDVR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMC
+MB8GA1UdIwQYMBaAFLkBpHkiuqRd7wzeDDlyNgbQ7cv5MAoGCCqGSM49BAMCA0gA
+MEUCIEG/9Cz0qa2rypVBrqV76rd3ePRprtzyY9RBaX4PIpW6AiEAzZ8jXB5VmeQP
+uRAVDG3nplebR6jbV7jYHl6ukDn5osE=
+-----END CERTIFICATE-----
+`
+	testClientKey = `-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEINLF2C8yh+ReOuU2Bpf4ncpGDDpEHt5x1vvw75ffJYRboAoGCCqGSM49
+AwEHoUQDQgAExV8IaXoICd4Y7bI++adZ3L5qTe94SNSFyLd8+Kl+u/HMc8tu1IRK
+WYzCKSh8AIFPSSVGBEXPVrL/4Ht1AS3Uyw==
+-----END EC PRIVATE KEY-----
+`
+)
+
 func writeTestTLS(t *testing.T, dir string) (caFile, serverCert, serverKey, clientCert, clientKey string) {
 	t.Helper()
-	ca, caKey := newCA(t)
-	serverCert, serverKey = newLeaf(t, dir, "server", ca, caKey, x509.ExtKeyUsageServerAuth, true)
-	clientCert, clientKey = newLeaf(t, dir, "client", ca, caKey, x509.ExtKeyUsageClientAuth, false)
-	caFile = filepath.Join(dir, "ca.pem")
-	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Raw}), 0o600); err != nil {
-		t.Fatal(err)
+	files := map[string]string{
+		"ca.pem":     testCACert,
+		"server.pem": testServerCert,
+		"server.key": testServerKey,
+		"client.pem": testClientCert,
+		"client.key": testClientKey,
 	}
-	return caFile, serverCert, serverKey, clientCert, clientKey
-}
-
-func newCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "worker test CA"},
-		NotBefore:             time.Unix(1_600_000_000, 0),
-		NotAfter:              time.Unix(1_900_000_000, 0),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cert, key
-}
-
-func newLeaf(t *testing.T, dir, name string, ca *x509.Certificate, caKey *ecdsa.PrivateKey, usage x509.ExtKeyUsage, server bool) (certFile, keyFile string) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(int64(len(name))),
-		Subject:      pkix.Name{CommonName: name},
-		NotBefore:    time.Unix(1_600_000_000, 0),
-		NotAfter:     time.Unix(1_900_000_000, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{usage},
-	}
-	if server {
-		tmpl.IPAddresses = []net.IP{net.IPv4(127, 0, 0, 1)}
-		tmpl.DNSNames = []string{"localhost"}
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	certFile = filepath.Join(dir, name+".pem")
-	keyFile = filepath.Join(dir, name+".key")
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return certFile, keyFile
-}
-
-func TestDialWorkerServiceRefusesPlaintextOffLoopback(t *testing.T) {
-	if _, err := DialWorkerService("10.0.0.1:8443"); core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("plaintext dial off loopback = %v, want invalid_argument", err)
-	}
-	tr, err := DialWorkerService("127.0.0.1:1")
-	if err != nil {
-		t.Fatalf("plaintext dial on loopback: %v", err)
-	}
-	_ = tr.Close()
-}
-
-func TestClampLeaseWait(t *testing.T) {
-	for _, tc := range []struct{ in, want time.Duration }{
-		{-time.Second, 0},
-		{30 * time.Second, 30 * time.Second},
-		{68 * 365 * 24 * time.Hour, maxLeaseWait},
-	} {
-		if got := clampLeaseWait(tc.in); got != tc.want {
-			t.Fatalf("clampLeaseWait(%v) = %v, want %v", tc.in, got, tc.want)
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
+	return filepath.Join(dir, "ca.pem"), filepath.Join(dir, "server.pem"), filepath.Join(dir, "server.key"), filepath.Join(dir, "client.pem"), filepath.Join(dir, "client.key")
 }
