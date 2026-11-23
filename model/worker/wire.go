@@ -347,11 +347,14 @@ type GRPCTransport struct {
 // connection; with none the call is plaintext, which the platform admits on
 // loopback only.
 func DialWorkerService(target string, creds ...credentials.TransportCredentials) (*GRPCTransport, error) {
-	var transport credentials.TransportCredentials = insecure.NewCredentials()
+	var transport credentials.TransportCredentials
 	if len(creds) > 0 && creds[0] != nil {
 		transport = creds[0]
-	} else if err := refusePlaintextTarget(target); err != nil {
-		return nil, err
+	} else {
+		if err := refusePlaintextTarget(target); err != nil {
+			return nil, err
+		}
+		transport = insecure.NewCredentials()
 	}
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(transport))
 	if err != nil {

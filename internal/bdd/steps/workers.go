@@ -1609,17 +1609,6 @@ func registerWorker(sc *godog.ScenarioContext) {
 
 // --- helpers ---
 
-func parseReadyLabels(raw string) map[string]string {
-	out := map[string]string{}
-	for _, part := range strings.Split(raw, ",") {
-		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if ok && key != "" {
-			out[key] = value
-		}
-	}
-	return out
-}
-
 // workerDeclare gives a pool a descriptor without a present worker, as after a
 // rollout drained the workers. price < 0 leaves the descriptor's price empty.
 func workerDeclare(ctx context.Context, tenant, poolID, modelID string, price int64) error {
