@@ -317,10 +317,18 @@ type convDC struct {
 	ctx   context.Context
 	stop  context.CancelFunc
 
-	mu       sync.Mutex
-	calls    int
-	inbox    *gateFuture
-	settle   chan struct{}
+	mu     sync.Mutex
+	calls  int
+	inbox  *gateFuture
+	settle chan struct{}
+
+	// atGate is the sticky half of the settle state: set when the coordinator
+	// waits at a gate, cleared only when act installs the next settle channel.
+	// It survives the channel it was set for, so a waiter that arrives after
+	// the coordinator blocked does not install a channel nobody will close
+	// (EP0-232).
+	atGate bool
+
 	finished chan struct{}
 	once     sync.Once
 }
@@ -500,6 +508,7 @@ func (c *convState) nextTurnIndexLocked() int {
 // state its action caused to be settled.
 func (d *convDC) blocked() {
 	d.mu.Lock()
+	d.atGate = true
 	if d.settle != nil {
 		close(d.settle)
 		d.settle = nil
@@ -523,6 +532,7 @@ func (d *convDC) act(fn func() error) error {
 	d.mu.Lock()
 	settle := make(chan struct{})
 	d.settle = settle
+	d.atGate = false
 	d.mu.Unlock()
 	if err := fn(); err != nil {
 		d.mu.Lock()
@@ -541,6 +551,12 @@ func (d *convDC) act(fn func() error) error {
 
 func (d *convDC) waitSettled() {
 	d.mu.Lock()
+	if d.atGate {
+		// The coordinator already reached a gate and cleared settle: there is
+		// nothing to await, and a fresh channel would never be closed.
+		d.mu.Unlock()
+		return
+	}
 	if d.settle == nil {
 		d.settle = make(chan struct{})
 	}
