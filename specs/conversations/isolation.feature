@@ -1,4 +1,4 @@
-@planned @wp:WP-L7-03 @runtime:any @level:component @security
+@wp:WP-L7-03 @runtime:any @level:component @security
 Feature: Conversations are isolated by tenant and by user
   The tenant is the isolation boundary of data: one tenant's conversation is
   never found or changed from another tenant. Within a tenant (the embedded

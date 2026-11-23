@@ -1,7 +1,8 @@
 # Streaming: runs outlive connections
 
-Status: **Partly implemented** (WP-L6-01, WP-L6-02; WP-L6-03, WP-L6-04 and WP-L7-03 are planned). Decisions: ADR-0005,
-ADR-0007. Specs: `specs/streaming`.
+Status: **Partly implemented** (WP-L6-01, WP-L6-02 and WP-L7-03; WP-L6-03 and
+WP-L6-04 are planned). Decisions: ADR-0005, ADR-0007. Specs: `specs/streaming`,
+`specs/conversations`.
 
 ## 1. Two layers
 
@@ -78,6 +79,14 @@ turn**. A message that arrives during a turn is handled by policy:
 - `queue` (run next),
 - `steer` (delivered at the next step boundary of the running turn),
 - `cancel` (stop the turn, keep the partial message marked interrupted).
+
+The coordinator is `agent/conversation` (WP-L7-03). Its durable record holds
+the turns, the messages, the queue and the accepted message ids, so a restart
+or a continuation keeps them; the record counts only the coordinator's own
+durable calls and checkpoints at a turn boundary on a runtime that supports
+continuing as new. Isolation is per tenant and per user: another tenant's
+conversation is `not_found`, another user's is `permission_denied`. The turn
+itself is the agent loop of WP-L7-01, run as a child of the coordinator.
 
 ## 7. Client protocols
 
