@@ -12,17 +12,22 @@ import (
 	"github.com/epzero/basamento/platform"
 )
 
+// checkAuthzErrCode verifies the last authz action failed with code. The
+// conversation feature registers the same step text, so it dispatches an
+// active authz world here instead of registering the phrase twice.
+func checkAuthzErrCode(w *authzWorld, code string) error {
+	if w.lastErr == nil {
+		return fmt.Errorf("want error code %s", code)
+	}
+	if string(core.CodeOf(w.lastErr)) != code {
+		return fmt.Errorf("got %s want %s", core.CodeOf(w.lastErr), code)
+	}
+	return nil
+}
+
 func registerThenAuthz(sc *godog.ScenarioContext) {
-	sc.Step(`^the action fails with code "([^"]*)"$`, func(ctx context.Context, code string) error {
-		w := authzW(ctx)
-		if w.lastErr == nil {
-			return fmt.Errorf("want error code %s", code)
-		}
-		if string(core.CodeOf(w.lastErr)) != code {
-			return fmt.Errorf("got %s want %s", core.CodeOf(w.lastErr), code)
-		}
-		return nil
-	})
+	// The step text is owned by the conversation feature as well; that
+	// registration dispatches here when an authz world is active.
 	sc.Step(`^the action is allowed for ([a-z]+)$`, func(ctx context.Context, who string) error {
 		w := authzW(ctx)
 		if w.lastErr != nil {

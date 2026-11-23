@@ -187,6 +187,66 @@ func (w *authzWorld) teardown() {
 	}
 }
 
+// The authz schema is the same for every scenario, so it is migrated once per
+// process into a template database; each scenario starts from a copy instead of
+// paying the migration cost for every permission scenario. The suite hit Go's
+// 10m default timeout in CI (EP0-115); this mirrors the worker template in
+// WP-L3-07.
+var (
+	authzDBTemplateOnce sync.Once
+	authzDBTemplatePath string
+	authzDBTemplateErr  error
+)
+
+// authzSQLiteTemplate returns the path of a migrated, unopened SQLite database
+// that holds the authz schema and the runs fixture table.
+func authzSQLiteTemplate() (string, error) {
+	authzDBTemplateOnce.Do(func() {
+		ctx := context.Background()
+		mig, err := combinedAuthMigrations()
+		if err != nil {
+			authzDBTemplateErr = err
+			return
+		}
+		dir, err := os.MkdirTemp("", "authz-bdd-template-*")
+		if err != nil {
+			authzDBTemplateErr = err
+			return
+		}
+		dbPath := filepath.Join(dir, "authz.db")
+		store, err := psql.Open(ctx, "sqlite:///"+dbPath, mig)
+		if err != nil {
+			authzDBTemplateErr = err
+			return
+		}
+		if _, err := store.Execer().Exec(ctx, `CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project TEXT NOT NULL)`); err != nil {
+			_ = store.Close()
+			authzDBTemplateErr = err
+			return
+		}
+		// Closing checkpoints the WAL, so the main file is a complete copy
+		// source; any surviving sidecar is copied with it just in case.
+		if err := store.Close(); err != nil {
+			authzDBTemplateErr = err
+			return
+		}
+		authzDBTemplatePath = dbPath
+	})
+	return authzDBTemplatePath, authzDBTemplateErr
+}
+
+// copyAuthzDB copies the migrated template to dst, with the WAL sidecar when
+// one survived the template's close, so a scenario still gets a real isolated
+// on-disk database of its own.
+func copyAuthzDB(src, dst string) error {
+	for _, suffix := range []string{"", "-wal"} {
+		if err := copyFileIfExists(src+suffix, dst+suffix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (w *authzWorld) databaseURL(ctx context.Context) (string, error) {
 	if w.forceSQLite || os.Getenv("BDD_SQL_PROFILE") != "cloud" || !sqltest.PostgresAvailable() {
 		dir, err := os.MkdirTemp("", "authz-bdd-*")
@@ -194,7 +254,15 @@ func (w *authzWorld) databaseURL(ctx context.Context) (string, error) {
 			return "", err
 		}
 		w.dir = dir
-		return "sqlite:///" + filepath.Join(dir, "authz.db"), nil
+		template, err := authzSQLiteTemplate()
+		if err != nil {
+			return "", err
+		}
+		dbPath := filepath.Join(dir, "authz.db")
+		if err := copyAuthzDB(template, dbPath); err != nil {
+			return "", err
+		}
+		return "sqlite:///" + dbPath, nil
 	}
 	url, cleanup, err := sqltest.CreateDatabase(ctx)
 	if err != nil {
@@ -229,7 +297,7 @@ func (w *authzWorld) ensureStore(ctx context.Context) error {
 	w.auditSQL = credentials.NewSQLAudit(db)
 	w.auditWrap = &authzAuditWrap{inner: w.auditSQL}
 	w.api = newAuthzTestAPI(w)
-	if _, err := w.db.Execer().Exec(ctx, `CREATE TABLE runs (id TEXT PRIMARY KEY, project TEXT NOT NULL)`); err != nil {
+	if _, err := w.db.Execer().Exec(ctx, `CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, project TEXT NOT NULL)`); err != nil {
 		return err
 	}
 	if err := w.rebuildAuthorizer(); err != nil {
