@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -21,12 +23,14 @@ import (
 	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform/blob"
 	"github.com/epzero/basamento/platform/bus"
 	"github.com/epzero/basamento/platform/credentials"
 	"github.com/epzero/basamento/platform/secrets"
 	"github.com/epzero/basamento/platform/sql"
+	"google.golang.org/grpc"
 )
 
 // wirePort is one port the composition root opens, in start-up order.
@@ -69,6 +73,7 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
+	wiring := f.workerWiring()
 	ports, runtimeName := wire(result.Config)
 
 	// Install the handler before a port opens or the listener binds: a signal
@@ -98,15 +103,31 @@ func runServe(args []string) {
 	// (ADR-0012 §11). The worker composition root (providers, routing) is a
 	// separate work package. A platform that cannot open its worker store
 	// must not serve as if time-driven work were running.
-	if err := startWorkerJanitor(ctx, opened); err != nil {
+	store, err := startWorkerJanitor(ctx, opened)
+	if err != nil {
 		closePorts(opened)
 		stop()
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	var platform *workerPlatform
+	if wiring["worker.listen"] != "" {
+		platform, err = startWorkerPlatform(ctx, store, wiring)
+		if err != nil {
+			closePorts(opened)
+			stop()
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
+	}
+	if platform != nil {
+		for _, field := range platform.readyFields() {
+			_, _ = fmt.Fprintf(os.Stdout, " %s", field)
+		}
 	}
 	_, _ = fmt.Fprintln(os.Stdout)
 
@@ -120,7 +141,7 @@ func runServe(args []string) {
 // platform's SQL port until the process ends. It reports an error when the
 // platform has a worker store it cannot open: serving without the janitor
 // would silently stop queue timeouts, lease expiry and retention.
-func startWorkerJanitor(ctx context.Context, opened []config.Port) error {
+func startWorkerJanitor(ctx context.Context, opened []config.Port) (*worker.Store, error) {
 	for _, p := range opened {
 		db, ok := p.(*sql.Store)
 		if !ok {
@@ -132,14 +153,131 @@ func startWorkerJanitor(ctx context.Context, opened []config.Port) error {
 			Recover: true,
 		})
 		if err != nil {
-			return fmt.Errorf("kit serve: worker store: %w", err)
+			return nil, fmt.Errorf("kit serve: worker store: %w", err)
 		}
 		go store.RunJanitor(ctx, time.Second, func(err error) {
 			fmt.Fprintln(os.Stderr, "worker janitor:", err)
 		})
-		return nil
+		return store, nil
 	}
-	return nil
+	return nil, nil
+}
+
+// workerPlatform is the worker side of kit serve: the pool it registers, the
+// platform model.Invoker for that pool, the router with its configured
+// remotes, and the WorkerService listener workers dial in to (ADR-0012,
+// REQ-MODEL-090). It owns no worker address: the platform never dials one.
+type workerPlatform struct {
+	ln      net.Listener
+	srv     *grpc.Server
+	invoker *worker.Invoker
+	router  *worker.Router
+	pool    string
+	remote  string
+	labels  map[string]string
+	model   string
+}
+
+// startWorkerPlatform composes the worker side and serves WorkerService on the
+// loopback listener the operator named. The main service listener stays the
+// process's public one; this one is only for workers that dial out.
+func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[string]string) (*workerPlatform, error) {
+	if store == nil {
+		return nil, fmt.Errorf("kit serve: worker listener needs the SQL port")
+	}
+	ln, err := net.Listen("tcp", wiring["worker.listen"])
+	if err != nil {
+		return nil, fmt.Errorf("kit serve: worker listener: %w", err)
+	}
+	pool := wiring["worker.pool"]
+	if pool != "" {
+		spec := worker.PoolSpec{ID: pool, Lease: 5 * time.Minute, Grace: time.Minute}
+		if tenant := wiring["worker.pool-tenant"]; tenant != "" {
+			spec.Tenant = core.TenantID(tenant)
+		}
+		if path := wiring["worker.pool-token-file"]; path != "" {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				_ = ln.Close()
+				return nil, fmt.Errorf("kit serve: pool token file: %w", err)
+			}
+			token := strings.TrimSpace(string(raw))
+			if _, _, err := store.EnsurePoolWithToken(ctx, spec, token); err != nil {
+				_ = ln.Close()
+				return nil, fmt.Errorf("kit serve: pool %q: %w", pool, err)
+			}
+		} else if _, _, err := store.EnsurePool(ctx, spec); err != nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: pool %q: %w", pool, err)
+		}
+	}
+	var remotes []worker.Remote
+	remote := wiring["worker.remote"]
+	remoteModel := wiring["worker.remote-model"]
+	if remote != "" {
+		if remoteModel == "" {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote needs --worker.remote-model")
+		}
+		remotes = append(remotes, worker.Remote{
+			Name: remote,
+			Descriptors: []model.Descriptor{{
+				ID:       remoteModel,
+				Provider: remote,
+				Caps:     []model.Capability{model.CapChat},
+				Params:   json.RawMessage(`{"type":"object"}`),
+				Protocol: model.ProtocolSingle,
+				Locality: model.LocalityCloud,
+			}},
+			Labels: parseLabels(wiring["worker.remote-labels"]),
+		})
+	}
+	// The platform side is a model.Invoker over the pool queue, and the router
+	// chooses between it and the configured remotes (ADR-0012 §8, REQ-MODEL-090).
+	platform := &workerPlatform{
+		ln:      ln,
+		invoker: &worker.Invoker{Store: store, Pool: pool},
+		router:  worker.NewRouter(store, remotes...),
+		pool:    pool,
+		remote:  remote,
+		model:   remoteModel,
+		labels:  parseLabels(wiring["worker.remote-labels"]),
+	}
+	platform.srv = worker.NewService(store).GRPCServer()
+	go func() {
+		if err := worker.ServeWorkerService(ctx, ln, platform.srv); err != nil {
+			fmt.Fprintln(os.Stderr, "worker service:", err)
+		}
+	}()
+	return platform, nil
+}
+
+// readyFields are the worker-side facts the ready line reports.
+func (p *workerPlatform) readyFields() []string {
+	out := []string{"worker.listen=" + p.ln.Addr().String()}
+	if p.pool != "" {
+		out = append(out, "worker.pool="+p.pool)
+	}
+	if p.remote != "" {
+		out = append(out, "worker.remote="+p.remote, "worker.remote-model="+p.model)
+		if len(p.labels) > 0 {
+			out = append(out, "worker.remote-labels="+formatLabels(p.labels))
+		}
+	}
+	return out
+}
+
+func formatLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+labels[key])
+	}
+	return strings.Join(parts, ",")
 }
 
 // startPorts opens the ports in order and binds the listener, all under ctx.

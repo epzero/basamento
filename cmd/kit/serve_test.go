@@ -490,7 +490,7 @@ func TestStartWorkerJanitorFailsWhenTheWorkerStoreCannotOpen(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := startWorkerJanitor(context.Background(), []config.Port{db}); err == nil {
+	if _, err := startWorkerJanitor(context.Background(), []config.Port{db}); err == nil {
 		t.Fatal("startWorkerJanitor accepted a store it cannot open; serve would run without the janitor")
 	}
 }

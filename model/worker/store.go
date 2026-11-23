@@ -214,15 +214,44 @@ func (s *Store) CreatePool(ctx context.Context, spec PoolSpec) (Pool, error) {
 	if err != nil {
 		return Pool{}, err
 	}
-	_, err = s.db.Execer().Exec(ctx,
+	if err := s.insertPool(ctx, spec, token); err != nil {
+		return Pool{}, err
+	}
+	return Pool{PoolSpec: spec, Token: token}, nil
+}
+
+// EnsurePoolWithToken creates the pool when it does not exist, storing token
+// as its pool token. It lets a composition root take a pool token from
+// deployment configuration, so operators can provision workers with it. Only
+// the hash is kept.
+func (s *Store) EnsurePoolWithToken(ctx context.Context, spec PoolSpec, token string) (Pool, bool, error) {
+	if strings.TrimSpace(token) == "" {
+		return Pool{}, false, core.NewError(core.CodeInvalidArgument,
+			"worker: pool token must not be empty", nil)
+	}
+	p, err := s.Pool(ctx, spec.ID)
+	switch {
+	case err == nil:
+		return Pool{PoolSpec: p}, false, nil
+	case core.CodeOf(err) != core.CodeNotFound:
+		return Pool{}, false, err
+	}
+	if err := spec.validate(); err != nil {
+		return Pool{}, false, err
+	}
+	if err := s.insertPool(ctx, spec, token); err != nil {
+		return Pool{}, false, err
+	}
+	return Pool{PoolSpec: spec, Token: token}, true, nil
+}
+
+func (s *Store) insertPool(ctx context.Context, spec PoolSpec, token string) error {
+	_, err := s.db.Execer().Exec(ctx,
 		`INSERT INTO worker_pools (pool_id, tenant, token_hash, token_revoked, ageing_ms, lease_ms, grace_ms, created_unix_ms)
 		 VALUES (?, ?, ?, 0, ?, ?, ?, ?)`,
 		spec.ID, string(spec.Tenant), hashToken(token), spec.Ageing.Milliseconds(),
 		spec.Lease.Milliseconds(), spec.Grace.Milliseconds(), unixms(s.now()))
-	if err != nil {
-		return Pool{}, err
-	}
-	return Pool{PoolSpec: spec, Token: token}, nil
+	return err
 }
 
 // EnsurePool creates the pool when it does not exist and returns the token
