@@ -41,9 +41,12 @@ eight packages until one layer key `contracts/gen` exists.
   before generated imports exist may leave `// indirect` until tidy.
 - **`contracts/buf.gen.yaml`:** `version: v2`, top-level **`clean: true`**
   (deletes output dirs before generate; stale `.pb.go` from removed protos do
-  not survive), `managed` with `go_package_prefix:
-  github.com/epzero/basamento/contracts/gen/go`, plugins `local: [go, tool,
-  protoc-gen-go]` and `local: [go, tool, protoc-gen-connect-go]`, `out: gen/go`,
+  not survive); `managed: {enabled: true, override: [{file_option:
+  go_package_prefix, value: github.com/epzero/basamento/contracts/gen/go}]}`
+  — the v1-era top-level `managed.go_package_prefix` field is rejected by v2
+  config decode (`field go_package_prefix not found`); plugins
+  `local: [go, tool, protoc-gen-go]` and
+  `local: [go, tool, protoc-gen-connect-go]`, `out: gen/go`,
   `opt: paths=source_relative`.
 - **Bumps:** protobuf patch → match `protoc-gen-go`, regenerate; connect → match
   `protoc-gen-connect-go` and `require`, regenerate. A `BUF_VERSION` bump lands
@@ -73,6 +76,11 @@ contracts module, partial generation.
   owner** of skip-versus-strict for this check. **`go tool gate contracts-gen`**
   assumes `buf` is on `PATH`; when invoked by hand without it, exit with
   `buf not found: run make tools` — it does **not** read `GATE_STRICT`.
+- **Version preflight:** both recipes that run `buf` (`generate` and G1)
+  first compare `buf --version` with `$(BUF_VERSION)` and fail
+  `buf <got>, want $(BUF_VERSION): run make tools` on a mismatch — a `buf`
+  of another version can emit different bytes, and the drift check must not
+  depend on which one is first on `PATH`.
 - **Drift algorithm:** `cd contracts && buf generate --output <tmpdir>` (does
   not touch the committed tree), then recursively compare `<tmpdir>/gen` with
   `contracts/gen` (differing, missing, extra, and **non-regular** entries — a
@@ -88,11 +96,21 @@ contracts module, partial generation.
   clean tree; differing, missing, extra files; extra package outside `go/`;
   non-regular entries; generate error. Extend
   `internal/gate/makefile_test.go` to pin that `generate` and `contracts-gen`
-  exist and `contracts-gen` is on the `static` list (same style as existing pin
-  tests).
+  exist, `contracts-gen` is on the `static` list, and both recipes reference
+  `$(BUF_VERSION)` (same style as existing pin tests).
 
 `buf breaking` (wire JSON vs base) and `contracts-gen` (committed Go vs protos
-and pins) are orthogonal. No `.github/workflows/gate.yml` or `make tools` change.
+and pins) are orthogonal. No `.github/workflows/gate.yml` change and no
+`make tools` change: `make tools` keeps installing the pinned `buf` only.
+
+**Plugin bootstrap (no `go install` step).** The two generators are `tool`
+lines in the root `go.mod` (D1); `local: [go, tool, protoc-gen-go]` runs them
+through the Go toolchain, which resolves the pinned patch from the module
+graph, downloads it from the proxy on first use, and then reuses the module
+cache. So `make tools` + `make generate` is complete: `make tools` supplies
+`buf`, the `tool` lines supply the plugins. Probe (2026-11-23, buf v1.75.0):
+without the `tool` lines, `buf generate` fails
+`go: no such tool "protoc-gen-go"`; with them present it succeeds.
 
 ### D4 — Layering
 
@@ -178,8 +196,10 @@ All four contracts in one toolchain change (~6.5k lines).
 
 ### D9 — Operations
 
-`make tools` + `make generate` when regenerating; committed gen lets **`go
-build`** work without `buf`. **`go build ./...`** still needs the module cache
+`make tools` (pinned `buf`) + `make generate` when regenerating; plugin
+binaries come from the `go.mod` `tool` lines, not from `make tools` (D3), so a
+cold module cache needs network once. Committed gen lets **`go build`** work
+without `buf`. **`go build ./...`** still needs the module cache
 to hold **`connectrpc.com/connect`** and protobuf, because generated packages
 import them — same as every other dependency, with this ADR adding connect. CI
 has network; on a machine with `GOPROXY=off` the cache must be filled once by
@@ -233,7 +253,7 @@ grants, `.gitattributes` and §Skip entries; regenerate `overview.md` §3 via
 | `contracts/gen/**` | D2, D8 output (`go/` from buf; tree must match drift) | Developer | High |
 | `go.mod`, `go.sum` | D1 `tool` + tidy (network) | Developer | High |
 | `layering.yaml` | D4 toolchain portion; EP0-227 adds `model/worker/dialout` | Developer | High |
-| `Makefile` | `generate` (direct buf); `contracts-gen: $(call tool,buf,$(GATE) contracts-gen)` on `static` | Developer | High |
+| `Makefile` | `generate` (direct buf); `contracts-gen: $(call tool,buf,$(GATE) contracts-gen)` on `static`; both preflight `buf --version` against `$(BUF_VERSION)` | Developer | High |
 | `internal/gate/contracts_gen.go` (+ tests, `makefile_test` pins) | D3 | Developer | High |
 | `tools/gate` | Register `contracts-gen` | Developer | High |
 | `.gitattributes` | D6 | Developer | Medium |
