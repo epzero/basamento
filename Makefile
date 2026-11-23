@@ -104,7 +104,7 @@ test: ## G3 (includes the BDD suite)
 bdd:
 	@mkdir -p .gate/bin
 	@if [ -z "$$EP_SUPERVISOR" ] && [ -x "$(GATE_PG_BIN)" ]; then export EP_SUPERVISOR="$$(pwd)/$(GATE_PG_BIN)"; fi; \
-	$(GO) test -race -count=1 ./internal/bdd/ && $(MAKE) --no-print-directory bdd-skips
+	$(GO) test -race -count=1 -timeout 20m ./internal/bdd/ && $(MAKE) --no-print-directory bdd-skips
 
 bdd-skips:
 	$(GATE) bdd-skips

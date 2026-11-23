@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres/v2"
 )
@@ -66,6 +67,26 @@ func TestMakefileRedgreenExportsHeadSupervisor(t *testing.T) {
 	}
 	if !red.MatchString(body) {
 		t.Fatal("Makefile redgreen: must export EP_SUPERVISOR when GATE_PG_BIN is executable (G4 parity)")
+	}
+}
+
+// TestMakefileBDDHasTestTimeout pins the bdd target's explicit test timeout:
+// the suite runs every feature in both profiles and takes longer than Go's
+// 10-minute default, so a silent drop back to the default must fail here
+// instead of panicking with "test timed out" in CI.
+func TestMakefileBDDHasTestTimeout(t *testing.T) {
+	body := makefileBody(t)
+	block := regexp.MustCompile(`(?ms)^bdd:.*?^\S`).FindString(body)
+	m := regexp.MustCompile(`-timeout[= ](\S+)`).FindStringSubmatch(block)
+	if m == nil {
+		t.Fatal("Makefile bdd: must pass -timeout explicitly; Go's 10m default is below the suite's cost")
+	}
+	d, err := time.ParseDuration(m[1])
+	if err != nil {
+		t.Fatalf("Makefile bdd: -timeout %q is not a Go duration: %v", m[1], err)
+	}
+	if d < 15*time.Minute {
+		t.Fatalf("Makefile bdd: -timeout %s leaves no headroom; want at least 15m", d)
 	}
 }
 
