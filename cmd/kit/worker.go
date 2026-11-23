@@ -610,9 +610,9 @@ func loadWorkerProviders(list string) ([]worker.Descriptor, map[string]model.Inv
 		var invoker model.Invoker
 		switch {
 		case m.CLI != nil:
-			invoker, err = providers.NewCLI(m, providers.CLIOptions{})
+			invoker, err = providers.NewCLI(m, providers.CLIOptions{Clock: core.SystemClock{}})
 		case m.HTTP != nil:
-			invoker, err = providers.NewHTTP(m, providers.HTTPOptions{Credentials: envCredentials{}})
+			invoker, err = providers.NewHTTP(m, providers.HTTPOptions{Credentials: envCredentials{}, Clock: core.SystemClock{}})
 		default:
 			err = fmt.Errorf("manifest %q has no driver", path)
 		}

@@ -121,6 +121,12 @@ func runServe(args []string) {
 			os.Exit(1)
 		}
 	}
+	if platform != nil {
+		// The worker composition facts are served on the loopback main
+		// listener, like /healthz: a scenario and an operator can ask which
+		// Invoker and Router this process actually built (MODEL-090-01).
+		mux.HandleFunc("/worker/composition", platform.serveComposition)
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
@@ -236,17 +242,36 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 			_ = ln.Close()
 			return nil, fmt.Errorf("kit serve: --worker.remote needs --worker.remote-model")
 		}
+		manifest := wiring["worker.remote-manifest"]
+		if manifest == "" {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote needs --worker.remote-manifest so the remote has an Invoker")
+		}
+		descs, invokers, err := loadWorkerProviders(manifest)
+		if err != nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-manifest: %w", err)
+		}
+		invoker := invokers[remoteModel]
+		if invoker == nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-model %q is not served by --worker.remote-manifest %q", remoteModel, manifest)
+		}
+		remoteDescs := make([]model.Descriptor, 0, 1)
+		for _, d := range descs {
+			if d.ID == remoteModel {
+				remoteDescs = append(remoteDescs, d.Descriptor)
+			}
+		}
+		if len(remoteDescs) == 0 {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-model %q is not served by --worker.remote-manifest %q", remoteModel, manifest)
+		}
 		remotes = append(remotes, worker.Remote{
-			Name: remote,
-			Descriptors: []model.Descriptor{{
-				ID:       remoteModel,
-				Provider: remote,
-				Caps:     []model.Capability{model.CapChat},
-				Params:   json.RawMessage(`{"type":"object"}`),
-				Protocol: model.ProtocolSingle,
-				Locality: model.LocalityCloud,
-			}},
-			Labels: parseLabels(wiring["worker.remote-labels"]),
+			Name:        remote,
+			Invoker:     invoker,
+			Descriptors: remoteDescs,
+			Labels:      parseLabels(wiring["worker.remote-labels"]),
 		})
 	}
 	// The platform side is a model.Invoker over the pool queue, and the router
@@ -298,13 +323,107 @@ func (p *workerPlatform) readyFields() []string {
 	if p.pool != "" {
 		out = append(out, "worker.pool="+p.pool)
 	}
+	if p.invoker != nil {
+		out = append(out, "worker.invoker="+p.invoker.Provider())
+	}
 	if p.remote != "" {
 		out = append(out, "worker.remote="+p.remote, "worker.remote-model="+p.model)
 		if len(p.labels) > 0 {
 			out = append(out, "worker.remote-labels="+formatLabels(p.labels))
 		}
 	}
+	// The route is derived from the composed router, not from the flags: if
+	// the router or a remote's Invoker is not wired, this field disappears or
+	// the endpoint below refuses (MODEL-090-01).
+	if p.router != nil && p.model != "" {
+		ctx := context.Background()
+		if len(p.labels) > 0 {
+			ctx = worker.WithLabels(ctx, p.labels)
+		}
+		if dest, err := p.router.Select(ctx, "", p.model); err == nil {
+			target := "pool:" + dest.Pool
+			if dest.IsRemote && dest.Remote != nil {
+				target = "remote:" + dest.Remote.Name
+			}
+			out = append(out, "worker.routes="+p.model+"="+target)
+		}
+	}
 	return out
+}
+
+// compositionView is what kit serve reports about the worker side it actually
+// composed. A scenario reads it instead of rebuilding an Invoker or Router
+// over the same database, so a composition root that stopped assigning them
+// cannot pass (MODEL-090-01).
+type compositionView struct {
+	Invoker string           `json:"invoker"`
+	Pool    string           `json:"pool,omitempty"`
+	Route   compositionRoute `json:"route"`
+	Result  *compositionRun  `json:"result,omitempty"`
+}
+
+type compositionRoute struct {
+	Model         string `json:"model"`
+	Target        string `json:"target"`
+	RemoteInvoker string `json:"remote_invoker,omitempty"`
+}
+
+type compositionRun struct {
+	State string `json:"state"`
+}
+
+// serveComposition answers routing and result questions from the Invoker and
+// Router kit serve built. It fails closed when either is missing, so removing
+// the composition turns the assertion red.
+func (p *workerPlatform) serveComposition(w http.ResponseWriter, r *http.Request) {
+	if p == nil || p.invoker == nil || p.router == nil {
+		http.Error(w, "worker composition is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	tenant := core.TenantID(q.Get("tenant"))
+	modelID := q.Get("model")
+	if tenant == "" || modelID == "" {
+		http.Error(w, "tenant and model are required", http.StatusBadRequest)
+		return
+	}
+	ctx := core.WithTenant(r.Context(), tenant)
+	if labels := parseLabels(q.Get("labels")); len(labels) > 0 {
+		ctx = worker.WithLabels(ctx, labels)
+	}
+	dest, err := p.router.Select(ctx, tenant, modelID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	view := compositionView{Invoker: p.invoker.Provider(), Pool: p.pool}
+	view.Route.Model = modelID
+	if dest.IsRemote && dest.Remote != nil {
+		view.Route.Target = "remote:" + dest.Remote.Name
+		view.Route.RemoteInvoker = invokerName(dest.Remote.Invoker)
+	} else {
+		view.Route.Target = "pool:" + dest.Pool
+	}
+	if ref := q.Get("ref"); ref != "" {
+		res, err := p.invoker.Result(ctx, model.Handle{Provider: p.invoker.Provider(), ClientRef: ref})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		view.Result = &compositionRun{State: string(res.State)}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(view)
+}
+
+func invokerName(inv model.Invoker) string {
+	if named, ok := inv.(interface{ Provider() string }); ok {
+		return named.Provider()
+	}
+	if inv == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T", inv)
 }
 
 func formatLabels(labels map[string]string) string {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,6 +79,7 @@ type workerWorld struct {
 	kit      *kitProcess
 	kitDir   string
 	kitAddr  string
+	kitHTTP  string
 	kitReady string
 	kitToken string
 	kitSQL   string
@@ -666,6 +669,23 @@ func (w *workerWorld) startKitServe(ctx context.Context, pool string) error {
 	if err := os.WriteFile(tokenFile, []byte(w.kitToken+"\n"), 0o600); err != nil {
 		return err
 	}
+	manifest := filepath.Join(dir, "cloud-llm.yaml")
+	// The remote is a real manifest-driven provider; the scenario only asks
+	// the router to choose it, never calls the vendor.
+	if err := os.WriteFile(manifest, []byte(`name: cloud-llm
+locality: cloud
+protocol: single
+http:
+  base_url: http://127.0.0.1:1
+  start:
+    method: POST
+    path: /start
+models:
+  - id: sdxl
+    caps: [chat]
+`), 0o600); err != nil {
+		return err
+	}
 	args := []string{
 		"serve", "--profile", "embedded",
 		"--listen.addr", httpAddr,
@@ -676,6 +696,7 @@ func (w *workerWorld) startKitServe(ctx context.Context, pool string) error {
 		"--worker.pool-token-file", tokenFile,
 		"--worker.remote", "cloud-llm",
 		"--worker.remote-model", "sdxl",
+		"--worker.remote-manifest", manifest,
 		"--worker.remote-labels", "region=eu",
 	}
 	w.kit, err = startKit(dir, args, nil)
@@ -687,6 +708,7 @@ func (w *workerWorld) startKitServe(ctx context.Context, pool string) error {
 		return err
 	}
 	w.kitReady = line
+	w.kitHTTP = httpAddr
 	w.kitAddr = readyField(line, "worker.listen")
 	if w.kitAddr == "" {
 		return fmt.Errorf("ready line %q reports no worker listener", line)
@@ -710,6 +732,43 @@ func (w *workerWorld) openKitStore(ctx context.Context) (*worker.Store, error) {
 	}
 	w.kitStore = st
 	return st, nil
+}
+
+// kitComposition asks kit serve what its composed Invoker and Router answer.
+// The scenario never builds its own Router or Invoker over the database.
+func (w *workerWorld) kitComposition(ctx context.Context, values url.Values) (kitComposition, error) {
+	var view kitComposition
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+w.kitHTTP+"/worker/composition?"+values.Encode(), nil)
+	if err != nil {
+		return view, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return view, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return view, fmt.Errorf("kit serve /worker/composition returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		return view, err
+	}
+	return view, nil
+}
+
+// kitComposition mirrors the JSON kit serve reports for its worker side.
+type kitComposition struct {
+	Invoker string `json:"invoker"`
+	Pool    string `json:"pool"`
+	Route   struct {
+		Model         string `json:"model"`
+		Target        string `json:"target"`
+		RemoteInvoker string `json:"remote_invoker"`
+	} `json:"route"`
+	Result *struct {
+		State string `json:"state"`
+	} `json:"result"`
 }
 
 // finishOverKit queues one invocation in kit serve's store and has the worker
@@ -1499,18 +1558,20 @@ func registerWorker(sc *godog.ScenarioContext) {
 	})
 	sc.Step(`^the model\.Invoker accounted invocation "([^"]*)"$`, func(ctx context.Context, ref string) error {
 		w := world(ctx).Worker
-		st, err := w.openKitStore(ctx)
+		view, err := w.kitComposition(ctx, url.Values{
+			"tenant": {"acme"}, "model": {"sdxl"}, "ref": {ref},
+		})
 		if err != nil {
 			return err
 		}
-		invoker := &worker.Invoker{Store: st, Pool: "acme-gpu"}
-		runCtx := core.WithTenant(ctx, core.TenantID("acme"))
-		res, err := invoker.Result(runCtx, model.Handle{Provider: invoker.Provider(), ClientRef: ref})
-		if err != nil {
-			return fmt.Errorf("model.Invoker did not account invocation %q: %w", ref, err)
+		if view.Invoker != "worker:acme-gpu" {
+			return fmt.Errorf("kit serve reports invoker %q, want worker:acme-gpu", view.Invoker)
 		}
-		if res.State != model.StateSucceeded {
-			return fmt.Errorf("invocation %q is %s, want succeeded", ref, res.State)
+		if view.Result == nil {
+			return fmt.Errorf("kit serve's model.Invoker did not account invocation %q", ref)
+		}
+		if view.Result.State != string(model.StateSucceeded) {
+			return fmt.Errorf("invocation %q is %s, want succeeded", ref, view.Result.State)
 		}
 		return nil
 	})
@@ -1522,36 +1583,25 @@ func registerWorker(sc *godog.ScenarioContext) {
 		if got := readyField(w.kitReady, "worker.remote-model"); got != modelID {
 			return fmt.Errorf("ready line reports remote model %q, want %q", got, modelID)
 		}
-		st, err := w.openKitStore(ctx)
+		if got := readyField(w.kitReady, "worker.routes"); got != modelID+"=remote:"+remoteName {
+			return fmt.Errorf("ready line reports routes %q, want %q", got, modelID+"=remote:"+remoteName)
+		}
+		plain, err := w.kitComposition(ctx, url.Values{"tenant": {"acme"}, "model": {modelID}})
 		if err != nil {
 			return err
 		}
-		remote := worker.Remote{
-			Name: remoteName,
-			Descriptors: []model.Descriptor{{
-				ID: modelID, Provider: remoteName, Caps: []model.Capability{model.CapChat},
-				Params: json.RawMessage(`{"type":"object"}`), Protocol: model.ProtocolSingle,
-				Locality: model.LocalityCloud,
-			}},
-			Labels:  parseReadyLabels(readyField(w.kitReady, "worker.remote-labels")),
-			Invoker: &cloudSim{},
+		if plain.Route.Target != "pool:acme-gpu" {
+			return fmt.Errorf("kit serve's router chose %q, want the worker pool", plain.Route.Target)
 		}
-		router := worker.NewRouter(st, remote)
-		tenant := core.TenantID("acme")
-		chosen, err := router.Select(core.WithTenant(ctx, tenant), tenant, modelID)
+		labelled, err := w.kitComposition(ctx, url.Values{
+			"tenant": {"acme"}, "model": {modelID},
+			"labels": {readyField(w.kitReady, "worker.remote-labels")},
+		})
 		if err != nil {
 			return err
 		}
-		if chosen.IsRemote || chosen.Pool == "" {
-			return fmt.Errorf("router chose remote %v, want the worker pool", chosen.Remote)
-		}
-		labelled := worker.WithLabels(core.WithTenant(ctx, tenant), map[string]string{"region": "eu"})
-		chosenRemote, err := router.Select(labelled, tenant, modelID)
-		if err != nil {
-			return err
-		}
-		if !chosenRemote.IsRemote || chosenRemote.Remote.Name != remoteName {
-			return fmt.Errorf("router did not choose remote %q for the labelled call", remoteName)
+		if labelled.Route.Target != "remote:"+remoteName || labelled.Route.RemoteInvoker != remoteName {
+			return fmt.Errorf("kit serve's labelled route is %+v, want remote %q with its invoker", labelled.Route, remoteName)
 		}
 		return nil
 	})
