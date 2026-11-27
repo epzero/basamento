@@ -31,8 +31,8 @@ func TestOpenWorkerTransportPicksEmbeddedOrDialOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeRemote()
-	if _, ok := remote.(*worker.GRPCTransport); !ok {
-		t.Fatalf("pool transport = %T, want *worker.GRPCTransport", remote)
+	if _, ok := remote.(*worker.ConnectTransport); !ok {
+		t.Fatalf("pool transport = %T, want *worker.ConnectTransport", remote)
 	}
 	if remoteStore != nil {
 		t.Fatalf("pool transport returned store %v, want nil", remoteStore)

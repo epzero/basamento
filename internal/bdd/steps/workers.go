@@ -68,10 +68,10 @@ type workerWorld struct {
 	// listener the platform hosts and a client the worker dials.
 	platformAddr   string
 	platformLn     net.Listener
-	platformSrv    interface{ Stop() }
+	platformSrv    *worker.Server
 	platformCancel context.CancelFunc
 	platform       *worker.Service
-	transport      *worker.GRPCTransport
+	transport      *worker.ConnectTransport
 	wireClient     *worker.Client
 	workedOverWire bool
 
@@ -248,7 +248,7 @@ func (w *workerWorld) teardown() {
 		w.platformCancel = nil
 	}
 	if w.platformSrv != nil {
-		w.platformSrv.Stop()
+		_ = w.platformSrv.Stop()
 		w.platformSrv = nil
 	}
 	if w.platformLn != nil {
@@ -595,14 +595,14 @@ func (w *workerWorld) startPlatformListener(ctx context.Context) error {
 		return err
 	}
 	svc := worker.NewService(st)
-	srv := svc.GRPCServer(nil)
+	srv := svc.Server(nil)
 	pctx, cancel := context.WithCancel(ctx)
 	w.platformAddr = ln.Addr().String()
 	w.platformLn = ln
 	w.platformSrv = srv
 	w.platform = svc
 	w.platformCancel = cancel
-	go func() { _ = worker.ServeWorkerService(pctx, ln, srv, false) }()
+	go func() { _ = srv.Serve(pctx, ln) }()
 	return nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -30,8 +31,6 @@ import (
 	"github.com/epzero/basamento/platform/credentials"
 	"github.com/epzero/basamento/platform/secrets"
 	"github.com/epzero/basamento/platform/sql"
-	"google.golang.org/grpc"
-	grpccreds "google.golang.org/grpc/credentials"
 )
 
 // wirePort is one port the composition root opens, in start-up order.
@@ -180,7 +179,7 @@ func startWorkerJanitor(ctx context.Context, opened []config.Port) (*worker.Stor
 // REQ-MODEL-090). It owns no worker address: the platform never dials one.
 type workerPlatform struct {
 	ln      net.Listener
-	srv     *grpc.Server
+	srv     *worker.Server
 	invoker *worker.Invoker
 	router  *worker.Router
 	pool    string
@@ -201,15 +200,15 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 		KeyFile:  wiring["worker.tls.key-file"],
 		CAFile:   wiring["worker.tls.ca-file"],
 	}
-	var serverCreds grpccreds.TransportCredentials
+	var serverTLS *tls.Config
 	if !tlsConfig.Empty() {
 		var err error
-		serverCreds, err = tlsConfig.ServerCredentials()
+		serverTLS, err = tlsConfig.ServerTLS()
 		if err != nil {
 			return nil, fmt.Errorf("kit serve: %w", err)
 		}
 	}
-	if err := validateWorkerListen(wiring["worker.listen"], serverCreds != nil); err != nil {
+	if err := validateWorkerListen(wiring["worker.listen"], serverTLS != nil); err != nil {
 		return nil, err
 	}
 	ln, err := net.Listen("tcp", wiring["worker.listen"])
@@ -289,9 +288,9 @@ func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[st
 		model:   remoteModel,
 		labels:  parseLabels(wiring["worker.remote-labels"]),
 	}
-	platform.srv = worker.NewService(store).GRPCServer(serverCreds)
+	platform.srv = worker.NewService(store).Server(serverTLS)
 	go func() {
-		if err := worker.ServeWorkerService(ctx, ln, platform.srv, serverCreds != nil); err != nil {
+		if err := platform.srv.Serve(ctx, ln); err != nil {
 			fmt.Fprintln(os.Stderr, "worker service:", err)
 		}
 	}()

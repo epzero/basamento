@@ -14,7 +14,7 @@ import (
 // Transport is the worker's side of basamento.worker.v1: short calls, each
 // naming the worker and the lease it is about, so a dropped connection costs a
 // short delay and never an invocation (ADR-0012 §4). The platform implements
-// the same calls over gRPC.
+// the same calls over Connect.
 type Transport interface {
 	Join(ctx context.Context, req JoinRequest) (Worker, error)
 	Lease(ctx context.Context, req LeaseRequest) ([]Invocation, error)

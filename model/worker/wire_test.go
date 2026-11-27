@@ -59,13 +59,13 @@ func TestInvocationRoundTripsOverTheWire(t *testing.T) {
 	}
 }
 
-func TestCodesSurviveTheStatusRoundTrip(t *testing.T) {
+func TestCodesSurviveTheConnectRoundTrip(t *testing.T) {
 	for _, code := range []core.Code{
 		core.CodeInvalidArgument, core.CodeNotFound, core.CodeConflict, core.CodeUnauthenticated,
 		core.CodeUnavailable, CodeLeaseLost,
 	} {
 		err := core.NewError(code, "refused", nil)
-		if got := core.CodeOf(fromStatus(toStatus(err))); got != code {
+		if got := core.CodeOf(fromConnect(toConnect(err))); got != code {
 			t.Fatalf("code %q came back as %q", code, got)
 		}
 	}

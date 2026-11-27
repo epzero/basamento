@@ -26,7 +26,7 @@ func TestWorkerServiceTLSPair(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverCreds, err := (TLSConfig{CertFile: serverCert, KeyFile: serverKey, CAFile: caFile}).ServerCredentials()
+	serverTLS, err := (TLSConfig{CertFile: serverCert, KeyFile: serverKey, CAFile: caFile}).ServerTLS()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +36,14 @@ func TestWorkerServiceTLSPair(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv := NewService(store).GRPCServer(serverCreds)
-	go func() { _ = ServeWorkerService(ctx, ln, srv, true) }()
+	srv := NewService(store).Server(serverTLS)
+	go func() { _ = srv.Serve(ctx, ln) }()
 
-	clientCreds, err := ClientCredentials(clientCert, clientKey, caFile)
+	clientTLS, err := ClientTLS(clientCert, clientKey, caFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr, err := DialWorkerService(ln.Addr().String(), clientCreds)
+	tr, err := DialWorkerService(ln.Addr().String(), clientTLS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestWorkerServiceTLSPair(t *testing.T) {
 
 	// The peer verifies the client certificate: a client without one is
 	// refused even though the server certificate is trusted.
-	noCert, err := ClientCredentials("", "", caFile)
+	noCert, err := ClientTLS("", "", caFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,9 +80,9 @@ func TestWorkerServiceTLSPair(t *testing.T) {
 
 func TestPlaintextWorkerListenerRefusesOffLoopback(t *testing.T) {
 	ln := &addrListener{Listener: mustListen(t), addr: &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 8443}}
-	err := ServeWorkerService(context.Background(), ln, NewService(nil).GRPCServer(nil), false)
+	err := NewService(nil).Server(nil).Serve(context.Background(), ln)
 	if core.CodeOf(err) != core.CodeInvalidArgument {
-		t.Fatalf("ServeWorkerService off loopback = %v, want invalid_argument", err)
+		t.Fatalf("Serve off loopback = %v, want invalid_argument", err)
 	}
 }
 

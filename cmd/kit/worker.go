@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,19 +26,17 @@ import (
 // openWorkerTransport picks the transport ADR-0012 describes: the embedded
 // SQL store when poolURL is empty, or the dial-out WorkerService client when
 // it is set. It returns the embedded store, if any, for the worker's janitor.
-func openWorkerTransport(ctx context.Context, poolURL, sqlURL string, tls worker.TLSConfig) (worker.Transport, *worker.Store, func(), error) {
+func openWorkerTransport(ctx context.Context, poolURL, sqlURL string, tlsFiles worker.TLSConfig) (worker.Transport, *worker.Store, func(), error) {
 	if poolURL != "" {
-		var tr *worker.GRPCTransport
-		var err error
-		if tls.Empty() {
-			tr, err = worker.DialWorkerService(poolURL)
-		} else {
-			creds, cerr := worker.ClientCredentials(tls.CertFile, tls.KeyFile, tls.CAFile)
+		var tlsConfig *tls.Config
+		if !tlsFiles.Empty() {
+			cfg, cerr := worker.ClientTLS(tlsFiles.CertFile, tlsFiles.KeyFile, tlsFiles.CAFile)
 			if cerr != nil {
 				return nil, nil, func() {}, fmt.Errorf("kit worker: %w", cerr)
 			}
-			tr, err = worker.DialWorkerService(poolURL, creds)
+			tlsConfig = cfg
 		}
+		tr, err := worker.DialWorkerService(poolURL, tlsConfig)
 		if err != nil {
 			return nil, nil, func() {}, fmt.Errorf("kit worker: %w", err)
 		}
