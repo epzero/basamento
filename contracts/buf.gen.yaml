@@ -1,0 +1,27 @@
+# Go bindings for the worker contract, served over Connect (ADR-0012).
+#
+# `make proto` runs `buf generate` with this template from `contracts/`. The
+# generated files land next to their package so layering keeps them with the
+# layer that owns the contract's Go side. Only the worker contract has a Go
+# transport today; other contracts are generated when their service lands.
+version: v2
+inputs:
+  - directory: .
+    paths:
+      - basamento/worker/v1
+plugins:
+  - local: protoc-gen-go
+    out: ..
+    opt:
+      - paths=import
+      - module=github.com/epzero/basamento
+      - Mbasamento/worker/v1/worker.proto=github.com/epzero/basamento/model/worker/pb
+  - local: protoc-gen-connect-go
+    out: ..
+    opt:
+      - paths=import
+      - module=github.com/epzero/basamento
+      - Mbasamento/worker/v1/worker.proto=github.com/epzero/basamento/model/worker/pb
+      # Keep the handler in the messages' package instead of a sub-package:
+      # model/worker is the layer that owns the contract's Go side.
+      - package_suffix=

@@ -4,16 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/epzero/basamento/core"
+	"github.com/epzero/basamento/core/coretest"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/model"
+	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform/credentials"
 	psql "github.com/epzero/basamento/platform/sql"
 )
@@ -490,7 +498,134 @@ func TestStartWorkerJanitorFailsWhenTheWorkerStoreCannotOpen(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := startWorkerJanitor(context.Background(), []config.Port{db}); err == nil {
+	if _, err := startWorkerJanitor(context.Background(), []config.Port{db}); err == nil {
 		t.Fatal("startWorkerJanitor accepted a store it cannot open; serve would run without the janitor")
+	}
+}
+
+// compositionInvoker is enough of a model.Invoker for routing: the endpoint
+// only names it, so the test never reaches a vendor.
+type compositionInvoker struct{ name string }
+
+func (c compositionInvoker) Provider() string { return c.name }
+func (compositionInvoker) Describe(context.Context) ([]model.Descriptor, error) {
+	return nil, nil
+}
+func (compositionInvoker) Start(context.Context, model.Request) (model.Handle, error) {
+	return model.Handle{}, errors.New("not called")
+}
+func (compositionInvoker) Events(context.Context, model.Handle, int64) (<-chan model.Event, error) {
+	return nil, errors.New("not called")
+}
+func (compositionInvoker) Result(context.Context, model.Handle) (model.Result, error) {
+	return model.Result{}, errors.New("not called")
+}
+func (compositionInvoker) Cancel(context.Context, model.Handle) error { return nil }
+func (compositionInvoker) Lookup(context.Context, string) (*model.Handle, error) {
+	return nil, nil
+}
+
+func TestCompositionEndpointUsesTheComposedInvokerAndRouter(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	db, err := psql.Open(ctx, "sqlite:///"+t.TempDir()+"/worker.db", fstest.MapFS{
+		"00001_noop.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n-- +goose Down\nSELECT 1;\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := worker.Open(ctx, db, worker.Options{Clock: coretest.NewFakeClock(at), IDs: &coretest.SeqIds{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := store.CreatePool(ctx, worker.PoolSpec{ID: "acme-gpu", Lease: 5 * time.Minute, Grace: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Join(ctx, worker.JoinRequest{
+		PoolToken: pool.Token, ProtocolVersion: worker.ProtocolVersion,
+		Descriptors: []worker.Descriptor{{
+			Descriptor: model.Descriptor{ID: "sdxl", Caps: []model.Capability{model.CapChat}},
+			Units:      1,
+		}},
+		Capacity: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	remote := worker.Remote{
+		Name:        "cloud-llm",
+		Invoker:     compositionInvoker{name: "cloud-llm"},
+		Descriptors: []model.Descriptor{{ID: "sdxl", Caps: []model.Capability{model.CapChat}}},
+		Labels:      map[string]string{"region": "eu"},
+	}
+	platform := &workerPlatform{
+		invoker: &worker.Invoker{Store: store, Pool: "acme-gpu"},
+		router:  worker.NewRouter(store, remote),
+		pool:    "acme-gpu",
+	}
+
+	rec := httptest.NewRecorder()
+	platform.serveComposition(rec, httptest.NewRequest(http.MethodGet, "/worker/composition?tenant=acme&model=sdxl", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("composition status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var plain compositionView
+	if err := json.Unmarshal(rec.Body.Bytes(), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.Invoker != "worker:acme-gpu" || plain.Route.Target != "pool:acme-gpu" {
+		t.Fatalf("composition = %+v, want the kit serve invoker and pool route", plain)
+	}
+
+	rec = httptest.NewRecorder()
+	platform.serveComposition(rec, httptest.NewRequest(http.MethodGet, "/worker/composition?tenant=acme&model=sdxl&labels=region%3Deu", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("labelled composition status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var labelled compositionView
+	if err := json.Unmarshal(rec.Body.Bytes(), &labelled); err != nil {
+		t.Fatal(err)
+	}
+	if labelled.Route.Target != "remote:cloud-llm" || labelled.Route.RemoteInvoker != "cloud-llm" {
+		t.Fatalf("labelled composition = %+v, want the composed remote and its invoker", labelled.Route)
+	}
+}
+
+// TestCompositionEndpointFailsWithoutComposition is the guard the BDD scenario
+// relies on: if startWorkerPlatform stops assigning invoker/router, the
+// endpoint refuses and MODEL-090-01 fails instead of passing vacuously.
+func TestCompositionEndpointFailsWithoutComposition(t *testing.T) {
+	for name, platform := range map[string]*workerPlatform{
+		"nil platform": {},
+		"no invoker":   {router: worker.NewRouter(nil)},
+		"no router":    {invoker: &worker.Invoker{}},
+	} {
+		rec := httptest.NewRecorder()
+		platform.serveComposition(rec, httptest.NewRequest(http.MethodGet, "/worker/composition?tenant=acme&model=sdxl", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: status = %d, want 503", name, rec.Code)
+		}
+	}
+}
+
+func TestValidateWorkerWiringNamesTheMissingFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		wiring map[string]string
+		want   string
+	}{
+		{"pool without listener", map[string]string{"worker.pool": "acme-gpu"}, "--worker.pool needs --worker.listen"},
+		{"token file without pool", map[string]string{"worker.listen": "127.0.0.1:0", "worker.pool-token-file": "token"}, "--worker.pool-token-file needs --worker.pool"},
+		{"remote without manifest", map[string]string{"worker.listen": "127.0.0.1:0", "worker.remote": "cloud", "worker.remote-model": "sdxl"}, "--worker.remote needs --worker.remote-manifest"},
+		{"tls without cert", map[string]string{"worker.listen": "127.0.0.1:0", "worker.tls.key-file": "key.pem"}, "--worker.tls.cert-file"},
+	} {
+		err := validateWorkerWiring(tc.wiring)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: validateWorkerWiring = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	if err := validateWorkerWiring(map[string]string{}); err != nil {
+		t.Fatalf("empty wiring = %v, want nil", err)
 	}
 }

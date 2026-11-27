@@ -14,6 +14,8 @@ endif
 
 # The versions of the optional tools, pinned here once for people, agents and CI.
 BUF_VERSION           := v1.75.0
+CONNECT_GO_VERSION    := v1.21.1
+PROTOC_GEN_GO_VERSION := v1.36.11
 GOVULNCHECK_VERSION   := v1.9.0
 GO_LICENSES_VERSION   := v2.0.1
 GOLANGCI_LINT_VERSION := v2.15.0
@@ -25,7 +27,7 @@ define tool
 	else echo "gate: skip $(1) (not installed)"; fi
 endef
 
-.PHONY: gate tools static spec test bdd bdd-skips redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check pg-prefetch
+.PHONY: gate tools proto static spec test bdd bdd-skips redgreen fmt vet build lint vuln licenses buf buf-breaking layering hygiene gomod release-check pg-prefetch
 
 EP_EMBEDDED_POSTGRES ?= github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
 GATE_PG_BIN := .gate/bin/embedded-postgres
@@ -35,9 +37,14 @@ GATE_PG_CACHE ?= $(BDD_POSTGRES_CACHE_DIR)
 # type-check a standard library newer than the Go it was built with.
 tools: ## install the pinned optional tools into $(go env GOPATH)/bin
 	$(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+	$(GO) install connectrpc.com/connect/cmd/protoc-gen-connect-go@$(CONNECT_GO_VERSION)
+	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(GO) install github.com/google/go-licenses/v2@$(GO_LICENSES_VERSION)
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+proto: ## regenerate the Go bindings from contracts/buf.gen.yaml
+	cd contracts && buf generate
 
 gate: static spec test redgreen ## everything the PR gate runs
 	@echo "gate: all checks passed"

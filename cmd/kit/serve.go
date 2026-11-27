@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +24,7 @@ import (
 	"github.com/epzero/basamento/auth/authn"
 	"github.com/epzero/basamento/core"
 	"github.com/epzero/basamento/internal/config"
+	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform/blob"
 	"github.com/epzero/basamento/platform/bus"
@@ -69,6 +73,11 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
+	wiring := f.workerWiring()
+	if err := validateWorkerWiring(wiring); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	ports, runtimeName := wire(result.Config)
 
 	// Install the handler before a port opens or the listener binds: a signal
@@ -98,15 +107,37 @@ func runServe(args []string) {
 	// (ADR-0012 §11). The worker composition root (providers, routing) is a
 	// separate work package. A platform that cannot open its worker store
 	// must not serve as if time-driven work were running.
-	if err := startWorkerJanitor(ctx, opened); err != nil {
+	store, err := startWorkerJanitor(ctx, opened)
+	if err != nil {
 		closePorts(opened)
 		stop()
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	var platform *workerPlatform
+	if wiring["worker.listen"] != "" {
+		platform, err = startWorkerPlatform(ctx, store, wiring)
+		if err != nil {
+			closePorts(opened)
+			stop()
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	if platform != nil {
+		// The worker composition facts are served on the loopback main
+		// listener, like /healthz: a scenario and an operator can ask which
+		// Invoker and Router this process actually built (MODEL-090-01).
+		mux.HandleFunc("/worker/composition", platform.serveComposition)
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "ready profile=%s runtime=%s listen=%s", result.Config.Profile, runtimeName, ln.Addr())
 	for _, p := range ports {
 		_, _ = fmt.Fprintf(os.Stdout, " %s=%s", p.name, p.implementation)
+	}
+	if platform != nil {
+		for _, field := range platform.readyFields() {
+			_, _ = fmt.Fprintf(os.Stdout, " %s", field)
+		}
 	}
 	_, _ = fmt.Fprintln(os.Stdout)
 
@@ -120,7 +151,7 @@ func runServe(args []string) {
 // platform's SQL port until the process ends. It reports an error when the
 // platform has a worker store it cannot open: serving without the janitor
 // would silently stop queue timeouts, lease expiry and retention.
-func startWorkerJanitor(ctx context.Context, opened []config.Port) error {
+func startWorkerJanitor(ctx context.Context, opened []config.Port) (*worker.Store, error) {
 	for _, p := range opened {
 		db, ok := p.(*sql.Store)
 		if !ok {
@@ -132,14 +163,329 @@ func startWorkerJanitor(ctx context.Context, opened []config.Port) error {
 			Recover: true,
 		})
 		if err != nil {
-			return fmt.Errorf("kit serve: worker store: %w", err)
+			return nil, fmt.Errorf("kit serve: worker store: %w", err)
 		}
 		go store.RunJanitor(ctx, time.Second, func(err error) {
 			fmt.Fprintln(os.Stderr, "worker janitor:", err)
 		})
+		return store, nil
+	}
+	return nil, nil
+}
+
+// workerPlatform is the worker side of kit serve: the pool it registers, the
+// platform model.Invoker for that pool, the router with its configured
+// remotes, and the WorkerService listener workers dial in to (ADR-0012,
+// REQ-MODEL-090). It owns no worker address: the platform never dials one.
+type workerPlatform struct {
+	ln      net.Listener
+	srv     *worker.Server
+	invoker *worker.Invoker
+	router  *worker.Router
+	pool    string
+	remote  string
+	labels  map[string]string
+	model   string
+}
+
+// startWorkerPlatform composes the worker side and serves WorkerService on the
+// loopback listener the operator named. The main service listener stays the
+// process's public one; this one is only for workers that dial out.
+func startWorkerPlatform(ctx context.Context, store *worker.Store, wiring map[string]string) (*workerPlatform, error) {
+	if store == nil {
+		return nil, fmt.Errorf("kit serve: worker listener needs the SQL port")
+	}
+	tlsConfig := worker.TLSConfig{
+		CertFile: wiring["worker.tls.cert-file"],
+		KeyFile:  wiring["worker.tls.key-file"],
+		CAFile:   wiring["worker.tls.ca-file"],
+	}
+	var serverTLS *tls.Config
+	if !tlsConfig.Empty() {
+		var err error
+		serverTLS, err = tlsConfig.ServerTLS()
+		if err != nil {
+			return nil, fmt.Errorf("kit serve: %w", err)
+		}
+	}
+	if err := validateWorkerListen(wiring["worker.listen"], serverTLS != nil); err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("tcp", wiring["worker.listen"])
+	if err != nil {
+		return nil, fmt.Errorf("kit serve: worker listener: %w", err)
+	}
+	pool := wiring["worker.pool"]
+	if pool != "" {
+		spec := worker.PoolSpec{ID: pool, Lease: 5 * time.Minute, Grace: time.Minute}
+		if tenant := wiring["worker.pool-tenant"]; tenant != "" {
+			spec.Tenant = core.TenantID(tenant)
+		}
+		if path := wiring["worker.pool-token-file"]; path != "" {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				_ = ln.Close()
+				return nil, fmt.Errorf("kit serve: pool token file: %w", err)
+			}
+			token := strings.TrimSpace(string(raw))
+			if _, _, err := store.EnsurePoolWithToken(ctx, spec, token); err != nil {
+				_ = ln.Close()
+				return nil, fmt.Errorf("kit serve: pool %q: %w", pool, err)
+			}
+		} else if _, _, err := store.EnsurePool(ctx, spec); err != nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: pool %q: %w", pool, err)
+		}
+	}
+	var remotes []worker.Remote
+	remote := wiring["worker.remote"]
+	remoteModel := wiring["worker.remote-model"]
+	if remote != "" {
+		if remoteModel == "" {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote needs --worker.remote-model")
+		}
+		manifest := wiring["worker.remote-manifest"]
+		if manifest == "" {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote needs --worker.remote-manifest so the remote has an Invoker")
+		}
+		descs, invokers, err := loadWorkerProviders(manifest)
+		if err != nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-manifest: %w", err)
+		}
+		invoker := invokers[remoteModel]
+		if invoker == nil {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-model %q is not served by --worker.remote-manifest %q", remoteModel, manifest)
+		}
+		remoteDescs := make([]model.Descriptor, 0, 1)
+		for _, d := range descs {
+			if d.ID == remoteModel {
+				remoteDescs = append(remoteDescs, d.Descriptor)
+			}
+		}
+		if len(remoteDescs) == 0 {
+			_ = ln.Close()
+			return nil, fmt.Errorf("kit serve: --worker.remote-model %q is not served by --worker.remote-manifest %q", remoteModel, manifest)
+		}
+		remotes = append(remotes, worker.Remote{
+			Name:        remote,
+			Invoker:     invoker,
+			Descriptors: remoteDescs,
+			Labels:      parseLabels(wiring["worker.remote-labels"]),
+		})
+	}
+	// The platform side is a model.Invoker over the pool queue, and the router
+	// chooses between it and the configured remotes (ADR-0012 §8, REQ-MODEL-090).
+	platform := &workerPlatform{
+		ln:      ln,
+		invoker: &worker.Invoker{Store: store, Pool: pool},
+		router:  worker.NewRouter(store, remotes...),
+		pool:    pool,
+		remote:  remote,
+		model:   remoteModel,
+		labels:  parseLabels(wiring["worker.remote-labels"]),
+	}
+	platform.srv = worker.NewService(store).Server(serverTLS)
+	go func() {
+		if err := platform.srv.Serve(ctx, ln); err != nil {
+			fmt.Fprintln(os.Stderr, "worker service:", err)
+		}
+	}()
+	return platform, nil
+}
+
+// validateWorkerWiring refuses half-configured worker flags instead of
+// dropping them: an operator who names a pool, a remote or TLS files without
+// the listener would otherwise believe the worker side is wired when it is
+// not.
+func validateWorkerWiring(wiring map[string]string) error {
+	if wiring["worker.listen"] == "" {
+		for _, key := range []string{
+			"worker.pool", "worker.pool-tenant", "worker.pool-token-file",
+			"worker.remote", "worker.remote-model", "worker.remote-labels", "worker.remote-manifest",
+			"worker.tls.cert-file", "worker.tls.key-file", "worker.tls.ca-file",
+		} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.listen", key)
+			}
+		}
 		return nil
 	}
+	if wiring["worker.pool"] == "" {
+		for _, key := range []string{"worker.pool-tenant", "worker.pool-token-file"} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.pool", key)
+			}
+		}
+	}
+	if wiring["worker.remote"] == "" {
+		for _, key := range []string{"worker.remote-model", "worker.remote-labels", "worker.remote-manifest"} {
+			if wiring[key] != "" {
+				return fmt.Errorf("kit serve: --%s needs --worker.remote", key)
+			}
+		}
+	} else {
+		if wiring["worker.remote-model"] == "" {
+			return fmt.Errorf("kit serve: --worker.remote needs --worker.remote-model")
+		}
+		if wiring["worker.remote-manifest"] == "" {
+			return fmt.Errorf("kit serve: --worker.remote needs --worker.remote-manifest so the remote has an Invoker")
+		}
+	}
+	if wiring["worker.tls.cert-file"] == "" || wiring["worker.tls.key-file"] == "" {
+		if wiring["worker.tls.cert-file"] != "" || wiring["worker.tls.key-file"] != "" || wiring["worker.tls.ca-file"] != "" {
+			return fmt.Errorf("kit serve: worker TLS needs both --worker.tls.cert-file and --worker.tls.key-file")
+		}
+	}
 	return nil
+}
+
+// validateWorkerListen mirrors the rule authn applies to the main listener:
+// a plaintext worker listener is loopback-only because it carries pool tokens
+// and worker credentials. TLS lifts that limit and is the documented way to
+// serve workers on another machine.
+func validateWorkerListen(addr string, secure bool) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("kit serve: --worker.listen %q is not a host:port address", addr)
+	}
+	if secure || loopbackHost(host) {
+		return nil
+	}
+	return fmt.Errorf("kit serve: --worker.listen %q is refused: without --worker.tls.cert-file and --worker.tls.key-file it accepts loopback addresses only", addr)
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// readyFields are the worker-side facts the ready line reports.
+func (p *workerPlatform) readyFields() []string {
+	out := []string{"worker.listen=" + p.ln.Addr().String()}
+	if p.pool != "" {
+		out = append(out, "worker.pool="+p.pool)
+	}
+	if p.invoker != nil {
+		out = append(out, "worker.invoker="+p.invoker.Provider())
+	}
+	if p.remote != "" {
+		out = append(out, "worker.remote="+p.remote, "worker.remote-model="+p.model)
+		if len(p.labels) > 0 {
+			out = append(out, "worker.remote-labels="+formatLabels(p.labels))
+		}
+	}
+	// The route is derived from the composed router, not from the flags: if
+	// the router or a remote's Invoker is not wired, this field disappears or
+	// the endpoint below refuses (MODEL-090-01).
+	if p.router != nil && p.model != "" {
+		ctx := context.Background()
+		if len(p.labels) > 0 {
+			ctx = worker.WithLabels(ctx, p.labels)
+		}
+		if dest, err := p.router.Select(ctx, "", p.model); err == nil {
+			target := "pool:" + dest.Pool
+			if dest.IsRemote && dest.Remote != nil {
+				target = "remote:" + dest.Remote.Name
+			}
+			out = append(out, "worker.routes="+p.model+"="+target)
+		}
+	}
+	return out
+}
+
+// compositionView is what kit serve reports about the worker side it actually
+// composed. A scenario reads it instead of rebuilding an Invoker or Router
+// over the same database, so a composition root that stopped assigning them
+// cannot pass (MODEL-090-01).
+type compositionView struct {
+	Invoker string           `json:"invoker"`
+	Pool    string           `json:"pool,omitempty"`
+	Route   compositionRoute `json:"route"`
+	Result  *compositionRun  `json:"result,omitempty"`
+}
+
+type compositionRoute struct {
+	Model         string `json:"model"`
+	Target        string `json:"target"`
+	RemoteInvoker string `json:"remote_invoker,omitempty"`
+}
+
+type compositionRun struct {
+	State string `json:"state"`
+}
+
+// serveComposition answers routing and result questions from the Invoker and
+// Router kit serve built. It fails closed when either is missing, so removing
+// the composition turns the assertion red.
+func (p *workerPlatform) serveComposition(w http.ResponseWriter, r *http.Request) {
+	if p == nil || p.invoker == nil || p.router == nil {
+		http.Error(w, "worker composition is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	tenant := core.TenantID(q.Get("tenant"))
+	modelID := q.Get("model")
+	if tenant == "" || modelID == "" {
+		http.Error(w, "tenant and model are required", http.StatusBadRequest)
+		return
+	}
+	ctx := core.WithTenant(r.Context(), tenant)
+	if labels := parseLabels(q.Get("labels")); len(labels) > 0 {
+		ctx = worker.WithLabels(ctx, labels)
+	}
+	dest, err := p.router.Select(ctx, tenant, modelID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	view := compositionView{Invoker: p.invoker.Provider(), Pool: p.pool}
+	view.Route.Model = modelID
+	if dest.IsRemote && dest.Remote != nil {
+		view.Route.Target = "remote:" + dest.Remote.Name
+		view.Route.RemoteInvoker = invokerName(dest.Remote.Invoker)
+	} else {
+		view.Route.Target = "pool:" + dest.Pool
+	}
+	if ref := q.Get("ref"); ref != "" {
+		res, err := p.invoker.Result(ctx, model.Handle{Provider: p.invoker.Provider(), ClientRef: ref})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		view.Result = &compositionRun{State: string(res.State)}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(view)
+}
+
+func invokerName(inv model.Invoker) string {
+	if named, ok := inv.(interface{ Provider() string }); ok {
+		return named.Provider()
+	}
+	if inv == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T", inv)
+}
+
+func formatLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+labels[key])
+	}
+	return strings.Join(parts, ",")
 }
 
 // startPorts opens the ports in order and binds the listener, all under ctx.

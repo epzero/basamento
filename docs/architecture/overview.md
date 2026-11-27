@@ -24,8 +24,12 @@ of `kit`. Status words: **Implemented**,
   form. Providers are generic HTTP API and CLI adapters configured per vendor.
   Paid starts are idempotent and budgeted (ADR-0006).
 - **Workers.** The same binary runs as `kit worker` on any machine, declares
-  the models and tools it serves and pulls only that work. The platform
-  orders the queue, and can start workers on demand (ADR-0012).
+  the models and tools it serves and pulls only that work. It uses the shared
+  SQL store in the embedded profile, or `--pool-url` to dial the platform's
+  `WorkerService` over Connect when it sits behind NAT; that listener is
+  loopback-only unless `--worker.tls.*` is configured, and a remote pool URL
+  needs `--pool-tls-*`. The platform orders the queue, and can start workers on
+  demand (ADR-0012).
 
 ## 2. Profiles
 

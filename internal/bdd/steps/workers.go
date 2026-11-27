@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +23,7 @@ import (
 	"github.com/epzero/basamento/model"
 	"github.com/epzero/basamento/model/worker"
 	"github.com/epzero/basamento/platform"
+	"github.com/epzero/basamento/platform/credentials"
 	psql "github.com/epzero/basamento/platform/sql"
 )
 
@@ -59,6 +63,27 @@ type workerWorld struct {
 	seq     int
 
 	audit *auditSink
+
+	// The dial-out transport proofs (MODEL-089-01, MODEL-090-01): a real
+	// listener the platform hosts and a client the worker dials.
+	platformAddr   string
+	platformLn     net.Listener
+	platformSrv    *worker.Server
+	platformCancel context.CancelFunc
+	platform       *worker.Service
+	transport      *worker.ConnectTransport
+	wireClient     *worker.Client
+	workedOverWire bool
+
+	// The kit serve system scenario's process and the store it opened.
+	kit      *kitProcess
+	kitDir   string
+	kitAddr  string
+	kitHTTP  string
+	kitReady string
+	kitToken string
+	kitSQL   string
+	kitStore *worker.Store
 }
 
 type joinedWorker struct {
@@ -214,11 +239,36 @@ func (w *workerWorld) open(ctx context.Context) (*worker.Store, error) {
 }
 
 func (w *workerWorld) teardown() {
+	if w.transport != nil {
+		_ = w.transport.Close()
+		w.transport = nil
+	}
+	if w.platformCancel != nil {
+		w.platformCancel()
+		w.platformCancel = nil
+	}
+	if w.platformSrv != nil {
+		_ = w.platformSrv.Stop()
+		w.platformSrv = nil
+	}
+	if w.platformLn != nil {
+		_ = w.platformLn.Close()
+		w.platformLn = nil
+	}
+	if w.kit != nil {
+		w.kit.kill()
+		w.kit = nil
+	}
+	if w.kitDir != "" {
+		_ = os.RemoveAll(w.kitDir)
+		w.kitDir = ""
+	}
 	if w.dir != "" {
 		_ = os.RemoveAll(w.dir)
 		w.dir = ""
 	}
 	w.store = nil
+	w.kitStore = nil
 }
 
 func (w *workerWorld) ensurePool(ctx context.Context, id string) (worker.PoolSpec, error) {
@@ -530,6 +580,240 @@ func workerSpillSetting(ctx context.Context, tenant, onOff string, minutes int) 
 		SpillOver:  onOff == "on",
 		SpillAfter: time.Duration(minutes) * time.Minute,
 	})
+}
+
+// startPlatformListener hosts the real basamento.worker.v1 service on a
+// loopback listener over the world's store. The worker is the side that
+// connects; the platform gets no worker address (MODEL-089-01).
+func (w *workerWorld) startPlatformListener(ctx context.Context) error {
+	st, err := w.open(ctx)
+	if err != nil {
+		return err
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	svc := worker.NewService(st)
+	srv := svc.Server(nil)
+	pctx, cancel := context.WithCancel(ctx)
+	w.platformAddr = ln.Addr().String()
+	w.platformLn = ln
+	w.platformSrv = srv
+	w.platform = svc
+	w.platformCancel = cancel
+	go func() { _ = srv.Serve(pctx, ln) }()
+	return nil
+}
+
+// dialPlatform opens the worker's own client connection to the listener. The
+// worker behind NAT needs no inbound route: it dials out.
+func (w *workerWorld) dialPlatform(ctx context.Context) (*worker.Client, error) {
+	if w.platformAddr == "" {
+		return nil, fmt.Errorf("the platform is not listening for workers")
+	}
+	tr, err := worker.DialWorkerService(w.platformAddr)
+	if err != nil {
+		return nil, err
+	}
+	w.transport = tr
+	return worker.NewClient(tr, nil), nil
+}
+
+// wireJoin joins over the dial-out transport rather than the in-process one.
+func (w *workerWorld) wireJoin(ctx context.Context, name, poolID string, descriptors []worker.Descriptor, capacity int) error {
+	if _, err := w.ensurePool(ctx, poolID); err != nil {
+		return err
+	}
+	token := w.poolToken(ctx, poolID)
+	client, err := w.dialPlatform(ctx)
+	if err != nil {
+		return err
+	}
+	joined, err := client.Join(ctx, worker.JoinRequest{
+		PoolToken:       token,
+		ProtocolVersion: worker.ProtocolVersion,
+		Descriptors:     descriptors,
+		Capacity:        capacity,
+	})
+	if err != nil {
+		return err
+	}
+	w.workers[name] = &joinedWorker{worker: joined, credential: joined.Credential}
+	w.workerOrder = append(w.workerOrder, name)
+	w.wireClient = client
+	return nil
+}
+
+// startKitServe starts the real `kit serve` binary with a declared pool and a
+// worker listener, then waits for its ready line (MODEL-090-01).
+func (w *workerWorld) startKitServe(ctx context.Context, pool string) error {
+	dir, err := os.MkdirTemp("", "worker-kit-*")
+	if err != nil {
+		return err
+	}
+	w.kitDir = dir
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	httpAddr := free.Addr().String()
+	_ = free.Close()
+	w.kitSQL = "sqlite:///" + filepath.Join(dir, "kit.db")
+	w.kitToken = "bdd-pool-token-0123456789abcdef"
+	tokenFile := filepath.Join(dir, "pool.token")
+	if err := os.WriteFile(tokenFile, []byte(w.kitToken+"\n"), 0o600); err != nil {
+		return err
+	}
+	manifest := filepath.Join(dir, "cloud-llm.yaml")
+	// The remote is a real manifest-driven provider; the scenario only asks
+	// the router to choose it, never calls the vendor.
+	if err := os.WriteFile(manifest, []byte(`name: cloud-llm
+locality: cloud
+protocol: single
+http:
+  base_url: http://127.0.0.1:1
+  start:
+    method: POST
+    path: /start
+models:
+  - id: sdxl
+    caps: [chat]
+`), 0o600); err != nil {
+		return err
+	}
+	args := []string{
+		"serve", "--profile", "embedded",
+		"--listen.addr", httpAddr,
+		"--data.dir", dataDir,
+		"--sql.url", w.kitSQL,
+		"--worker.listen", "127.0.0.1:0",
+		"--worker.pool", pool,
+		"--worker.pool-token-file", tokenFile,
+		"--worker.remote", "cloud-llm",
+		"--worker.remote-model", "sdxl",
+		"--worker.remote-manifest", manifest,
+		"--worker.remote-labels", "region=eu",
+	}
+	w.kit, err = startKit(dir, args, nil)
+	if err != nil {
+		return err
+	}
+	line, err := w.kit.awaitReady()
+	if err != nil {
+		return err
+	}
+	w.kitReady = line
+	w.kitHTTP = httpAddr
+	w.kitAddr = readyField(line, "worker.listen")
+	if w.kitAddr == "" {
+		return fmt.Errorf("ready line %q reports no worker listener", line)
+	}
+	return nil
+}
+
+// openKitStore opens the store kit serve created, so the scenario can read the
+// pool and the queue over the same database.
+func (w *workerWorld) openKitStore(ctx context.Context) (*worker.Store, error) {
+	if w.kitStore != nil {
+		return w.kitStore, nil
+	}
+	db, err := psql.Open(ctx, w.kitSQL, credentials.Migrations())
+	if err != nil {
+		return nil, err
+	}
+	st, err := worker.Open(ctx, db, worker.Options{Clock: world(ctx).Core.clock, IDs: &coretest.SeqIds{}})
+	if err != nil {
+		return nil, err
+	}
+	w.kitStore = st
+	return st, nil
+}
+
+// kitComposition asks kit serve what its composed Invoker and Router answer.
+// The scenario never builds its own Router or Invoker over the database.
+func (w *workerWorld) kitComposition(ctx context.Context, values url.Values) (kitComposition, error) {
+	var view kitComposition
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+w.kitHTTP+"/worker/composition?"+values.Encode(), nil)
+	if err != nil {
+		return view, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return view, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return view, fmt.Errorf("kit serve /worker/composition returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		return view, err
+	}
+	return view, nil
+}
+
+// kitComposition mirrors the JSON kit serve reports for its worker side.
+type kitComposition struct {
+	Invoker string `json:"invoker"`
+	Pool    string `json:"pool"`
+	Route   struct {
+		Model         string `json:"model"`
+		Target        string `json:"target"`
+		RemoteInvoker string `json:"remote_invoker"`
+	} `json:"route"`
+	Result *struct {
+		State string `json:"state"`
+	} `json:"result"`
+}
+
+// finishOverKit queues one invocation in kit serve's store and has the worker
+// finish it over the dial-out listener.
+func (w *workerWorld) finishOverKit(ctx context.Context, name, ref, modelID string) error {
+	st, err := w.openKitStore(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := st.Enqueue(ctx, worker.Invocation{
+		ClientRef: ref, Pool: "acme-gpu", Tenant: core.TenantID("acme"), Model: modelID,
+		Class: worker.ClassNormal, Units: 1, Request: json.RawMessage(`{}`),
+	}); err != nil {
+		return err
+	}
+	tr, err := worker.DialWorkerService(w.kitAddr)
+	if err != nil {
+		return err
+	}
+	w.transport = tr
+	client := worker.NewClient(tr, nil)
+	joined, err := client.Join(ctx, worker.JoinRequest{
+		PoolToken: w.kitToken, ProtocolVersion: worker.ProtocolVersion,
+		Descriptors: []worker.Descriptor{descriptorForModel(modelID, 1, false)}, Capacity: 4,
+	})
+	if err != nil {
+		return err
+	}
+	w.workers[name] = &joinedWorker{worker: joined, credential: joined.Credential}
+	leased, err := client.LeaseOnce(ctx, 4, nil, time.Hour, 0)
+	if err != nil {
+		return err
+	}
+	if len(leased) != 1 || leased[0].ClientRef != ref {
+		return fmt.Errorf("worker %q leased %v, want invocation %q", name, refsOf(leased), ref)
+	}
+	w.lastLease = leased
+	attempt := leased[0].Attempt
+	if err := client.Starting(ctx, ref, attempt); err != nil {
+		return err
+	}
+	if err := client.Finish(ctx, ref, string(model.StateSucceeded), json.RawMessage(`{}`), "", 0, attempt); err != nil {
+		return err
+	}
+	return client.Leave(ctx)
 }
 
 func registerWorker(sc *godog.ScenarioContext) {
@@ -1215,6 +1499,111 @@ func registerWorker(sc *godog.ScenarioContext) {
 			}
 		}
 		return fmt.Errorf("no audit event records a refused join to pool %q", poolID)
+	})
+
+	// --- the dial-out transport (MODEL-089-01, MODEL-090-01) ---
+	sc.Step(`^a platform listening for workers on a loopback listener and worker "([^"]*)" has no inbound route$`, func(ctx context.Context, name string) error {
+		return world(ctx).Worker.startPlatformListener(ctx)
+	})
+	sc.Step(`^worker "([^"]*)" joined pool "([^"]*)" with its pool token, declaring model "([^"]*)"$`, func(ctx context.Context, name, poolID, modelID string) error {
+		return world(ctx).Worker.wireJoin(ctx, name, poolID, []worker.Descriptor{descriptorForModel(modelID, 1, false)}, 4)
+	})
+	sc.Step(`^worker "([^"]*)" dials out to WorkerService and asks for work with (\d+) free units?$`, func(ctx context.Context, name string, free int) error {
+		w := world(ctx).Worker
+		client := w.wireClient
+		if client == nil {
+			var err error
+			client, err = w.dialPlatform(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		leased, err := client.LeaseOnce(ctx, free, nil, time.Hour, 0)
+		if err != nil {
+			return err
+		}
+		w.lastLease = leased
+		w.workedOverWire = true
+		return nil
+	})
+	sc.Step(`^the platform attempted 0 outbound dials to worker "([^"]*)"$`, func(ctx context.Context, name string) error {
+		w := world(ctx).Worker
+		if w.platform == nil || !w.workedOverWire {
+			return fmt.Errorf("the worker was not served over the platform's listener")
+		}
+		if dials := w.platform.OutboundDials(); dials != 0 {
+			return fmt.Errorf("the platform dialled worker %q %d times, want 0", name, dials)
+		}
+		return nil
+	})
+	sc.Step(`^kit serve started with pool "([^"]*)" declared and worker "([^"]*)" configured, listening for workers on a loopback listener$`, func(ctx context.Context, pool, name string) error {
+		return world(ctx).Worker.startKitServe(ctx, pool)
+	})
+	sc.Step(`^worker "([^"]*)" dials out to WorkerService and finishes invocation "([^"]*)" of "([^"]*)"$`, func(ctx context.Context, name, ref, modelID string) error {
+		return world(ctx).Worker.finishOverKit(ctx, name, ref, modelID)
+	})
+	sc.Step(`^pool "([^"]*)" is registered$`, func(ctx context.Context, pool string) error {
+		w := world(ctx).Worker
+		if got := readyField(w.kitReady, "worker.pool"); got != pool {
+			return fmt.Errorf("ready line reports pool %q, want %q", got, pool)
+		}
+		st, err := w.openKitStore(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := st.Pool(ctx, pool); err != nil {
+			return fmt.Errorf("pool %q is not registered: %w", pool, err)
+		}
+		return nil
+	})
+	sc.Step(`^the model\.Invoker accounted invocation "([^"]*)"$`, func(ctx context.Context, ref string) error {
+		w := world(ctx).Worker
+		view, err := w.kitComposition(ctx, url.Values{
+			"tenant": {"acme"}, "model": {"sdxl"}, "ref": {ref},
+		})
+		if err != nil {
+			return err
+		}
+		if view.Invoker != "worker:acme-gpu" {
+			return fmt.Errorf("kit serve reports invoker %q, want worker:acme-gpu", view.Invoker)
+		}
+		if view.Result == nil {
+			return fmt.Errorf("kit serve's model.Invoker did not account invocation %q", ref)
+		}
+		if view.Result.State != string(model.StateSucceeded) {
+			return fmt.Errorf("invocation %q is %s, want succeeded", ref, view.Result.State)
+		}
+		return nil
+	})
+	sc.Step(`^remote "([^"]*)" serving "([^"]*)" is assigned so the router can choose between worker "([^"]*)" and remote "([^"]*)"$`, func(ctx context.Context, remoteName, modelID, workerName, remoteAgain string) error {
+		w := world(ctx).Worker
+		if got := readyField(w.kitReady, "worker.remote"); got != remoteName {
+			return fmt.Errorf("ready line reports remote %q, want %q", got, remoteName)
+		}
+		if got := readyField(w.kitReady, "worker.remote-model"); got != modelID {
+			return fmt.Errorf("ready line reports remote model %q, want %q", got, modelID)
+		}
+		if got := readyField(w.kitReady, "worker.routes"); got != modelID+"=remote:"+remoteName {
+			return fmt.Errorf("ready line reports routes %q, want %q", got, modelID+"=remote:"+remoteName)
+		}
+		plain, err := w.kitComposition(ctx, url.Values{"tenant": {"acme"}, "model": {modelID}})
+		if err != nil {
+			return err
+		}
+		if plain.Route.Target != "pool:acme-gpu" {
+			return fmt.Errorf("kit serve's router chose %q, want the worker pool", plain.Route.Target)
+		}
+		labelled, err := w.kitComposition(ctx, url.Values{
+			"tenant": {"acme"}, "model": {modelID},
+			"labels": {readyField(w.kitReady, "worker.remote-labels")},
+		})
+		if err != nil {
+			return err
+		}
+		if labelled.Route.Target != "remote:"+remoteName || labelled.Route.RemoteInvoker != remoteName {
+			return fmt.Errorf("kit serve's labelled route is %+v, want remote %q with its invoker", labelled.Route, remoteName)
+		}
+		return nil
 	})
 }
 

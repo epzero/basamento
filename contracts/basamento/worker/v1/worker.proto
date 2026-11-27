@@ -120,8 +120,12 @@ message LeaseResponse {
 message Invocation {
   string client_ref = 1;
   string model = 2;
-  // Opaque request payload, as model.Request.
-  google.protobuf.Struct request = 3;
+  // Field 3 carried a google.protobuf.Struct, which silently rounded
+  // integers above 2^53. Raw JSON keeps every int64 exact, so a seed of
+  // 9007199254740993 arrives unchanged.
+  reserved 3;
+  reserved "request";
+  bytes request_json = 8;
   int32 units = 4;
   // Attempt number of this invocation, starting at 1.
   int32 attempt = 5;
@@ -165,7 +169,10 @@ message Event {
   bytes audio = 4;
   double progress = 5;
   int32 attempt = 6;
-  google.protobuf.Struct data = 7;
+  // Field 7 carried a google.protobuf.Struct; raw JSON keeps int64 exact.
+  reserved 7;
+  reserved "data";
+  bytes data_json = 8;
 }
 
 // ResumeRequest takes back an in-doubt invocation inside its grace period.
@@ -200,7 +207,10 @@ message FinishRequest {
   string credential = 2;
   string client_ref = 3;
   string state = 4;
-  google.protobuf.Struct result = 5;
+  // Field 5 carried a google.protobuf.Struct; raw JSON keeps int64 exact.
+  reserved 5;
+  reserved "result";
+  bytes result_json = 9;
   string error_code = 6;
   int64 cost_milli_points = 7;
   // Attempt of the lease this result belongs to.

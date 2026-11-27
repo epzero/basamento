@@ -227,9 +227,11 @@ declares what its provider manifests serve and pulls until it is stopped;
 `--capacity`, `--labels` and `--once` bound it. A manifest model may set
 `units` and `restart: safe` (ADR-0012 §6, §7). The first version wires the
 embedded profile's in-process transport (`worker.LocalTransport`); the cloud
-profile's dial-out `WorkerService` is still owed by WP-L3-07 (MODEL-089-01,
-MODEL-090-01). The worker journal is a file under `--data-dir`, so
-a restarted worker resumes what it holds.
+profile serves the dial-out `WorkerService` over Connect (`basamento.worker.v1`)
+from `kit serve` and dials it from `kit worker --pool-url` (ADR-0012;
+MODEL-089-01, MODEL-090-01). The worker
+journal is a file under `--data-dir`, so a restarted worker resumes what it
+holds.
 
 ## 7. Prices
 
