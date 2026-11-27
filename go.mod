@@ -198,6 +198,9 @@ tool (
 	github.com/fergusstrange/embedded-postgres/v2/cmd/embedded-postgres
 )
 
-require github.com/epzero/basamento/presets/codegen v0.0.0
+require (
+	connectrpc.com/connect v1.21.1
+	github.com/epzero/basamento/presets/codegen v0.0.0
+)
 
 replace github.com/epzero/basamento/presets/codegen => ./presets/codegen
